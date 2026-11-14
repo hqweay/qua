@@ -11,6 +11,7 @@ import {
   buildAdjacency,
   choiceDisplayLabel,
   choicesFor,
+  COLOR_PROP,
   danglingOf,
   declaredFieldIds,
   applyQuickFilter,
@@ -23,6 +24,7 @@ import {
   hasQueryBody,
   hasChildrenViewBody,
   findInForest,
+  ICON_PROP,
   isJournal,
   isViewRoot,
   journalDate,
@@ -31,6 +33,7 @@ import {
   derivedTabId,
   normalizeAlias,
   parentsOf,
+  prop,
   propDisplayLabels,
   propKindOf,
   propLabel,
@@ -58,9 +61,9 @@ import type { Tx } from '../../core/kb/types.ts'
 import type { BlockStore } from '../../core/model/store.ts'
 import type { Prefs, Workspace } from '../../core/infra/workspace.ts'
 import type { Layers, Row } from '../../ui/overlay/layers.ts'
+import { openIconPicker } from '../../ui/overlay/icon-picker.ts'
 import { openChoicePicker } from '../choice-picker.ts'
 import { createNameChoice, openNameChoice, openTagChoice } from '../retrieval/name-choice.ts'
-import { ICON_PATHS } from '../../view/icons.ts'
 import { BUILTIN_LABEL, MountArea, type ViewBodyHost } from '../../ui/chrome/mount-area.ts'
 import { PropertiesPanel, type PropertiesDeps } from '../../ui/block-ui/properties.ts'
 import type { DerivedMode } from '../../ui/query/query-view.ts'
@@ -315,38 +318,57 @@ export function setupPanels(deps: PanelsDeps) {
   }
 
   /**
-   * **选项图标选择器**：把 `ICON_PATHS` 的键现画成一列，行内带图标预览。
-   *
-   * 为什么不另造一份「可选图标清单」：`view/icons.ts` 已经是图标值的唯一数据源，
-   * 这里再列一遍就会与真正能渲染的集合分叉（选了却画成占位）。
+   * **图标选择器**（网格浮层，`ui/overlay/icon-picker.ts`）：矢量全量目录 ＋ ⊘ ＋
+   * 最近使用 ＋ 手动源。选中即记账（`recentIcons`，设备态不入 KB）——
+   * 「再用一次」的名单跟着这台机器走。
    */
   const pickIconValue = (anchor: DOMRect, current: string, onPick: (icon: string) => void, trigger?: HTMLElement): void => {
-    const rows: Row[] = [
-      {
-        id: 'icon/',
-        label: t('ui.props.choice.iconNone'),
-        keyHint: current === '' ? t('ui.props.choice.current') : undefined,
-      },
-    ]
-    for (const name of Object.keys(ICON_PATHS)) {
-      const value = `lucide:${name}`
-      rows.push({
-        id: `icon/${value}`,
-        label: name,
-        icon: value,
-        keyHint: current === value ? t('ui.props.choice.current') : undefined,
-      })
-    }
-    layers.openMenu({
-      rows,
+    openIconPicker({
+      layers,
       anchor,
       ...(trigger ? { trigger } : {}),
-      title: t('ui.props.choice.pickIcon'),
-      width: 320,
-      searchable: true,
-      focusSearch: true,
-      emptyText: t('ui.props.choice.iconNone'),
-      onPick: (row) => onPick(String(row.id).slice('icon/'.length)),
+      current,
+      recent: deps.prefs().recentIcons,
+      onPick: (value) => {
+        onPick(value)
+        // 摘键不进「最近使用」（它不是用了一个图标，是没有）
+        if (value !== '') {
+          const prev = deps.prefs().recentIcons ?? []
+          deps.prefs().recentIcons = [value, ...prev.filter((n) => n !== value)].slice(0, 24)
+          deps.scheduleDeviceSave()
+        }
+      },
+    })
+  }
+
+  /**
+   * **「图标＋颜色」选择器**（标签配置头／页属性面板的入口）：色与脸两条轴一次只动一条。
+   * 写走命令面（`set-icon`／`set-color`），撤销与落盘都在那条路上；
+   * 写完由调用方的 `onDone` 刷自己的面板（命令路径不自动重画宿主）。
+   */
+  const pickFace = (b: Block, anchor: DOMRect, trigger?: HTMLElement, onDone?: () => void): void => {
+    const registry = deps.getRegistry()
+    const done = (): void => onDone?.()
+    openIconPicker({
+      layers,
+      anchor,
+      ...(trigger ? { trigger } : {}),
+      current: prop<string>(b, ICON_PROP) ?? '',
+      color: prop<string>(b, COLOR_PROP) ?? '',
+      recent: deps.prefs().recentIcons,
+      onPick: (value) => {
+        void registry.invoke('core.block/set-icon', { blockId: b.id, icon: value }, 'ui')
+        if (value !== '') {
+          const prev = deps.prefs().recentIcons ?? []
+          deps.prefs().recentIcons = [value, ...prev.filter((n) => n !== value)].slice(0, 24)
+          deps.scheduleDeviceSave()
+        }
+        done()
+      },
+      onColor: (color) => {
+        void registry.invoke('core.block/set-color', { blockId: b.id, color }, 'ui')
+        done()
+      },
     })
   }
 
@@ -467,8 +489,10 @@ export function setupPanels(deps: PanelsDeps) {
       pickRef: pickRefValue,
       /** 多值 select：整份数组写回（每次勾选一次撤销） */
       pickChoice: (b, propId, current, onPick, anchor, trigger) => pickChoiceValue(b, propId, current, onPick, anchor, trigger),
-      /** 选项图标：同一张 `ICON_PATHS` 数据现画成一列（带图标预览，可搜索） */
+      /** 选项图标：同一份 catalog 现画成网格（可搜索、⊘、最近使用） */
       pickIcon: pickIconValue,
+      /** 页的脸（图标＋颜色）：写走命令面，写完回来刷这张卡 */
+      pickFace: (b, anchor, trigger) => pickFace(b, anchor, trigger, repaint),
       refLabel: (targetId) => {
         const b = kb.get(targetId)
         if (!b) return t('ui.props.refMissing', { id: shortId(targetId) })

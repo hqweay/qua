@@ -28889,6 +28889,97 @@ await check('T303 身份色：单色借色／多色环／chip 各染各色；摘
   return '两个有色标签出色环、摘一个回落 solid 借色、chip 染各染各的标签色、全摘回落中性'
 })
 
+/**
+ * T304 图标选择器与「图标＋颜色」入口。
+ *
+ * 钉三件：① 选项图标入口升到网格选择器（可搜索；选完写 `_icon`）；② 标签配置头的
+ * 「图标＋颜色」**内嵌**在选择器里（不另开一层 popover），选图标与点色都就地生效；
+ * ③ 页属性面板有同一枚入口，选色写走命令面。三处都验「选中态 ＋ 写路径」，
+ * 写路径用真命令（不是带外改动）。
+ */
+await check('T304 图标选择器：选项入口网格化；标签配置头/页属性面板的「图标＋颜色」就地生效', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+
+  // ① 选项图标入口：网格选择器里搜一个图标并选中 ⇒ 写 `_icon`（200 的选项入口同升）
+  const host = await pickLeaf(page)
+  assert(host, '第一页里应有可编辑的内容块')
+  const choiceId = await page.evaluate(async (hostId) => {
+    window.__qua.focusBlock(hostId, 0)
+    await window.__qua.invoke('core.props/create-def', { blockId: hostId, label: '优先级', kind: 'select', target: 'own' })
+    const defId = window.__qua.propDefs().find((d) => d.label === '优先级')?.id ?? ''
+    await window.__qua.invoke('core.props/add-choice', { defId, label: '高' })
+    const def = window.__qua.__editor.store.find(defId)
+    return { defId, choiceId: def.children[0].id }
+  }, host.id)
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), choiceId.defId)
+  await page.waitForTimeout(200)
+  // 直接从选项编辑器的图标钮开（它现在的实现就是网格选择器）
+  await page.waitForSelector('.choice-icon', { timeout: 3000 })
+  await page.click('.choice-icon')
+  await page.waitForSelector('.icon-picker .icon-picker-cell', { timeout: 3000 })
+  const opened = await page.evaluate(() => document.querySelector('.icon-picker') !== null)
+  assert(opened, `选项图标的入口应打开网格选择器：${opened}`)
+  await page.fill('.icon-picker .icon-picker-search', 'flag')
+  await page.waitForTimeout(120)
+  await page.click('.icon-picker .icon-picker-cell[data-icon="lucide:flag"]')
+  await page.waitForTimeout(150)
+  const picked = await page.evaluate((id) => window.__qua.__editor.store.find(id)?.props?._icon ?? '', choiceId.choiceId)
+  assert(picked === 'lucide:flag', `选中应写 _icon：${JSON.stringify(picked)}`)
+
+  // ② 标签配置头：内嵌「图标＋颜色」，选图标与点色都就地生效
+  // 上一步 focus-block 把中心切到了定义页 ⇒ 先回第一页再挑叶子
+  const pageId0 = await page.evaluate(() => window.__qua.pages()[0].id)
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), pageId0)
+  await page.waitForTimeout(200)
+  const leaf2 = await pickLeaf(page)
+  assert(leaf2, '回到第一页后应有可编辑的内容块')
+  await page.evaluate((t) => window.__qua.focusBlock(t.id, t.text.length), leaf2)
+  await page.evaluate(() => window.__qua.invoke('core.editor/insert-tag', { tag: '配置头标签' }))
+  await page.waitForTimeout(200)
+  const tagInfo = await page.evaluate(
+    (name) => window.__qua.allBlocks().find((x) => x.aliases.includes(name))?.id ?? '',
+    '配置头标签',
+  )
+  assert(tagInfo, '应建出标签块')
+  await page.evaluate((id) => window.__qua.invoke('core.dock/open-block', { blockId: id, side: 'right' }), tagInfo)
+  await page.waitForSelector(`.blk[data-block-id="${tagInfo}"] .blk-alias-btn`, { timeout: 5000 })
+  await page.click(`.blk[data-block-id="${tagInfo}"] .blk-alias-btn`)
+  await page.waitForSelector('.alias-editor', { timeout: 3000 })
+  await page.click('.alias-editor .alias-face-btn')
+  await page.waitForSelector('.alias-editor .icon-picker', { timeout: 3000 })
+  await page.fill('.alias-editor .icon-picker .icon-picker-search', 'target')
+  await page.waitForTimeout(120)
+  await page.click('.alias-editor .icon-picker .icon-picker-cell[data-icon="lucide:target"]')
+  await page.waitForTimeout(200)
+  // 选完浮层还在（内嵌不顶掉宿主），图标已写
+  assert(await page.locator('.alias-editor .icon-picker').count() > 0, '内嵌选择器选完不顶掉别名编辑器')
+  const tagIcon = await page.evaluate((id) => window.__qua.__editor.store.find(id)?.props?._icon ?? '', tagInfo)
+  assert(tagIcon === 'lucide:target', `配置头选图标应写 _icon：${JSON.stringify(tagIcon)}`)
+  // 点一个色（色板第 2 枚＝红）：色行选完就地更新，不关面板
+  await page.click('.alias-editor .icon-picker-colors .icon-picker-swatch:nth-child(2)')
+  await page.waitForTimeout(200)
+  const tagColor = await page.evaluate((id) => window.__qua.__editor.store.find(id)?.props?._color ?? '', tagInfo)
+  assert(tagColor === 'red', `配置头点色应写 _color：${JSON.stringify(tagColor)}`)
+  await page.keyboard.press('Escape')
+
+  // ③ 页属性面板：同一枚入口，选色写走命令面
+  const pageId = await page.evaluate(() => window.__qua.pages()[0].id)
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), pageId)
+  await page.waitForTimeout(200)
+  await page.waitForSelector('.prop-face-btn', { timeout: 3000 })
+  await page.click('.prop-face-btn')
+  await page.waitForSelector('.icon-picker .icon-picker-colors', { timeout: 3000 })
+  await page.click('.icon-picker-colors .icon-picker-swatch:nth-child(3)')
+  await page.waitForTimeout(200)
+  const pageColor = await page.evaluate((id) => window.__qua.__editor.store.find(id)?.props?._color ?? '', pageId)
+  assert(pageColor !== '' && pageColor !== undefined, `页属性面板点色应写 _color：${JSON.stringify(pageColor)}`)
+  await page.keyboard.press('Escape')
+
+  await ctx.close()
+  return '选项图标入口网格化可搜索；标签配置头内嵌选择器选图标/点色就地生效；页属性面板同一枚入口写命令面'
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

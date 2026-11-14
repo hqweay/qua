@@ -942,3 +942,135 @@
   outline: 2px solid var(--ui-accent);
   outline-offset: 1px;
 }
+
+/* ============================================================ 图标选择器
+   浮层语言（影/圆角由 .popover 给）；36px 格＋2px gap、8 列——命中区推给指头。
+   选中态：hover 中性（只提亮底盘），选中 accent 描边；颜色行的选中同一条。 */
+.icon-picker {
+  width: calc(8 * 36px + 7 * 2px); /* 8 列＋格距，外壳的 padding 归 .popover */
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-3);
+}
+.icon-picker-tabs {
+  display: flex;
+  gap: var(--ui-gap-2);
+}
+.icon-picker-tab[data-on='1'] {
+  border-color: var(--ui-accent);
+  color: var(--ui-accent);
+}
+.icon-picker-search,
+.icon-picker-manual-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.icon-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 36px);
+  gap: 2px;
+  max-height: 232px; /* 约 5 行半：搜索始终在场，滚动能到 */
+  overflow-y: auto;
+}
+.icon-picker-recent {
+  max-height: 38px; /* 一行：它只是快捷行 */
+  overflow: hidden;
+}
+.icon-picker-section {
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-tertiary);
+}
+.icon-picker-cell {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  border-radius: var(--ui-radius-sm);
+  cursor: pointer;
+  color: var(--ui-text);
+  padding: 0;
+  font-size: 20px;
+  line-height: 1;
+}
+.icon-picker-cell:hover {
+  background: var(--ui-bg-hover);
+}
+.icon-picker-cell[data-active='1'] {
+  background: var(--ui-accent-soft);
+  outline: 1.5px solid var(--ui-accent);
+  outline-offset: -1.5px;
+}
+.icon-picker-cell[data-none='1'] {
+  color: var(--ui-text-tertiary);
+}
+.icon-picker-manual {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-2);
+}
+.icon-picker-manual-hint {
+  margin: 0;
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-tertiary);
+}
+/* 颜色行：⊘ 中性 ＋ 色板封闭集；色点用各自的 token（不在这里写色值） */
+.icon-picker-colors {
+  display: flex;
+  gap: var(--ui-gap-2);
+  align-items: center;
+}
+.icon-picker-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: var(--ui-radius-pill);
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  background: var(--swatch, var(--ui-text-tertiary));
+}
+.icon-picker-swatch[data-none='1'] {
+  background: none;
+  border: 1.5px dashed var(--ui-border);
+}
+.icon-picker-swatch[data-on='1'] {
+  box-shadow: 0 0 0 2px var(--ui-surface-raised), 0 0 0 3.5px var(--ui-text);
+}
+
+/* 脸入口（别名配置头与页属性面板共用一套语言）：按钮是当前值的样子（脸＋色点），
+   点开就地展开选择器（内嵌面板，不另开一层 popover） */
+.alias-face-btn,
+.prop-face-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  border: none;
+  background: none;
+  padding: 2px 4px;
+  border-radius: var(--ui-radius-sm);
+  cursor: pointer;
+  color: var(--ui-text-secondary);
+}
+.alias-face-btn:hover,
+.prop-face-btn:hover {
+  background: var(--ui-bg-hover);
+}
+.prop-face-dot,
+.alias-face-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--ui-radius-pill);
+  background: var(--swatch, var(--ui-text-tertiary));
+}
+.alias-face-panel {
+  margin-top: var(--ui-gap-2);
+  padding: var(--ui-gap-3);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-surface-sunken);
+}
+.prop-face .prop-value {
+  display: inline-flex;
+}

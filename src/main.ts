@@ -7,7 +7,7 @@
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
-import { addAlias, addList, blockLabel, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, COLOR_PROP, isColorValue, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, cardLayoutOf, propKindOf, propLabel, choicesOf, choicesFor, childDisplayProps, enginePropDefs, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec, withBlockOwnerData, VIEW_KIND_ICON, type StoredViewKind, type UndoKind, type ColorAxis } from './core/index.ts'
+import { addAlias, addList, blockLabel, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, COLOR_PROP, ICON_PROP, isColorValue, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, cardLayoutOf, propKindOf, propLabel, choicesOf, choicesFor, childDisplayProps, enginePropDefs, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec, withBlockOwnerData, VIEW_KIND_ICON, type StoredViewKind, type UndoKind, type ColorAxis } from './core/index.ts'
 import { choiceDisplayLabel, cardinalityOf, queryFieldsOf, singleValueOf, valueListOf } from './core/index.ts'
 import { openChoicePicker } from './app/choice-picker.ts'
 import { plainText } from './core/model/runs.ts'
@@ -1298,6 +1298,21 @@ function setBlockColor(blockId: string, color: string | null): boolean {
   return true
 }
 
+/** 设脸（`_icon`）：空串/`null` ＝ 摘（回落角色默认）；值域宽松（lucide 名或字面文本） */
+function setBlockIcon(blockId: string, icon: string | null): boolean {
+  const b = findInForest(ws.blocks, blockId)
+  if (!b) return false
+  const value = icon?.trim() ?? ''
+  writeProps(blockId, () => {
+    const props = { ...(b.props ?? {}) }
+    if (value === '') delete props[ICON_PROP]
+    else props[ICON_PROP] = value
+    if (Object.keys(props).length === 0) delete b.props
+    else b.props = props
+  })
+  return true
+}
+
 /**
  * 把一个块从某个列表里摘掉。
  *
@@ -2332,6 +2347,7 @@ const app: App = {
   addBlockRole: (blockId, role) => addBlockRole(blockId, role),
   removeBlockRole: (blockId, role) => removeBlockRole(blockId, role),
   setBlockColor: (blockId, color) => setBlockColor(blockId, color),
+  setBlockIcon: (blockId, icon) => setBlockIcon(blockId, icon),
   /**
    * 删除标签块。与「取消标签」是**两条轴**：取消只摘 `tag` 露面位（块与内容都还在），
    * 删除连块带子树一起软删（回收站可恢复）。
@@ -2743,6 +2759,7 @@ const openAliasEditor = (blockId: string, anchor: HTMLElement | DOMRect | null, 
         write: (mutate) => writeProps(blockId, mutate),
         close: () => layers.closePopover(),
         toast: (text, kind) => app.toast(text, kind),
+        layers,
         autofocus,
       }),
     // 元素锚点会跟着那一颗按钮走（行随重渲染被换掉时由 `anchorOf` 兜住「不在了」）

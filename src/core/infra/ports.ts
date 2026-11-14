@@ -387,6 +387,11 @@ export interface App {
    */
   setBlockColor(blockId: string, color: string | null): boolean
   /**
+   * **设脸**（`_icon`）：`null`/空串 ＝ 摘图标（回落角色默认）。值域只放宽不收紧：
+   * `lucide:<name>` 或字面文本都收，读侧画不出的名字降级占位。
+   */
+  setBlockIcon(blockId: string, icon: string | null): boolean
+  /**
    * **提取为页**：补 `page` 露面 ＋ 搬到森林顶层 ＋ 原位置留一枚引用。
    *
    * 与 `addBlockRole(...,'page')` 的区别只在位置：那条原地不动，这条显式搬家。

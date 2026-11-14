@@ -18,7 +18,7 @@
  * ⚠️ 组件不写模型：所有写入经注入的回调（由装配层转成命令）。
  */
 import type { Block, ClickMods } from '../../core/index.ts'
-import { clickModsOf, enginePropText, isEngineProp } from '../../core/index.ts'
+import { clickModsOf, enginePropText, identityTokenVar, isEngineProp } from '../../core/index.ts'
 import { plainText } from '../../core/model/runs.ts'
 import { onCommitKeys } from './keys.ts'
 import type { Dangling, FieldRow, PropKind } from '../../core/index.ts'
@@ -126,6 +126,13 @@ export interface PropertiesDeps {
    * 维护第二份清单；浮层也只有装配层能开。
    */
   pickIcon: (anchor: DOMRect, current: string, onPick: (icon: string) => void) => void
+  /**
+   * **这一块的「图标＋颜色」**（装配层弹出选择器，写 `_icon`／`_color`）。
+   *
+   * 只给**有露面位的东西**（页——标签在配置头有同一枚）：没有露面位的东西不给入口，
+   * 写路径不拦（props 是自由槽）。写完由装配层 `onDone` 回来刷面板。
+   */
+  pickFace?: (b: Block, anchor: DOMRect, trigger?: HTMLElement) => void
   /**
    * **这一块归在谁下面**（`props._belongsTo` 的活块，有序）。
    *
@@ -590,6 +597,10 @@ export class PropertiesPanel {
     this.els.body.appendChild(this.buildTags(target))
     // 归属紧随其后：与标签并列的另一种「它是谁的」。任何块都有这一行
     this.els.body.appendChild(this.buildBelongs(target))
+    // 页的脸：图标＋颜色一枚入口（标签在配置头有同一枚；普通块不给入口）
+    if (hasList(target, 'page') && this.deps.pickFace) {
+      this.els.body.appendChild(this.buildFace(target))
+    }
 
     if (rows.length === 0) {
       const empty = document.createElement('p')
@@ -868,6 +879,40 @@ export class PropertiesPanel {
    * ⚠️ 摘标签不只删这一行：正文里那枚 `#名` 也要收掉（`deps.removeTag` 负责），
    *    否则归属没了、正文里还挂着一个看起来像标签的东西。
    */
+  /**
+   * **页的脸**（图标＋颜色）：一枚入口开同一个选择器（色行＋图标网格）。
+   * 按钮自己是当前值的样子（脸＋色点）——入口读作「它现在长这样，点开改」。
+   */
+  private buildFace(target: Block): HTMLElement {
+    const row = document.createElement('div')
+    row.className = 'prop-row prop-face ui-row'
+    const label = document.createElement('label')
+    label.className = 'prop-label'
+    const name = document.createElement('span')
+    name.className = 'prop-name'
+    name.textContent = t('ui.iconPicker.faceEntry')
+    label.append(name)
+
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'prop-face-btn'
+    btn.dataset.tip = t('ui.iconPicker.faceEntry')
+    const ico = document.createElement('span')
+    ico.className = 'prop-face-ico'
+    renderIcon(ico, prop<string>(target, '_icon'), 'circle-help', 'sm')
+    btn.appendChild(ico)
+    const color = prop<string>(target, '_color')
+    if (color !== undefined) {
+      const dot = document.createElement('span')
+      dot.className = 'prop-face-dot'
+      dot.style.setProperty('--swatch', identityTokenVar(color))
+      btn.appendChild(dot)
+    }
+    btn.addEventListener('click', () => this.deps.pickFace?.(target, btn.getBoundingClientRect(), btn))
+    row.append(label, btn)
+    return row
+  }
+
   private buildTags(target: Block): HTMLElement {
     const row = document.createElement('div')
     row.className = 'prop-row prop-tags ui-row'

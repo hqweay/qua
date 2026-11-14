@@ -40,6 +40,13 @@ export const TAGS_HANDLERS: Record<string, Handler> = {
     const color = a.color === undefined || a.color === null ? null : S(a.color)
     return app.setBlockColor(id, color)
   },
+  /** 设脸：`icon` 缺省/空串 ＝ 摘图标（回落角色默认） */
+  'core.block/set-icon': (a, app) => {
+    const id = S(a.blockId) || curBlock(app)
+    if (!id) return false
+    const icon = a.icon === undefined || a.icon === null ? null : String(a.icon)
+    return app.setBlockIcon(id, icon)
+  },
   /**
    * 删除标签块：与「取消标签」是两条轴。
    * 取消只摘露面位（块与内容都还在）；删除连块带子树一起软删，回收站可恢复。

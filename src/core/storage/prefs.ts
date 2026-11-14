@@ -71,6 +71,11 @@ export interface Prefs {
    * 只记**从面板成功执行**的命令名，最新在前、去重封顶；形状归 `normalizePrefs`。
    */
   recentCommands: string[]
+  /**
+   * 图标选择器「最近使用」的名单（设备态：这一台机器上用过什么，不进库）。
+   * 只记选过的图标值，最新在前、去重封顶；收藏卡从块退到设备状态的同一判据。
+   */
+  recentIcons: string[]
   /** @deprecated 2026-10-19 起的旧形状；只用于读迁移，写一律写 `dock` */
   railOpen?: boolean
 }
@@ -171,6 +176,7 @@ export const DEFAULT_PREFS: Prefs = {
   badgeOpen: false,
   keys: {},
   recentCommands: [],
+  recentIcons: [],
 }
 
 /**
@@ -295,6 +301,11 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
     ? [...new Set(p.recentCommands.filter((n): n is string => typeof n === 'string' && n !== ''))].slice(0, 12)
     : []
 
+  // 最近使用的图标值：非空串才收，去重、封顶（24 ≈ 两屏网格的一行量）——它是选择器的快捷行
+  const recentIcons = Array.isArray(p.recentIcons)
+    ? [...new Set(p.recentIcons.filter((n): n is string => typeof n === 'string' && n !== ''))].slice(0, 24)
+    : []
+
   return {
     ...DEFAULT_PREFS,
     ...p,
@@ -306,6 +317,7 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
     mountGroups,
     keys,
     recentCommands,
+    recentIcons,
     dock: {
       // `legacyPinned` 只在归一内部用，不进落盘形状
       left: { open: left.open, width: left.width, cards: left.cards },

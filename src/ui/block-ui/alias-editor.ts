@@ -18,9 +18,11 @@ import {
   aliasLeaf,
   aliasesOf,
   canRemoveAlias,
+  COLOR_PROP,
   DISPLAY_PROP,
   displayNameOf,
   hasList,
+  ICON_PROP,
   normalizeAlias,
   primaryAliasOf,
   prop,
@@ -32,6 +34,10 @@ import {
 } from '../../core/index.ts'
 import type { KbClient } from '../../core/kb/types.ts'
 import { t } from '../../core/infra/msg.ts'
+import { renderIcon } from '../../view/icons.ts'
+import { identityTokenVar } from '../../core/identity/faces.ts'
+import { renderIconPicker } from '../overlay/icon-picker.ts'
+import type { Layers } from '../overlay/layers.ts'
 
 export interface AliasEditorDeps {
   /** 读门面：查重（这个地址现在归谁）按名现取 */
@@ -44,6 +50,8 @@ export interface AliasEditorDeps {
   close: () => void
   /** 冲突/拒绝的提示（装配层注入；缺省时静默，不抛） */
   toast?: (text: string, kind?: 'ok' | 'warn' | 'info') => void
+  /** 浮层装配（「图标＋颜色」内嵌在选择器里用——别名编辑器已经占着 popover 位） */
+  layers?: Layers
   /**
    * 打开时就把光标放进「添加别名」输入框。
    *
@@ -84,6 +92,15 @@ export function renderAliasEditor(host: HTMLElement, deps: AliasEditorDeps): voi
   const toast = (text: string, kind: 'ok' | 'warn' | 'info' = 'info'): void => deps.toast?.(text, kind)
   const redraw = (): void => renderAliasEditor(host, deps)
 
+  /** 写/摘一格系统属性（图标或颜色）：空值连槽位一起摘，属性袋不留空壳 */
+  const setFaceProp = (target: Block, key: string, value: string): void => {
+    const props = { ...(target.props ?? {}) }
+    if (value === '') delete props[key]
+    else props[key] = value
+    if (Object.keys(props).length === 0) delete target.props
+    else target.props = props
+  }
+
   /* ------------------------------------------------------------ 头部 */
 
   const title = document.createElement('h4')
@@ -103,7 +120,59 @@ export function renderAliasEditor(host: HTMLElement, deps: AliasEditorDeps): voi
     full.textContent = t('ui.alias.fullName', { name: primary })
     head.appendChild(full)
   }
+  // **配置头的脸位**：标签/页（有露面位的东西）在这里配「图标＋颜色」。
+  // 选择器**内嵌**（不另开一层 popover——这颗头自己就在 popover 里），选完就地更新。
+  // 写走 deps.write（与改名同一条路：撤销、落盘、重画都在那条路上）。
+  // ⚠️ 开合状态挂在**宿主元素**上：redraw 是整棵重画，局部变量活不过一次渲染。
+  const hasFaceEntry = (hasList(b, 'tag') || hasList(b, 'page')) && deps.layers !== undefined
+  if (hasFaceEntry) {
+    const faceBtn = document.createElement('button')
+    faceBtn.type = 'button'
+    faceBtn.className = 'alias-face-btn'
+    faceBtn.dataset.tip = t('ui.iconPicker.faceEntry')
+    const faceIco = document.createElement('span')
+    faceIco.className = 'alias-face-ico'
+    renderIcon(faceIco, prop<string>(b, ICON_PROP), 'circle-help', 'sm')
+    faceBtn.appendChild(faceIco)
+    const faceColor = prop<string>(b, COLOR_PROP)
+    if (faceColor !== undefined) {
+      const dot = document.createElement('span')
+      dot.className = 'alias-face-dot'
+      dot.style.setProperty('--swatch', identityTokenVar(faceColor))
+      faceBtn.appendChild(dot)
+    }
+    head.appendChild(faceBtn)
+    faceBtn.addEventListener('click', () => {
+      host.dataset.faceOpen = host.dataset.faceOpen === '1' ? '0' : '1'
+      redraw()
+    })
+  }
   host.appendChild(head)
+  if (hasFaceEntry && host.dataset.faceOpen === '1') {
+    const facePanel = document.createElement('div')
+    facePanel.className = 'alias-face-panel'
+    const cur = deps.block()
+    if (cur) {
+      renderIconPicker(facePanel, {
+        layers: deps.layers!,
+        anchor: null,
+        current: prop<string>(cur, ICON_PROP) ?? '',
+        color: prop<string>(cur, COLOR_PROP) ?? '',
+        keepOpen: true,
+        onPick: (value) => {
+          host.dataset.faceOpen = '1'
+          deps.write(() => setFaceProp(cur, ICON_PROP, value))
+          redraw()
+        },
+        onColor: (color) => {
+          host.dataset.faceOpen = '1'
+          deps.write(() => setFaceProp(cur, COLOR_PROP, color))
+          redraw()
+        },
+      })
+    }
+    host.appendChild(facePanel)
+  }
 
   /* ---------------------------------------------------------- 别名列表 */
 
