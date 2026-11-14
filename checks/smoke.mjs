@@ -29674,6 +29674,26 @@ await check('T311 块下属性：+N 就地展开／菜单三态覆盖；改默�
   assert(!expanded.drawer, '+N 不该顺手打开属性抽屉：' + JSON.stringify(expanded))
   assert(expanded.h > summary.h + 40, '五栏应明显高于一行：' + JSON.stringify({ s: summary.h, l: expanded.h }))
 
+  /**
+   * ②b **`⋯` 不许压在值上**（真机报过：一栏一行时两者重叠）。
+   *
+   * 判据是矩形相交而不是「看上去还行」：`⋯` 是绝对定位（不能占行，否则估高多一行），
+   * 值靠右 ⇒ 只要没给它留槽，最末一行必然重叠，而 hover 才显形让这件事很容易漏看。
+   */
+  const overlap = await page.evaluate((id) => {
+    const el = document.querySelector(`.blk[data-block-id="${id}"] > .blk-props-line`)
+    const btn = el?.querySelector('.blk-prop-mode')
+    if (!el || !btn) return { found: false, hits: 0 }
+    const b = btn.getBoundingClientRect()
+    const hits = [...el.querySelectorAll('.blk-prop-value')].filter((v) => {
+      const r = v.getBoundingClientRect()
+      return r.width > 0 && r.left < b.right && r.right > b.left && r.top < b.bottom && r.bottom > b.top
+    })
+    return { found: true, hits: hits.length, slot: Math.round(b.width) }
+  }, host)
+  assert(overlap.found && overlap.slot > 0, `list 档应有 ⋯ 且它有实际槽宽：${JSON.stringify(overlap)}`)
+  assert(overlap.hits === 0, `⋯ 不许与值重叠：${JSON.stringify(overlap)}`)
+
   // ③ 菜单改成「一行摘要」⇒ 覆盖生效（仍是这一块的事）
   await pickMode('一行摘要')
   const backToSummary = await read()

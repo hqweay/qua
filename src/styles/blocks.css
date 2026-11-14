@@ -1170,6 +1170,8 @@
 .blk-props-line {
   flex: 0 0 auto;
   position: relative;
+  /* 「这一块怎么排」那颗 `⋯` 的槽宽：list 档每栏右侧留出这么宽，按钮落进去 */
+  --props-mode-slot: 26px;
   width: calc(100% - var(--ui-marker-slot) - var(--ui-gap-4));
   margin-inline-start: calc(var(--ui-marker-slot) + var(--ui-gap-4));
   height: var(--ui-props-h);
@@ -1235,6 +1237,12 @@
   width: 100%;
   align-items: center;
   justify-content: space-between;
+  /*
+   * 给 `⋯` 留槽：它是绝对定位（不能占行，否则估高多一行 ⇒ 滚动条偏小），
+   * 而值靠右 ⇒ 不预留的话最末一行必然被压住。**每栏都留**而不是只留末行：
+   * 只留末行要判「哪一栏是最后一行」，那条判断会随档位/待填行变化而漏。
+   */
+  padding-inline-end: var(--props-mode-slot);
 }
 .blk-props-line[data-props-density='list'] .blk-prop-value {
   max-width: 60%;
@@ -1267,6 +1275,9 @@
   position: absolute;
   inset-inline-end: 0;
   bottom: 0;
+  width: var(--props-mode-slot);
+  padding: 0;
+  text-align: center;
 }
 .blk-props-line:hover .blk-prop-mode,
 .blk-props-line:focus-within .blk-prop-mode {
