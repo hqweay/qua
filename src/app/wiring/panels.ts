@@ -477,6 +477,11 @@ export function setupPanels(deps: PanelsDeps) {
       void deps.getRegistry().invoke('core.tags/remove', { blockId: b.id, tagId }, 'ui')
       repaint()
     },
+    // 重排归属序（拖 chips）：写走命令面，写完回来刷这张卡
+    reorderTags: (b, orderedIds) => {
+      void deps.getRegistry().invoke('core.tags/reorder', { blockId: b.id, tagIds: orderedIds }, 'ui')
+      repaint()
+    },
       // 属性区里的标签名也是「指向标签块的一处露面」，与正文 chip 同一条口径
       openRef: (to, mods) => refClick({ to }, { ...mods, altKey: false }),
       defs: () => [...kb.propDefs()],

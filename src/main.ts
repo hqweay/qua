@@ -7,7 +7,7 @@
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
-import { addAlias, addList, blockLabel, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, COLOR_PROP, ICON_PROP, isColorValue, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, cardLayoutOf, propKindOf, propLabel, choicesOf, choicesFor, childDisplayProps, enginePropDefs, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec, withBlockOwnerData, VIEW_KIND_ICON, type StoredViewKind, type UndoKind, type ColorAxis } from './core/index.ts'
+import { addAlias, addList, blockLabel, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, COLOR_PROP, ICON_PROP, isColorValue, isHexColor, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, cardLayoutOf, propKindOf, propLabel, choicesOf, choicesFor, childDisplayProps, enginePropDefs, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec, withBlockOwnerData, VIEW_KIND_ICON, type StoredViewKind, type UndoKind, type ColorAxis } from './core/index.ts'
 import { choiceDisplayLabel, cardinalityOf, queryFieldsOf, singleValueOf, valueListOf } from './core/index.ts'
 import { openChoicePicker } from './app/choice-picker.ts'
 import { plainText } from './core/model/runs.ts'
@@ -32,6 +32,7 @@ import {
     type MenuRequest,
 } from './core/commands/index.ts'
 import { Layers, paletteRows, rowsFromBindings, type PickMods, type Row } from './ui/overlay/layers.ts'
+import { openIconPicker } from './ui/overlay/icon-picker.ts'
 import { createTriggers, memberRows, type MemberTagRef, type TriggerDeps } from './app/retrieval/triggers.ts'
 import { openTagChoice } from './app/retrieval/name-choice.ts'
 import { selectionRefRows } from './app/retrieval/selection-ref-rows.ts'
@@ -1314,6 +1315,48 @@ function setBlockIcon(blockId: string, icon: string | null): boolean {
 }
 
 /**
+ * **自定义色进「最近自定义」**（设备态，不进 KB）：去重封顶 6。
+ * 内置板 key 不记——板本身常驻，记了反而在色行里出现两颗同色点。
+ */
+function recordRecentColor(color: string): void {
+  if (!isHexColor(color)) return
+  const hex = color.toLowerCase()
+  const prev = prefs().recentColors ?? []
+  prefs().recentColors = [hex, ...prev.filter((n) => n !== hex)].slice(0, 6)
+  scheduleDeviceSave()
+}
+
+/**
+ * **任意块的「图标＋颜色」选择器**（块菜单入口）：读路径（借形/借色）对所有块一致，
+ * 写入口也一致——不再按「有没有露面位」限流。写走命令面（`set-icon`/`set-color`），
+ * 撤销与落盘都在那条路上；图标选完即收（脸选完是一次显式动作），色不关浮层（两条轴一次一条）。
+ */
+function openFacePicker(blockId: string, anchor: DOMRect | null): void {
+  const b = findInForest(ws.blocks, blockId)
+  if (!b) return
+  openIconPicker({
+    layers,
+    anchor,
+    current: prop<string>(b, ICON_PROP) ?? '',
+    color: prop<string>(b, COLOR_PROP) ?? '',
+    recent: () => prefs().recentIcons,
+    recentColors: () => prefs().recentColors,
+    onPick: (value) => {
+      void registry.invoke('core.block/set-icon', { blockId, icon: value }, 'ui')
+      if (value !== '') {
+        const prev = prefs().recentIcons ?? []
+        prefs().recentIcons = [value, ...prev.filter((n) => n !== value)].slice(0, 24)
+        scheduleDeviceSave()
+      }
+    },
+    onColor: (color) => {
+      void registry.invoke('core.block/set-color', { blockId, color }, 'ui')
+      recordRecentColor(color)
+    },
+  })
+}
+
+/**
  * 把一个块从某个列表里摘掉。
  *
  * 摘 `tag` 时**提示不阻止**（与删标签同一套形状）：成员与声明会失效，但**值一个字节不动**
@@ -2389,6 +2432,7 @@ const app: App = {
     return true
   },
   openAliasEditor: (blockId, autofocus) => openAliasEditor(blockId, ed.caretRect(), autofocus),
+  openFacePicker: (blockId) => openFacePicker(blockId, ed.caretRect()),
   openPropertiesDrawer: (blockId, focusPropId) => panels.openPropertiesDrawer(blockId, focusPropId),
   setBlockType: (blockId, typeId) => applyBlockType(blockId, typeId),
 
@@ -2761,11 +2805,7 @@ const openAliasEditor = (blockId: string, anchor: HTMLElement | DOMRect | null, 
         toast: (text, kind) => app.toast(text, kind),
         layers,
         recentColors: () => prefs().recentColors,
-        recordColor: (hex) => {
-          const prev = prefs().recentColors ?? []
-          prefs().recentColors = [hex, ...prev.filter((n) => n !== hex)].slice(0, 6)
-          scheduleDeviceSave()
-        },
+        recordColor: (hex) => recordRecentColor(hex),
         autofocus,
       }),
     // 元素锚点会跟着那一颗按钮走（行随重渲染被换掉时由 `anchorOf` 兜住「不在了」）

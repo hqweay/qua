@@ -113,6 +113,11 @@ export const COMMANDS: CommandDecl[] = [
      `hidden` 只管面板可见性，HTTP/MCP/CLI 照常可调。 */
   { name: 'core.tags/add', title: t('cmd.tags.add'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, name: { type: 'string' } }, keywords: ['tag', t('menu.kw.tag')], hidden: true },
   { name: 'core.tags/remove', title: t('cmd.tags.remove'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, tagId: { type: 'string' } }, keywords: ['tag', t('menu.kw.tag'), 'remove'], hidden: true },
+  /**
+   * 重排一个块的归属序（`_tags` 数组序）。只许换序不许增删（集合必须一致）——
+   * 顺序喂着块标的借形/借色取「第一个」，是用户可编辑的真实数据，不是打标先打的偶然。
+   */
+  { name: 'core.tags/reorder', title: t('cmd.tags.reorder'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, tagIds: { type: 'array' } }, keywords: ['tag', 'reorder', 'order'], hidden: true },
   { name: 'core.belongs-to/add', title: t('cmd.belongs.add'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { childId: { type: 'string' }, parentId: { type: 'string' } }, hidden: true },
   { name: 'core.belongs-to/remove', title: t('cmd.belongs.remove'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { childId: { type: 'string' }, parentId: { type: 'string' } }, hidden: true },
   { name: 'core.belongs-to/prune', title: t('cmd.belongs.prune'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { childId: { type: 'string' } }, hidden: true },
@@ -193,6 +198,11 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.block/untag', title: t('cmd.block.untag'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['tag', 'role', 'remove'] },
   { name: 'core.block/set-color', title: t('cmd.block.set-color'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, color: { type: 'string' } }, keywords: ['color', 'identity'], hidden: true },
   { name: 'core.block/set-icon', title: t('cmd.block.set-icon'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, icon: { type: 'string' } }, keywords: ['icon', 'identity'], hidden: true },
+  /**
+   * 任意块的「图标＋颜色」选择器入口（块菜单）：读路径（借形/借色）对所有块一致，
+   * 写入口也一致——选择器本体在装配层开，这里只指路。
+   */
+  { name: 'core.block/edit-face', title: t('cmd.block.edit-face'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['icon', 'color', 'face'] },
   { name: 'core.tag/delete', title: t('cmd.tag.delete'), capability: 'admin', undoable: false, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['tag', 'delete', 'remove'] },
   { name: 'core.block/edit-aliases', title: t('cmd.block.edit-aliases'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['alias', 'name', 'list'] },
   { name: 'core.block/set-type', title: t('cmd.block.set-type'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, type: { type: 'string' } }, keywords: ['type', 'convert'], hidden: true },

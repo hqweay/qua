@@ -69,6 +69,13 @@ export interface PropertiesDeps {
   /** 摘掉一个标签（连带收掉它在正文里的露面） */
   removeTag: (b: Block, tagId: string) => void
   /**
+   * **重排归属序**（拖 chips 落下后整序写回）。
+   *
+   * 顺序喂着块标的借形/借色取「第一个」——它是数据（`_tags` 数组序），不是装饰；
+   * 只许换序，集合一致性判在命令层。
+   */
+  reorderTags: (b: Block, orderedIds: string[]) => void
+  /**
    * **打开一个指向某块的露面**（这一行里只有标签名用它）。
    *
    * 判据与正文里的标签 chip 是同一条：**一份归属的每一处露面，点名字都打开它**。
@@ -925,10 +932,41 @@ export class PropertiesPanel {
 
     const value = document.createElement('span')
     value.className = 'prop-value props-tag-value'
-    for (const tag of this.deps.tags(target)) {
+    const tags = this.deps.tags(target)
+    /**
+     * **拖拽重排**（≥2 枚才有意义）：HTML5 DnD，拖动中实时搬 DOM 预览落点，
+     * 落下后按 DOM 序整笔写回（`core.tags/reorder` 只许换序，集合不一致整笔拒绝）。
+     *
+     * 为什么顺序是数据不是装饰：块标的借形/借色取「第一个」，顺序就是
+     * 「谁是主标签」——它必须可编辑，否则读路径依赖一个用户改不了的隐藏序。
+     */
+    const draggable = tags.length >= 2
+    const draggingOf = (): HTMLElement | null => value.querySelector<HTMLElement>('.props-tag[data-dragging]')
+    for (const tag of tags) {
       const chip = document.createElement('span')
       chip.className = 'props-tag'
       chip.dataset.panelTagId = tag.id
+      if (draggable) {
+        chip.draggable = true
+        chip.addEventListener('dragstart', (e) => {
+          chip.dataset.dragging = '1'
+          // Electron 要 dataTransfer 里有非空数据才起拖（shape 无关，id 只是载体）
+          e.dataTransfer?.setData('text/plain', tag.id)
+          e.dataTransfer && (e.dataTransfer.effectAllowed = 'move')
+        })
+        chip.addEventListener('dragend', () => {
+          delete chip.dataset.dragging
+        })
+        // 悬停在另一枚 chip 上 ⇒ 按指针在前半/后半决定预览落点（挪的是正在拖的那枚）
+        chip.addEventListener('dragover', (e) => {
+          e.preventDefault()
+          if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+          const dragging = draggingOf()
+          if (!dragging || dragging === chip) return
+          const mid = chip.getBoundingClientRect().left + chip.offsetWidth / 2
+          chip.parentNode?.insertBefore(dragging, e.clientX < mid ? chip : chip.nextSibling)
+        })
+      }
       const text = document.createElement('span')
       const name = displayNameOf(tag)
       text.textContent = `#${name}`
@@ -944,6 +982,17 @@ export class PropertiesPanel {
       const del = this.tagDel(t('ui.props.tagRemove'), () => this.deps.removeTag(target, tag.id))
       chip.append(text, del)
       value.appendChild(chip)
+    }
+    // 落下＝按预览序整笔写回；写失败（集合不一致）由 repaint 恢复模型序，不留假预览
+    if (draggable) {
+      value.addEventListener('dragover', (e) => e.preventDefault())
+      value.addEventListener('drop', (e) => {
+        e.preventDefault()
+        const ids = [...value.querySelectorAll<HTMLElement>('.props-tag[data-panel-tag-id]')].map(
+          (el) => el.dataset.panelTagId!,
+        )
+        this.deps.reorderTags(target, ids)
+      })
     }
     // 与查询条件值位同一个手势：点开浮层选已有（可新建），而不是手打名字碰运气
     const add = document.createElement('button')

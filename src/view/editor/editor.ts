@@ -2322,6 +2322,34 @@ export class BlockEditor {
   }
 
   /**
+   * **重排一个块的归属序**（`_tags` 数组序）。
+   *
+   * 顺序喂着块标的借形/借色取「第一个」——它是用户可编辑的真实数据，
+   * 不是打标先打的偶然；拖完 chips 的顺序写回这里。
+   * 只许换序不许增删：传入集合与现状不一致就整笔拒绝（重排不是加/摘的第二入口，
+   * 那两件事各有自己的门，混进来会出现「拖一下顺手挂上了别的标签」的暗写）。
+   * @returns 真的换了序才 `true`（同序／集合不一致／块不存在 ⇒ `false`）
+   */
+  reorderTags(blockId: string, orderedIds: readonly string[]): boolean {
+    const b = this.store.find(blockId)
+    if (!b) return false
+    const cur = tagIdsOf(b)
+    if (cur.length !== orderedIds.length) return false
+    const key = (ids: readonly string[]): string => [...ids].sort().join('\u0000')
+    if (key(cur) !== key(orderedIds)) return false
+    if (cur.every((id, i) => id === orderedIds[i])) return false
+    this.beginUndoEntry()
+    const ok = this.write((tx) => {
+      tx.setTags(blockId, [...orderedIds])
+      return true
+    })
+    this.finishUndoEntry('other')
+    if (locate(this.doc, blockId)) this.renderBlock(blockId)
+    this.emitChange('text', [blockId])
+    return ok
+  }
+
+  /**
    * 从 DOM 输入事件同步模型（真实键入路径）。
    *
    * **DOM 重建 runs**：读回的是整段内容（文本段带格式、原子按 `data-atom-id`

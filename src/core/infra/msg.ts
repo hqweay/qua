@@ -96,6 +96,8 @@ export const MSG = {
   'cmd.block.untag': '取消标签标记',
   'cmd.block.set-color': '设置身份色',
   'cmd.block.set-icon': '设置图标',
+  'cmd.block.edit-face': '图标与颜色…',
+  'cmd.tags.reorder': '调整标签顺序',
   'cmd.tag.delete': '删除标签',
   'cmd.block.edit-aliases': '别名与露面…',
   'cmd.anno.toggle-bold': '加粗',

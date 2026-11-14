@@ -47,6 +47,13 @@ export const TAGS_HANDLERS: Record<string, Handler> = {
     const icon = a.icon === undefined || a.icon === null ? null : String(a.icon)
     return app.setBlockIcon(id, icon)
   },
+  /** 开「图标＋颜色」选择器（任意块）：选择器本体在装配层，这里只指路 */
+  'core.block/edit-face': (a, app) => {
+    const id = S(a.blockId) || curBlock(app)
+    if (!id) return false
+    app.openFacePicker(id)
+    return true
+  },
   /**
    * 删除标签块：与「取消标签」是两条轴。
    * 取消只摘露面位（块与内容都还在）；删除连块带子树一起软删，回收站可恢复。
@@ -84,6 +91,12 @@ export const TAGS_HANDLERS: Record<string, Handler> = {
     const tagId = S(a.tagId, '')
     if (blockId === '' || tagId === '') return false
     return app.ed.removeTag(blockId, tagId)
+  },
+  /** 重排归属序：只许换序（集合一致性判在编辑器里），顺序喂块标的借形/借色 */
+  'core.tags/reorder': (a, app) => {
+    const blockId = S(a.blockId, '')
+    if (blockId === '' || !Array.isArray(a.tagIds)) return false
+    return app.ed.reorderTags(blockId, a.tagIds.map(String))
   },
 
   /* ---- 归属边 ---- */

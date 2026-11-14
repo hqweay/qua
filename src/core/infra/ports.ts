@@ -400,6 +400,8 @@ export interface App {
   extractToPage(blockId: string): boolean
   /** 打开别名编辑器（名字、露面、显示模式）——纯 UI，落在装配层 */
   openAliasEditor(blockId: string, autofocus?: boolean): void
+  /** 打开「图标＋颜色」选择器（任意块的脸）——纯 UI，落在装配层 */
+  openFacePicker(blockId: string): void
   /**
    * **看这一块的属性**：打开属性抽屉（整高右滑的任务面）。
    *

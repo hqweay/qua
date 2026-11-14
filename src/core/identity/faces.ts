@@ -13,9 +13,12 @@
  *
  * 三条链：
  *   · **`faceOf`**（自位，块标）：显式 `_icon` ?? 结构身份默认（标签→hash／查询→漏斗／
- *     定义→滑杆）?? 无（调用方画圆点）。回落集**比指位小一档**：页/日记的自位身份已由
- *     内容形态表达（首行加粗／只读日期行），file 图标在自位是纯装饰；
- *     标签/查询/定义的默认图标是**结构旗**，正文为空也成立。
+ *     定义→滑杆）?? **主标签借形**（归属序第一个带显式 `_icon` 的标签）?? 无（调用方画圆点）。
+ *     回落集**比指位小一档**：页/日记的自位身份已由内容形态表达（首行加粗／只读日期行），
+ *     file 图标在自位是纯装饰；标签/查询/定义的默认图标是**结构旗**，正文为空也成立。
+ *     借形与借色同一资格：归属是身份信息，形与色不该一半借一半不借——
+ *     「成员不是标签所以图标不借」的旧口径随任意块自位脸入口一起废止（当时图标唯一
+ *     显示位是 chip；现在块标有了自位脸，借入只是回落位，泛滥担忧由色轴同一资格承担）。
  *   · **`iconOf`**（指位，入口行／候选行／菜单行）：显式 `_icon` ?? 全角色默认
  *     （标签→hash／日记→calendar／页→file／查询→漏斗／定义→滑杆）?? 无
  *     （普通块＝空白但占位：页/块的区分由有图标/无图标继续承载）。
@@ -69,16 +72,42 @@ function roleOf(b: Block): string | undefined {
 }
 
 /**
- * **自位的脸**：块标上画什么。显式 `_icon` 优先；缺省回落到结构旗；
- * 普通块/页/日记没有结构旗 ⇒ `undefined`（调用方画圆点——「无脸默认」）。
+ * **自位的脸**：块标上画什么。显式 `_icon` 优先；缺省回落结构旗；再缺省借主标签的形；
+ * 都没有 ⇒ `undefined`（调用方画圆点——「无脸默认」）。
+ *
+ * 特异性排序（①最具体的发言赢）：自己显式配的 > 自己就是的定义 > 挂上去的归属。
+ * 借形只认标签**显式** `_icon`（与借色同一资格）：标签没配脸就不借，一层不递归。
+ *
+ * @param byId 标签 id → 标签块（给了才走借形档；调用方用 `tagsById` 建一次表，
+ *   逐行渲染可用 `faceOfByFind`，别逐行扫森林）
  */
-export function faceOf(b: Block): string | undefined {
+export function faceOf(b: Block, byId?: ReadonlyMap<string, Block>): string | undefined {
   const explicit = prop<string>(b, ICON_PROP)
   if (explicit !== undefined && explicit.trim() !== '') return explicit
   if (hasList(b, 'tag')) return STRUCTURAL_FACE.tag
   if (isQueryBlock(b)) return STRUCTURAL_FACE.query
   if (isPropDefBlock(b)) return STRUCTURAL_FACE.def
+  if (byId) {
+    for (const t of resolveTagIds(b, byId)) {
+      const ico = prop<string>(t, ICON_PROP)
+      if (ico !== undefined && ico.trim() !== '') return ico
+    }
+  }
   return undefined
+}
+
+/**
+ * `faceOf` 的逐行渲染形状：手里只有 `FindBlock` 时用这个（借形档要查标签块）。
+ * （整屏批量渲染仍请先 `tagsById` 建表走 `faceOf`。）
+ */
+export function faceOfByFind(b: Block, find?: FindBlock): string | undefined {
+  if (!find) return faceOf(b)
+  const byId = new Map<string, Block>()
+  for (const id of tagIdsOf(b)) {
+    const t = find(id)
+    if (t) byId.set(id, t)
+  }
+  return faceOf(b, byId)
 }
 
 /**
@@ -100,7 +129,8 @@ export type IdentityFaceColor =
 
 /**
  * **自位的色**：自己的脸自己上色（`_color` 上自己的块标/图标）；
- * **标签的脸借给成员——色借、图标不借**（成员不是标签，图标上 chip）。
+ * **标签的脸借给成员——形与色同一资格**（归属序第一个带显式 `_icon` 的标签借形，
+ * 见 `faceOf`；色按下面这条链借）。
  *
  * 借色只认**显式** `_color`（色板封闭集内的值）：有色标签自己没配色就不借，
  * 一层借色不递归——「借来的色再借出去」没有第二份真相。

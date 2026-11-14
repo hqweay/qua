@@ -816,6 +816,10 @@
   font-size: var(--ui-fs-xs);
   white-space: nowrap;
 }
+/* 拖拽重排的进行中态：拖动的那枚压暗（落点预览由 DOM 实时搬位表达，不再加线） */
+.props-tag[data-dragging] {
+  opacity: 0.4;
+}
 /*
   **只有名字可点**（`×` 不在里面）：与正文 chip 同一口径，点名字＝打开那个标签块。
   一枚 chip 上两个命中区会互相抢 —— 点「摘掉」时顺手把标签页也打开是最烦的一种。

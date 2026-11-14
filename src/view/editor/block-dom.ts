@@ -22,7 +22,7 @@ import {
   blockTypeOf,
   displayNameOf,
   embedBodyOf,
-  faceOf,
+  faceOfByFind,
   colorOfByFind,
   identityDotColor,
   identityRingGradient,
@@ -983,14 +983,15 @@ export function makeBlockEl(
     marker.dataset.dragFor = markerTargetId
     /**
      * **块标＝脸位**：`faceOf` 的结果画在这里——用户配的 `_icon`（脸）优先，
-     * 缺省回落结构旗（标签=hash／查询=漏斗／定义=滑杆）；都没有就是圆点（无脸默认）。
+     * 缺省回落结构旗（标签=hash／查询=漏斗／定义=滑杆），再缺省借主标签的形
+     * （归属序第一个带显式 `_icon` 的标签——与借色同一资格）；都没有就是圆点（无脸默认）。
      * 信号回答「这是哪类东西」，脸回答「这是哪一个东西」，同一个槽承载两者。
      *
      * ⚠️ 三条行为锚（左键 zoom／右键菜单／拖动）与脸无关：被动图像不吃行为，
      *    块标上的脸**不挂任何事件**——点它还是聚焦/缩进，`dragstart` 还是抓手的事。
      * ⚠️ 图标与点互斥（CSS），悬停时都让位给抓手——「任何块标悬停＝把手」这一条不变。
      */
-    const face = faceOf(b)
+    const face = faceOfByFind(b, opts.find)
     if (face !== undefined) {
       marker.classList.add(isPropDefBlock(b) ? 'marker-schema' : isQueryBlock(b) ? 'marker-query' : 'marker-face')
       const ico = document.createElement('span')

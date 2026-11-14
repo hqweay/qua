@@ -43,6 +43,32 @@ test('faceOf：自位回落集比指位小一档——页/日记/普通块没有
   assert.equal(faceOf(block(undefined)), undefined)
 })
 
+test('faceOf：借形——归属序第一个带显式图标的标签把形借给成员（与借色同一资格）', () => {
+  const withIcon = mkTagBlock('目标')
+  withIcon.props = { ...(withIcon.props ?? {}), _icon: 'lucide:target' }
+  const first = mkTagBlock('甲')
+  first.props = { ...(first.props ?? {}), _icon: 'lucide:flag' }
+  const plain = mkTagBlock('普通')
+  const byId = tagsById([withIcon, first, plain])
+  assert.equal(faceOf(block({ _tags: [plain.id, withIcon.id] }), byId), 'lucide:target')
+  // 序里前面的带了图标就轮不到后面的——「第一个」按 _tags 序，不是谁显眼用谁
+  assert.equal(faceOf(block({ _tags: [first.id, withIcon.id] }), byId), 'lucide:flag')
+  // 标签没显式配脸就不借（与借色同一口径）
+  assert.equal(faceOf(block({ _tags: [plain.id] }), byId), undefined)
+})
+
+test('faceOf：特异性排序——自己显式的 > 结构旗 > 借形 > 圆点', () => {
+  const withIcon = mkTagBlock('目标')
+  withIcon.props = { ...(withIcon.props ?? {}), _icon: 'lucide:target' }
+  const byId = tagsById([withIcon])
+  // 结构旗压过借形：查询块挂了带图标的标签，漏斗还是漏斗
+  assert.equal(faceOf(block({ _query: { where: { all: [] } }, _tags: [withIcon.id] }), byId), 'lucide:list-filter')
+  // 自己显式配的压过一切
+  assert.equal(faceOf(block({ _icon: 'lucide:star', _tags: [withIcon.id] }), byId), 'lucide:star')
+  // 没给标签表就不走借形档（逐行渲染没建表的调用方回落圆点；要借走 faceOfByFind）
+  assert.equal(faceOf(block({ _tags: [withIcon.id] })), undefined)
+})
+
 test('iconOf：全角色默认——标签/日记/页/查询/定义各有一档', () => {
   assert.equal(iconOf(mkTagBlock('设计')), 'lucide:hash')
   assert.equal(iconOf(block({ _date: '2026-11-14' })), 'lucide:calendar')
