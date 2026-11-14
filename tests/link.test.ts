@@ -12,6 +12,7 @@ import assert from 'node:assert/strict'
 import {
   EXTERNAL_URL_SCHEMES,
   URL_REJECT_MSG,
+  bareExternalUrl,
   checkExternalUrl,
   rejectText,
   schemeLabelOf,
@@ -76,4 +77,21 @@ test('③ 放行时给的是规范化之后的 url（同一个地址只有一种
   assert.equal(r.ok, true)
   assert.ok(r.ok && r.url.startsWith('https://'), `应带规范化后的地址：${r.ok ? r.url : ''}`)
   assert.ok(r.ok && r.url.includes('example.com'), '主机名按规范小写')
+})
+
+test('④ 粘贴纯 URL 判据：整段恰好是一条外链才成链，落盘的是规范化地址', () => {
+  // 首尾空白（复制来源常带换行）不影响判定，地址取规范化后的那一个
+  assert.equal(bareExternalUrl('  https://qua.leay.net/arch.html \n'), 'https://qua.leay.net/arch.html')
+  // URL 夹在文字里 ⇒ 不转（不扫长文本，不把用户贴的字改写成链接）
+  assert.equal(bareExternalUrl('看看 https://x.com 这个站'), null)
+  // 段中含空白（含换行）⇒ 不是「恰好一条」
+  assert.equal(bareExternalUrl('https://x.com/a b'), null)
+  assert.equal(bareExternalUrl('https://x.com\nhttps://y.com'), null)
+  // 非 http(s) 协议与没写协议的裸域名 ⇒ 不转（与打开判据同一个白名单）
+  assert.equal(bareExternalUrl('file:///etc/passwd'), null)
+  assert.equal(bareExternalUrl('javascript:alert(1)'), null)
+  assert.equal(bareExternalUrl('qua.leay.net'), null)
+  // 空串
+  assert.equal(bareExternalUrl(''), null)
+  assert.equal(bareExternalUrl('   \n'), null)
 })

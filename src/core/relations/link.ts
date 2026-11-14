@@ -70,3 +70,21 @@ export function checkExternalUrl(raw: string): UrlCheck {
 export function rejectText(r: { kind: UrlRejectKind; scheme: string }): string {
   return t(URL_REJECT_MSG[r.kind], r.scheme === '' ? undefined : { scheme: r.scheme })
 }
+
+/**
+ * 「这段粘贴文本是不是**恰好**一条外链」的唯一答案（粘贴链纯 URL 档的判据）。
+ *
+ * 为什么进 core 而不是塞在粘贴调用点：判据与「能不能打开」同源（同一个白名单），
+ * 判据写两份，粘贴端与打开端迟早对协议口径各说各话。trim 掉首尾空白后**整段**
+ * 不再含任何空白才算——长文本里扫 URL 不归这条管，那是在改写用户贴进来的字；
+ * URL 后面跟一句话的形状（协议后面有空格）也在这里被挡掉，不会误成链。
+ *
+ * @returns `ok` 时是**规范化后**的地址（与 `checkExternalUrl` 同一口径，
+ *          落盘的同一个地址只有一种写法）；不是外链 ⇒ `null`（调用方落回纯文本插入）
+ */
+export function bareExternalUrl(raw: string): string | null {
+  const s = raw.trim()
+  if (s === '' || /\s/.test(s)) return null
+  const chk = checkExternalUrl(s)
+  return chk.ok ? chk.url : null
+}

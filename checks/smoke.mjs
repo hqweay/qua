@@ -10108,6 +10108,68 @@ await check(
 )
 
 await check(
+  'T301 粘贴纯 URL 成链：整段恰是一条外链 ⇒ 一枚 link 原子（选区文字变显示文本）；夹在文字里 ⇒ 不转；各一次撤销复原',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+    const target = await pickLeaf(page)
+    assert(target, '第一页里应有可编辑的内容块')
+    const readContent = () =>
+      page.evaluate((id) => {
+        const b = window.__qua.__editor.store.find(id)
+        return b ? b.content.map((r) => ({ t: r.t, v: r.v, url: r.t === 'link' ? r.url : undefined })) : null
+      }, target.id)
+
+    // ① 整段恰是一条 http 链接（复制来源常带的空白一并吃掉）⇒ 一枚 link 原子，不落成文字
+    await page.evaluate((t) => window.__qua.__editor.clip.pasteAt(t.id, 0, '  https://qua.leay.net/arch.html \n'), target)
+    await page.waitForTimeout(120)
+    const c1 = await readContent()
+    assert(
+      c1 && c1[0]?.t === 'link' && c1[0]?.url === 'https://qua.leay.net/arch.html',
+      `纯 URL 应贴成 link 原子（地址取规范化后）：${JSON.stringify(c1)}`,
+    )
+    const ops1 = await opShape(page)
+    assert(ops1.length === 1 && ops1[0].op === 'upsert' && ops1[0].block === target.id, `应只落一条内容 upsert：${JSON.stringify(ops1)}`)
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(150)
+    const back1 = await readContent()
+    assert(back1 && back1.every((r) => r.t !== 'link'), `一次撤销应回到无链接的原文：${JSON.stringify(back1)}`)
+
+    // ② URL 夹在文字里 ⇒ 原文落成文本，不转（不扫长文本、不改写用户贴的字）
+    await page.evaluate((t) => window.__qua.__editor.clip.pasteAt(t.id, 0, '看看 https://x.com 这个站'), target)
+    await page.waitForTimeout(120)
+    const c2 = await readContent()
+    assert(
+      c2 && c2.every((r) => r.t === 'text') && c2.some((r) => r.v.includes('https://x.com')),
+      `夹在文字里的 URL 不该转成原子：${JSON.stringify(c2)}`,
+    )
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(150)
+
+    // ③ 区间选中贴 URL：选区被替换，选区文字成为这枚链接的显示文本（v）
+    await page.evaluate((t) => window.__qua.__editor.clip.pasteAt(t.id, 0, '锚甲乙'), target)
+    await page.waitForTimeout(120)
+    await page.evaluate((t) => window.__qua.__editor.clip.pasteAt(t.id, 1, 'https://qua.leay.net/', { from: 1, to: 3 }), target)
+    await page.waitForTimeout(120)
+    const c3 = await readContent()
+    assert(
+      c3 && c3.some((r) => r.t === 'link' && r.v === '甲乙' && r.url === 'https://qua.leay.net/'),
+      `选区贴 URL 应把选区文字变成显示文本：${JSON.stringify(c3)}`,
+    )
+    const plain3 = c3.filter((r) => r.t === 'text').map((r) => r.v).join('')
+    assert(plain3.startsWith('锚') && !plain3.includes('甲乙'), `选区段被换成原子、段前的原文原样留下：${JSON.stringify(plain3)}`)
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(150)
+    const back3 = await readContent()
+    assert(back3 && back3.every((r) => r.t !== 'link'), `撤销应撤掉这枚替换出来的链接：${JSON.stringify(back3)}`)
+
+    await ctx.close()
+    return `pasteAt 纯 URL ⇒ link 原子（1 upsert、⌘Z 复原）；夹字不转；选区文字变显示文本`
+  },
+)
+
+await check(
   'T89 翻到全新的一天也走事务：空天的首子块经事务一条 upsert{parent:天块,index:0}；天块本身在库顶层；重复翻同一天零 op（幂等）',
   async () => {
     const { ctx, page } = await freshPage(browser, base)

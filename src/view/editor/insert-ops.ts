@@ -579,16 +579,11 @@ export class InsertOps {
   /**
    * 在光标处插一枚外链 run（`core.editor/insert-link` 的落点）。
    *
-   * `text` 省略 ⇒ 显示**地址本身**：`LinkRun.v` 是内容而不是提示占位，
-   * 留空会让这一枚 link 显示成一片空白（用户看不出那里有个 link）。
-   *
    * ⚠️ url 的合法性由调用方用 `core/link.ts` 的 `checkExternalUrl` 判过：
    *    编辑器只管形状，协议的取舍不属于它。
    */
   insertLink(opts: { url: string; text?: string }): string | null {
-    const text = (opts.text ?? '').trim()
-    const run: LinkRun = { id: uuidv7Hex(), t: 'link', v: text === '' ? opts.url : text, url: opts.url }
-    return this.insertRun(run)
+    return this.insertRun(linkRunOf(opts.url, opts.text))
   }
 
   /**
@@ -643,4 +638,15 @@ export class InsertOps {
  */
 function refRunOf(to: string, label: string, flavor?: '#'): RefRun {
   return { id: uuidv7Hex(), t: 'ref', to, ...(flavor ? { flavor } : {}), label }
+}
+
+/**
+ * 一枚外链 run 的形状（命令插入与粘贴纯 URL 两条路径共用）。
+ *
+ * `text` 省略/空白 ⇒ 显示**地址本身**：`LinkRun.v` 是内容而不是提示占位，
+ * 留空会让这枚 link 显示成一片空白（用户看不出那里有个 link）。
+ */
+export function linkRunOf(url: string, text?: string): LinkRun {
+  const t = (text ?? '').trim()
+  return { id: uuidv7Hex(), t: 'link', v: t === '' ? url : t, url }
 }

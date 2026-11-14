@@ -7,6 +7,7 @@
  * 是主用法 ⇒ 源按整片森林定位，落点仍在本视图。
  */
 import {
+  bareExternalUrl,
   blankRowKind,
   hasDescendant,
   isDeleted,
@@ -28,12 +29,14 @@ import {
   joinRuns,
   plainLen,
   plainText,
+  sliceRuns,
   spliceRuns,
   splitRuns,
   textRuns,
   type Run as InlineRun,
 } from '../../core/model/runs.ts'
 import type { ClipboardRefs } from './clipboard-flavor.ts'
+import { linkRunOf } from './insert-ops.ts'
 import type { BlockEditor } from './editor.ts'
 
 export class ClipboardOps {
@@ -52,12 +55,30 @@ export class ClipboardOps {
   }
 
   pasteAt(id: string, offset: number, text: string, cut?: { from: number; to: number } | null): void {
-    const lines = text.split('\n')
     const loc = locate(this.ed.doc, id)
     if (!loc) return
     // 区间选中＝先删后贴，插入点就是范围起点；两步在**同一笔**内容写里落
     const at = cut ? Math.min(cut.from, cut.to) : offset
     const cutTo = cut ? Math.max(cut.from, cut.to) : offset
+    /**
+     * 纯 URL 档（在 `((id))` 记号与文本之前）：整段恰好是一条外链 ⇒ 贴成 link 原子，
+     * 不落成文字。同块区间选中被替换时，选区文字成为这枚链接的显示文本（选区为空
+     * ⇒ 显示地址本身）。判据住 `core`，粘贴端与打开端对协议口径只有一份答案。
+     */
+    const bare = bareExternalUrl(text)
+    if (bare) {
+      const anchor = cut ? plainText(sliceRuns(loc.block.content, at, cutTo)).trim() : ''
+      this.ed.beginUndoEntry()
+      const next = spliceRuns(loc.block.content, at, cutTo, [linkRunOf(bare, anchor)])
+      // 与单行粘贴同档（把内容落进这一行）；原子各占 1 格 ⇒ 光标落在原子后面
+      this.ed.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)), undefined, { directEdit: true })
+      this.ed.finishUndoEntry('insert')
+      this.ed.renderAll()
+      this.ed.placeCaret(id, at + 1)
+      this.ed.emitChange('text')
+      return
+    }
+    const lines = text.split('\n')
     this.ed.beginUndoEntry()
     if (lines.length === 1) {
       const next = spliceRuns(loc.block.content, at, cutTo, this.runsWithRefs(lines[0]!))
@@ -135,6 +156,17 @@ export class ClipboardOps {
     }
   }
 
+  /**
+   * 粘贴文本 → runs 的唯一入口：纯 URL 档在最前，其次 `((id))` 记号（目标不在的
+   * 记号照原文留下），都不是 ⇒ 纯文本。文本态与块选区态两条落点共用这一份，
+   * 「贴进来的是什么」不该随落点变两副面孔。
+   */
+  private runsForPaste(text: string): InlineRun[] {
+    const bare = bareExternalUrl(text)
+    if (bare) return [linkRunOf(bare)]
+    return this.runsWithRefs(text)
+  }
+
   /** 正文里的 `((id))` 记号解析成引用 run（目标不在的记号照原文留下） */
   private runsWithRefs(text: string): InlineRun[] {
     const tokens = refTokensIn(text)
@@ -194,7 +226,7 @@ export class ClipboardOps {
   /**
    * 块选区态的粘贴落点：没有光标，⌘V 的东西作为新块落在选区后面。
    * 剪切味 ⇒ 移动到选区后（源没了 ⇒ 降级为文本）；引用味 ⇒ 每枚引用一块；
-   * 纯文本 ⇒ 每行一块（`((id))` 记号照常解析成引用）。
+   * 纯文本 ⇒ 每行一块（解析走 `runsForPaste`：纯 URL 与 `((id))` 记号与文本态同判据）。
    */
   pasteIntoSelection(refs: ClipboardRefs | null, text: string): 'moved' | 'pasted' | 'gone' | 'refused' {
     const selIds = this.ed.bsel.selectedRootIds()
@@ -207,7 +239,7 @@ export class ClipboardOps {
     } else if (refs) {
       return this.insertBlocksAfter(lastId, refs.ids.map((rid) => mkBlock([this.refRunTo(rid, refs.anchor)])))
     }
-    return this.insertBlocksAfter(lastId, text.split('\n').map((l) => mkBlock(this.runsWithRefs(l))))
+    return this.insertBlocksAfter(lastId, text.split('\n').map((l) => mkBlock(this.runsForPaste(l))))
   }
 
   /** 新块插到 `afterId` 后面（同级位；日记根的兄弟位按整片森林算，不是本视图的 roots） */
