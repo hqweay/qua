@@ -498,9 +498,13 @@ await check('E6 中文 IME：行内原子两侧组合输入、候选取消、提
   await page.evaluate(() => window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[0].id }))
   const atom = await page.evaluate(() => {
     const mounted = new Set(window.__qua.blocks().map((b) => b.id))
-    return window.__qua.atoms().find((a) => mounted.has(a.blockId)) ?? null
+    const hit = window.__qua.atoms().find((a) => mounted.has(a.blockId)) ?? null
+    if (!hit) return null
+    const sameBlock = window.__qua.atoms().filter((a) => a.blockId === hit.blockId)
+    return { ...hit, firstInBlock: sameBlock.every((a) => a.start >= hit.start) }
   })
   assert(atom, '假数据里应能找到行内原子')
+  assert(atom.firstInBlock, 'E6 的投影断言要求目标是块内第一枚原子（纯文本前缀 ⇒ plain 偏移＝投影偏移）')
   const blockId = atom.blockId
   const text0 = await page.evaluate((id) => window.__qua.blocks().find((b) => b.id === id)?.text, blockId)
   assert(typeof text0 === 'string', `原子所属块应已装进编辑器：${blockId}`)
@@ -618,10 +622,13 @@ await check('E6 中文 IME：行内原子两侧组合输入、候选取消、提
       JSON.stringify(right.committed.runKinds) === JSON.stringify(['text', 'ref', 'text']),
     `提交后序列应是「文本段 ＋ 原子 ＋ 文本段」：左 ${JSON.stringify(left.committed.runKinds)} / 右 ${JSON.stringify(right.committed.runKinds)}`,
   )
-  // 投影文本里原子不进字（它是节点，不是字符）⇒ 两段中文直接相邻
+  // 投影文本里原子不进字（它是节点，不是字符）⇒ 两段中文直接相邻。
+  // 期望值从目标块**自己的**初始文本推导（钉行为不钉文案）：左段＋两段中文＋右段
   assert(
-    /^与 中文中文 同源/.test(finalText),
-    `两侧提交后投影文本应是「与 中文中文 同源…」（两段中文直接相邻，原子不进投影）：${finalText}`,
+    finalText === text0.slice(0, atom.start) + '中文中文' + text0.slice(atom.start),
+    `两侧提交后投影应是「初始文本在原子处拼进两段中文」（原子不进投影）：want ${JSON.stringify(
+      text0.slice(0, atom.start) + '中文中文' + text0.slice(atom.start),
+    )} got ${JSON.stringify(finalText)}`,
   )
 
   return `原子[${atom.start},${atom.end}) 两侧各连打「中文」：compositionstart/update/end 都到 renderer；**候选取消（清空预编辑）后模型零残留、原子零位移**；左侧提交⇒原子右移 2 格，右侧提交⇒原子纹丝不动，宽度恒为 1 格、DOM 里恒 1 个 .atom span、序列仍是「文本段＋原子＋文本段」（两侧都没有替身字符）、总数不变`

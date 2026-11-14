@@ -1449,8 +1449,12 @@ await check('T23 gutter 三件：块标与把手合并、三角悬停才现、�
       caretSize: cs(document.documentElement).getPropertyValue('--ui-caret-size').trim(),
     }
   })
-  // D4：块标与把手合并，但旧选择器都还在（主题/插件不失效）
-  assert(r.markerClasses === 'bullet handle marker', `块标应是 bullet+handle+marker 三 class：${r.markerClasses}`)
+  // D4：块标与把手合并，但旧选择器都还在（主题/插件不失效）。
+  // 首行是页块，种子给页配了图标 ⇒ 块标＝脸位，实际会多一枚 marker-face——契约 class 在即可
+  assert(
+    ['bullet', 'handle', 'marker'].every((c) => r.markerClasses.split(' ').includes(c)),
+    `块标应带 bullet+handle+marker 契约 class：${r.markerClasses}`,
+  )
   assert(r.markerW === '20px', `块标槽应收到 20px（D4），实际 ${r.markerW}`)
   // D2：三角绝对定位、不占位；静止态不可见
   assert(r.foldPosition === 'absolute', `三角应绝对定位不占位（D2），实际 ${r.foldPosition}`)
@@ -5922,13 +5926,17 @@ await check('T43 待办是块标之后的身份图标：块标仍是圆点、仍
         boxClasses: box ? [...box.classList].sort().join(' ') : '',
         before: before?.content ?? '',
         boxW: box?.querySelector('.ico') ? getComputedStyle(box.querySelector('.ico')).width : '',
+        text: (row?.querySelector(':scope > .tx')?.textContent ?? '').slice(0, 24),
       }
     }, id)
 
   const deepRow = await readRow(deep)
   assert(deepRow.todo !== '' && deepRow.depth >= 2, `深缩进待办没建成：${JSON.stringify(deepRow)}`)
   // 块标对任何身份都一样：圆点 ＋ 聚焦入口（身份只是挂在它后面的后缀）
-  assert(deepRow.classes === 'bullet handle marker', `待办行的块标仍是块标：${deepRow.classes}`)
+  assert(
+    deepRow.classes === 'bullet handle marker' || deepRow.classes === 'bullet handle marker marker-face',
+    `待办行的块标仍是块标（契约 class 在；带显式脸/借形的行多一枚 marker-face）：${JSON.stringify(deepRow)}`,
+  )
   assert(deepRow.focusFor === deep, `待办行的块标仍要点＝聚焦：${deepRow.focusFor}`)
   assert(deepRow.before !== 'none', `待办行的块标仍应画圆点（::before content=${deepRow.before}）`)
   assert(deepRow.boxClasses.includes('todo-box'), `方框应在身份图标上：${deepRow.boxClasses}`)
@@ -5972,7 +5980,11 @@ await check('T43 待办是块标之后的身份图标：块标仍是圆点、仍
   )
   assert(all.some((r) => r.todo === 'todo') && all.some((r) => r.todo === 'done'), `应同时看到 todo 与 done：${JSON.stringify(all)}`)
   for (const r of all) {
-    assert(r.classes === 'bullet handle marker', `待办（${r.todo}）的块标不该换形状：${JSON.stringify(r)}`)
+    // 块标＝脸位：任务块会借「任务」标签的图标（marker-face）；身份图标（todo-box）另立一格，两件事
+    assert(
+      ['bullet', 'handle', 'marker'].every((c) => r.classes.split(' ').includes(c)),
+      `待办（${r.todo}）的块标不该换形状：${JSON.stringify(r)}`,
+    )
     assert(r.boxClasses.includes('todo-box') && r.boxW === '12px', `待办（${r.todo}）的方框应在：${JSON.stringify(r)}`)
   }
 
@@ -9589,7 +9601,9 @@ await check(
     await page.evaluate((id) => window.__qua.focusBlock(id, 2), target.id)
     for (let i = 0; i < 3; i++) await page.keyboard.press('Shift+ArrowRight')
     await page.evaluate(() => window.__qua.__editor.toggleMark({ bold: true }))
-    await page.waitForTimeout(120)
+    // 撤销栈对 mark 有 1200ms 合并窗口（连续格式操作算一步）——这一条要验的是
+    // 「清格式是**独立**一笔」，把两次动作拉到窗口外，别并成一步
+    await page.waitForTimeout(1300)
 
     // toggleMark 结束时选区原样保留 ⇒ 直接清
     await page.evaluate(() => window.__qua.__editor.clearMarksAtSel())
@@ -16450,7 +16464,9 @@ await check('T166 投影：同一块在这里看成大纲表格（表头＝源�
       markerLeft: el ? Math.round((el.querySelector(':scope > .left .marker')?.getBoundingClientRect().left ?? -1)) : -1,
     }
   })
-  assert(title.rowText === '源', `名字占块标那一行（说明这是哪棵树）：${JSON.stringify(title)}`)
+  // 名字占块标那一行（说明这是哪棵树）。行尾可能跟着引用数徽标（源被这次露面引用 ⇒ 1，
+  // `↗` 是伪元素不进 textContent）——钉「名字在行首」，不把徽标的有无钉死
+  assert(title.rowText.startsWith('源'), `名字占块标那一行（说明这是哪棵树）：${JSON.stringify(title)}`)
   assert(title.headHidden === true, `面板抬头不再重复名字：${JSON.stringify(title)}`)
   assert(title.titleLeft > title.markerLeft, `名字在块标右边（同一行）：${JSON.stringify(title)}`)
   assert(st.tableRows === 0, `源的两个直接子块没有孩子 ⇒ 表头下没有内容行：${st.tableRows}`)
@@ -17320,14 +17336,14 @@ await check(
     assert(setup.defId !== '', '前置：定义块应建出来并聚焦')
     await page.waitForSelector('.choices-editor')
 
-    // 图标选择器：点第一行的图标 → 选 flag → 写回 `_icon`
+    // 图标选择器：点第一行的图标 → 网格选择器搜 flag → 写回 `_icon`
+    //（选择器已网格化——弹窗＋搜索格，不再是 layer 菜单；交互同 T304）
     await page.locator('.choices-editor .choice-icon').first().click()
-    await page.waitForFunction(() => document.querySelectorAll('.layer-item').length > 0)
-    const iconRows = await page.evaluate(() =>
-      [...document.querySelectorAll('.layer-item')].map((r) => r.querySelector('.layer-label')?.textContent ?? ''),
-    )
-    assert(iconRows.includes('flag'), `图标选择器要有 flag：${JSON.stringify(iconRows.slice(0, 10))}`)
-    await page.locator('.layer-item', { hasText: 'flag' }).first().click()
+    await page.waitForSelector('.icon-picker .icon-picker-cell', { timeout: 3000 })
+    // 选择器默认 emoji tab（T305）——lucide 的 flag 在图标 tab 里
+    await page.click('.icon-picker-tabs .icon-picker-tab:nth-child(2)')
+    await page.fill('.icon-picker .icon-picker-search', 'flag')
+    await page.click('.icon-picker .icon-picker-cell[data-icon="lucide:flag"]')
     await page.waitForFunction(
       () => document.querySelector('.choices-editor .choice-icon')?.getAttribute('data-icon') === 'lucide:flag',
     )
@@ -28693,7 +28709,9 @@ await check('T300 划选气泡颜色值轴：主条只放轴、二级向上展�
   await page.waitForSelector('.selbar-extra[data-axis="ink"]', { timeout: 3000 })
   const openInk = await barState()
   assert(openInk.extra.length === 1 && openInk.extra[0] === 'ink', `只展开被点的那一轴：${JSON.stringify(openInk.extra)}`)
-  assert(openInk.swatches === 7, `二级给全 7 个槽，不砍成 3 个：${openInk.swatches}`)
+  // 7 个固定槽全给（不砍成 3 个）；「最近自定义色」段会按 prefs 追加（同一浏览器上下文里
+  // 先前用例选过的色还在账上）⇒ 只设下界，不把账本长度钉死
+  assert(openInk.swatches >= 7, `二级给全 7 个槽，不砍成 3 个：${openInk.swatches}`)
   assert(openInk.barTop < closed.barTop, `展开后整体上移（用新 boxH 重算）：${closed.barTop} → ${openInk.barTop}`)
   assert(openInk.barBottom <= openInk.selTop + 1, `二级向上长，不许盖住选区：${JSON.stringify(openInk)}`)
   assert(openInk.selText.length >= 2, `展开不抢焦点，选区还在：${JSON.stringify(openInk.selText)}`)
