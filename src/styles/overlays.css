@@ -958,7 +958,9 @@
    悬停底色是白 7%，叠在色点上读成「变白」）。
    选中态：hover 中性（只提亮底盘），选中 accent 描边；颜色行的选中同一条。 */
 .popover .icon-picker {
-  width: calc(8 * 32px + 7 * 2px + 10px); /* 8 列＋格距＋竖向滚动条的一条槽 */
+  /* 面宽不再为滚动条赌一条槽（各平台滚动条宽度不一，赌输＝8 列横溢出一截）：
+     列宽交给格子自适应（见 grid），这里只给一个稳定的面宽 */
+  width: 300px;
   display: flex;
   flex-direction: column;
   gap: var(--ui-gap-2);
@@ -982,14 +984,16 @@
 }
 .popover .icon-picker-grid {
   display: grid;
-  grid-template-columns: repeat(8, 32px);
+  /* 列宽自适应：竖滚动条多宽都挤不横（fixed 轨道＋真滚动条比预留槽宽＝横向溢出） */
+  grid-template-columns: repeat(8, minmax(0, 1fr));
   gap: 2px;
-  max-height: 168px; /* 五行：搜索与分类都在场，滚动能到 */
+  max-height: 190px; /* 五行：搜索与分类都在场，滚动能到 */
   overflow-y: auto;
+  overflow-x: hidden;
   scrollbar-width: thin;
 }
 .popover .icon-picker-recent {
-  max-height: 34px; /* 一行：它只是快捷行 */
+  max-height: 38px; /* 一行：它只是快捷行 */
   overflow: hidden;
 }
 .popover .icon-picker-section {
@@ -997,8 +1001,10 @@
   color: var(--ui-text-tertiary);
 }
 .popover .icon-picker-cell {
-  width: 32px;
-  height: 32px;
+  /* 格子随列宽走（aspect-ratio 保方）：命中区不小于 32px 由面宽保证 */
+  width: auto;
+  height: auto;
+  aspect-ratio: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1037,6 +1043,7 @@
 .popover .icon-picker-colors {
   position: relative; /* 原生色盘 input 的定位宿主 */
   display: flex;
+  flex-wrap: wrap; /* 最近自定义色多时折行，不横滚（色行是快捷段，两行比滚好） */
   gap: var(--ui-gap-2);
   align-items: center;
 }
