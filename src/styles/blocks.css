@@ -1871,9 +1871,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  /* 脸的描边吃身份色（行上的 --identity-c 槽）；emoji 自带色不受影响（它是字面文本） */
+  /* 脸的描边吃身份色（行上的 --identity-c 槽）；emoji 自带色不受影响（它是字面文本）。
+     全强度：脸是数据，不吃透明度的亏——「低调」由信号档的中性色承担（tertiary），
+     不在这里叠第二层折扣（0.7 时 emoji 比同款 chip 明显发虚，真机反馈）。 */
   color: var(--identity-c, var(--ui-text-tertiary));
-  opacity: 0.7;
 }
 /*
  * **多标签的外环**：≥2 个有色标签时垫在点下的一圈 conic——
