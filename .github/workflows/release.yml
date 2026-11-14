@@ -1,0 +1,144 @@
+# 打包流水线 —— push 一个 `v*` tag，出 mac / Windows 安装包，挂到**草稿 Release**。
+#
+# 三条口径（改动前先对照）：
+#   · **版本单一来源是 `package.json`**：tag 必须与它的 `version` 一致，不一致当场拒跑
+#     ——否则产物文件名、安装包版本、Release 名三方各说各话。
+#   · **产物挂 draft**：发布动作始终在人手上——签名问题、产物名问题、顺手看一眼
+#     changelog，都发生在「点发布」之前，而不是之后。
+#   · **每个平台先验后包**：mac job 先跑真 Electron 断言（同 gate.yml 的 electron job）
+#     再打包；Windows 目前只有打包（壳行为断言还没在 Windows 上立起来，登记在
+#     docs/ELECTRON-备忘.md），装到真机的验证交给手测。
+#
+# 手动触发（workflow_dispatch）只出产物 artifact，不建 Release——用来在真推 tag 之前试跑。
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+# 打包是长活且出的是可下载产物，后来的 tag 推送不取消在跑的那批
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # 强制冒烟走 `dist/`，别去连 5180（同 gate.yml：连上别人那台 dev server 会测到别人的代码）
+  QUA_NO_DEV: '1'
+
+jobs:
+  gate:
+    name: 版本校验 ＋ 浏览器门禁
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 版本由 `.node-version` 钉住，与 `engines`、`packageManager` 同一口径
+          node-version-file: '.node-version'
+          cache: pnpm
+
+      - run: pnpm i --frozen-lockfile
+
+      # tag 与 package.json 必须同一句话；手动触发没有 tag，跳过
+      - name: 校验 tag 与 package.json 版本一致
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::tag v${TAG_VERSION} 与 package.json 的 ${PKG_VERSION} 不一致——版本单一来源是 package.json，改好再推"
+            exit 1
+          fi
+
+      - run: pnpm gate:web
+
+  mac:
+    name: macOS（先验后包）
+    needs: gate
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.node-version'
+          cache: pnpm
+
+      # Electron 二进制走 npm postinstall；`pnpm-workspace.yaml` 里已经放行
+      - run: pnpm i --frozen-lockfile
+
+      # 先验：真壳断言（窗口、原生菜单、nativeTheme）在发货平台上跑一遍（同 gate.yml）
+      - run: VITE_QUA_TEST=1 pnpm build && pnpm build:electron && pnpm check:electron
+
+      # 后包：不签名（identity: null），产物名 Qua-<版本>-arm64.dmg
+      - run: pnpm build:mac
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-arm64
+          path: |
+            release/Qua-*-arm64.dmg
+            release/latest-mac.yml
+          if-no-files-found: error
+
+  win:
+    name: Windows（NSIS x64）
+    needs: gate
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.node-version'
+          cache: pnpm
+
+      - run: pnpm i --frozen-lockfile
+
+      # 只有打包：壳行为断言尚未在 Windows 上立起来（登记为手测项，不是绿灯）
+      - run: pnpm build && pnpm build:electron && pnpm build:win
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win-x64
+          path: |
+            release/Qua-*-x64.exe
+            release/Qua-*-x64.exe.blockmap
+          if-no-files-found: error
+
+  release:
+    # 只有 tag 触发才建 Release；手动试跑到此为止，产物留在 workflow run 页
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [mac, win]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist-pkg
+
+      # 草稿：发布动作在人的手上。generate-notes 按提交生成初稿，发布前可改
+      - name: 创建草稿 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --draft --generate-notes \
+            --title "相 $GITHUB_REF_NAME" \
+            dist-pkg/*
