@@ -129,11 +129,17 @@
 .selbar {
   position: fixed;
   z-index: var(--ui-z-selbar);
-  padding: var(--ui-gap-1);
+  padding: var(--ui-gap-2);
   background: var(--ui-surface-raised);
-  border: 1px solid var(--ui-border);
-  border-radius: var(--ui-radius-md);
-  box-shadow: var(--ui-shadow-mid);
+  border-radius: var(--ui-radius-float);
+  box-shadow: var(--ui-shadow-float);
+}
+/*
+  **入场只在「从无到有」那一刻**（`selbar-enter` 由渲染层加，且只在新气泡上）。
+  气泡每次刷新都是整颗重建，动画若挂在 `.selbar` 上，点色轴就会重放一遍淡入 —— 看着像闪一下。
+*/
+.selbar.selbar-enter {
+  animation: overlay-in var(--ui-dur-2) var(--ui-ease-out);
 }
 /*
   二级画在主条之前（column 顺序）⇒ 视觉上向上长；placeNear 读到变高的 boxH
@@ -142,19 +148,22 @@
 .selbar .selbar-stack {
   display: flex;
   flex-direction: column;
-  gap: var(--ui-gap-1);
+  gap: var(--ui-gap-2);
 }
 .selbar .selbar-row {
   display: flex;
   align-items: center;
   gap: var(--ui-gap-1);
 }
+/* 组间靠留白分组，不画竖线：线是「切开」，同级动作之间不该被切开 */
+.selbar .sel-btn[data-group-start] {
+  margin-inline-start: var(--ui-gap-3);
+}
 .selbar .selbar-extra {
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 0 var(--ui-gap-1) var(--ui-gap-1);
-  border-bottom: 1px solid var(--ui-border);
+  padding: 0 0 var(--ui-gap-1);
 }
 .selbar .selbar-extra-lead {
   color: var(--ui-text-tertiary);
@@ -164,12 +173,12 @@
 .selbar .sel-btn {
   position: relative;
   min-width: 28px;
-  height: 26px;
+  height: 32px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0 var(--ui-gap-3);
-  border-radius: var(--ui-radius-sm);
+  border-radius: var(--ui-radius-md);
   color: var(--ui-text-secondary);
   font-size: var(--ui-fs-sm);
   line-height: 1;
@@ -177,30 +186,25 @@
 /* 值轴入口只用一个像素级信号表达「当前值」，7 个可选值收在二级 */
 .selbar .sel-axis-value {
   position: absolute;
-  left: 6px;
-  right: 6px;
-  bottom: 2px;
-  height: 2px;
-  border-radius: 1px;
+  left: 8px;
+  right: 8px;
+  bottom: 3px;
+  height: 3px;
+  border-radius: 2px;
 }
+/* 悬停是中性的「指针在这儿」，按压态才是「选区里已经有这个格式」——两者不同底色 */
 .selbar .sel-btn:hover {
-  background: var(--ui-accent-soft);
+  background: var(--ui-bg-hover);
   color: var(--ui-text);
 }
 .selbar .sel-btn[data-on='1'] {
   background: var(--ui-accent-soft);
   color: var(--ui-accent);
 }
-.selbar .sel-sep {
-  width: var(--ui-sep);
-  height: 16px;
-  margin: 0 var(--ui-gap-1);
-  background: var(--ui-border);
-}
 /* 颜色轴：值不是开关，是槽名；色点与入口色标共用同一份 --ui-ink-* 语义槽 */
 .selbar .sel-swatch {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   padding: 0;
   border: 1px solid var(--ui-border);
   border-radius: 50%;
@@ -213,9 +217,9 @@
 .selbar .sel-swatch[data-slot='blue'], .selbar .sel-axis-value[data-slot='blue'] { background: var(--ui-ink-blue); }
 .selbar .sel-swatch[data-slot='violet'], .selbar .sel-axis-value[data-slot='violet'] { background: var(--ui-ink-violet); }
 .selbar .sel-swatch[data-slot='gray'], .selbar .sel-axis-value[data-slot='gray'] { background: var(--ui-ink-gray); }
+/* 选中＝双环：内环用浮层底色把色点与环切开，外环给状态。比用正文色描一圈干净得多 */
 .selbar .sel-swatch[data-on='1'] {
-  outline: 2px solid var(--ui-text);
-  outline-offset: 1px;
+  box-shadow: 0 0 0 2px var(--ui-surface-raised), 0 0 0 3.5px var(--ui-text);
 }
 
 .popover {

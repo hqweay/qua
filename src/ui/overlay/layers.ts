@@ -600,15 +600,20 @@ export class Layers {
     let lastGroup = ''
     o.rows.forEach((r) => {
       const g = groupTitle(r.group)
+      /**
+       * 组与组之间**不画竖线**，改成在第一颗上留一道额外左边距（`.sel-btn[data-group-start]`）。
+       * 线是「切开」，而这两组是同级动作（「这段变什么样」与「这一段去哪里」），
+       * 它们之间该是呼吸，不是隔断。分组标题仍要算——菜单那边照旧用线。
+       */
+      let groupStart = false
       if (g && g !== lastGroup) {
         lastGroup = g
-        const sep = document.createElement('span')
-        sep.className = 'sel-sep'
-        row.appendChild(sep)
+        groupStart = true
       }
       const b = document.createElement('button')
       b.type = 'button'
       b.className = 'sel-btn'
+      if (groupStart) b.dataset.groupStart = '1'
       b.dataset.command = r.command ?? ''
       if (r.axis) b.dataset.axis = r.axis
       if (r.icon) renderIcon(b, r.icon, 'circle-help')
@@ -640,6 +645,15 @@ export class Layers {
       row.appendChild(b)
     })
     document.body.appendChild(box)
+    /**
+     * **只有「从无到有」才走入场上浮**。
+     *
+     * 气泡每次刷新（点色轴、改格式、按压态变化）都是**整颗重建**：先 append 新的、
+     * 再摘旧的。若入场动画挂在 `.selbar` 上，每次重建都会重放一遍淡入——
+     * 用户看到的就是「点一下色板，气泡闪一下」。动画的语义是「这个浮层出现了」，
+     * 而这条路径里它只是换了同一颗气泡的内容。
+     */
+    if (this.selEl === null) box.classList.add('selbar-enter')
     this.selEl?.remove()
     this.selEl = box
     /**
@@ -664,6 +678,15 @@ export class Layers {
     })
     box.style.left = `${at.left}px`
     box.style.top = `${at.top}px`
+    /**
+     * **翻到下方时，二级改画在主条下面**（`column-reverse`）。
+     *
+     * 默认顺序把二级排在主条之前 ⇒ 盒子变高时「向上长」，主条原地不动——这只在
+     * 气泡位于选区**上方**时成立（`placeNear` 固定底边）。翻到下方时它固定的是**顶边**，
+     * 同一个顺序会让主条被向下顶 27px：用户刚点中的那颗按钮从手指底下跑掉，
+     * 再点一次收起又跳回来。改反向排布后，两种情况都是「主条贴着选区，二级往远处长」。
+     */
+    if (at.flipped) stack.style.flexDirection = 'column-reverse'
   }
 
   closeSelectionBar(): void {
