@@ -235,7 +235,12 @@ export function isEmptyContent(content: Content): boolean {
 
 /* ------------------------------------------------------------- 归一化 */
 
-function normMarks(marks: Marks | undefined): Marks | undefined {
+/**
+ * marks 归一化：非法键剥掉、值轴验槽名、按固定键序重建。
+ * **查询条件复用它**（`{mark}` 原子的 canonical 形状）——条件里的 marks 与
+ * run 上的 marks 是同一份词汇，归一化口径只能有一份，否则 `specKey` 会分叉。
+ */
+export function normMarks(marks: Marks | undefined): Marks | undefined {
   if (!marks) return undefined
   const out: Record<string, true | ColorSlot> = {}
   for (const k of MARK_KINDS) {

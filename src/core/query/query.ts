@@ -11,7 +11,7 @@
  *    索引路径见 `index-port.ts` 的 `queryByIndex`；`QuerySpec` 仍是那个 canonical JSON。
  */
 import { hasList, isJournalBlock, isPropDefBlock, type Block } from '../model/model.ts'
-import { plainText } from '../model/runs.ts'
+import { MARK_KINDS, normMarks, plainText, type Content, type Marks } from '../model/runs.ts'
 import { walkForest } from '../model/walk.ts'
 import { findPath } from '../model/tree.ts'
 import { tagIdsOf, tagMemberIds } from '../identity/tags.ts'
@@ -48,12 +48,16 @@ import type { KbClient } from '../kb/types.ts'
  * 标签归属**不在**这里：它是分类（`tag`），不是引用。
  */
 export interface RefTarget {
-  to: string
+  /** 目标块 id；**缺省＝不限目标**（「这块引用了别的东西」，`{ref}` 不指名） */
+  to?: string
   kind?: RefKind | readonly RefKind[]
 }
 
-/** 条件里的 ref 目标 id（字符串与对象两态只有一个读法） */
-export function refTargetOf(ref: string | RefTarget): string {
+/**
+ * 条件里的 ref 目标 id（字符串与对象两态只有一个读法）。
+ * 不限目标（对象形态缺 `to`）⇒ `undefined`。
+ */
+export function refTargetOf(ref: string | RefTarget): string | undefined {
   return typeof ref === 'string' ? ref : ref.to
 }
 
@@ -66,7 +70,14 @@ export function refKindsOf(ref: string | RefTarget): readonly RefKind[] {
 }
 
 export type QueryNode =
-  /** 直接指向 `targetId` 的块（反链的最小形态：只认 id，不认 label） */
+  /**
+   * 指向 `targetId` 的块（反链的最小形态：只认 id，不认 label）。
+   *
+   * **不限目标**（对象形态缺 `to`）＝「这块引用了别的东西」：存在任一条指定 kind 的
+   * 出向引用边。它**不是恒真条件**——「有引用」是有意义的判定；kind 缺省三类全算
+   * （inline／property／embed，与指名时同一口径）。行内标签 `#名` 不算：那是
+   * `tagMention` 边，「分类」的问题由 `{tag}` 原子答，两问不混。
+   */
   | { ref: string | RefTarget }
   /** 带某个标签的块：值是**标签块 id**（与 `{prop}` 同一条「键是 id」纪律——标签改名不影响查询语义）；id 解析不到活着的标签块就是空集 */
   | { tag: string }
@@ -138,6 +149,32 @@ export type QueryNode =
    *    `tag` 留轴，有真消费者时在此续支。
    */
   | { role: 'journal' | 'page' }
+  /**
+   * **正文里存在一段带这组 marks 的内容**（run.marks ⊇ 给定键值，子集匹配）。
+   *
+   * 没指定的轴不参与判定——`{mark:{bg:'red'}}` 命中「有红底字的块」，不管它有没有
+   * 同时加粗；与 `toggleMark` 的「一格」语义同一条人话。**子集不是全等**：
+   * 全等会让「加粗的红字」从「红字」的查询里消失，那不是用户想问的。
+   *
+   * 参与判定的 run：text／ref／link（给引用加粗是真实格式）；asset 结构上不许带
+   * marks（写入红线剥掉），天然不参与。实现＝一次线性扫描。
+   *
+   * ⚠️ **空 marks 恒真 ⇒ 形状校验拒绝**（`isQueryNode` 判 ill-formed、构建器不产空行）：
+   *    `{mark:{}}` 命中全库，一条写歪的条件看起来像「这条条件成立」——同 `{prop}` id 守卫。
+   * ⚠️ 与 `{text}` 是**两个独立的存在量化**：`{text:'X'}` ∧ `{mark:{bg}}` ≠ 「X 那段字带红底」
+   *    （会伪命中「另一处有红底」的块）。同一段的组合语义将来扩 `{text}` 值位表达，
+   *    不在这里造第二种写法。
+   * ⚠️ marks 的 canonical 形状复用 `normMarks`（固定键序）——与 run 上的 marks 同一份
+   *    归一化口径，`specKey` 与往返断言免费。
+   */
+  | { mark: Marks }
+  /**
+   * **正文里有外链 run**；`url` 给了比 contains（大小写不敏），缺省＝「有外链即可」。
+   *
+   * 「有外链」**不是恒真**（与 `{mark:{}}` 的空值恒真两回事），所以不需要守卫；
+   * 但 `url:''` 是伪条件（空串 contains），`canonicalNode` 归一成不带 url。
+   */
+  | { link: { url?: string } }
   | { all: QueryNode[] }
   | { any: QueryNode[] }
   | { not: QueryNode }
@@ -326,6 +363,11 @@ export interface QueryEnv {
    * 表按需建：`where` 里没有 `{ref}` 时给一个恒 `undefined` 的读面，一趟都不扫。
    */
   refSources: RefSources
+  /**
+   * `{ref}` **不限目标**的读面。表按需建：`where` 里没有「缺 `to` 的 `{ref}`」时缺省
+   * ——缺省读面一个块都不命中（`NO_REF_FROMS`），不会静默放宽成「命中全库」。
+   */
+  refFroms?: RefFroms
   tags: ReadonlySet<string>
   /**
    * **字段读取表**：判「这块有没有这一栏」要看标签声明与定义 kind，
@@ -358,8 +400,16 @@ export interface QueryEnv {
  */
 export type RefSources = (targetId: string) => ReadonlyMap<RelationKind, ReadonlySet<string>> | undefined
 
+/**
+ * 「这块自己发过哪些 kinds 的引用边」——`{ref}` **不限目标**时的读面。
+ * 与 `RefSources` 同一次扫描顺带建（纯函数路径）；索引路径按块懒查 `outgoing`。
+ */
+export type RefFroms = (blockId: string) => ReadonlySet<RelationKind>
+
 /** 没有 `{ref}` 条件时的读面：一个块都不命中，且不建表 */
 const NO_REF_SOURCES: RefSources = () => undefined
+
+const NO_REF_FROMS: RefFroms = () => new Set()
 
 /**
  * 条件里有没有 `{ref}`。两条求值路径都用它决定「要不要建引用表」——
@@ -376,11 +426,26 @@ export function usesRef(node: QueryNode): boolean {
 }
 
 /**
- * 森林里的引用边 → 按（目标, 种类）索引的读面。**整片森林只扫一趟**，
+ * 条件里有没有「**不限目标**的 `{ref}`」（对象形态缺 `to`）。
+ * 两条求值路径都用它决定「要不要建出向表」——指名目标用入向表就够了。
+ */
+export function usesRefAny(node: QueryNode): boolean {
+  if ('all' in node) return node.all.some(usesRefAny)
+  if ('any' in node) return node.any.some(usesRefAny)
+  if ('not' in node) return usesRefAny(node.not)
+  if ('up' in node) return usesRefAny(node.up)
+  if ('down' in node) return usesRefAny(node.down)
+  if ('near' in node) return usesRefAny(node.near)
+  return 'ref' in node && typeof node.ref !== 'string' && node.ref.to === undefined
+}
+
+/**
+ * 森林里的引用边 → 引用条件的两张读面（按目标 ＋ 按来源）。**整片森林只扫一趟**，
  * 与 `relationEdgesOfForest` 同一份提取口径（正文引用／属性引用／嵌入都算引用）。
  */
-function refSourcesOfForest(forest: readonly Block[]): RefSources {
+function refTablesOfForest(forest: readonly Block[]): { sources: RefSources; froms: RefFroms } {
   const byTarget = new Map<string, Map<RelationKind, Set<string>>>()
+  const byFrom = new Map<string, Set<RelationKind>>()
   for (const e of relationEdgesOfForest(forest).edges) {
     let perKind = byTarget.get(e.to)
     if (!perKind) {
@@ -393,8 +458,18 @@ function refSourcesOfForest(forest: readonly Block[]): RefSources {
       perKind.set(e.kind, froms)
     }
     froms.add(e.from)
+    let ks = byFrom.get(e.from)
+    if (!ks) {
+      ks = new Set()
+      byFrom.set(e.from, ks)
+    }
+    ks.add(e.kind)
   }
-  return (targetId) => byTarget.get(targetId)
+  const empty: ReadonlySet<RelationKind> = new Set()
+  return {
+    sources: (targetId) => byTarget.get(targetId),
+    froms: (blockId) => byFrom.get(blockId) ?? empty,
+  }
 }
 
 /**
@@ -499,7 +574,7 @@ export function refSourceIds(
   targetId: string,
   kinds: readonly RefKind[] = REFERENCE_KINDS,
 ): Set<string> {
-  const perKind = refSourcesOfForest(forest)(targetId)
+  const perKind = refTablesOfForest(forest).sources(targetId)
   const out = new Set<string>()
   for (const kind of kinds) for (const id of perKind?.get(kind) ?? []) out.add(id)
   return out
@@ -654,10 +729,18 @@ function createMatcher(forest: readonly Block[], env: QueryEnv): Matcher {
      * （`{all:[{ref:X},{not:{ref:Y}}]}` 曾静默变空）。
      */
     if ('ref' in node) {
-      const perKind = env.refSources(refTargetOf(node.ref))
-      if (!perKind) return false
-      for (const kind of refKindsOf(node.ref)) if (perKind.get(kind)?.has(block.id) === true) return true
-      return false
+      const kinds = refKindsOf(node.ref)
+      const to = refTargetOf(node.ref)
+      // 指名目标：按当前节点自己的目标查入向表，不读「整份 where 的并集」
+      if (to !== undefined) {
+        const perKind = env.refSources(to)
+        if (!perKind) return false
+        return kinds.some((kind) => perKind.get(kind)?.has(block.id) === true)
+      }
+      // 不限目标：这块自己发过任一指定 kind 的出向边。环境没给读面 ⇒ 不命中
+      //（调用方按 usesRefAny 接表；缺省读面恒空，不静默放宽成「命中全库」）
+      const froms = env.refFroms?.(block.id) ?? NO_REF_FROMS(block.id)
+      return kinds.some((kind) => froms.has(kind))
     }
     /**
      * 标签条件：**按边判定**，不扫文本。
@@ -670,6 +753,8 @@ function createMatcher(forest: readonly Block[], env: QueryEnv): Matcher {
      */
     if ('tag' in node) return env.tags.has(block.id)
     if ('text' in node) return plainText(block.content).includes(node.text)
+    if ('mark' in node) return contentHasMarks(block.content, node.mark)
+    if ('link' in node) return contentHasLink(block.content, node.link.url)
     if ('prop' in node) {
       /**
        * **守卫**：`{prop}` 只认两种 id —— 属性定义块的 id，或系统槽白名单
@@ -744,6 +829,39 @@ function valueContains(v: unknown, needle: string): boolean {
   if (want === '') return false
   if (Array.isArray(v)) return v.some((x) => String(x).toLowerCase().includes(want))
   return String(v).toLowerCase().includes(want)
+}
+
+/**
+ * 正文里有没有一段 run 的 marks **盖住** `want`（子集匹配：没指定的轴不参与）。
+ * ref/link 的 marks 算数（真实格式）；asset 结构上没有 marks，跳过不是特判。
+ */
+function contentHasMarks(content: Content, want: Marks): boolean {
+  for (const r of content) {
+    if (r.t === 'asset') continue
+    const m = r.marks
+    if (!m) continue
+    let covered = true
+    for (const k of MARK_KINDS) {
+      const w = want[k]
+      if (w === undefined) continue
+      if (m[k] !== w) {
+        covered = false
+        break
+      }
+    }
+    if (covered) return true
+  }
+  return false
+}
+
+/** 正文里有没有外链 run；`url` 给了（非空）比 contains，大小写不敏 */
+function contentHasLink(content: Content, url: string | undefined): boolean {
+  const want = url === undefined ? '' : url.toLowerCase()
+  for (const r of content) {
+    if (r.t !== 'link') continue
+    if (want === '' || r.url.toLowerCase().includes(want)) return true
+  }
+  return false
 }
 
 /**
@@ -860,13 +978,28 @@ export function isQueryNode(raw: unknown): raw is QueryNode {
     const r = n.ref
     if (!r || typeof r !== 'object' || Array.isArray(r)) return false
     const ref = r as Partial<RefTarget>
-    if (typeof ref.to !== 'string' || ref.to === '') return false
+    if (ref.to !== undefined && (typeof ref.to !== 'string' || ref.to === '')) return false
     if (ref.kind === undefined) return true
     if (typeof ref.kind === 'string') return isRefKind(ref.kind)
     return Array.isArray(ref.kind) && ref.kind.every((k) => isRefKind(k))
   }
   if ('tag' in n) return typeof n.tag === 'string'
   if ('text' in n) return typeof n.text === 'string'
+  /**
+   * `{mark}`：键必须是已知的 mark 键、值轴必须是合法槽名，且**归一化后非空**——
+   * 空 marks 恒真（命中全库），一条写歪的条件看起来像「这条条件成立」。
+   */
+  if ('mark' in n) {
+    const m = n.mark
+    if (!m || typeof m !== 'object' || Array.isArray(m)) return false
+    return normMarks(m as Marks) !== undefined
+  }
+  if ('link' in n) {
+    const p = n.link
+    if (!p || typeof p !== 'object' || Array.isArray(p)) return false
+    const l = p as { url?: unknown }
+    return l.url === undefined || typeof l.url === 'string'
+  }
   if ('role' in n) return typeof n.role === 'string'
   if ('prop' in n) {
     const p = n.prop
@@ -917,10 +1050,17 @@ export function canonicalNode(n: QueryNode): QueryNode {
       n.ref.kind === undefined
         ? undefined
         : [...new Set(typeof n.ref.kind === 'string' ? [n.ref.kind] : n.ref.kind)].sort()
-    return { ref: { to: n.ref.to, ...(kinds === undefined ? {} : { kind: kinds }) } }
+    return {
+      ref: {
+        ...(n.ref.to === undefined ? {} : { to: n.ref.to }),
+        ...(kinds === undefined ? {} : { kind: kinds }),
+      },
+    }
   }
   if ('tag' in n) return { tag: n.tag }
   if ('text' in n) return { text: n.text }
+  if ('mark' in n) return { mark: normMarks(n.mark) ?? {} }
+  if ('link' in n) return n.link.url ? { link: { url: n.link.url } } : { link: {} }
   /**
    * 属性条件**逐算子原样带走**，不补默认值（补了两种写法就不再等价）。
    *
@@ -961,8 +1101,10 @@ export function runQuery(spec: QuerySpec, input: QueryRunInput): QueryHit[] {
   // 而用户看到的只是「结果不对」，没有任何线索指向条件。
   if (!host && usesSelf(spec.where)) return []
   const q = host ? resolveSelfSpec(spec, host, input.blocks) : spec
+  const refTables = usesRef(q.where) ? refTablesOfForest(input.blocks) : undefined
   const env: QueryEnv = {
-    refSources: usesRef(q.where) ? refSourcesOfForest(input.blocks) : NO_REF_SOURCES,
+    refSources: refTables?.sources ?? NO_REF_SOURCES,
+    ...(refTables && usesRefAny(q.where) ? { refFroms: refTables.froms } : {}),
     tags: collectTags(q.where, input.blocks),
     fields: fieldTableOf(input.blocks),
     ...(input.today ? { today: input.today } : {}),
@@ -1067,8 +1209,10 @@ export function resolveSelfSpec(spec: QuerySpec, host: Block, forest: readonly B
     if ('near' in n) return { near: node(n.near) }
     if ('is' in n) return { is: n.is === SELF ? host.id : n.is }
     if ('ref' in n) {
-      const to = refTargetOf(n.ref) === SELF ? host.id : refTargetOf(n.ref)
-      return typeof n.ref === 'string' ? { ref: to } : { ref: { ...n.ref, to } }
+      if (typeof n.ref === 'string') return { ref: n.ref === SELF ? host.id : n.ref }
+      // 不限目标（缺 `to`）没有 `$self` 可解析，原样带走——不给它注入 `to: undefined`
+      if (n.ref.to === undefined) return n
+      return { ref: { ...n.ref, to: n.ref.to === SELF ? host.id : n.ref.to } }
     }
     if ('prop' in n) {
       if (!('eq' in n.prop) || n.prop.eq !== SELF) return n

@@ -34,6 +34,7 @@ import {
   resolveTodayBase,
   usesSelf,
   usesRef,
+  usesRefAny,
   isQueryNode,
   isQuerySpec,
   specChanged,
@@ -1143,4 +1144,97 @@ test('相对时间窗：{rel:{days}} 对 env.today 现算（存表达式，隔�
   assert.deepEqual(runQuery(spec, { blocks, today: '2026-11-06' }).map((h) => h.blockId), ['b', 'c'])
   // 没有基准 ⇒ 不命中（不猜今天）
   assert.deepEqual(runQuery(spec, { blocks }), [])
+})
+
+/* ---------------- 行内格式／外链／不限目标引用：{mark}／{link} 原子与 {ref} 的不限目标档 ---------------- */
+
+test('{mark}：子集匹配——没指定的轴不参与判定', () => {
+  const red: Block = b('red', 'x')
+  red.content = [{ t: 'text', v: '红字', marks: { bg: 'red', bold: true } }, { t: 'text', v: '素字' }]
+  const blue: Block = b('blue', 'y')
+  blue.content = [{ t: 'text', v: '蓝字', marks: { bg: 'blue' } }]
+  const bare: Block = b('bare', 'z')
+  const blocks = [red, blue, bare]
+  const ids = (where: QueryNode) => runQuery({ where }, { blocks }).map((h) => h.blockId)
+  assert.deepEqual(ids({ mark: { bg: 'red' } }), ['red'], '红底命中，不管它有没有同时加粗（子集不是全等）')
+  assert.deepEqual(ids({ mark: { bg: 'red', bold: true } }), ['red'], '指定的轴全都盖住才命中')
+  assert.deepEqual(ids({ mark: { bg: 'blue' } }), ['blue'])
+  assert.deepEqual(ids({ mark: { bg: 'green' } }), [], '谁都没有的格式不命中')
+  assert.deepEqual(ids({ mark: { bold: true } }), ['red'], '无格式的块天然不命中')
+})
+
+test('{mark}：ref run 上的 marks 算数（给引用加粗是真实格式），asset 结构上没有 marks', () => {
+  const host: Block = b('host', '有引用')
+  host.content = [{ id: 'r1', t: 'ref', to: 'elsewhere', label: '那块', marks: { bold: true } }]
+  const pic: Block = b('pic', '图')
+  pic.content = [{ id: 'a1', t: 'asset', asset: 'aabbccdd' }]
+  const blocks = [host, pic]
+  const ids = (where: QueryNode) => runQuery({ where }, { blocks }).map((h) => h.blockId)
+  assert.deepEqual(ids({ mark: { bold: true } }), ['host'])
+  assertSameHits({ where: { mark: { bold: true } } }, blocks)
+})
+
+test('{mark}：空 marks 恒真 ⇒ 形状校验拒绝（一条写歪的条件不许看起来像「成立」）', () => {
+  assert.equal(isQueryNode({ mark: {} }), false)
+  assert.equal(isQueryNode({ mark: { bg: 'red' } }), true)
+  assert.equal(isQueryNode({ mark: { bg: 'nosuchslot' } }), false, '值轴的值必须是合法槽名')
+  assert.equal(isQueryNode({ mark: { nope: true } }), false, '键必须是已知的 mark 键')
+})
+
+test('canonicalSpec：{mark}/{link} 存活，marks 按固定键序重建（specKey 不因写法分叉）', () => {
+  const spec = (where: QueryNode): QuerySpec => ({ where })
+  assert.deepEqual(
+    canonicalSpec(spec({ mark: { bg: 'red', bold: true } })),
+    { where: { mark: { bold: true, bg: 'red' } } },
+    'MARK_KINDS 固定键序',
+  )
+  assert.equal(
+    JSON.stringify(canonicalSpec(spec({ mark: { bold: true, bg: 'red' } }))),
+    JSON.stringify(canonicalSpec(spec({ mark: { bg: 'red', bold: true } }))),
+    '同一组 marks 两种写法 → 同一个 canonical 字节串',
+  )
+  assert.deepEqual(canonicalSpec(spec({ link: { url: '' } })), { where: { link: {} } }, '空串 contains 是伪条件，归一成「有外链即可」')
+  assert.deepEqual(canonicalSpec(spec({ link: { url: 'example' } })), { where: { link: { url: 'example' } } })
+})
+
+test('{link}：有外链即可；url 给了比 contains（大小写不敏）', () => {
+  const withLink: Block = b('l1', '外链')
+  withLink.content = [{ id: 'k1', t: 'link', v: '示例', url: 'https://Example.com/Page' }]
+  const plain: Block = b('l2', '没链')
+  const blocks = [withLink, plain]
+  const ids = (where: QueryNode) => runQuery({ where }, { blocks }).map((h) => h.blockId)
+  assert.deepEqual(ids({ link: {} }), ['l1'])
+  assert.deepEqual(ids({ link: { url: 'example' } }), ['l1'])
+  assert.deepEqual(ids({ link: { url: 'EXAMPLE' } }), ['l1'], 'contains 大小写不敏（与属性 contains 同一口径）')
+  assert.deepEqual(ids({ link: { url: 'nope' } }), [])
+  assertSameHits({ where: { link: { url: 'example' } } }, blocks)
+  assertSameHits({ where: { link: {} } }, blocks)
+})
+
+test('{ref} 不限目标：发过任一指定 kind 引用边的块都命中；#名 提及不算引用', () => {
+  const x: Block = b('x', '甲')
+  x.content = [{ id: 'r1', t: 'ref', to: 'tgt', label: '目标' }]
+  const hash: Block = b('hash', '乙')
+  hash.content = [{ id: 'r2', t: 'ref', to: 'tgt', flavor: '#', label: '目标' }]
+  const z: Block = b('z', '丙')
+  const blocks = [x, hash, z]
+  const ids = (where: QueryNode) => runQuery({ where }, { blocks }).map((h) => h.blockId)
+  assert.deepEqual(ids({ ref: {} }), ['x'], '有引用即命中')
+  assert.deepEqual(ids({ ref: { kind: ['inline'] } }), ['x'])
+  assert.deepEqual(ids({ ref: { kind: ['property'] } }), [], '只有 #名 提及不算（tagMention 不是引用 kind）')
+  assert.deepEqual(ids({ not: { ref: {} } }), ['hash', 'z'], '否定照常可组合')
+  assert.equal(usesRefAny({ ref: {} }), true)
+  assert.equal(usesRefAny({ ref: 'tgt' }), false, '指名目标走入向表，不建出向表')
+  assert.equal(usesRefAny({ all: [{ ref: {} }] }), true)
+  assertSameHits({ where: { ref: {} } }, blocks)
+  assertSameHits({ where: { ref: { kind: ['inline', 'embed'] } } }, blocks)
+  assertSameHits({ where: { not: { ref: {} } } }, blocks)
+})
+
+test('$self 解析：对象形态的 {ref:{to:$self}} 仍解析成宿主；不限目标原样带走', () => {
+  const host: Block = b('host', '宿主')
+  assert.deepEqual(resolveSelfSpec({ where: { ref: { to: '$self', kind: 'inline' } } }, host, [host]).where, {
+    ref: { to: 'host', kind: 'inline' },
+  })
+  assert.deepEqual(resolveSelfSpec({ where: { ref: { kind: 'inline' } } }, host, [host]).where, { ref: { kind: 'inline' } })
 })

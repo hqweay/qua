@@ -19,6 +19,7 @@ import { journalDate, isJournal } from '../identity/journal.ts'
 import { fieldTableOf, propKindOf, type PropKind } from '../props/props.ts'
 import {
   collectPropKinds,
+  isRefKind,
   relationEdgeKey,
   relationEdgesOfBlock,
   REFERENCE_KINDS,
@@ -32,11 +33,13 @@ import {
   isExactRoleJournal,
   resolveSelfSpec,
   usesRef,
+  usesRefAny,
   usesSelf,
   type QueryEnv,
   type QueryHit,
   type QueryNode,
   type QuerySpec,
+  type RefFroms,
   type RefSources,
 } from '../query/query.ts'
 
@@ -881,6 +884,7 @@ export function queryByIndex(
   const q = host ? resolveSelfSpec(spec, host, forest) : spec
   const env: QueryEnv = {
     refSources: usesRef(q.where) ? refSourcesByIndex(index) : () => undefined,
+    ...(usesRefAny(q.where) ? { refFroms: refFromsByIndex(index) } : {}),
     tags: tagsByIndex(q.where, index),
     fields: fieldTableOf(forest),
     ...(opts.today ? { today: opts.today } : {}),
@@ -919,6 +923,24 @@ function refSourcesByIndex(index: Index): RefSources {
     }
     cache.set(targetId, byKind)
     return byKind
+  }
+}
+
+/**
+ * 「这块发过哪些 kinds 的引用边」——`{ref}` 不限目标时的读面，按块**懒查** `outgoing`
+ * （表已在索引里，与 `refSourcesByIndex` 同一个理由）。判定与纯函数路径共用
+ * `evaluateQuery`，这里只管把同一份口径的表递过去；只认 `REFERENCE_KINDS`，
+ * 标签归属／`#名` 提及等非引用边从这张表里就进不来。
+ */
+function refFromsByIndex(index: Index): RefFroms {
+  const cache = new Map<string, ReadonlySet<RelationKind>>()
+  return (blockId) => {
+    const hit = cache.get(blockId)
+    if (hit) return hit
+    const kinds = new Set<RelationKind>()
+    for (const e of index.outgoing.get(blockId) ?? []) if (isRefKind(e.kind)) kinds.add(e.kind)
+    cache.set(blockId, kinds)
+    return kinds
   }
 }
 
