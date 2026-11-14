@@ -1765,7 +1765,7 @@ function commandDecls() {
    * 查不到的引用运行时会降级成问号占位（不静默消失），但界面上一排问号＝静默劣化：
    * 搜索卡、视图菜单整批出现过「代码里写了 `lucide:search`、表里没有 search」的事故。
    * ⇒ 静态对账：源码里所有 `lucide:…` 字面量 ∪ `createIcon('…')` 调用点，
-   *   都必须落在 vendor 表的键集合里。表是生成的全量 catalog（脚本读 vendor 产出入仓），
+   *   都必须落在 vendor 表的键集合里。表是生成的全量 catalog（脚本读 vendor 生成、随源码提交），
    *   所以这条拦的是**引用拼错**（typo），不再是「表里还没有这个名字」。
    */
   const iconsSrc = readFileSync(join(ROOT, 'src/view/icon-catalog.ts'), 'utf8')

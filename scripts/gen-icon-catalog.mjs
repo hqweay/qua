@@ -1,10 +1,10 @@
 /**
  * 生成全量图标 catalog：读 `lucide-static`（devDependency，只为生成）里每个图标的
- * `<svg>` 内联内容，产出 `src/view/icon-catalog.ts`（**产物入仓**——构建不依赖生成步骤，
+ * `<svg>` 内联内容，产出 `src/view/icon-catalog.ts`（**生成文件随源码提交**——构建不依赖生成步骤，
  * 生产依赖保持 0；存的是上游 path 数据，图标名字本身住在调用点）。
  *
  * 为什么全量而不是「用到才粘」：换图标只是加一行引用，不再维护一张手粘表；
- * 「全量 path 表进主包」的体积先量（产物入仓后 `pnpm build` 看真实数字），
+ * 「全量 path 表进主包」的体积先量（生成文件提交后 `pnpm build` 看真实数字），
  * 超预期再谈拆包——先让 treadmill 消失，再优化它。
  *
  * 用法：`node scripts/gen-icon-catalog.mjs`（改完 vendor 版本后重跑一次；不要手改产物）。

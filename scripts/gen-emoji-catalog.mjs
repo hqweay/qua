@@ -1,7 +1,7 @@
 /**
  * 生成 emoji 数据 catalog：读 `emojibase-data`（devDependency，只为生成）的**中文**
  * 标注数据（label/tags 是 CLDR zh），产出 `src/ui/overlay/emoji-catalog.ts`
- * （**产物入仓**，与图标 catalog 同一纪律：构建不依赖生成步骤，生产依赖保持 0）。
+ * （**生成文件随源码提交**，与图标 catalog 同一纪律：构建不依赖生成步骤，生产依赖保持 0）。
  *
  * 取舍：
  *   · 只取顶层条目（**肤色变体 v1 不做**——skins 整段丢掉）；

@@ -15,7 +15,7 @@
  *   · 所以图标是 **view 层的公共原语**，ui 与 app 只能往上引用它。
  *
  * 为什么**不装包**：生产依赖保持 0——`lucide-static` 只在 devDependencies（生成脚本
- * `scripts/gen-icon-catalog.mjs` 读它），path 数据以生成产物入仓，不跟随上游运行时漂移。
+ * `scripts/gen-icon-catalog.mjs` 读它），path 数据以生成文件随源码提交，不跟随上游运行时漂移。
  *
  * ⚠️ **正文里的 emoji 不归这里管**：那是用户写的文本，不是图标位。
  *
