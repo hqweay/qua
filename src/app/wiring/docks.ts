@@ -18,10 +18,12 @@ import {
   dockKey,
   findDock,
   findInForest,
+  ICON_PROP,
   isCardCollapsed,
   isLeafEntry,
   openActionOf,
   pinDefaultFor,
+  prop,
   pruneEphemeralWindows,
   uuidv7Hex,
   type DerivedCardId,
@@ -737,10 +739,13 @@ export function setupDocks(deps: DocksDeps) {
     const id = dockKey({ kind: 'shortcut', block: blockId })
     const target = kb.get(blockId)
     const label = target ? blockLabel(target, (id) => kb.get(id)) : t('ui.dock.shortcutMissing')
+    // 图标随目标块现算（与名字同一条规则）：块有自己的脸就用它——一排快捷卡
+    // 靠脸彼此区分，统一箭头时区分全压在两字 glyph 上；无脸退回箭头（动作语义兜底）
+    const face = target ? prop<string>(target, ICON_PROP) : undefined
     const tile: DockTile = {
       id,
       title: label,
-      icon: target ? 'lucide:arrow-up-right' : 'lucide:circle-help',
+      icon: target ? (face || 'lucide:arrow-up-right') : 'lucide:circle-help',
       ...(target ? { glyph: label.slice(0, 2) } : {}),
       missing: !target,
       close: { title: t('ui.dock.removeShortcut'), onClick: () => removeShortcut(side, blockId) },
