@@ -1128,7 +1128,7 @@ export const MSG = {
   'cmd.settings.open': '设置',
   'ui.settings.appearance': '外观',
   'ui.settings.propsLine': '块下属性',
-  'ui.settings.propsLineHint': '摘要把多栏收成一行（点「还有 N 项」可就地展开某一块）；一栏一行读得全，但长页会更长',
+  'ui.settings.propsLineHint': '这里是**默认**排法：摘要把多栏收成一行，一栏一行读得全但长页更长。某一块想单独改，用它属性行末尾的「⋯」',
   'ui.settings.keys': '快捷键',
   'ui.settings.keysHint': '点一下键位再按新的；Esc 取消',
   'ui.settings.capture': '按新的键…',
