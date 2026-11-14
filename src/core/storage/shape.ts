@@ -20,11 +20,15 @@ import { isJournalDate } from '../identity/journal.ts'
 import { TAGS_PROP, isTagRefList } from '../identity/tags.ts'
 import {
   CHILD_PROPS_PROP,
+  CHOICES_PROP,
   FIELD_DEFS_PROP,
+  FORMAT_PROP,
   OWN_PROPS_PROP,
   UI_POSITION_PROP,
   isChildPropsValue,
+  isChoicesValue,
   isFieldDefRefs,
+  isFormatValue,
   isOwnPropSlots,
   isPropKind,
   isUiPositionValue,
@@ -157,8 +161,14 @@ import {
  *            改为渲染时回落（`identity/faces.ts` 的三条链），创建路径不再写这些值。
  *            旧库带着落盘的默认值，「用户明确选了 file」与「默认 file」不可区分 ⇒
  *            作废重 seed，不写迁移（代价登记：现无消费方，真需要区分时加显式哨兵值）。
+ * v44 → v45：**`select` 的值域从「定义块的选项子块」改成定义块上的记录**
+ *            （`props._choices`）。新读路径不读 `def.children` ⇒ 旧库的
+ *            选项子块不再是候选（值指向它们的块会显示「选项已删除」，但值不清）。
+ *            同时 `url` 从 kind 降格成 `text` 的格式：旧 `_kind:'url'` 读侧
+ *            归一成 text＋format url，不迁值。⇒ 作废重 seed；**桌面真机库不吃这个版本号**
+ *            （见 `ipc-adapter`），那边按「旧值在场」设计读路径（`legacyChoiceOf`）。
  */
-export const WORKSPACE_VERSION = 44
+export const WORKSPACE_VERSION = 45
 
 /** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {
@@ -258,6 +268,10 @@ function isBlock(x: unknown): x is Block {
   if (color !== undefined && !isColorValue(color)) return false
   const kind = b.props['_kind']
   if (kind !== undefined && !isPropKind(kind)) return false
+  const format = b.props[FORMAT_PROP]
+  if (format !== undefined && !isFormatValue(format)) return false
+  const choices = b.props[CHOICES_PROP]
+  if (choices !== undefined && !isChoicesValue(choices)) return false
   const fieldDefs = b.props[FIELD_DEFS_PROP]
   if (fieldDefs !== undefined && !isFieldDefRefs(fieldDefs)) return false
   const ownProps = b.props[OWN_PROPS_PROP]

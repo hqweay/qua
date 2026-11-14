@@ -623,6 +623,7 @@ export function setupPanels(deps: PanelsDeps) {
         setUiPosition: (defId, position) =>
           void deps.getRegistry().invoke('core.props/set-ui-position', { defId, position }, 'ui'),
         remove: (choiceId) => void deps.getRegistry().invoke('core.props/delete-choice', { choiceId }, 'ui'),
+        restore: (choiceId) => void deps.getRegistry().invoke('core.props/restore-choice', { choiceId }, 'ui'),
       },
   })
 

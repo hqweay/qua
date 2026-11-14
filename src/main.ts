@@ -1729,7 +1729,7 @@ function openSpecPopover(opts: {
         if (propId === '_tags') return kb.tags().map((t) => ({ id: t.id, label: blockLabel(t, kbGet) }))
         const def = kb.get(propId)
         if (!def || propKindOf(def) !== 'select') return []
-        return choicesOf(def).map((c) => ({ id: c.id, label: blockLabel(c, kbGet) }))
+        return choicesOf(def).map((c) => ({ id: c.id, label: c.label }))
       },
       ...(hostBlock ? { owner: hostBlock } : {}),
       pickRef: (b, propId, current, onPick, rect, trigger, opts) => pickRefValue(b, propId, current, onPick, rect, trigger, opts),

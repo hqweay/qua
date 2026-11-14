@@ -2092,7 +2092,7 @@ await check('T38 查询视图：冻结成员与顺序、内容按 id 实时、�
       if (b.props?._kind === 'select' && JSON.stringify(b.content ?? []).includes('任务状态')) {
         return {
           id: b.id,
-          done: (b.children ?? []).find((c) => JSON.stringify(c.content ?? []).includes('完成'))?.id ?? '',
+          done: (b.props?._choices ?? []).find((c) => String(c.label ?? '').includes('完成'))?.id ?? '',
         }
       }
     }
@@ -7677,7 +7677,7 @@ await check(
   async () => {
     const { ctx, page } = await freshPage(browser, base)
 
-    // 核心词汇：`任务状态` 是 select（值＝选项块 id），`#任务` 声明它，种子里打了标签的块都已有这条属性
+    // 核心词汇：`任务状态` 是 select（值＝选项记录 id），`#任务` 声明它，种子里打了标签的块都已有这条属性
     const target = await page.evaluate(() => {
       const def = window.__qua.propDefs().find((d) => d.label === '任务状态')
       const tag = window.__qua.allBlocks().find((b) => b.lists.includes('tag') && b.aliases.includes('任务'))
@@ -7712,7 +7712,7 @@ await check(
     // 卡里把值选成「完成」⇒ 模型与左侧方框都要变（两个编辑面共写一份，不能一边改另一边不动）
     const doneId = await page.evaluate((defId) => {
       const def = window.__qua.__editor.store.find(defId)
-      return (def?.children ?? []).find((c) => JSON.stringify(c.content ?? []).includes('完成'))?.id ?? ''
+      return (def?.props?._choices ?? []).find((c) => String(c.label ?? '').includes('完成'))?.id ?? ''
     }, target.defId)
     assert(doneId !== '', '前置：任务状态定义应有「完成」选项')
     await page.evaluate(({ propId, value }) => {
@@ -8050,12 +8050,12 @@ await check(
       return {
         skipped: false,
         ops: ops.map((o) => ({ e: o.e, id: o.id ?? o.block, op: o.op, value: o.value })),
-        // 任务状态是一个属性槽（select，值＝选项块 id）；不绑死属性键名，
-        // 选项 id 从定义块的子块现读（选项正文是种子内容，认字就行）
+        // 任务状态是一个属性槽（select，值＝选项记录 id）；不绑死属性键名，
+        // 选项 id 从定义块的 `_choices` 现读（label 是种子内容，认字就行）
         choices: (() => {
           for (const b of ed.store.blocks ?? []) {
             if (b.props?._kind === 'select' && JSON.stringify(b.content ?? []).includes('任务状态')) {
-              return (b.children ?? []).map((c) => ({ id: c.id, label: JSON.stringify(c.content ?? []) }))
+              return (b.props?._choices ?? []).map((c) => ({ id: c.id, label: String(c.label ?? '') }))
             }
           }
           return []
@@ -9527,11 +9527,11 @@ await check(
     const stampOps = ops.filter((o) => o.e === 'block' && o.op === 'upsert')
     assert(ops.length === 3, `切换待办应恰好 3 条 op（时刻 upsert ＋ 自有槽 ＋ 值）：${JSON.stringify(ops)}`)
     assert(stampOps.length === 1, `其中一条应是记时刻的 upsert：${JSON.stringify(ops)}`)
-    /** 任务状态是 select（值＝选项块 id）：首切（还不是任务）落「待办」选项 id，从定义块的子块现读 */
+    /** 任务状态是 select（值＝选项记录 id）：首切（还不是任务）落「待办」选项 id，从定义块的 `_choices` 现读 */
     const todoId = await page.evaluate(() => {
       for (const b of window.__qua.__editor.store.blocks ?? []) {
         if (b.props?._kind === 'select' && JSON.stringify(b.content ?? []).includes('任务状态')) {
-          return (b.children ?? []).find((c) => JSON.stringify(c.content ?? []).includes('待办'))?.id
+          return (b.props?._choices ?? []).find((c) => String(c.label ?? '').includes('待办'))?.id
         }
       }
       return ''
@@ -16108,7 +16108,7 @@ await check('T163 大纲表格：改格子⇒写回那一块（表头格写直�
       }
       return null
     }
-    // 库里唯一的任务状态定义（`_use: 'status'` ＋ `_check`）：值写它的 `on` 选项块 id
+    // 库里唯一的任务状态定义（`_use: 'status'` ＋ `_check`）：值写它的 `on` 选项记录 id
     const status = walk(forest, (b) => (b.props?._use === 'status' && b.props?._check ? b : null))
     if (!status) return { error: 'fixture 里没有任务状态定义' }
     // 先确认这一格此刻**不是**完成态，免得下面断言的是种子自带的样子
@@ -16988,8 +16988,8 @@ await check('T170 粘贴为…的二级菜单不是空的：when 里的键必须
 })
 
 /**
- * **选项是定义块的子块**：属性定义页加两条 ⇒ 成员块的下拉出现两项；
- * 值存的是**选项块 id**（改名不改值）。
+ * **选项是定义块上的记录**（不进森林）：属性定义页加两条 ⇒ 成员块的下拉出现两项；
+ * 值存的是**记录 id**（改名不改值）。
  */
 await check(
   'T171 select 定义页加选项 → 成员块下拉出现；值存 choice id；改名不改值',
@@ -17051,9 +17051,14 @@ await check(
         rows: document.querySelectorAll('.choices-editor .choice-row').length,
         names: [...document.querySelectorAll('.choices-editor .choice-name')].map((e) => e.value),
         kids: block?.children.length ?? -1,
+        records: Array.isArray(block?.props?._choices) ? block.props._choices.length : -1,
       }
     })
-    assert(added.rows === 2 && added.kids === 2, `两条选项＝定义块的两个子块：${JSON.stringify(added)}`)
+    assert(
+      added.rows === 2 && added.records === 2,
+      `两条选项＝定义块上的两条记录：${JSON.stringify(added)}`,
+    )
+    assert(added.kids === 0, `选项不进森林：${JSON.stringify(added)}`)
     assert(JSON.stringify(added.names) === JSON.stringify(['待办', '完成']), `顺序＝插入顺序：${JSON.stringify(added.names)}`)
 
     // 成员块：下拉里的项来自 choicesFor（空占位 ＋ 两条）
@@ -17140,7 +17145,7 @@ await check(
  * 这条同时钉住「删除不是清值」：清值是不可逆的第二个动作，不该藏在「删选项」里。
  */
 await check(
-  'T171b 删掉被引用的选项 ⇒ 值还在、显示「选项已删除」；恢复 ⇒ 显示回来',
+  'T171b 删掉被引用的选项（立墓碑）⇒ 值还在、显示「选项已删除」；恢复 ⇒ 显示回来',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -17156,9 +17161,9 @@ await check(
       })
       const def = window.__qua.propDefs().find((d) => d.label === '冒烟删除状态')
       window.__qua.invoke('core.props/add-choice', { defId: def.id, label: '会被删的选项' })
-      // `invoke` 只回答 handled；新选项的 id 从模型的子块读（`def` 是活引用）
+      // `invoke` 只回答 handled；新选项的 id 从定义块的 `_choices` 读（`def` 是活引用）
       const live = window.__qua.__editor.store.blocks.find((b) => b.id === def.id)
-      const choiceId = live?.children[0]?.id ?? ''
+      const choiceId = live?.props?._choices?.[0]?.id ?? ''
       const member = window.__qua.tagMembers(tag.id)[0] ?? ''
       window.__qua.invoke('core.props/set-value', { blockId: member, propId: def.id, value: choiceId })
       return { defId: def.id, choiceId, memberId: member }
@@ -17179,8 +17184,8 @@ await check(
         deleted: row?.currentChoiceDeleted === true,
       }
     }, setup)
-    assert(deleted.value === setup.choiceId, `软删不清值：${JSON.stringify(deleted)}`)
-    assert(deleted.choices.length === 0, `软删的选项不进候选：${JSON.stringify(deleted.choices)}`)
+    assert(deleted.value === setup.choiceId, `墓碑不清值：${JSON.stringify(deleted)}`)
+    assert(deleted.choices.length === 0, `墓碑不进候选：${JSON.stringify(deleted.choices)}`)
     assert(deleted.label === '会被删的选项' && deleted.deleted, `旧名留着并标「已删除」（用户才知道恢复哪条）：${JSON.stringify(deleted)}`)
 
     await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.memberId)
@@ -17194,7 +17199,7 @@ await check(
     assert(missing.text.includes('会被删的选项') && missing.text.includes('已删除'), `旧名 ＋ 「已删除」：${JSON.stringify(missing)}`)
     assert(missing.deleted === '1', `这一项要带 deleted 标记（不是「不在作用域」）：${JSON.stringify(missing)}`)
 
-    await page.evaluate((id) => window.__qua.invoke('core.block/restore', { blockId: id }), setup.choiceId)
+    await page.evaluate((id) => window.__qua.invoke('core.props/restore-choice', { choiceId: id }), setup.choiceId)
     await page.waitForTimeout(260)
     const restored = await page.evaluate((s) => {
       const row = window.__qua.fields(s.memberId).find((f) => f.propId === s.defId)
@@ -17204,7 +17209,7 @@ await check(
     assert(restored.choices.includes('会被删的选项'), `恢复后选项回到候选：${JSON.stringify(restored.choices)}`)
 
     await ctx.close()
-    return `软删被引用的选项 ⇒ 值在、旧名＋「已删除」；恢复 ⇒ 候选与显示都回来`
+    return `删被引用的选项（墓碑）⇒ 值在、旧名＋「已删除」；恢复 ⇒ 候选与显示都回来`
   },
 )
 

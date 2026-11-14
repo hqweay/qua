@@ -1164,7 +1164,7 @@ export function makeBlockEl(
         for (const c of picked.slice(0, cap)) {
           const ico = document.createElement('span')
           ico.className = 'prop-multi-ico'
-          renderIcon(ico, prop<string>(c, '_icon') ?? prop<string>(field.def, '_icon'), 'square-dashed', 'sm')
+          renderIcon(ico, c.icon ?? prop<string>(field.def, '_icon'), 'square-dashed', 'sm')
           mark.appendChild(ico)
         }
         if (picked.length > cap) {
@@ -1174,7 +1174,7 @@ export function makeBlockEl(
           mark.appendChild(more)
         }
       }
-      const labels = picked.map((c) => plainText(c.content).trim()).filter((x) => x !== '')
+      const labels = picked.map((c) => c.label.trim()).filter((x) => x !== '')
       mark.dataset.tip = t('ui.props.gutterTitle', {
         prop: blockLabel(field.def),
         value: labels.length === 0 ? t('ui.props.pending') : labels.join('、'),
@@ -1203,7 +1203,7 @@ export function makeBlockEl(
         mark.dataset.propId = field.propId
         mark.dataset.checkFor = b.id
         renderIcon(mark, field.icon, field.value === field.check.on ? 'square-check' : 'square', 'sm')
-        const value = field.choice ? plainText(field.choice.content).trim() : ''
+        const value = field.choice ? field.choice.label.trim() : ''
         mark.dataset.tip = t('ui.props.gutterTitle', {
           prop: blockLabel(field.def),
           value: value === '' ? t('ui.props.pending') : value,
@@ -1216,7 +1216,7 @@ export function makeBlockEl(
       mark.dataset.propId = field.propId
       mark.dataset.propFor = b.id
       renderIcon(mark, field.icon, 'square-dashed', 'sm')
-      const value = field.choice ? plainText(field.choice.content).trim() : ''
+      const value = field.choice ? field.choice.label.trim() : ''
       mark.dataset.tip = t('ui.props.gutterTitle', {
         prop: blockLabel(field.def),
         value: value === '' ? t('ui.props.pending') : value,

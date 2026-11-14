@@ -1,11 +1,12 @@
 /**
- * **选项（`select` 的 choice）**：选项是属性定义块的**直接子块**。
+ * **选项（`select` 的值域）＝ 定义块上的一组记录**，不是块。
  *
  * 验收口径（为什么这些断言长这样）：
- *   · 身份是**块 id**，不是选项名 —— 改名不改值，两个同名选项是两个值；
- *   · 顺序是**兄弟顺序** —— 没有第二份 order 字段；
- *   · 可见性是**一个三态表达式**（`_choiceScope`），多标签取并集；
- *   · 当前值不被隐藏：值指向的选项不可见/已软删时，控件仍能拿到它的名字。
+ *   · 身份是**记录 id**，不是选项名 —— 改名不改值，两个同名选项是两个值；
+ *   · 顺序是**数组序** —— 没有第二份 order 字段，也没有兄弟序这回事；
+ *   · 可见性是**一个三态表达式**（记录的 `scope`），多标签取并集；
+ *   · 当前值不被隐藏：值指向的选项不可见/已删（墓碑）时，控件仍能拿到它的名字；
+ *   · 旧形状遗留（桌面真机库的选项子块）**读得出、但不参与候选**——不写迁移。
  *
  * 这些性质都不在 UI 里判：属性面板与表格都吃同一份派生（`FieldRow.choices`）。
  */
@@ -13,6 +14,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Block, ViewRecord } from '../src/core/index.ts'
 import {
+  allChoicesOf,
   choiceById,
   choiceDisplayLabel,
   ChoiceLookupIndex,
@@ -22,11 +24,18 @@ import {
   choicesFor,
   choicesOf,
   fieldRows,
+  formatOf,
+  isChoicesValue,
   isMultiValueKey,
+  legacyChoiceOf,
   mkPropDef,
   propDisplayLabels,
+  propKindOf,
   runQuery,
+  setChoices,
   sortRecords,
+  type ChoiceScope,
+  type PropChoice,
 } from '../src/core/index.ts'
 import { plainText, textRuns } from '../src/core/model/runs.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
@@ -49,42 +58,69 @@ const blk = (id: string, text = '', props?: Record<string, unknown>): Block => (
 const tagBlock = (id: string, name: string): Block =>
   blk(id, name, { _aliases: [name], _lists: ['tag'] })
 
-/** 一个 select 定义 + 它给的选项（子块顺序就是选项顺序） */
-const selectDef = (id: string, children: Block[]): Block => {
+/** 一条选项记录 */
+const choice = (id: string, name: string, scope?: ChoiceScope): PropChoice => ({
+  id,
+  label: name,
+  ...(scope ? { scope } : {}),
+})
+
+/** 一个 select 定义 + 它的选项记录（数组序就是选项序） */
+const selectDef = (id: string, choices: PropChoice[]): Block => {
   const def = blk(id, '状态', { _kind: 'select' })
-  def.children = children
+  setChoices(def, choices)
   return def
 }
 
-const choice = (id: string, name: string, scope?: unknown): Block =>
-  blk(id, name, scope === undefined ? undefined : { _choiceScope: scope })
-
 const tagName = (id: string): string => ({ tagA: '任务', tagB: '书' })[id] ?? id.slice(-6)
 
-/* ------------------------------------------------------------ 1. 目录 */
+/* ------------------------------------------------------------ 1. 记录域 */
 
-test('choicesOf：只返回活子块，顺序＝兄弟顺序（软删的不算，但仍在原位）', () => {
+test('choicesOf：只返回活记录，顺序＝数组序（墓碑不提供选择，但仍在原位）', () => {
   const def = selectDef('def', [
     choice('c1', '一'),
-    choice('c2', '二', { _choiceScope: { mode: 'only', tags: ['tagA'] } }),
-    { ...choice('c3', '三'), props: { _deletedAt: 5 } },
+    choice('c2', '二', { mode: 'only', tags: ['tagA'] }),
+    { ...choice('c3', '三'), deleted: true },
   ])
   assert.deepEqual(
     choicesOf(def).map((c) => c.id),
     ['c1', 'c2'],
-    '活块按 def.children 的顺序',
+    '活记录按 `_choices` 的数组序',
   )
-  // 软删的块没有被摘掉：恢复走同一格（值指向它时也要能解析到）
-  assert.equal(def.children.length, 3)
+  assert.equal(allChoicesOf(def).length, 3, '墓碑没有被摘掉：恢复走同一格（值指向它时也要能解析到）')
 })
 
-test('choiceById：能找到软删的选项（显示「选项已删除」靠它）', () => {
-  const gone = { ...choice('c-gone', '已删'), props: { _deletedAt: 7 } }
-  const def = selectDef('def', [choice('c1', '一'), gone])
-  const forest = [def]
-  assert.equal(choiceById(forest, 'c-gone')?.id, 'c-gone', '软删的选项也要找得到')
-  assert.equal(choiceById(forest, 'c1')?.id, 'c1')
-  assert.equal(choiceById(forest, 'nope'), undefined)
+test('isChoicesValue：记录形状 ＋ id 唯一；空数组合法', () => {
+  assert.equal(isChoicesValue([]), true, '没有选项是合法状态')
+  assert.equal(isChoicesValue([{ id: 'a', label: '甲' }]), true)
+  assert.equal(isChoicesValue([{ id: 'a', label: '甲', icon: 'lucide:circle', scope: { mode: 'all' } }]), true)
+  assert.equal(isChoicesValue([{ id: 'a', label: '' }]), false, 'label 是显示名，不能空')
+  assert.equal(isChoicesValue([{ id: '', label: '甲' }]), false)
+  assert.equal(
+    isChoicesValue([
+      { id: 'a', label: '甲' },
+      { id: 'a', label: '乙' },
+    ]),
+    false,
+    'id 重复 ⇒ 值显示哪个名字没有答案，是坏形状',
+  )
+  assert.equal(isChoicesValue([{ id: 'a', label: '甲', scope: { mode: 'bad' } }]), false)
+  assert.equal(isChoicesValue([{ id: 'a', label: '甲', deleted: false }]), false, '墓碑只有 true 这一种写法')
+})
+
+test('setChoices：空数组连槽一起摘掉（「没有选项」与「空壳」是同一个答案）', () => {
+  const def = blk('def', '状态', { _kind: 'select' })
+  setChoices(def, [choice('c1', '一')])
+  assert.equal(isChoicesValue(def.props?._choices), true)
+  setChoices(def, [])
+  assert.equal('_choices' in (def.props ?? {}), false, '删到零条不留空数组')
+})
+
+test('选项不是块：定义块的 children 里有块也不算选项（旧形状不再被读）', () => {
+  const legacyChild = blk('c-old', '旧选项')
+  const def = blk('def', '状态', { _kind: 'select' })
+  def.children = [legacyChild]
+  assert.deepEqual(choicesOf(def), [], '`_choices` 为空 ⇒ 候选为空，不读 children')
 })
 
 /* ------------------------------------------------------------ 2. 可见性 */
@@ -112,25 +148,23 @@ test('choiceVisible：all 处处可见；only 要命中；except 命中即隐藏
   assert.equal(choiceVisible(exceptA, ab), false, '多标签取并集：任一命中即隐藏')
 })
 
-test('choiceScopeOf：坏值回落 all；only/except 去重，空集合保留（编辑中间态）', () => {
+test('choiceScopeOf：缺省 all；only/except 去重，空集合保留（编辑中间态）', () => {
   assert.deepEqual(choiceScopeOf(choice('c', 'x')), { mode: 'all' }, '缺省 = 全局')
-  assert.deepEqual(choiceScopeOf(choice('c', 'x', 'nope')), { mode: 'all' }, '形状不认识 ⇒ 全局')
-  assert.deepEqual(choiceScopeOf(choice('c', 'x', { mode: 'only' })), { mode: 'all' })
   assert.deepEqual(
     choiceScopeOf(choice('c', 'x', { mode: 'only', tags: ['tagA', 'tagA'] })),
     { mode: 'only', tags: ['tagA'] },
+    '标签去重',
   )
-  assert.deepEqual(choiceScopeOf(choice('c', 'x', { mode: 'except', tags: [] })), { mode: 'except', tags: [] },
-    '空集合不被归一成 all：否则「刚切到 only」的中间态永远勾不上标签')
-  assert.deepEqual(choiceScopeOf(choice('c', 'x', { mode: 'except', tags: ['gone'] })), {
-    mode: 'except',
-    tags: ['gone'],
-  }, '悬空标签 id 原样保留：删标签不等于改作用域')
+  assert.deepEqual(
+    choiceScopeOf(choice('c', 'x', { mode: 'except', tags: [] })),
+    { mode: 'except', tags: [] },
+    '空集合不被归一成 all：否则「刚切到 only」的中间态永远勾不上标签',
+  )
 })
 
 /* ------------------------------------------------------------ 3. 适用性 */
 
-test('choicesFor：保持兄弟顺序；定义缺失／不是 select ⇒ 空数组', () => {
+test('choicesFor：保持记录序；定义缺失／不是 select ⇒ 空数组', () => {
   const def = selectDef('def', [choice('c1', '一'), choice('c2', '仅 A', { mode: 'only', tags: ['tagA'] }), choice('c3', '三')])
   const tagA = tagBlock('tagA', '任务')
   tagA.props = { ...tagA.props, _fieldDefs: ['def'] }
@@ -141,7 +175,7 @@ test('choicesFor：保持兄弟顺序；定义缺失／不是 select ⇒ 空数�
   assert.deepEqual(
     choicesFor(withA, 'def', forest).map((c) => c.id),
     ['c1', 'c2', 'c3'],
-    '#A 的块看到三条（含 only #A），顺序＝兄弟顺序',
+    '#A 的块看到三条（含 only #A），顺序＝记录序',
   )
   assert.deepEqual(
     choicesFor(plain, 'def', forest).map((c) => c.id),
@@ -233,35 +267,24 @@ test('fieldRows：select 行带 choices / currentChoiceLabel；当前值不可�
   assert.equal(r2.value, 'c2', '值一个字节都没动')
 })
 
-test('fieldRows：值指向已软删的选项 ⇒ 旧名 ＋ 「已删除」标记，值仍在', () => {
-  const gone = choice('c-gone', '已删')
-  gone.props = { ...gone.props, _deletedAt: 9 }
-  const def = selectDef('def', [choice('c1', '待办'), gone])
+test('fieldRows：值指向已删（墓碑）的选项 ⇒ 旧名 ＋ 「已删除」标记，值仍在', () => {
+  const def = selectDef('def', [choice('c1', '待办'), { ...choice('c-gone', '已删'), deleted: true }])
   const block = blk('b', '一块', { def: 'c-gone' })
   const row = fieldRows(block, [def]).find((r) => r.propId === 'def')!
-  assert.deepEqual(row.choices?.map((c) => c.id), ['c1'], '软删的选项不进候选')
+  assert.deepEqual(row.choices?.map((c) => c.id), ['c1'], '墓碑不进候选')
   assert.equal(row.currentChoiceLabel, '已删', '旧名要留着：用户才知道该恢复哪一条')
   assert.equal(row.currentChoiceDeleted, true, '控件据此标「已删除」')
   assert.equal(row.value, 'c-gone', '值一个字节都没动')
 })
 
-test('查询不把选项及其子块当内容行：schema 子树整棵不参与求值', () => {
-  const note = blk('c1-note', '待办说明')
-  const c1 = choice('c1', '待办')
-  c1.children = [note]
-  const def = selectDef('def', [c1])
-  const host = blk('host', '正文里提到 待办说明 的一块')
-  const hits = runQuery({ where: { text: '待办说明' } }, { blocks: [def, host] })
+test('查询不把选项当内容行：选项记录没有正文，也进不了求值', () => {
+  const def = selectDef('def', [choice('c1', '待办')])
+  const host = blk('host', '正文里提到 待办 的一块')
+  const hits = runQuery({ where: { text: '待办' } }, { blocks: [def, host] })
   assert.deepEqual(
     hits.map((h) => h.blockId),
     ['host'],
-    `选项的子块也是说明，不是内容行：${JSON.stringify(hits)}`,
-  )
-  const optionHit = runQuery({ where: { text: '待办' } }, { blocks: [def, host] })
-  assert.deepEqual(
-    optionHit.map((h) => h.blockId),
-    ['host'],
-    `选项自己也不是内容行：${JSON.stringify(optionHit)}`,
+    `选项名不是内容：${JSON.stringify(hits)}`,
   )
 })
 
@@ -288,7 +311,7 @@ test('软删的标签不提供作用域：only [已删标签] 不可见；except
   const block = blk('b', '一块', { _tags: ['tagA'], _ownProps: ['def'] })
   const forest = [def, tagA, block]
 
-  const rowOf = (): Block[] => fieldRows(block, forest).find((r) => r.propId === 'def')!.choices ?? []
+  const rowOf = (): PropChoice[] => fieldRows(block, forest).find((r) => r.propId === 'def')!.choices ?? []
   assert.deepEqual(
     rowOf().map((c) => c.id),
     ['c-except'],
@@ -303,23 +326,60 @@ test('软删的标签不提供作用域：only [已删标签] 不可见；except
   )
 })
 
-test('choiceLookupOf：一趟扫，软删标签的名字仍解析得到（不是短 id）', () => {
-  const goneTag = tagBlock('tagA', '任务')
-  goneTag.props = { ...goneTag.props, _deletedAt: 1 }
-  const goneChoice = choice('c-gone', '旧选项')
-  goneChoice.props = { ...goneChoice.props, _deletedAt: 2 }
-  const look = choiceLookupOf([goneTag, goneChoice])
-  assert.equal(look.tagName('tagA'), '任务', '软删标签的旧名要能显示')
-  assert.equal(look.find('c-gone')?.id, 'c-gone', '软删的选项也要找得到（当前值显示旧名）')
+/* ------------------------------------------------------------ 7. 查找表（含旧形状遗留） */
+
+test('choiceById：新记录与旧形状遗留块都能找到（含墓碑/软删）', () => {
+  const def = selectDef('def', [choice('c1', '一'), { ...choice('c-gone', '已删'), deleted: true }])
+  const legacy = blk('c-legacy', '旧选项', { _choiceScope: { mode: 'only', tags: ['tagA'] } })
+  const legacyGone = blk('c-legacy-gone', '旧已删', { _deletedAt: 7 })
+  const forest = [def, legacy, legacyGone]
+
+  assert.equal(choiceById(forest, 'c1')?.label, '一')
+  assert.equal(choiceById(forest, 'c-gone')?.label, '已删', '墓碑也要找得到')
+  assert.equal(choiceById(forest, 'nope'), undefined)
+
+  // 旧形状遗留：块在森林里 ⇒ 投影成记录，名字读得出来（不写迁移）
+  const old = choiceById(forest, 'c-legacy')
+  assert.equal(old?.label, '旧选项')
+  assert.deepEqual(old?.scope, { mode: 'only', tags: ['tagA'] }, '旧 `_choiceScope` 仍读得出')
+  assert.equal(choiceById(forest, 'c-legacy-gone')?.deleted, true, '软删的旧块投成墓碑')
 })
 
-test('ChoiceLookupIndex：purge 后不返回旧对象；软删的旧对象留着（显示旧名）', () => {
-  const live = blk('c1', '选项')
+test('legacyChoiceOf：遗留块投影只读（正文/图标/作用域/软删），不进森林', () => {
+  const b = blk('old', '旧选项', {
+    _icon: 'lucide:circle',
+    _color: 'red',
+    _choiceScope: { mode: 'except', tags: ['tagB'] },
+  })
+  const c = legacyChoiceOf(b)
+  assert.equal(c.id, 'old')
+  assert.equal(c.label, '旧选项')
+  assert.equal(c.icon, 'lucide:circle')
+  assert.equal(c.color, 'red')
+  assert.deepEqual(c.scope, { mode: 'except', tags: ['tagB'] })
+  assert.equal(c.deleted, undefined)
+})
+
+test('choiceLookupOf：记录表与块兜底共用一份；软删标签的名字仍解析得到', () => {
+  const def = selectDef('def', [choice('c1', '记录选项')])
+  const legacy = blk('c-old', '旧选项')
+  const goneTag = tagBlock('tagA', '任务')
+  goneTag.props = { ...goneTag.props, _deletedAt: 1 }
+  const look = choiceLookupOf([def, legacy, goneTag])
+
+  assert.equal(look.find('c1')?.label, '记录选项')
+  assert.equal(look.find('c-old')?.label, '旧选项', '旧形状遗留走块兜底')
+  assert.equal(look.find('nope'), undefined)
+  assert.equal(look.tagName('tagA'), '任务', '软删标签的旧名要能显示')
+})
+
+test('ChoiceLookupIndex：purge 后不返回旧块；软删留下的块仍是「在场」的遗留', () => {
+  const live = blk('c1', '旧选项')
   const idx = new ChoiceLookupIndex()
   idx.rebuild([live])
-  assert.equal(idx.lookup().find('c1')?.id, 'c1')
+  assert.equal(idx.lookup().find('c1')?.label, '旧选项')
 
-  // purge：树里没有、`store.find` 也找不到；旧对象没有删除标记 ⇒ 必须摘掉
+  // purge：树里没有、`store.find` 也找不到 ⇒ 必须摘掉
   idx.remember('c1', () => undefined)
   assert.equal(
     idx.lookup().find('c1'),
@@ -335,7 +395,7 @@ test('ChoiceLookupIndex：purge 后不返回旧对象；软删的旧对象留着
   assert.equal(idx2.lookup().find('c2')?.id, 'c2', '软删的旧对象要留着（当前值显示旧名 ＋「已删除」）')
 })
 
-/* ------------------------------------------------------------ 7. 新建定义 */
+/* ------------------------------------------------------------ 8. 命令 */
 
 function commandHarness(): { cmds: ReturnType<typeof propsCommands>; kb: MemoryKb; toasts: string[] } {
   const store = new BlockStore([])
@@ -373,7 +433,7 @@ test('createPropDef：默认复用同名同 kind；mode:new 建第二个 propId'
   assert.equal(kb.propDefs().length, 3)
 })
 
-test('选项命令：插入/改名/移动/作用域/软删都走一笔事务（值不清）', () => {
+test('选项命令：加/改名/移动/作用域/删除都写定义块（值不清、不插子块）', () => {
   const { cmds, kb } = commandHarness()
   const defId = cmds.createPropDef('', '状态', 'select', 'own')
   const c1 = cmds.addChoice(defId, '待办')
@@ -382,14 +442,15 @@ test('选项命令：插入/改名/移动/作用域/软删都走一笔事务（�
 
   const def = () => kb.propDefs().find((d) => d.id === defId)!
   assert.deepEqual(choicesOf(def()).map((c) => c.id), [c1, c2], '顺序＝插入顺序')
-  assert.deepEqual(choiceScopeOf(def().children[1]!), { mode: 'only', tags: ['tagA'] })
+  assert.deepEqual(choiceScopeOf(choicesOf(def())[1]!), { mode: 'only', tags: ['tagA'] })
+  assert.equal(def().children.length, 0, '选项不再插成子块')
 
   // 值存的是选项 id：改名不动值
   const host = { id: 'host', content: textRuns('一块'), children: [], created: 1, modified: 1, props: { [defId]: c2 } }
   kb.tx((tx) => tx.insert(host, null, 0))
   cmds.setChoiceLabel(c2, '已做完')
   assert.equal(host.props?.[defId], c2, '改名不改值')
-  assert.equal(plainText(choicesOf(def())[1]!.content), '已做完', '改名写的是正文')
+  assert.equal(choicesOf(def())[1]!.label, '已做完', '改名写的是记录 label')
 
   // 往下/往上移动：`beforeId` 之前的最终位置
   cmds.moveChoice(defId, c2, c1)
@@ -397,26 +458,28 @@ test('选项命令：插入/改名/移动/作用域/软删都走一笔事务（�
   cmds.moveChoice(defId, c2, '')
   assert.deepEqual(choicesOf(def()).map((c) => c.id), [c1, c2], '空 beforeId ⇒ 末尾')
 
-  // 作用域改回全局：槽位一起摘掉（不留空壳）
+  // 作用域改回全局：字段一起摘掉（不留空壳）
   cmds.setChoiceScope(c2, { mode: 'all' })
-  assert.equal('_choiceScope' in (def().children[1]!.props ?? {}), false)
+  assert.equal('scope' in choicesOf(def())[1]!, false, '改回全局不留 `{mode:"all"}`')
 
-  // 软删：选项不在候选里，但值还在；恢复后回来
+  // 删除＝墓碑：记录仍在数组原位、值还在、名字读得出
   cmds.deleteChoice(c1)
-  assert.deepEqual(choicesOf(def()).map((c) => c.id), [c2], '软删的选项不提供选择')
-  assert.equal(host.props?.[defId], c2, '值不动（这条值是 c2，不是被删的 c1）')
-  assert.equal(choiceById(kb.roots(), c1)?.id, c1, '软删的选项仍能被解析（显示「选项已删除」）')
+  assert.deepEqual(choicesOf(def()).map((c) => c.id), [c2], '墓碑不提供选择')
+  assert.equal(allChoicesOf(def()).length, 2, '记录没被摘掉')
+  assert.equal(host.props?.[defId], c2, '值不动')
+  assert.equal(choiceById(kb.roots(), c1)?.label, '待办', '墓碑仍能被解析（显示「已删除」）')
 })
 
-test('图标/勾选框映射/快捷入口：图标写选项、状态唯一、空图标摘格', () => {
+test('图标/勾选框映射/快捷入口：图标写记录、状态唯一、空图标摘格', () => {
   const { cmds, kb, toasts } = commandHarness()
   const defId = cmds.createPropDef('', '状态', 'select', 'own')
   const c1 = cmds.addChoice(defId, '待办')
   const c2 = cmds.addChoice(defId, '完成')
   cmds.addChoice(defId, '进行中')
+  const rec = (id: string) => allChoicesOf(kb.get(defId)!).find((c) => c.id === id)
 
   cmds.setChoiceIcon(c1, 'lucide:square')
-  assert.equal(kb.get(c1)?.props?._icon, 'lucide:square', '图标写在选项块上')
+  assert.equal(rec(c1)?.icon, 'lucide:square', '图标写在记录上')
 
   cmds.setChoiceCheck(defId, { on: c2, off: c1, status: true })
   assert.deepEqual(kb.get(defId)?.props?._check, { on: c2, off: c1 })
@@ -453,7 +516,7 @@ test('图标/勾选框映射/快捷入口：图标写选项、状态唯一、空
   assert.equal('_uiPosition' in (kb.get(defId)?.props ?? {}), false, 'panel 是缺省 ⇒ 摘键')
 
   cmds.setChoiceIcon(c1, '')
-  assert.equal('_icon' in (kb.get(c1)?.props ?? {}), false, '空图标摘格，不留空串')
+  assert.equal('icon' in (rec(c1) ?? {}), false, '空图标摘格，不留空串')
 })
 
 test('多值：setChoiceCardinality 写/摘 `_cardinality`；切回单值挡住仍有 >1 值的库', () => {
@@ -480,6 +543,18 @@ test('多值：setChoiceCardinality 写/摘 `_cardinality`；切回单值挡住�
   cmds.setPropValue('host', defId, [c1])
   cmds.setChoiceCardinality(defId, 'one')
   assert.equal('_cardinality' in (kb.get(defId)?.props ?? {}), false, '只剩一个值 ⇒ 可切回单值，槽摘掉')
+})
+
+test('基数允许集按 kind 收：date 不能多值、text/asset 可以', () => {
+  const { cmds, kb, toasts } = commandHarness()
+  const date = cmds.createPropDef('', '截止', 'date', 'own')
+  cmds.setChoiceCardinality(date, 'many')
+  assert.equal('_cardinality' in (kb.get(date)?.props ?? {}), false, 'date 先只 one')
+  assert.ok(toasts.some((x) => x.includes('多值')), `应有提示：${JSON.stringify(toasts)}`)
+
+  const text = cmds.createPropDef('', '多链接', 'text', 'own', 'new')
+  cmds.setChoiceCardinality(text, 'many')
+  assert.equal(kb.get(text)?.props?._cardinality, 'many', 'text（含 url 格式）可多值')
 })
 
 test('多值字段的查询：eq/neq 按包含判，empty 判空数组', () => {
@@ -509,9 +584,35 @@ test('isMultiValueKey：`_tags` 永远多值；字段按 `_cardinality` 解析',
   )
 })
 
-/* ------------------------------------------------------------ 8. 排序 */
+/* ------------------------------------------------------------ 9. 类型系统 */
 
-test('sortRecords：select 列按选项兄弟顺序（resolver），不在列表的值排最后', () => {
+test('propKindOf：七 kind；旧形状 `_kind:"url"` 读成 text（值不变、format 给 url）', () => {
+  const text = mkPropDef('备注', 'text')
+  assert.equal(propKindOf(text), 'text')
+  assert.equal(formatOf(text), undefined, '缺省没有格式')
+
+  const url = blk('url-def', '链接', { _kind: 'url' })
+  assert.equal(propKindOf(url), 'text', 'url 降格为 text（不写迁移、读路径归一）')
+  assert.equal(formatOf(url), 'url', '旧定义没写 `_format` ⇒ 按 url 解释')
+
+  const email = mkPropDef('邮箱', 'text', { _format: 'email' })
+  assert.equal(formatOf(email), 'email')
+
+  const asset = mkPropDef('封面', 'asset', { _format: 'image' })
+  assert.equal(propKindOf(asset), 'asset')
+  assert.equal(formatOf(asset), 'image')
+
+  // 格式名不在允许集 ⇒ 回落缺省（不崩、不静默把坏值当格式）
+  const bad = mkPropDef('坏格式', 'text', { _format: 'sparkles' })
+  assert.equal(formatOf(bad), undefined)
+  // 没有格式轴的 kind：写了也不认
+  const cb = mkPropDef('勾', 'checkbox', { _format: 'plain' })
+  assert.equal(formatOf(cb), undefined)
+})
+
+/* ------------------------------------------------------------ 10. 排序 */
+
+test('sortRecords：select 列按记录顺序（resolver），不在列表的值排最后', () => {
   const def = selectDef('def', [choice('c1', '一'), choice('c2', '二'), choice('c3', '三')])
   const rec = (id: string, value: string | undefined): ViewRecord => ({
     block: blk(id, id),

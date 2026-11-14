@@ -18,19 +18,18 @@
  */
 import { onCommitKeys } from './keys.ts'
 import {
-  ICON_PROP,
+  allChoicesOf,
   cardinalityOf,
   checkOf,
   choiceScopeOf,
   choiceVisible,
   choicesOf,
-  plainText,
-  prop,
   propKindOf,
   uiPositionOf,
   useOf,
   type Block,
   type ChoiceScope,
+  type PropChoice,
   type UiPosition,
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
@@ -51,6 +50,8 @@ export interface ChoiceActions {
   /** 定义块的快捷入口位置（block-left ＝ 块左侧图标；panel ＝ 只留属性卡） */
   setUiPosition: (defId: string, position: UiPosition) => void
   remove: (choiceId: string) => void
+  /** 恢复一条被删的选项（撤墓碑；值一个字节不动） */
+  restore: (choiceId: string) => void
 }
 
 export interface ChoicesEditorDeps {
@@ -170,7 +171,11 @@ export class ChoicesEditor {
     for (const [i, choice] of visible.entries()) list.appendChild(this.choiceItem(def, choice, i, visible, focusTag))
     section.appendChild(list)
 
-    if (focusTag === '') section.appendChild(this.checkSection(def))
+    if (focusTag === '') {
+      section.appendChild(this.checkSection(def))
+      const deleted = this.deletedBlock(def)
+      if (deleted) section.appendChild(deleted)
+    }
 
     if (focusTag !== '') {
       const hidden = this.hiddenChoices(def, focusTag)
@@ -233,7 +238,7 @@ export class ChoicesEditor {
     box.appendChild(head)
     if (!check) return box
 
-    const names = new Map(all.map((c) => [c.id, plainText(c.content).trim() || c.id.slice(-6)]))
+    const names = new Map(all.map((c) => [c.id, c.label.trim() || c.id.slice(-6)]))
     const selectRow = (which: 'on' | 'off'): HTMLElement => {
       const row = document.createElement('label')
       row.className = 'choices-gutter'
@@ -293,7 +298,7 @@ export class ChoicesEditor {
   /* ---------------------------------------------------------- 两个视角的集合 */
 
   /** 本视角看得到的选项（兄弟顺序） */
-  private visibleChoices(def: Block, focusTag: string): Block[] {
+  private visibleChoices(def: Block, focusTag: string): PropChoice[] {
     const all = choicesOf(def)
     if (focusTag === '') return all
     const ids = new Set([focusTag])
@@ -301,7 +306,7 @@ export class ChoicesEditor {
   }
 
   /** 被**本标签**排除的选项（`except` 里含本标签）：可以一键恢复 */
-  private hiddenChoices(def: Block, focusTag: string): Block[] {
+  private hiddenChoices(def: Block, focusTag: string): PropChoice[] {
     return choicesOf(def).filter((c) => {
       const scope = choiceScopeOf(c)
       return scope.mode === 'except' && scope.tags.includes(focusTag)
@@ -325,7 +330,7 @@ export class ChoicesEditor {
    * 全局的、`except` 的、多标签共享的选项动一下会影响所有标签，那里只给
    * 「对本标签隐藏」；改名/删除/排序是**属性定义页**的事（全量视角）。
    */
-  private choiceItem(def: Block, choice: Block, index: number, siblings: Block[], focusTag: string): HTMLElement {
+  private choiceItem(def: Block, choice: PropChoice, index: number, siblings: PropChoice[], focusTag: string): HTMLElement {
     const full = focusTag === ''
     const scope = choiceScopeOf(choice)
     const localOnly = !full && scope.mode === 'only' && scope.tags.length === 1 && scope.tags[0] === focusTag
@@ -340,13 +345,13 @@ export class ChoicesEditor {
 
     const name = document.createElement('input')
     name.className = 'prop-input choice-name'
-    name.value = plainText(choice.content).trim()
+    name.value = choice.label.trim()
     name.placeholder = t('ui.props.choice.name')
     if (editable) {
       const commit = (): void => {
         const next = name.value.trim()
-        if (next === '' || next === plainText(choice.content).trim()) {
-          name.value = plainText(choice.content).trim()
+        if (next === '' || next === choice.label.trim()) {
+          name.value = choice.label.trim()
           return
         }
         this.deps.write.setLabel(choice.id, next)
@@ -433,7 +438,7 @@ export class ChoicesEditor {
      * 图标集是 `view/icons.ts` 的一份数据；浮层由装配层开（`pickIcon`），
      * 组件只负责「点的是哪一行、选完写哪一格」。
      */
-    const icon = prop<string>(choice, ICON_PROP) ?? ''
+    const icon = choice.icon ?? ''
     const ico = document.createElement('button')
     ico.type = 'button'
     ico.className = 'choice-icon'
@@ -460,7 +465,7 @@ export class ChoicesEditor {
   }
 
   /** 「对本标签隐藏」：只改这一个标签能看到它这件事，不动别的标签 */
-  private hideFromTag(choice: Block, focusTag: string): void {
+  private hideFromTag(choice: PropChoice, focusTag: string): void {
     const scope = choiceScopeOf(choice)
     let next: ChoiceScope
     if (scope.mode === 'all') next = { mode: 'except', tags: [focusTag] }
@@ -503,7 +508,7 @@ export class ChoicesEditor {
    * 三态一个表达式：没有「既 only 又 except」，也没有优先级规则。
    * 勾选/取消标签**立刻写**（`set-choice-scope` 一笔事务），所以面板在重画后保持展开。
    */
-  private scopePanel(choice: Block): HTMLElement {
+  private scopePanel(choice: PropChoice): HTMLElement {
     const scope = choiceScopeOf(choice)
     const box = document.createElement('div')
     box.className = 'choice-scope-panel'
@@ -585,9 +590,54 @@ export class ChoicesEditor {
     return box
   }
 
+  /* ---------------------------------------------------------- 已删除（全量视角） */
+
+  /**
+   * **墓碑段**：删掉的选项仍留在数组里（`deleted: true`），这里把它们列出来，
+   * 每条一个「恢复」。
+   *
+   * 为什么不做成「删了就消失」：值侧指向它的块一个字节都没动，用户需要一条路
+   * 把名字找回来 —— 「删选项连值一起删」正是被这个需求反噬的。
+   * 只在全量视角给：标签视角改的是「本标签看不看得到」，与全局的删/恢复不是一件事。
+   */
+  private deletedBlock(def: Block): HTMLElement | null {
+    const gone = allChoicesOf(def).filter((c) => c.deleted === true)
+    if (gone.length === 0) return null
+    const box = document.createElement('div')
+    box.className = 'choices-hidden choices-deleted'
+    const head = document.createElement('div')
+    head.className = 'choices-head'
+    const title = document.createElement('span')
+    title.className = 'choices-title'
+    title.textContent = t('ui.props.choice.deletedSection')
+    head.appendChild(title)
+    box.appendChild(head)
+    for (const choice of gone) {
+      const row = document.createElement('div')
+      row.className = 'choice-row ui-row'
+      row.dataset.choiceId = choice.id
+      row.dataset.choiceDeleted = '1'
+      const name = document.createElement('span')
+      name.className = 'choice-name choice-name--static'
+      name.textContent = choice.label.trim() || choice.id.slice(-6)
+      const restore = document.createElement('button')
+      restore.type = 'button'
+      restore.className = 'choice-restore'
+      restore.dataset.choiceRestore = '1'
+      restore.textContent = t('ui.props.choice.restore')
+      restore.addEventListener('click', () => {
+        this.deps.write.restore(choice.id)
+        this.render()
+      })
+      row.append(name, restore)
+      box.appendChild(row)
+    }
+    return box
+  }
+
   /* ---------------------------------------------------------- 已隐藏（标签视角） */
 
-  private hiddenBlock(hidden: Block[], focusTag: string): HTMLElement {
+  private hiddenBlock(hidden: PropChoice[], focusTag: string): HTMLElement {
     const box = document.createElement('div')
     box.className = 'choices-hidden'
     const head = document.createElement('div')
@@ -606,7 +656,7 @@ export class ChoicesEditor {
       row.dataset.choiceId = choice.id
       const name = document.createElement('span')
       name.className = 'choice-name choice-name--static'
-      name.textContent = plainText(choice.content).trim() || choice.id.slice(-6)
+      name.textContent = choice.label.trim() || choice.id.slice(-6)
       const restore = document.createElement('button')
       restore.type = 'button'
       restore.className = 'choice-restore'

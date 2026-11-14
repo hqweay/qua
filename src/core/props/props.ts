@@ -19,6 +19,7 @@
  */
 import {
   ALIASES_PROP,
+  COLOR_PROP,
   ICON_PROP,
   aliasesOf,
   isDeleted,
@@ -36,6 +37,37 @@ import { derivedId, pad, uuidv7Hex } from '../model/ids.ts'
 import { journalDate, todayISO } from '../identity/journal.ts'
 import { allTags, resolveTagIds, TAGS_PROP, tagIdsOf, tagsById } from '../identity/tags.ts'
 import { t } from '../infra/msg.ts'
+
+/**
+ * 选项记录域：类型、形状判据、墓碑、作用域住 `./choices.ts`；
+ * 本文件从那里再导出，**对外的符号名不变**（`core/index.ts` 只转一手）。
+ */
+export {
+  CHOICES_PROP,
+  CHOICE_SCOPE_PROP,
+  choiceScopeOf,
+  choiceVisible,
+  choicesOf,
+  allChoicesOf,
+  isChoicesValue,
+  newChoiceId,
+  parseChoiceScope,
+  parseChoices,
+  patchChoice,
+  setChoices,
+  type ChoiceScope,
+  type PropChoice,
+} from './choices.ts'
+import {
+  CHOICE_SCOPE_PROP,
+  allChoicesOf,
+  choiceScopeOf,
+  choiceVisible,
+  choicesOf,
+  parseChoiceScope,
+  type ChoiceScope,
+  type PropChoice,
+} from './choices.ts'
 
 /**
  * 两个属性值是不是同一件事（**结构相等**：属性值可以是数组／对象，`Object.is` 不够）。
@@ -267,12 +299,99 @@ export function todoOf(block: Block, table: FieldTable): TodoState | undefined {
   return singleValueOf(value) === status.on ? 'done' : 'todo'
 }
 
-export type PropKind = 'text' | 'number' | 'date' | 'checkbox' | 'select' | 'ref' | 'url'
+/**
+ * **七个 kind**（集合封闭）：判据是**值的存储形状**（或校验/查询算子的
+ * 本质）不同；只是编辑器/渲染增强的归**格式**。
+ *
+ *   text（含 url/email/phone 格式）／number／date（含 datetime 格式）／checkbox／
+ *   select（记录域）／ref（任意块 id）／asset（两态来源引用）
+ *
+ * ⚠️ `url`／`datetime`／`image`／`email`／`phone` **不是 kind**：它们各自只是某个
+ *    kind 的格式。把其中任何一个写成 kind 都是退回了旧形状。
+ */
+export type PropKind = 'text' | 'number' | 'date' | 'checkbox' | 'select' | 'ref' | 'asset'
 
-export const PROP_KINDS: readonly PropKind[] = ['text', 'number', 'date', 'checkbox', 'select', 'ref', 'url']
+export const PROP_KINDS: readonly PropKind[] = ['text', 'number', 'date', 'checkbox', 'select', 'ref', 'asset']
 
+/**
+ * 已退役的 kind 名（只给**读路径**认）：
+ * `url` 降格成 `text` 的 `url` 格式。旧桌面库的 `_kind: 'url'`
+ * 仍在磁盘上，冷启动不能判 corrupt —— 所以形状判据宽容它，`propKindOf` 归一成 text。
+ */
+const LEGACY_KINDS: readonly string[] = ['url']
+
+/** 形状判据（含退役名）：**落盘校验与写侧入口共用**，退役名不算坏形状 */
 export function isPropKind(v: unknown): v is PropKind {
+  return typeof v === 'string' && ((PROP_KINDS as readonly string[]).includes(v) || LEGACY_KINDS.includes(v))
+}
+
+/** 当前这一代的 kind（不含退役名）：新建定义只许走这里 */
+export function isCurrentPropKind(v: unknown): v is PropKind {
   return typeof v === 'string' && (PROP_KINDS as readonly string[]).includes(v)
+}
+
+/** 定义块上的**格式**槽（同值形状内的约束与渲染增强；展示不落盘，格式是类型的一部分） */
+export const FORMAT_PROP = '_format'
+
+/**
+ * **kind 注册表**：一条声明说清这个 kind 能装什么。
+ *
+ * 为什么要一张表而不是散装 `if (kind === 'select')`：值形状、格式允许集、基数允许集
+ * 是**同一件事的三个面**，散在编辑器/查询/渲染各写一份，迟早有一份漏掉——
+ * 那时出现的症状是「界面上能填、查询算不出来」。
+ *
+ * `formats` 用封闭集：写进去一个不在表里的格式就是坏形状（读侧回落 undefined）。
+ * 空数组 ＝ 这个 kind 没有格式轴。
+ */
+export interface PropKindSpec {
+  /** 值的标量形状（多值时逐项校验）；**空值判定不在这里**（`hasValue` 管） */
+  isValue: (v: unknown) => boolean
+  /** 允许的格式（空＝没有格式轴） */
+  formats: readonly string[]
+  /** 允许多值（`_cardinality: 'many'`）；`false` 时写路径挡住 */
+  many: boolean
+}
+
+const isStringValue = (v: unknown): boolean => typeof v === 'string'
+
+export const PROP_KIND_SPECS: Readonly<Record<PropKind, PropKindSpec>> = {
+  // 格式轴：plain（缺省）／url／email／phone —— 都在同一个字符串形状里
+  text: { isValue: isStringValue, formats: ['plain', 'url', 'email', 'phone'], many: true },
+  // 按真数字存：排序与 gt/lt 的正确性是 kind 的第一职责；单位/小数位格式**未拍板**（原样放行）
+  number: { isValue: (v) => typeof v === 'number' && Number.isFinite(v), formats: [], many: true },
+  date: { isValue: isStringValue, formats: ['date', 'datetime'], many: false },
+  checkbox: { isValue: (v) => typeof v === 'boolean', formats: [], many: false },
+  // 值＝记录 id（不透明）；域住在定义块的 `_choices`
+  select: { isValue: isStringValue, formats: [], many: true },
+  // 值＝任意块 id；实体档（inline 岛）是看法层的事，不改值形状
+  ref: { isValue: isStringValue, formats: [], many: true },
+  // 两态来源引用：资产库 hash 或 http(s) URL —— 同一个字符串形状，按 scheme 现算分派
+  asset: { isValue: isStringValue, formats: ['image', 'file', 'any'], many: true },
+}
+
+export function kindSpecOf(kind: PropKind): PropKindSpec {
+  return PROP_KIND_SPECS[kind]
+}
+
+/** 这个 kind 允许多值吗（基数轴的 per-kind 允许集） */
+export function allowsMany(kind: PropKind): boolean {
+  return PROP_KIND_SPECS[kind].many
+}
+
+/**
+ * 一格的标量值合不合这个 kind 的形状。
+ *
+ * ⚠️ 只管**形状**，不管「有没有值」：空串／空数组是「没填」，由 `hasValue` 判。
+ *    多值的每一项过这一关，数组本身在这一关之外（`valuesOk`）。
+ */
+export function isKindValue(kind: PropKind, value: unknown): boolean {
+  return PROP_KIND_SPECS[kind].isValue(value)
+}
+
+/** 一格值（单值或多值）整体合不合：多值时逐项校验，空数组合法（＝没填） */
+export function valuesOk(kind: PropKind, value: unknown): boolean {
+  if (Array.isArray(value)) return value.every((v) => isKindValue(kind, v))
+  return isKindValue(kind, value)
 }
 
 /* ------------------------------------------------------------ 定义块 */
@@ -306,39 +425,58 @@ export function propLabel(def: Block): string {
   return plainText(def.content).trim()
 }
 
-/** 定义的 kind（落盘缺省按 text：旧数据/手写定义不该让面板整段消失） */
+/**
+ * 定义的 kind（落盘缺省按 text：旧数据/手写定义不该让面板整段消失）。
+ *
+ * ⚠️ **退役名在这里归一**：`_kind: 'url'` 读成 `text`（格式由 `formatOf` 给 `url`）。
+ *    这是读路径兼容，不是迁移 —— 磁盘上的那个字符串不动。
+ */
 export function propKindOf(def: Block): PropKind {
   const k = prop<unknown>(def, '_kind')
-  return isPropKind(k) ? k : 'text'
+  if (k === 'url') return 'text'
+  return isCurrentPropKind(k) ? k : 'text'
 }
+
+/**
+ * 定义的格式（`_format`）：同值形状内的约束与渲染增强。
+ *
+ * 三种「没有格式」要分开：
+ *   · 这个 kind 没有格式轴（checkbox/select/ref）⇒ 写了也不认，返回 undefined；
+ *   · 格式名不在允许集里（坏数据）⇒ 回落 undefined（按缺省格式画，不崩）；
+ *   · 旧形状的 `_kind: 'url'` 没写过 `_format` ⇒ 按 `url` 解释（遗留值在场）。
+ *
+ * `number` 的单位/小数位格式**未拍板**：这一格原样放行，等拍板后再收窄。
+ */
+export function formatOf(def: Block): string | undefined {
+  const kind = propKindOf(def)
+  const raw = prop<unknown>(def, FORMAT_PROP)
+  if (kind === 'number') return typeof raw === 'string' && raw !== '' ? raw : undefined
+  const spec = PROP_KIND_SPECS[kind]
+  if (spec.formats.length === 0) return undefined
+  if (typeof raw === 'string' && spec.formats.includes(raw)) return raw
+  if (kind === 'text' && prop<unknown>(def, '_kind') === 'url') return 'url'
+  return undefined
+}
+
+/** 格式名的形状（写侧用）：非空字符串；按 kind 的允许集收窄在命令层做 */
+export function isFormatValue(v: unknown): boolean {
+  return typeof v === 'string' && v !== ''
+}
+
 
 /* ------------------------------------------------------------ 选项（select） */
 
-/**
- * **一个 `select` 属性能选哪些值 ＝ 定义块的直接子块。**
+/*
+ * 选项**不再是块**：记录域、墓碑、可见性判据住在 `./choices.ts`，
+ * 本文件只消费它。这里保留哪些东西、为什么：
  *
- * 没有 `_choiceOf` 之类的新标记：父块是定义 ⇒ 它的直接子块就是选项。
- * 角色由位置派生，与「外观按类型、chrome 按身份」同一条判据 ——
- * 另存一份「这是选项」的声明，就会多出一份能与位置不一致的答案。
- *
- * 软删的选项不算：它们留在原位等恢复，但此刻不提供选择。
+ *   · `choicesOf` / `allChoicesOf` / `choiceScopeOf` / `choiceVisible` —— 再导出，
+ *     调用方（面板、表格、gutter）读到的仍是同一份语义，只是元素从 Block 换成记录；
+ *   · `choiceDisplayLabel` / `choicesForDef` / `choiceCells` —— 留在这一层，因为它们
+ *     要「定义块的标签作用域」＋「同名判据」这两样本文件已有的东西；
+ *   · 旧形状遗留（桌面真机库的选项子块）由 `choiceById` 的**块兜底**读出来，
+ *     不写迁移：值指向的旧块还在森林里 ⇒ 名字仍读得出。
  */
-export function choicesOf(def: Block): Block[] {
-  return def.children.filter((c) => !isDeleted(c))
-}
-
-
-
-/**
- * 一个选项的可见范围（**唯一的可见性来源**）。
- *
- * 三态互斥，所以没有「既 only 又 except」的冲突态，也没有优先级规则。
- * 缺省/坏值按 `all`：旧数据或手写数据不该让控件整片空掉。
- */
-export type ChoiceScope = { mode: 'all' } | { mode: 'only'; tags: string[] } | { mode: 'except'; tags: string[] }
-
-/** 选项作用域住在选项块上（系统属性；形状见 `ChoiceScope`） */
-export const CHOICE_SCOPE_PROP = '_choiceScope'
 
 /**
  * 属性定义的**用途**（系统属性）：这条属性拿来干什么。
@@ -444,39 +582,9 @@ export function singleValueOf(value: unknown): string {
 /**
  * 把一格未知值读成三态作用域；`null` ＝ 形状不认识（命令层据此拒绝写入）。
  *
- * 归一化只做一件不承载语义的事：标签去重。**空集合保留**：编辑作用域时会经过
- * 「刚切到 only、还没勾标签」的中间态，把它归一成 `all` 会让复选框整片禁用，
- * 用户再也选不上标签。空集本身有明确含义（only ＝ 谁都看不见）。
- * **悬空的标签 id 也原样保留**：标签被删不等于作用域失效 —— 静默摘掉会让一个
- * `only` 悄悄变成「所有人都能选」。
+ * ⚠️ 判据本体住在 `./choices.ts`（记录与遗留块共用同一份）：这里只再导出，
+ *    免得两条读路径对「什么算合法作用域」各有一个答案。
  */
-export function parseChoiceScope(raw: unknown): ChoiceScope | null {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
-  const v = raw as { mode?: unknown; tags?: unknown }
-  if (v.mode === 'all') return { mode: 'all' }
-  if (v.mode !== 'only' && v.mode !== 'except') return null
-  if (!Array.isArray(v.tags)) return null
-  const tags = [...new Set(v.tags.filter((x): x is string => typeof x === 'string' && x !== ''))]
-  return { mode: v.mode, tags }
-}
-
-/** 选项的可见范围；坏值回落「所有用这个属性的块都能选它」 */
-export function choiceScopeOf(choice: Block): ChoiceScope {
-  return parseChoiceScope(prop<unknown>(choice, CHOICE_SCOPE_PROP)) ?? { mode: 'all' }
-}
-
-/**
- * 这个选项对一组标签可见吗。
- *
- * 多标签取**并集**：`only` 任一命中即可见，`except` 任一命中即隐藏。
- * 空标签集：`all` 可见、`only` 不可见、`except` 可见（没有要排除的）。
- */
-export function choiceVisible(choice: Block, tagIds: ReadonlySet<string>): boolean {
-  const scope = choiceScopeOf(choice)
-  if (scope.mode === 'all') return true
-  const hit = scope.tags.some((id) => tagIds.has(id))
-  return scope.mode === 'only' ? hit : !hit
-}
 
 /**
  * 一块带着哪些标签 id（**标签页编辑时把自身算进去**：只看自己的选项）。
@@ -496,24 +604,24 @@ function tagIdSetOf(block: Block, tagById: (id: string) => Block | undefined): S
 }
 
 /**
- * **「这个块能选哪些选项」的唯一实现**（兄弟顺序）。
+ * **「这个块能选哪些选项」的唯一实现**（记录序）。
  *
- * 适用性来自块自己打着的标签（`_fieldDefs` 的声明），可见性来自每个选项的
- * `_choiceScope`。属性面板与表格都必须走这里 —— 两处各写一遍 filter 就会出现
+ * 适用性来自块自己打着的标签（`_fieldDefs` 的声明），可见性来自记录的 `scope`。
+ * 属性面板与表格都必须走这里 —— 两处各写一遍 filter 就会出现
  * 「同一块在两个视图里能选的东西不一样」。
  */
-export function choicesForDef(block: Block, def: Block, tagById: (id: string) => Block | undefined): Block[] {
+export function choicesForDef(block: Block, def: Block, tagById: (id: string) => Block | undefined): PropChoice[] {
   if (propKindOf(def) !== 'select') return []
   const tagIds = tagIdSetOf(block, tagById)
   return choicesOf(def).filter((c) => choiceVisible(c, tagIds))
 }
 
 /**
- * 这个块在某个属性上**能选**的选项（兄弟顺序）。
+ * 这个块在某个属性上**能选**的选项（记录序）。
  *
  * 定义缺失或不是 `select` ⇒ 空数组（控件空态，不是崩）。
  */
-export function choicesFor(block: Block, propId: string, forest: readonly Block[]): Block[] {
+export function choicesFor(block: Block, propId: string, forest: readonly Block[]): PropChoice[] {
   const def = findPropDef(forest, propId)
   if (!def) return []
   const byId = tagsById(forest)
@@ -524,12 +632,12 @@ export function choicesFor(block: Block, propId: string, forest: readonly Block[
  * 读 `select` 行时要用的三件查找。
  *
  * 默认从整片森林现建；表格那种「一格一次」的调用方可以传一份**一次算好**的
- * （`find` 要能找到软删的选项：当前值可能指向一条已删的），否则 N 个格子就是
+ * （`find` 要能找到已删的记录：当前值可能指向一条墓碑），否则 N 个格子就是
  * N 次全库扫。
  */
 export interface ChoiceLookup {
-  /** 按 id 找块（**含软删**） */
-  find: (id: string) => Block | undefined
+  /** 按 id 找选项（**含墓碑**；旧形状遗留块会投影成记录） */
+  find: (id: string) => PropChoice | undefined
   /** 按 id 找标签（作用域的名字） */
   tagById: (id: string) => Block | undefined
   /** 标签显示名（缺失时给短 id） */
@@ -544,20 +652,49 @@ export function choiceLookupOf(forest: readonly Block[]): ChoiceLookup {
 }
 
 /**
+ * 旧形状遗留的选项块 → 记录（**只读投影，不落盘**）。
+ *
+ * 桌面真机库升级后，`def.children` 里那些选项子块还在（桌面不吃
+ * `WORKSPACE_VERSION`），而值仍指着它们的 id。读路径要读得出名字，否则
+ * 每一块的任务状态都会显示「选项已删除」。这条投影就是「遗留值在场」的实现：
+ * 有 id、有名字、有作用域、软删的带墓碑 —— 新写入一概不再产生这种块。
+ */
+export function legacyChoiceOf(b: Block): PropChoice {
+  const label = plainText(b.content).trim() || b.id.slice(-6)
+  const scope = parseChoiceScope(prop<unknown>(b, CHOICE_SCOPE_PROP))
+  const icon = prop<string>(b, ICON_PROP)
+  const color = prop<string>(b, COLOR_PROP)
+  const desc: string | undefined = undefined
+  return {
+    id: b.id,
+    label,
+    ...(icon ? { icon } : {}),
+    ...(color ? { color } : {}),
+    ...(desc ? { desc } : {}),
+    ...(scope ? { scope } : {}),
+    ...(isDeleted(b) ? { deleted: true as const } : {}),
+  }
+}
+
+/**
  * **可增量修补**的选项查找表（表格按 blockId 局部修补行，不能每格扫全库）。
  *
- * 「软删」与「purge」在 `store.find` 眼里都是 `undefined`（索引看不见被删的块），
- * 所以增量修补必须自己判：
- *   · 表里那份**带删除标记** ⇒ 软删，留着（当前值要显示旧名 ＋ 「已删除」）；
- *   · 表里那份没有删除标记、树里也找不到 ⇒ 已被 purge，必须摘掉 ——
- *     否则当前值会拿一个已经不在树上的旧对象当「还在」，显示旧名而不是「选项已删除」。
+ * 两张表各管一件事：
+ *   · `records` —— 定义块 `_choices` 里的记录（一趟扫全部定义块建好，含墓碑）；
+ *   · `blocks` —— 全库块（标签名 ＋ **旧形状遗留选项**的兜底）。
+ *
+ * `find` 先查记录、再回落块：新形状里同一 id 只会在其中一张表出现，回落不会遮蔽。
+ * 增量修补只服务块那一侧（`remember` 的入参本来就是块 id）——记录不通过 `store.find`
+ * 增长，新加选项时调用方会重建整表。
  */
 export class ChoiceLookupIndex {
+  private records = new Map<string, PropChoice>()
   private byId = new Map<string, Block>()
   private tagById = new Map<string, Block>()
 
-  /** 整表重建（含软删的块与标签：名字要显示得出来） */
+  /** 整表重建（含软删的块与标签、含墓碑的记录：名字要显示得出来） */
   rebuild(forest: readonly Block[]): void {
+    this.records.clear()
     this.byId.clear()
     this.tagById.clear()
     walkForest(
@@ -565,6 +702,8 @@ export class ChoiceLookupIndex {
       (b) => {
         this.byId.set(b.id, b)
         if (hasList(b, 'tag')) this.tagById.set(b.id, b)
+        // 定义块顺手把记录收进来：同一趟遍历，不另走一遍
+        for (const c of allChoicesOf(b)) this.records.set(c.id, c)
       },
       { includeDeleted: true },
     )
@@ -586,7 +725,12 @@ export class ChoiceLookupIndex {
 
   lookup(): ChoiceLookup {
     return {
-      find: (id) => this.byId.get(id),
+      find: (id) => {
+        const record = this.records.get(id)
+        if (record) return record
+        const block = this.byId.get(id)
+        return block ? legacyChoiceOf(block) : undefined
+      },
       tagById: (id) => this.tagById.get(id),
       tagName: (id) => {
         const tag = this.tagById.get(id)
@@ -597,66 +741,64 @@ export class ChoiceLookupIndex {
 }
 
 /**
- * 按 id 找选项块（**含软删**）：当前值可能指向一个已经不提供选择的选项，
+ * 按 id 找选项（**含墓碑**）：当前值可能指向一个已经不提供选择的选项，
  * 控件仍要显示它的名字，而不是把值静默清掉。
+ *
+ * 两级：先找定义块上的记录（新形状），再回落森林里的块（旧形状遗留，267.9.1）。
  */
-export function choiceById(forest: readonly Block[], choiceId: string): Block | undefined {
+export function choiceById(forest: readonly Block[], choiceId: string): PropChoice | undefined {
   if (choiceId === '') return undefined
-  let hit: Block | undefined
+  let record: PropChoice | undefined
+  let legacy: Block | undefined
   walkForest(
     forest,
     (b) => {
-      if (b.id !== choiceId) return
-      hit = b
-      return false
+      const hit = allChoicesOf(b).find((c) => c.id === choiceId)
+      if (hit) {
+        record = hit
+        return false
+      }
+      if (b.id === choiceId) {
+        legacy = b
+        return false
+      }
     },
     { includeDeleted: true },
   )
-  return hit
+  if (record) return record
+  return legacy ? legacyChoiceOf(legacy) : undefined
 }
 
 /** 同一属性下的选项是否重名（**同名不是错**：身份是 id，名字只是显示） */
-function duplicateChoiceName(def: Block, choice: Block): boolean {
-  const name = plainText(choice.content).trim()
-  const same = choicesOf(def).filter((c) => plainText(c.content).trim() === name)
-  return same.length > 1
+function duplicateChoiceName(def: Block, choice: PropChoice): boolean {
+  const name = choice.label.trim()
+  return choicesOf(def).filter((c) => c.label.trim() === name).length > 1
+}
+
+/** 选项的作用域后缀（同名说明用） */
+function scopeSuffix(scope: ChoiceScope, tagName: (id: string) => string): string {
+  const tags = scope.mode === 'all' ? '' : scope.tags.map((id) => `#${tagName(id)}`).join('、')
+  if (scope.mode === 'all') return t('ui.props.choice.scopeAllSuffix')
+  if (tags === '') return t('ui.props.choice.scopeNoTagsSuffix')
+  return scope.mode === 'only'
+    ? t('ui.props.choice.scopeOnlySuffix', { tags })
+    : t('ui.props.choice.scopeExceptSuffix', { tags })
 }
 
 /**
  * **选项的显示名**（属性面板、表格、选项编辑器都只走这一个入口）。
  *
- * 选项名就是它自己的正文；同一属性下有同名选项时追加作用域，
+ * 选项名就是记录里的 `label`；同一属性下有同名选项时追加作用域，
  * 仍重名再补短 id —— 两个同名选项必须能被指着说清楚是哪一条。
  */
-export function choiceDisplayLabel(choice: Block, def: Block, tagName: (id: string) => string): string {
-  const name = plainText(choice.content).trim() || choice.id.slice(-6)
+export function choiceDisplayLabel(choice: PropChoice, def: Block, tagName: (id: string) => string): string {
+  const name = choice.label.trim() || choice.id.slice(-6)
   if (!duplicateChoiceName(def, choice)) return name
-  const scope = choiceScopeOf(choice)
-  const tags = scope.mode === 'all' ? '' : scope.tags.map((id) => `#${tagName(id)}`).join('、')
-  const suffix =
-    scope.mode === 'all'
-      ? t('ui.props.choice.scopeAllSuffix')
-      : tags === ''
-        ? t('ui.props.choice.scopeNoTagsSuffix')
-        : scope.mode === 'only'
-          ? t('ui.props.choice.scopeOnlySuffix', { tags })
-          : t('ui.props.choice.scopeExceptSuffix', { tags })
-  const label = `${name}${suffix}`
-  const again = choicesOf(def).filter((c) => {
-    const sc = choiceScopeOf(c)
-    const tg = sc.mode === 'all' ? '' : sc.tags.map((id) => `#${tagName(id)}`).join('、')
-    const suf =
-      sc.mode === 'all'
-        ? t('ui.props.choice.scopeAllSuffix')
-        : tg === ''
-          ? t('ui.props.choice.scopeNoTagsSuffix')
-          : sc.mode === 'only'
-            ? t('ui.props.choice.scopeOnlySuffix', { tags: tg })
-            : t('ui.props.choice.scopeExceptSuffix', { tags: tg })
-    return `${plainText(c.content).trim() || c.id.slice(-6)}${suf}` === label
-  })
+  const label = `${name}${scopeSuffix(choiceScopeOf(choice), tagName)}`
+  const again = choicesOf(def).filter((c) => `${c.label.trim() || c.id.slice(-6)}${scopeSuffix(choiceScopeOf(c), tagName)}` === label)
   return again.length > 1 ? `${label}（${choice.id.slice(-6)}）` : label
 }
+
 
 /**
  * **属性显示名**（`propId → label`）：同名属性带声明来源。
@@ -731,15 +873,17 @@ export function choiceCells(
   const look = lookup ?? choiceLookupOf(forest)
   const choices = choicesForDef(block, def, look.tagById)
   const value = valueOf(block, propId)
-  // 多值：每一格都显示名字（含软删/隐藏的值），缺失项用「已删除」兜底
+  // 多值：每一格都显示名字（含墓碑/隐藏的值），缺失项用「已删除」兜底
   if (cardinalityOf(def) === 'many') {
     const ids = valueListOf(value)
     if (ids.length === 0) return { choices }
     const set = new Set(ids)
-    const known = new Set(def.children.map((c) => c.id))
-    // 显示顺序＝**选项兄弟序**；不在定义里的旧值（另一个库/已 purge）按值序排在末尾
-    const ordered = [...def.children.filter((c) => set.has(c.id)).map((c) => c.id), ...ids.filter((id) => !known.has(id))]
-    const currentChoices: Block[] = []
+    // 顺序用**含墓碑的完整记录序**：值指向已删记录时它仍占原位
+    const all = allChoicesOf(def)
+    const known = new Set(all.map((c) => c.id))
+    // 显示顺序＝**选项序**；不在定义里的旧值（遗留块/另一个库/已 purge）按值序排在末尾
+    const ordered = [...all.filter((c) => set.has(c.id)).map((c) => c.id), ...ids.filter((id) => !known.has(id))]
+    const currentChoices: PropChoice[] = []
     const currentChoiceLabels: string[] = []
     for (const id of ordered) {
       const current = look.find(id)
@@ -758,7 +902,9 @@ export function choiceCells(
   // 真没了（purge／值来自另一个库）：没有名字可显示，UI 用「选项已删除」兜底
   if (!current) return { choices }
   const currentChoiceLabel = choiceDisplayLabel(current, def, look.tagName)
-  return isDeleted(current) ? { choices, currentChoiceLabel, currentChoiceDeleted: true } : { choices, currentChoiceLabel }
+  return current.deleted === true
+    ? { choices, currentChoiceLabel, currentChoiceDeleted: true }
+    : { choices, currentChoiceLabel }
 }
 
 /* ------------------------------------------------------------ 引擎属性（core/*） */
@@ -1199,25 +1345,25 @@ export interface FieldRow {
   /** 稳定排序键（声明的先后；同 propId 取最早那次） */
   order: number
   /**
-   * `select` 行：这个块此刻能选的选项（`choicesFor` 的结果，兄弟顺序）。
+   * `select` 行：这个块此刻能选的选项（`choicesFor` 的结果，记录序）。
    *
    * UI **不许**再读定义块上的任何「选项目录」——「这个块有哪些选项」只有这一个读法，
    * 属性面板与表格都吃它。
    */
-  choices?: Block[]
+  choices?: PropChoice[]
   /**
-   * `select` 行：当前值对应的选项名（**即使它被作用域隐藏或已软删**）。
+   * `select` 行：当前值对应的选项名（**即使它被作用域隐藏或已删**）。
    *
    * 找不到（选项真的没了／值来自另一个库）时缺席，由 UI 用字典兜底
    * 「选项已删除」——值本身不动，用户可显式清空。
    */
   currentChoiceLabel?: string
-  /** `select` 行：当前值指向的选项**已被软删**（控件显示旧名 ＋ 「已删除」标记） */
+  /** `select` 行：当前值指向的选项**已删（墓碑）**（控件显示旧名 ＋ 「已删除」标记） */
   currentChoiceDeleted?: boolean
-  /** `select` 多值行：当前值指向的选项名（顺序＝选项兄弟序；缺失项用「已删除」兜底） */
+  /** `select` 多值行：当前值指向的选项名（顺序＝选项序；缺失项用「已删除」兜底） */
   currentChoiceLabels?: string[]
-  /** `select` 多值行：当前值指向的选项块（含软删；缺失项不在里面） */
-  currentChoices?: Block[]
+  /** `select` 多值行：当前值指向的选项（含墓碑；缺失项不在里面） */
+  currentChoices?: PropChoice[]
 }
 
 /**
@@ -1414,18 +1560,18 @@ export interface GutterField {
   value: unknown
   /** 有没有值。渲染方用它区分「未填」与「已填」，**不是**准入条件 */
   filled: boolean
-  /** 字段基数（`one`／`many`；只有 `select` 可能是 `many`） */
+  /** 字段基数（全 kind 轴；`select` 之外也可能是 `many`——多值不是 kind，是基数） */
   cardinality: Cardinality
   /**
-   * `select`（单值）：当前值指向的选项（**含软删**）。渲染方据此取图标与显示名；
+   * `select`（单值）：当前值指向的选项（**含墓碑**）。渲染方据此取图标与显示名；
    * 值缺失／值不是选项 id ⇒ 缺席。
    */
-  choice?: Block
+  choice?: PropChoice
   /**
-   * `select`（多值）：被选中的选项，**按选项兄弟序**（含软删/已隐藏——值还在就要显示）。
+   * `select`（多值）：被选中的选项，**按选项序**（含墓碑/已隐藏——值还在就要显示）。
    * 渲染方据此画多枚图标；空数组＝未填。
    */
-  picked?: Block[]
+  picked?: PropChoice[]
   /**
    * 画在块左侧的图标：`select`（单值）＝ 选项 `_icon` ?? 定义 `_icon`。
    * `checkbox` 不吃这一格——它的图形由勾选状态决定（方框／勾）。
@@ -1440,30 +1586,30 @@ export interface GutterField {
   use?: PropUse
 }
 
-/** 当前值指向的选项（含软删：值还在，显示不能丢）；不是选项 id ⇒ 缺席 */
-function choiceByValue(def: Block, value: unknown): Block | undefined {
+/** 当前值指向的选项（含墓碑：值还在，显示不能丢）；不是选项 id ⇒ 缺席 */
+function choiceByValue(def: Block, value: unknown): PropChoice | undefined {
   const id = singleValueOf(value)
   if (id === '') return undefined
-  return def.children.find((c) => c.id === id)
+  return allChoicesOf(def).find((c) => c.id === id)
 }
 
-/** 多值：按选项兄弟序取回被选中的选项（含软删/已隐藏，值还在就要显示） */
-function pickedChoicesOf(def: Block, value: unknown): Block[] {
+/** 多值：按选项序取回被选中的选项（含墓碑/已隐藏，值还在就要显示） */
+function pickedChoicesOf(def: Block, value: unknown): PropChoice[] {
   const ids = new Set(valueListOf(value))
   if (ids.size === 0) return []
-  return def.children.filter((c) => ids.has(c.id))
+  return allChoicesOf(def).filter((c) => ids.has(c.id))
 }
 
-/** 块左侧画哪个图标：选项自己的 `_icon` 优先，缺省退回定义块上的 `_icon` */
-function gutterIconOf(def: Block, choice: Block | undefined): string | undefined {
-  return (choice ? prop<string>(choice, ICON_PROP) : undefined) ?? prop<string>(def, ICON_PROP)
+/** 块左侧画哪个图标：选项自己的图标优先，缺省退回定义块上的 `_icon` */
+function gutterIconOf(def: Block, choice: PropChoice | undefined): string | undefined {
+  return choice?.icon ?? prop<string>(def, ICON_PROP)
 }
 
 /** 一行字段 → gutter 上的一件（两个派生入口共用，避免逐行/批量两种形状漂移） */
 function gutterFieldOf(
   row: { propId: string; def: Block; kind: PropKind; value: unknown; filled: boolean },
 ): GutterField {
-  const cardinality = row.kind === 'select' ? cardinalityOf(row.def) : 'one'
+  const cardinality = cardinalityOf(row.def)
   const many = cardinality === 'many'
   const choice = row.kind === 'select' && !many ? choiceByValue(row.def, row.value) : undefined
   const picked = row.kind === 'select' && many ? pickedChoicesOf(row.def, row.value) : undefined

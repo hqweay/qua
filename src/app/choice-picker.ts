@@ -8,7 +8,7 @@
  * 单选/多选不是两个菜单：行、图标、空态都一样，差别只有「选中后关不关」与
  * 「写回 string 还是 string[]」。这个差别由定义的 `_cardinality` 决定，不由调用方猜。
  */
-import { ICON_PROP, blockLabel, cardinalityOf, prop, type Block } from '../core/index.ts'
+import { ICON_PROP, cardinalityOf, choicesOf, prop, type Block, type PropChoice } from '../core/index.ts'
 import { t } from '../core/infra/msg.ts'
 import type { Layers, Row } from '../ui/overlay/layers.ts'
 
@@ -16,17 +16,17 @@ export interface ChoicePickerOpts {
   layers: Layers
   /** 属性定义块（`_cardinality` 从这里读，调用方不再传「是不是多选」） */
   def: Block
-  /** 这个块此刻能选的选项（已按作用域过滤，兄弟序） */
-  choices: readonly Block[]
+  /** 这个块此刻能选的选项（已按作用域过滤，记录序） */
+  choices: readonly PropChoice[]
   /** 单选：当前选项 id；多选：当前选项 id 列表 */
   current: string | readonly string[]
   /** 锚点（缺省 ⇒ 菜单自己找落点，与命令面板同一条兜底） */
   anchor?: DOMRect | null
   /** 这次打开的触发元素（点的那颗图标／按钮）；给了它，同一颗再点一次＝收起 */
   trigger?: HTMLElement
-  /** 选项显示名（同名选项带作用域；缺省只用正文） */
-  labelOf?: (choice: Block) => string
-  /** 选中后写回：单选给 string，多选给 string[]（顺序＝选项兄弟序） */
+  /** 选项显示名（同名选项带作用域；缺省只用记录里的 label） */
+  labelOf?: (choice: PropChoice) => string
+  /** 选中后写回：单选给 string，多选给 string[]（顺序＝选项序） */
   onPick: (next: string | string[]) => void
   title?: string
 }
@@ -34,11 +34,10 @@ export interface ChoicePickerOpts {
 /** 打开取值菜单；多选时保持打开，每点一行写一次（每次一次撤销） */
 export function openChoicePicker(o: ChoicePickerOpts): void {
   const multi = cardinalityOf(o.def) === 'many'
-  // 呈现摘要 ＋ 唯一兜底：选项块没有自己的字（图片行）也读得出文件名，不露裸 id
-  const labelOf = o.labelOf ?? ((c: Block) => blockLabel(c))
-  const iconOf = (c: Block): string | undefined =>
-    prop<string>(c, ICON_PROP) ?? prop<string>(o.def, ICON_PROP)
-  const known = new Set(o.def.children.map((c) => c.id))
+  // 呈现摘要：记录自带 label（遗留选项块的投影也带），不露裸 id
+  const labelOf = o.labelOf ?? ((c: PropChoice) => c.label)
+  const iconOf = (c: PropChoice): string | undefined => c.icon ?? prop<string>(o.def, ICON_PROP)
+  const known = new Set(choicesOf(o.def).map((c) => c.id))
   const selected = new Set<string>(
     multi
       ? Array.isArray(o.current)
@@ -83,11 +82,13 @@ export function openChoicePicker(o: ChoicePickerOpts): void {
       if (selected.has(id)) selected.delete(id)
       else selected.add(id)
       /**
-       * 写回的顺序＝**选项兄弟序**（不是勾选顺序）：多值是一个集合，
+       * 写回的顺序＝**选项序**（不是勾选顺序）：多值是一个集合，
        * 顺序再承载语义就得维护第二份 order，而选项的顺序已经有一份了。
-       * 不在定义里的旧值（另一个库/已 purge）原样留在末尾，不静默丢。
+       * 不在定义里的旧值（遗留块/另一个库/已 purge）原样留在末尾，不静默丢。
        */
-      const next = o.def.children.filter((c) => selected.has(c.id)).map((c) => c.id)
+      const next = choicesOf(o.def)
+        .filter((c) => selected.has(c.id))
+        .map((c) => c.id)
       for (const x of selected) if (!known.has(x)) next.push(x)
       o.onPick(next)
       o.layers.setRows(rows())

@@ -5,15 +5,16 @@ import {
   CARDINALITY_PROP,
   CHECK_PROP,
   CHILD_PROPS_PROP,
-  CHOICE_SCOPE_PROP,
-  ICON_PROP,
   UI_POSITION_PROP,
   USE_PROP,
+  allChoicesOf,
+  allowsMany,
   cardinalityOf,
   checkOf,
   childDisplayProps,
   flatten,
   hasList,
+  isCurrentPropKind,
   parseCheckSpec,
   useOf,
   valueListOf,
@@ -23,21 +24,21 @@ import {
   declareOwnProp,
   declaredFieldIds,
   displayNameOf,
-  mkBlock,
   membersOf,
   mkPropDef,
+  newChoiceId,
   normalizeAlias,
   parseChoiceScope,
+  patchChoice,
   propKindOf,
   propLabel,
+  setChoices,
   setValue,
   undeclareField,
-  writeBlockContent,
   type Block,
   type Cardinality,
   type UiPosition,
 } from '../../core/index.ts'
-import { textRuns } from '../../core/model/runs.ts'
 import { t } from '../../core/infra/msg.ts'
 import type { App, PropCreateMode, PropTarget } from '../../core/infra/ports.ts'
 import type { PropsDeps } from './types.ts'
@@ -61,6 +62,7 @@ export function propsCommands(
   | 'setUiPosition'
   | 'setChildProps'
   | 'deleteChoice'
+  | 'restoreChoice'
 > {
   const find = (id: string): Block | undefined => d.kb.get(id)
 
@@ -88,6 +90,17 @@ export function propsCommands(
     }
     d.write(blockId, () => declareOwnProp(b, propId))
   }
+
+  /**
+   * 选项 id → 宿主定义块。
+   *
+   * **记录不在森林里**，没有 `store.find` 可走，而端口签名只给 `choiceId`
+   * （面板/编辑器手里只有「我改的是哪一条」）。反查走命名库读 `kb.propDefs()`
+   * ——定义数量级、且不在打字路径上，可以接受。
+   * 返回 undefined ＝ 这条记录真没了（另一个库／定义被删）：命令静默 no-op。
+   */
+  const defOfChoice = (choiceId: string): Block | undefined =>
+    d.kb.propDefs().find((def) => allChoicesOf(def).some((c) => c.id === choiceId))
 
   return {
     setPropValue: (blockId, propId, value) => {
@@ -137,7 +150,7 @@ export function propsCommands(
           .join('、')
         d.toast(t('ui.props.reused', { source: from === '' ? t('ui.props.own') : from }), 'info')
       } else {
-        const def = mkPropDef(name, k === 'text' || k === 'number' || k === 'date' || k === 'checkbox' || k === 'select' || k === 'ref' || k === 'url' ? k : 'text')
+        const def = mkPropDef(name, isCurrentPropKind(k) ? k : 'text')
         propId = def.id
         // 定义块与「挂到这一块」是**同一笔**：拆开就会留下「定义有了、没人用它」的半批。
         // 定义住**森林顶层**（不被任何标签子树带走）；结构写经 `tx.insert` 产 op，
@@ -169,10 +182,10 @@ export function propsCommands(
     /* ---------------------------------------------------------- 选项 */
 
     /**
-     * 加一个选项 ＝ 在定义块下插一个**普通子块**。
+     * 加一个选项 ＝ 往定义块的 `_choices` 追加一条记录。
      *
-     * 没有 `_choiceOf`：父块是定义就是选项。值与顺序都不在这条路径上
-     * （值是块上的 id、顺序是兄弟序），所以这里只做一次插入。
+     * 值与顺序都不在这条路径上（值是块上的记录 id、顺序是数组序），
+     * 所以这里只做一次属性写 —— **不再插子块**。
      */
     addChoice: (defId, label, scope) => {
       const name = label.trim()
@@ -185,72 +198,92 @@ export function propsCommands(
       const parsed = scope === undefined ? { mode: 'all' as const } : parseChoiceScope(scope)
       // 形状不认识 ⇒ 不写：宁可保留上一个合法作用域，也不落一格读不回来的值
       if (!parsed) return ''
-      const choice = mkBlock(name, parsed.mode === 'all' ? {} : { props: { [CHOICE_SCOPE_PROP]: parsed } })
-      d.run((tx) => tx.insert(choice, defId, def.children.length))
-      return choice.id
+      const id = newChoiceId()
+      d.run((tx) =>
+        tx.patch(defId, (b) =>
+          setChoices(b, [
+            ...allChoicesOf(b),
+            { id, label: name, ...(parsed.mode === 'all' ? {} : { scope: parsed }) },
+          ]),
+        ),
+      )
+      return id
     },
 
-    /** 改选项名：正文就是名字，值存的是 id ⇒ **零值迁移** */
+    /** 改选项名：名字就是记录里的 `label`，值存的是 id ⇒ **零值迁移** */
     setChoiceLabel: (choiceId, label) => {
       const name = label.trim()
       if (name === '') return
-      const choice = find(choiceId)
-      if (!choice) return
+      const def = defOfChoice(choiceId)
+      if (!def) return
       d.run((tx) =>
-        tx.patch(choiceId, (b) => {
-          writeBlockContent(b, textRuns(name))
-          b.modified = Date.now()
-        }),
+        tx.patch(def.id, (b) => setChoices(b, patchChoice(allChoicesOf(b), choiceId, (c) => ({ ...c, label: name })))),
       )
     },
 
     /**
-     * 重排选项：`beforeId` 之前的那个位置就是**最终**下标。
+     * 重排选项：`beforeId` **之前**的那个位置就是最终下标。
      *
-     * `tx.move` 的 `index` 是「摘掉之后再插的位置」，所以目标在当前位置之后时要减一
-     * （否则同一个动作会多走一格 —— 而且只在「往下移」的方向上错）。
+     * 数组重排＝先把这一条摘出来，再插到目标之前（目标在它后面时，摘出后下标自然前移）。
+     * `beforeId` 为空 ⇒ 末尾。
      */
     moveChoice: (defId, choiceId, beforeId) => {
       const def = find(defId)
       if (!def) return
-      const from = def.children.findIndex((c) => c.id === choiceId)
+      const list = allChoicesOf(def)
+      const from = list.findIndex((c) => c.id === choiceId)
       if (from < 0) return
-      const before = beforeId === '' ? -1 : def.children.findIndex((c) => c.id === beforeId)
-      if (before === from) return
-      const index = before < 0 ? def.children.length - 1 : before > from ? before - 1 : before
-      d.run((tx) => tx.move(choiceId, defId, index))
+      if (choiceId === beforeId) return
+      const moved = list[from]!
+      const rest = list.filter((c) => c.id !== choiceId)
+      const before = beforeId === '' ? -1 : rest.findIndex((c) => c.id === beforeId)
+      const index = before < 0 ? rest.length : before
+      const next = [...rest.slice(0, index), moved, ...rest.slice(index)]
+      d.run((tx) => tx.patch(defId, (b) => setChoices(b, next)))
     },
 
     /** 写选项的可见范围（三态；形状不认识就不写，别落一格读不回来的值） */
     setChoiceScope: (choiceId, scope) => {
-      const choice = find(choiceId)
-      if (!choice) return
+      const def = defOfChoice(choiceId)
+      if (!def) return
       const parsed = parseChoiceScope(scope)
       if (!parsed) {
         d.toast(t('ui.props.choice.scopeInvalid'), 'warn')
         return
       }
-      // 显式改回全局时连槽一起摘掉：`{mode:'all'}` 与「没有这一格」是同一个答案，
-      // 留一个空壳只会让快照比较多出一处噪声
       d.run((tx) =>
-        tx.patch(choiceId, (b) => {
-          if (parsed.mode === 'all') {
-            const props = { ...(b.props ?? {}) }
-            delete props[CHOICE_SCOPE_PROP]
-            if (Object.keys(props).length === 0) delete b.props
-            else b.props = props
-          } else {
-            b.props = { ...(b.props ?? {}), [CHOICE_SCOPE_PROP]: parsed }
-          }
-        }),
+        tx.patch(def.id, (b) =>
+          setChoices(
+            b,
+            patchChoice(allChoicesOf(b), choiceId, (c) => {
+              // 显式改回全局时连字段一起摘掉：`{mode:'all'}` 与「没有这一格」是同一个答案
+              if (parsed.mode === 'all') {
+                const { scope: _drop, ...rest } = c
+                return rest
+              }
+              return { ...c, scope: parsed }
+            }),
+          ),
+        ),
       )
     },
 
-    /** 写选项图标：空串 ＝ 摘掉这一格（无图标） */
+    /** 写选项图标：空串 ＝ 摘掉这一格（无图标，回落定义块的图标） */
     setChoiceIcon: (choiceId, icon) => {
-      if (!find(choiceId)) return
+      const def = defOfChoice(choiceId)
+      if (!def) return
       const value = icon.trim()
-      d.run((tx) => tx.patch(choiceId, (b) => patchProp(b, ICON_PROP, value === '' ? undefined : value)))
+      d.run((tx) =>
+        tx.patch(def.id, (b) =>
+          setChoices(
+            b,
+            patchChoice(allChoicesOf(b), choiceId, (c) => {
+              const { icon: _drop, ...rest } = c
+              return value === '' ? rest : { ...rest, icon: value }
+            }),
+          ),
+        ),
+      )
     },
 
     /**
@@ -306,7 +339,14 @@ export function propsCommands(
      */
     setChoiceCardinality: (defId, cardinality: Cardinality) => {
       const def = find(defId)
-      if (!def || propKindOf(def) !== 'select') return
+      if (!def) return
+      const kind = propKindOf(def)
+      // 基数轴已从 select 推广到全 kind，但**允许集按 kind 收**：
+      // date 先只 one、checkbox 永不 many —— 注册表 `many` 是唯一判据
+      if (cardinality === 'many' && !allowsMany(kind)) {
+        d.toast(t('ui.props.cardinality.notAllowed', { kind: t(`ui.props.kind.${kind}`) }), 'warn')
+        return
+      }
       // 多值不能是勾选框/任务状态：先摘掉映射，别留下一个读出来无效的 `_check`
       if (cardinality === 'many' && checkOf(def) !== undefined) {
         d.toast(t('ui.props.choice.checkMultiBlocked'), 'warn')
@@ -355,14 +395,37 @@ export function propsCommands(
     },
 
     /**
-     * 删一个选项 ＝ **普通软删**。
+     * 删一个选项 ＝ **给记录立墓碑**。
      *
-     * 值一个字节都不动：恢复选项后，所有还指着它的块自动解析回来。
-     * 清值是不可逆的第二个动作，不该藏在「删选项」里。
+     * 值一个字节都不动：记录仍在数组原位、仍读得出名字，控件显示「已删除」。
+     * 恢复选项＝撤掉墓碑（入口随选项编辑器排轮）；清值是不可逆的第二个动作，
+     * 不该藏在「删选项」里 —— 同类工具的数据库版「删选项连值一起删」正是这条的反面。
      */
     deleteChoice: (choiceId) => {
-      if (!find(choiceId)) return
-      d.run((tx) => tx.remove(choiceId))
+      const def = defOfChoice(choiceId)
+      if (!def) return
+      d.run((tx) =>
+        tx.patch(def.id, (b) =>
+          setChoices(b, patchChoice(allChoicesOf(b), choiceId, (c) => ({ ...c, deleted: true as const }))),
+        ),
+      )
+    },
+
+    /** 撤墓碑：记录回到候选，所有还指着它的块当场解析回旧名（值一个字节不动） */
+    restoreChoice: (choiceId) => {
+      const def = defOfChoice(choiceId)
+      if (!def) return
+      d.run((tx) =>
+        tx.patch(def.id, (b) =>
+          setChoices(
+            b,
+            patchChoice(allChoicesOf(b), choiceId, (c) => {
+              const { deleted: _drop, ...rest } = c
+              return rest
+            }),
+          ),
+        ),
+      )
     },
   }
 }

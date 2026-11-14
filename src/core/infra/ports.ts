@@ -320,8 +320,8 @@ export interface App {
   addProp(blockId: string, propId: string, target: PropTarget): void
   /** 解除声明（**定义块与成员块上的值都不动**） */
   undeclareProp(blockId: string, propId: string): void
-  /* 选项（`select`）：选项＝定义块的直接子块，值＝选项块 id */
-  /** 给定义加一个选项；返回新选项块的 id（空串＝没写）。`scope` 缺省全局 */
+  /* 选项（`select`）：选项＝定义块 `_choices` 里的记录（不进森林），值＝记录 id */
+  /** 给定义加一条选项记录；返回新记录的 id（空串＝没写）。`scope` 缺省全局 */
   addChoice(defId: string, label: string, scope?: ChoiceScope): string
   /** 改选项名（**零值迁移**：值存的是 id） */
   setChoiceLabel(choiceId: string, label: string): void
@@ -339,7 +339,7 @@ export interface App {
    */
   setChoiceCheck(defId: string, spec: { on: string; off: string; status: boolean } | null): void
   /**
-   * 切换单值/多值（只对 `select`）。
+   * 切换单值/多值（全 kind 轴；允许集按 kind 收，见 `PROP_KIND_SPECS`）。
    *
    * 切回 `one` 时若仍有块选了多个值 ⇒ **拒绝**并给一句提示，不静默只显示第一个。
    */
@@ -357,8 +357,10 @@ export interface App {
    * 浮层归装配层（命令 handler 不碰 DOM，与 showRefPicker 同一条理由）。
    */
   showChildPropsPicker(blockId: string): void
-  /** 删一个选项（**普通软删**：值保留，恢复后自动解析回来） */
+  /** 删一条选项 ＝ **立墓碑**（值保留、旧名仍显示；恢复走 `restoreChoice`） */
   deleteChoice(choiceId: string): void
+  /** 撤掉墓碑：选项回到候选，指向它的值自动解析回来 */
+  restoreChoice(choiceId: string): void
   /* 归属边（属于／包含；一条边存在子块的 `_belongsTo`，任何块都能配） */
   addBelongsTo(childId: string, parentId: string): boolean
   removeBelongsTo(childId: string, parentId: string): void

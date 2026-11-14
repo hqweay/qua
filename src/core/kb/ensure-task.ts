@@ -1,12 +1,12 @@
 /**
- * 「任务状态」词汇的**事务内**按需物化：定义块 ＋ 选项（与 `ensureTagInTx` 同一条纪律）。
+ * 「任务状态」词汇的**事务内**按需物化：定义块 ＋ 选项记录（与 `ensureTagInTx` 同一条纪律）。
  *
- * 为什么需要它：任务状态值认的是**选项块 id**，而属性面板按 propId 找定义块才能
+ * 为什么需要它：任务状态值认的是**选项记录 id**，而属性面板按 propId 找定义块才能
  * 画出一行。定义块只在满态种子里物化——库被清空过（恢复空库只留日记）、或定义块
  * 本身被清掉的库里没有它；这时往块上落一个待办值，面板只剩「未知属性」，
  * 方框、看板、种子查询也都认不出这个值。
  *
- * 选项**补齐不重排**：定义块在但值域缺某个选项（老库只有三个选项）⇒ 把缺的
+ * 选项**补齐不重排**：定义块在但值域缺某个选项（老库只有三项）⇒ 把缺的
  * 追加到末尾，已有的一个字节不动——用户可能改过选项名或顺序，补齐只负责
  * 「值域里得有这一格」，不负责「长成什么样」。
  *
@@ -14,8 +14,8 @@
  * 信息，树操作会把住在子树里的定义当货物搬走。
  *
  * ⚠️ 每一笔写都经 `tx`：直接改活块不进 op，落盘会得到「值落了、定义没建」的半批。
- * ⚠️ 判存在要**含软删**：定义块与选项都按确定性 id 取身份，软删的那份还在树上，
- *    再插一份同 id 的就是两块同 id——宁可不插不补（那一行退回「未知属性」的旧样子），
+ * ⚠️ 判存在要**含软删**：定义块按确定性 id 取身份，软删的那份还在树上，
+ *    再插一份同 id 的就是两块同 id——宁可不插（那一行退回「未知属性」的旧样子），
  *    不造出第二个身份。恢复进回收站里的定义块是回收站路径的事。
  */
 import { walkForest } from '../model/walk.ts'
@@ -27,7 +27,9 @@ import {
   TASK_STATUS_PROP_ID,
   TASK_STATUS_TODO_ID,
   USE_PROP,
+  allChoicesOf,
   checkOf,
+  setChoices,
   useOf,
 } from '../props/props.ts'
 import { taskStatusChoices, taskStatusVocabulary } from '../fixtures/task-vocabulary.ts'
@@ -73,11 +75,19 @@ export function ensureTaskStatusInTx(forest: readonly Block[], tx: Tx): void {
       }
     })
   }
-  const have = new Set(def.children.map((c) => c.id))
+  /**
+   * 值域补齐：`_choices` 里没有的那几条追加到末尾。
+   *
+   * ⚠️ 旧桌面库里选项**还是子块**（`def.children`），`_choices` 为空 ⇒ 这里会把
+   *    四条记录补一遍。它们与旧块同 id 不同载体：记录只在「能选什么」里生效，
+   *    旧值（指向旧块 id）照样由读路径的块兜底解析。这是补齐，不是迁移。
+   */
+  const have = new Set(allChoicesOf(def).map((c) => c.id))
   const wanted = new Map(taskStatusChoices().map((c) => [c.id, c]))
-  for (const id of TASK_STATUS_CHOICE_IDS) {
-    if (have.has(id)) continue
-    const choice = wanted.get(id)
-    if (choice) tx.insert(choice, def.id, def.children.length)
-  }
+  const missing = TASK_STATUS_CHOICE_IDS.filter((id) => !have.has(id))
+    .map((id) => wanted.get(id))
+    .filter((c): c is NonNullable<typeof c> => c !== undefined)
+  if (missing.length === 0) return
+  tx.patch(def.id, (b) => setChoices(b, [...allChoicesOf(b), ...missing]))
 }
+

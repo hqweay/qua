@@ -187,14 +187,28 @@ export type SystemPropId =
   | typeof DEFAULT_FILTER_PROP
   // 露面指针（见 `core/embed.ts`）：同一块在别处再出现一次
   | '_embed'
-  // 字段定义（prop-def）：kind / 声明列表 / 选项的可见范围
+  // 字段定义（prop-def）：kind / 格式 / 声明列表 / 选项记录域
   | '_kind'
+  /**
+   * 字段的**格式**（见 `core/props.ts` 的 `formatOf`）：同值形状内的约束与渲染增强。
+   *
+   * 格式不是 kind：`url`／`email`／`phone` 都是 `text` 的格式，`datetime` 是 `date` 的，
+   * `image` 是 `asset` 的。它只影响校验与画法，不改存储形状。
+   */
+  | '_format'
   | '_fieldDefs'
   /**
-   * 一个**选项块**的可见范围（见 `core/props.ts` 的 `choiceScopeOf`）。
+   * **选项记录域**（见 `core/props/choices.ts`）：`select` 的值域是一组记录，
+   * 存在定义块的这一格里，**不进森林**；数组序＝选项序。
    *
-   * 选项是定义块的直接子块，所以「它是选项」由位置回答；这一格只回答
-   * 「哪些标签的成员看得到它」。三态一个表达式，不做「按标签分槽的值」。
+   * 值侧 `props[propId]` 仍存记录 id —— 不透明引用，值不知道它指向记录还是块。
+   */
+  | '_choices'
+  /**
+   * ⚠️ **旧形状的残留**：选项还是块时，可见范围住在这里（选项块上）。
+   *
+   * 新形状把它挪进记录字段（`PropChoice.scope`）；这一格只为**桌面真机遗留库**
+   * 的旧选项子块保留读兼容（`legacyChoiceOf`），不再写入。
    */
   | '_choiceScope'
   /**
@@ -214,8 +228,9 @@ export type SystemPropId =
   /**
    * 字段定义的**基数**（见 `core/props.ts` 的 `cardinalityOf`）：`one`（缺省）／`many`。
    *
-   * 多值只对 `select` 有意义：值是一个选项 id 数组，顺序按选项兄弟序。
-   * 它是**值形态**，不是新的 kind——单选/多选共用同一套选项与同一份值域。
+   * 它是**值形态轴**，不是新的 kind。允许集按 kind 收
+   * （`PROP_KIND_SPECS[kind].many`）：text/number/select/ref/asset 可多值，
+   * date 先只 one、checkbox 永不 many。
    */
   | '_cardinality'
   // 自有属性槽：这一块自己登记了哪些属性（见 `core/props.ts` 的 `ownPropIds`）

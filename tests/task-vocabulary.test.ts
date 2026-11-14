@@ -23,6 +23,7 @@ import {
   findPropDef,
   hasValue,
   mkPropDef,
+  setChoices,
   TASK_STATUS_ABANDONED_ID,
   TASK_STATUS_DONE_ID,
   TASK_STATUS_DOING_ID,
@@ -51,7 +52,12 @@ test('按需物化：空库里落了待办值 ⇒ 定义块补进顶层，行不
 
   const def = findPropDef(store.blocks, TASK_STATUS_PROP_ID)
   assert.ok(def, '落值之后定义块必须在')
-  assert.equal(def!.children.length, 4, 'select 的值域＝四个选项子块（待办/进行中/完成/放弃）')
+  assert.deepEqual(
+    choicesOf(def!).map((c) => c.id),
+    [TASK_STATUS_TODO_ID, TASK_STATUS_DOING_ID, TASK_STATUS_DONE_ID, TASK_STATUS_ABANDONED_ID],
+    'select 的值域＝四条选项记录（待办/进行中/完成/放弃）',
+  )
+  assert.equal(def!.children.length, 0, '选项不进森林：定义块没有子块')
   assert.equal(uiPositionOf(def!), 'block-left', '快捷入口仍画在块左侧（gutter 方框要能出现）')
 
   const rows = fieldRows(line, store.blocks)
@@ -115,8 +121,11 @@ test('词汇构造器：种子与按需物化共用同一份形状（确定性 i
     [TASK_STATUS_TODO_ID, TASK_STATUS_DOING_ID, TASK_STATUS_DONE_ID, TASK_STATUS_ABANDONED_ID],
   )
   assert.ok(hasValue(def, '_default'), '缺省槽在：声明了这一栏没填的块读侧就是「待办」')
-  // 选项块从 mkBlock 来，随机 id 的正常块不受影响：确认这里造的都是词汇 id
-  for (const c of choicesOf(def)) assert.equal(c.children.length, 0)
+  // 记录只有形状字段（没有块身份）：label ＋ icon，且都不进森林
+  for (const c of choicesOf(def)) {
+    assert.equal(typeof c.label, 'string')
+    assert.equal(c.icon?.startsWith('lucide:'), true)
+  }
   assert.ok(mkBlock('普通块').id !== TASK_STATUS_TODO_ID)
 })
 
@@ -124,8 +133,8 @@ test('按需物化：选项补齐不重排 —— 老库的三选项定义块长
   const { ws } = blankWithTodo()
   // 造一个「老库」：定义块只有三个选项（补齐机制落地前的形状），名字也改过
   const old = taskStatusVocabulary()
-  old.children = old.children.slice(0, 3)
-  old.children[2]!.content = textRuns('改过的完成')
+  // 老库的形状：`_choices` 只有三条（补齐机制落地前），名字也改过
+  setChoices(old, choicesOf(old).slice(0, 3).map((c, i) => (i === 2 ? { ...c, label: '改过的完成' } : c)))
   ws.blocks.push(old)
 
   const store = new BlockStore(ws.blocks)
@@ -134,8 +143,10 @@ test('按需物化：选项补齐不重排 —— 老库的三选项定义块长
     ensureTaskStatusInTx(store.blocks, tx)
     return true
   })
-  // 一条 block.insert ＋ 一条 prop.set（新补的选项带 `_icon`；op 是按格发的）
-  assert.equal(r.ops.length, 2, '只补缺的那一格（选项块＋它的图标格）')
+  // `_choices` 是**一格**（整份数组写回）⇒ 一条 prop.set；值域变了顺带记改动时刻
+  // （时刻住在块上、值住在属性袋里 ⇒ 一条 upsert{modified}，与 `setValue` 同构）
+  assert.equal(r.ops.length, 2, '补值域＝一条 prop.set ＋ 一条时刻 upsert')
+  assert.equal(r.ops.filter((o) => o.e === 'prop').length, 1, '选项不按条发 op（整份数组是一格）')
 
   const def = findPropDef(store.blocks, TASK_STATUS_PROP_ID)!
   assert.deepEqual(
@@ -144,7 +155,7 @@ test('按需物化：选项补齐不重排 —— 老库的三选项定义块长
     '「放弃」追加到末尾，顺序不变',
   )
   // 改过的显示名还在：补齐只负责值域里有这一格，不负责长成什么样
-  assert.equal(plainText(choicesOf(def)[2]!.content), '改过的完成')
+  assert.equal(choicesOf(def)[2]!.label, '改过的完成')
 })
 
 test('清空值停在「待填」：给了缺省的定义，清空留栏不摘栏；取消待办才真摘', () => {

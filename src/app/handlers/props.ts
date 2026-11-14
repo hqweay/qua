@@ -55,7 +55,7 @@ export const PROPS_HANDLERS: Record<string, Handler> = {
     app.undeclareProp(blockId, propId)
     return true
   },
-  /* ---- 选项（select）：选项是定义块的直接子块，值存选项块 id ---- */
+  /* ---- 选项（select）：选项是定义块上的记录，值存记录 id ---- */
   'core.props/add-choice': (a, app) => {
     const defId = S(a.defId)
     const label = S(a.label)
@@ -131,6 +131,12 @@ export const PROPS_HANDLERS: Record<string, Handler> = {
     const choiceId = S(a.choiceId)
     if (!choiceId) return false
     app.deleteChoice(choiceId)
+    return true
+  },
+  'core.props/restore-choice': (a, app) => {
+    const choiceId = S(a.choiceId)
+    if (!choiceId) return false
+    app.restoreChoice(choiceId)
     return true
   },
 }

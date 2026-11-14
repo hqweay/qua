@@ -20,6 +20,7 @@ import {
   declaredFieldIds,
   declaredFields,
   CHECK_PROP,
+  choicesOf,
   DEFAULT_PROP,
   USE_PROP,
   checkOf,
@@ -38,6 +39,7 @@ import {
   ownPropIds,
   mkTagBlock,
   readField,
+  setChoices,
   TASK_STATUS_ABANDONED_ID,
   TASK_STATUS_DONE_ID,
   TASK_STATUS_DOING_ID,
@@ -260,17 +262,18 @@ test('种子库自带核心词汇：任务状态定义（顶层、归 gutter、s
   assert.equal(plainText(def!.content), '任务状态')
   assert.equal(def!.props?._kind, 'select')
   assert.equal(uiPositionOf(def), 'block-left')
-  // 选项＝定义块的直接子块，id 是核心词汇（代码按 id 认「完成」，不按显示名）
+  // 选项＝定义块上的记录（不进森林），id 是核心词汇（代码按 id 认「完成」，不按显示名）
   assert.deepEqual(
-    (def!.children ?? []).map((c) => c.id),
+    choicesOf(def!).map((c) => c.id),
     [TASK_STATUS_TODO_ID, TASK_STATUS_DOING_ID, TASK_STATUS_DONE_ID, TASK_STATUS_ABANDONED_ID],
   )
+  assert.equal(def!.children.length, 0, '选项不是块：定义块没有子块')
   assert.equal(def!.props?._default, TASK_STATUS_TODO_ID, '缺省读出「待办」：刚挂上的任务不用先点一格')
   // 语义（use）与显示（check）分开：任务状态唯一，勾选=完成、取消=待办
   assert.equal(def!.props?._use, 'status')
   assert.deepEqual(def!.props?._check, { on: TASK_STATUS_DONE_ID, off: TASK_STATUS_TODO_ID })
-  const done = def!.children.find((c) => c.id === TASK_STATUS_DONE_ID)
-  assert.equal(done?.props?._icon, 'lucide:circle-check', '每个值有自己的图标（非方框，读作状态）')
+  const done = choicesOf(def!).find((c) => c.id === TASK_STATUS_DONE_ID)
+  assert.equal(done?.icon, 'lucide:circle-check', '每个值有自己的图标（非方框，读作状态）')
 
   const task = ws.blocks.find((b) => hasList(b, 'tag') && plainText(b.content) === '任务')
   assert.ok(task, '标签块应在森林顶层')
@@ -358,10 +361,10 @@ test('gutter 派生：select 带当前选项的图标与完成档；未填退回
     { [UI_POSITION_PROP]: 'block-left', _icon: 'lucide:flag' },
     'p-prio',
   )
-  def.children = [
-    { ...mkBlock('高', { props: { _icon: 'lucide:arrow-up' } }), id: 'p-hi' },
-    { ...mkBlock('低', { props: { _icon: 'lucide:arrow-down' } }), id: 'p-lo' },
-  ]
+  setChoices(def, [
+    { id: 'p-hi', label: '高', icon: 'lucide:arrow-up' },
+    { id: 'p-lo', label: '低', icon: 'lucide:arrow-down' },
+  ])
   const host: Block = { id: 'h', text: '', children: [], props: { 'p-prio': 'p-hi' } }
   const f = gutterFieldsOf(host, [def, host])[0]!
   assert.equal(f.icon, 'lucide:arrow-up', '选项自己的图标优先')
@@ -382,11 +385,11 @@ test('多值 select：值读成数组、名字按兄弟序、被作用域隐藏�
     { _cardinality: 'many', [USE_PROP]: 'status', [CHECK_PROP]: { on: 'c1', off: 'c2' } },
     'p-multi',
   )
-  def.children = [
-    { ...mkBlock('甲'), id: 'c1' },
-    { ...mkBlock('乙'), id: 'c2' },
-    { ...mkBlock('丙', { props: { _choiceScope: { mode: 'only', tags: ['t1'] } } }), id: 'c3' },
-  ]
+  setChoices(def, [
+    { id: 'c1', label: '甲' },
+    { id: 'c2', label: '乙' },
+    { id: 'c3', label: '丙', scope: { mode: 'only', tags: ['t1'] } },
+  ])
   const host: Block = {
     id: 'h',
     content: textRuns('带多值'),
@@ -398,7 +401,7 @@ test('多值 select：值读成数组、名字按兄弟序、被作用域隐藏�
   const rows = fieldRows(host, [def, host])
   const row = rows.find((r) => r.propId === 'p-multi')!
   assert.equal(row.cardinality, 'many')
-  assert.deepEqual(row.currentChoiceLabels, ['甲', '丙'], '顺序＝选项兄弟序，不是勾选序')
+  assert.deepEqual(row.currentChoiceLabels, ['甲', '丙'], '顺序＝选项序，不是勾选序')
   assert.deepEqual(row.currentChoices?.map((c) => c.id), ['c1', 'c3'], '被作用域隐藏的值照常显示')
   assert.equal(checkOf(def), undefined, '多值不能有勾选框映射（读侧直接忽略）')
   assert.equal(todoOf(host, fieldTableOf([def, host])), undefined, '多值不是任务：status 映射在 many 上不生效')

@@ -35,6 +35,7 @@ import {
   mkQueryBlock,
   mkTagBlock,
   plainText,
+  setChoices,
   shiftISO,
   TASK_STATUS_ABANDONED_ID,
   TASK_STATUS_DONE_ID,
@@ -44,6 +45,7 @@ import {
   type Anno,
   type Block,
   type MountEntry,
+  type PropChoice,
 } from '../index.ts'
 import { ANNOTATES_PROP, NOTE_TYPE } from '../relations/annotates.ts'
 import { taskStatusVocabulary } from './task-vocabulary.ts'
@@ -446,7 +448,7 @@ export const SEED_TRAY_ID = derivedId('tray', 'seed/quick')
  * 演示用的属性与实例是种子内容，不是核心词汇。
  */
 function featureVocabulary(): { blocks: Block[]; tagId: string } {
-  // 选项块（select 的值域＝定义块的直接子块）：角色由位置派生，每个值带一枚图标
+  // 选项是**定义块上的记录**（`_choices`）：不进森林，数组序＝选项序
   const statusDef = mkPropDef(
     FEATURE_STATUS_LABEL,
     'select',
@@ -454,22 +456,23 @@ function featureVocabulary(): { blocks: Block[]; tagId: string } {
     { [DEFAULT_PROP]: FEATURE_STATUS_EXPLORING_ID },
     FEATURE_STATUS_PROP_ID,
   )
-  const choice = (label: string, id: string, icon: string): Block => ({
-    ...mkBlock(label, { props: { _icon: `lucide:${icon}` } }),
+  const choice = (label: string, id: string, icon: string): PropChoice => ({
     id,
+    label,
+    icon: `lucide:${icon}`,
   })
-  statusDef.children = [
+  setChoices(statusDef, [
     choice('探索中', FEATURE_STATUS_EXPLORING_ID, 'loader-circle'),
     choice('已落地', FEATURE_STATUS_SHIPPED_ID, 'circle-check'),
     choice('搁置', FEATURE_STATUS_SHELVED_ID, 'minus'),
-  ]
+  ])
   const dateDef = mkPropDef(FEATURE_DATE_LABEL, 'date', {}, FEATURE_DATE_PROP_ID)
   const tag = mkTagBlock(FEATURE_TAG_LABEL)
   tag.props = { ...(tag.props ?? {}), _icon: 'lucide:sliders-horizontal' }
   declareField(tag, FEATURE_STATUS_PROP_ID)
   declareField(tag, FEATURE_DATE_PROP_ID)
-  // 子块也要同一个固定时刻：漏一层就会得到「定义是 2026-10-27、它的选项是现在」
-  for (const b of [statusDef, dateDef, tag, ...statusDef.children]) {
+  // 同一个固定时刻：留 `Date.now()` 会让种子每次重开都跟别的内容差一年
+  for (const b of [statusDef, dateDef, tag]) {
     b.created = SEED_AT
     b.modified = SEED_AT
   }
@@ -590,7 +593,7 @@ function coreVocabulary(): { blocks: Block[]; featureTagId: string } {
   const feature = featureVocabulary()
   // 它们也是**种子内容**（会进库、会导出）⇒ 与其它种子同一个固定时刻：
   // 留 `Date.now()` 会让这些块每次 seed 都跟别的内容差一年，而它们本该是同一份快照。
-  for (const b of [taskStatus, task, ...taskStatus.children]) {
+  for (const b of [taskStatus, task]) {
     b.created = SEED_AT
     b.modified = SEED_AT
   }

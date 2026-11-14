@@ -321,7 +321,7 @@ export function makeCellEditor(
     for (const c of choices) {
       const o = document.createElement('option')
       o.value = c.id
-      o.textContent = row.def ? choiceDisplayLabel(c, row.def, tagName) : plainText(c.content).trim() || c.id.slice(-6)
+      o.textContent = row.def ? choiceDisplayLabel(c, row.def, tagName) : c.label.trim() || c.id.slice(-6)
       sel.appendChild(o)
     }
     /**
@@ -349,9 +349,7 @@ export function makeCellEditor(
      * 都塞一个虚线占位）。它读的是行派生里的选项块，与 gutter 同一个 `_icon`。
      */
     const currentChoice = choices.find((c) => c.id === current)
-    const icon =
-      (currentChoice ? prop<string>(currentChoice, ICON_PROP) : undefined) ??
-      (row.def ? prop<string>(row.def, ICON_PROP) : undefined)
+    const icon = currentChoice?.icon ?? (row.def ? prop<string>(row.def, ICON_PROP) : undefined)
     if (icon === undefined) return sel
     const wrap = document.createElement('span')
     wrap.className = 'prop-select'
