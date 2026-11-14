@@ -228,7 +228,7 @@ test('createPropRefTarget：建页落顶层 ＋ 写值同一笔；同名地址�
   assert.equal(valueOf(kb.get('host')!, defId), made, '值指向新块')
   const created = kb.get(made)
   assert.ok(created, '新块在库里')
-  assert.equal(kb.roots().at(-1)?.id, made, '落森林顶层末尾（135 口径）')
+  assert.equal(kb.roots().at(-1)?.id, made, '落森林顶层末尾（页块的落点）')
   assert.ok((created?.props?._lists as string[]).includes('page'), '物化的是页块（`@` 建页的转世）')
 
   const again = cmds.createPropRefTarget('host', defId, '张三')
