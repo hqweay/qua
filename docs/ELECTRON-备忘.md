@@ -255,8 +255,9 @@ FATAL:content/browser/gpu/gpu_data_manager_impl_private.cc:417] GPU process isn'
   CFBundleShortVersionString 0.1.0
   LSApplicationCategoryType  public.app-category.productivity
   ```
-- electron-builder 对非 ASCII 路径**没有出问题**（我们用的是 `target: dir`；
-  如果改成 `dmg`，`artifactName` 里出现中文要另行留意——**这条没测**）。
+- **产物名走 ASCII**：`artifactName` 是 `Qua-<版本>-<arch>.<ext>`——中文产物名
+  （`productName: 相`）在 Windows/NSIS 下没验证过，下载链用 ASCII 稳；
+  app 内显示名不受影响（仍是「相」）。
 - ⚠️ 唯一的坑是**目录名**：Electron 默认拿 `productName` 当 `userData` 目录名 ⇒
   会变成 `~/Library/Application Support/相/`（**中文路径**，脚本/日志/备份工具到处是坑）。
   所以 `main.ts` 在 `whenReady` 之前**显式**：
@@ -550,12 +551,16 @@ Qua/
   （`replay(op_log) == 装载出来的模型` 有真 SQLite 测试），但**不从日志重建整库**、
   没有 checkpoint；导出闸门未做。
 - **没做**：欢迎页／最近库管理（启动总会开一个库，没有库时自动建默认库）；同库第二窗。
-- **没做**：签名与公证（本地自用）；DMG 目标（只出了 `.app`，`target: dir`）。
+- **没做**：签名与公证（beta 明确不做，安装包右键→打开）。
+- **没验（Windows 首包）**：NSIS 安装器在真 Windows 上的安装/卸载与库根落「文档/Qua」；
+  WCO 安全区（`titleBarOverlay` 分支已写、CSS 只按 140px 预留，无真机）；
+  壳行为断言（`check:electron`）只在 macOS 上立着，Windows 的菜单/单实例/窗口行为没有自动化。
+  本地交叉构建出过 `Qua-*-x64.exe`（NSIS 无需 Windows 真机即可打包，但**打包成功 ≠ 运行正常**）。
 - **没做**：CSP（缺口见 4.4）；「编辑 → 撤销/重做」与 app 自己的 `⌘Z` 的冲突（见 1.2.1）；
   深色跟随系统（见 1.5）；`⌘A` 接管与自研查找（四件账①②）。
 - **没验**：真实**系统输入法**（拼音候选窗）的端到端；`⌘Q/⌘W/⌘H/⌘M` 的真实按键（TCC 挡住，见 4.6）；
   `prefers-color-scheme` 是否跟随系统（当前环境测不出，见 1.5）；
-  `dmg` 目标下中文 `artifactName` 是否有坑（见 2.3）；
+  `dmg`/`exe` 在 GitHub Release 附件侧的下载表现（中文文件名已绕开，ASCII 未验）；
   **在别的 macOS 版本/别的机器上首次打开**（Gatekeeper 拦截的实际表现）。
 - **存档（顺带发现，不属于本次范围）**：`localStorage` 的键是 `qua.workspace`（`src/core/infra/workspace.ts`），
   **改名时故意没动它**——换键等于把已有数据静默丢掉。它在 Chromium profile 里，位置：

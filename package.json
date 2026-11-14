@@ -33,7 +33,8 @@
     "gate:web": "node scripts/gate.mjs --no-electron",
     "gate:fast": "node scripts/gate.mjs --fast",
     "gate:queued": "node scripts/gate-queued.mjs",
-    "gate:bundle": "pnpm gate && pnpm check:bundle"
+    "gate:bundle": "pnpm gate && pnpm check:bundle",
+    "build:win": "pnpm build && pnpm build:electron && node scripts/build-win.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
@@ -79,7 +80,18 @@
       "gatekeeperAssess": false,
       "icon": "build/icon.icns"
     },
-    "artifactName": "${productName}-${version}-${arch}.${ext}"
+    "artifactName": "Qua-${version}-${arch}.${ext}",
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    }
   },
   "dependencies": {
     "jieba-wasm": "2.4.0",
