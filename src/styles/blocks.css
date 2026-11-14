@@ -1217,6 +1217,14 @@
   color: var(--ui-text);
   max-width: 24ch;
 }
+/* 值是引用：点得动才像引用（跳转由事件层接，这里只给可点的观感） */
+.blk-props-line .blk-prop-ref {
+  cursor: pointer;
+}
+.blk-props-line .blk-prop-ref:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 .blk-props-line .blk-prop-sep {
   color: var(--ui-text-secondary);
   user-select: none;

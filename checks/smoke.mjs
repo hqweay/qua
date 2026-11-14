@@ -29521,6 +29521,75 @@ await check('T309 ref 的候选域：_refTags 过滤候选、标题带约束；�
   return `定义页限 #演员 ⇒ 候选只剩成员（标题带「限」）；搜索「新人」新建并引用；约束外的值仍显示`
 })
 
+/**
+ * **块下属性行里的 `ref` 值是「露面」不是「标签」**。
+ *
+ * 判据：`data-ref-to` 是应用里「指向某块」的唯一判据（正文引用／行尾 chip／属性区的
+ * 标签名都用它）。块下那一段此前是纯文本 ⇒ 点了只会冒泡到整对按钮去开面板，
+ * 于是「引用打不开」。修法是让它带上同一条契约，全套手势由事件层接管：
+ * 这里的断言只证明「值带契约」＋「点它真的到了目标」，不重复验证 ⇧/⌘（那是同一个实现）。
+ *
+ * ⚠️ 反证也要钉：点**名字**仍然开面板（否则整行都变成导航，编辑入口就没了）。
+ */
+await check('T310 块下属性行的 ref 值可点跳转；点名字仍开属性面板', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  const ids = await page.evaluate(() => {
+    const host = window.__qua.blocks().find((b) => b.roles.length === 0 && b.text.length > 2)
+    const ed = window.__qua.__editor
+    const target = ed.insert.insertBlockAfter(host.id, '目标甲')
+    window.__qua.invoke('core.props/create-def', { blockId: host.id, label: '负责人', kind: 'ref', target: 'own' })
+    const def = window.__qua.propDefs().find((d) => d.label === '负责人')
+    window.__qua.invoke('core.props/set-value', { blockId: host.id, propId: def.id, value: target })
+    return { host: host.id, target, defId: def.id }
+  })
+  await page.waitForTimeout(450)
+
+  // ① 值带导航契约，且这一行里只有它一处
+  const line = await page.evaluate((host) => {
+    const row = document.querySelector(`.blk[data-block-id="${host}"] .blk-props-line`)
+    const val = row?.querySelector('.blk-prop-ref')
+    return {
+      hasLine: Boolean(row),
+      refTo: val?.dataset.refTo ?? '',
+      text: val?.textContent ?? '',
+      count: row?.querySelectorAll('[data-ref-to]').length ?? 0,
+    }
+  }, ids.host)
+  assert(line.hasLine, '块下应有属性行：' + JSON.stringify(line))
+  assert(line.refTo === ids.target, '值是「指向某块的露面」（data-ref-to）：' + JSON.stringify(line))
+  assert(line.count === 1, '一行里恰好一处露面（名字段不是引用）：' + JSON.stringify(line))
+  assert(line.text === '目标甲', '值文本仍是目标名：' + JSON.stringify(line))
+
+  // ② 点值 ⇒ 打开目标（引用第一职责），且不顺手把属性抽屉也开了
+  await page.click(`.blk[data-block-id="${ids.host}"] .blk-prop-ref`)
+  await page.waitForTimeout(400)
+  const opened = await page.evaluate((target) => ({
+    roots: (window.__qua.__editor.doc?.roots ?? []).map((b) => b.id),
+    drawer: Boolean(document.querySelector('.props-drawer')),
+  }), ids.target)
+  assert(opened.roots.includes(ids.target), `点值应打开目标块：${JSON.stringify(opened)}`)
+  assert(!opened.drawer, `点值不该同时开属性抽屉（两个命中区不许都响应）：${JSON.stringify(opened)}`)
+
+  // ③ 回到 host，点名字 ⇒ 开面板，且不跳走
+  await page.evaluate((host) => window.__qua.invoke('core.block/focus-block', { blockId: host }), ids.host)
+  await page.waitForTimeout(320)
+  await page.click(`.blk[data-block-id="${ids.host}"] .blk-prop-name`)
+  await page.waitForSelector('.props-drawer', { timeout: 4000 })
+  const inspected = await page.evaluate(({ host, target }) => ({
+    drawerTarget: document.querySelector('.props-drawer')?.dataset.targetBlockId ?? '',
+    roots: (window.__qua.__editor.doc?.roots ?? []).map((b) => b.id),
+    jumped: (window.__qua.__editor.doc?.roots ?? []).some((b) => b.id === target),
+  }), { host: ids.host, target: ids.target })
+  assert(inspected.drawerTarget === ids.host, `点名字应开这一块的属性面板：${JSON.stringify(inspected)}`)
+  assert(!inspected.jumped, `点名字不该导航走：${JSON.stringify(inspected)}`)
+
+  await ctx.close()
+  return `值带 data-ref-to ⇒ 点值到「目标甲」、不开抽屉；点名字开面板、不导航`
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

@@ -9,6 +9,10 @@
  * 常驻输入框会把「一行字」变成一排控件，还要处理焦点、IME、重排换掉正在输入的节点。
  * 面板里的值控件是现成的，点过去就落在那一栏上（`focusPropId`）。
  *
+ * ⚠️ **值是引用时，值那一段不是「标签」而是「露面」**：它带 `data-ref-to`，
+ *    于是「左键打开／⇧ 右槽／⌘ 新 tab／⌥ 详情」由事件层那一条分支接管
+ *    （判据与正文引用、行尾 chip 同一份）。本文件**不实现跳转**：第二份实现＝第二套语义。
+ *    整对按钮只兜住「点名字／点空白」那条老路（开面板）。
  * ⚠️ 值文本**只在这里格式化**：gutter 图标、表格列、面板各自有自己的画法，
  *    但「这一行写什么」只有这一份，免得同一块在四个面上给出四种说法。
  */
@@ -78,8 +82,23 @@ export function renderPropsLine(
     const value = document.createElement('span')
     value.className = 'blk-prop-value ui-ellipsis'
     value.textContent = fieldRowText(row, deps.refLabel)
+    /**
+     * **值是引用 ⇒ 值本身是一枚「指向某块的露面」**（`data-ref-to` 是应用里唯一的判据）。
+     *
+     * 这一行画在 `.blk` 里，也就在编辑器宿主内 ⇒ 事件层那一条分支把左键／⇧／⌘／⌥
+     * 全套接上，这里一个事件都不挂。此前它是一段纯文本：点了只会冒泡到整对按钮去开面板，
+     * 所以「引用打不开」。
+     */
+    if (row.kind === 'ref' && row.value !== undefined && row.value !== null && row.value !== '') {
+      value.dataset.refTo = String(row.value)
+      value.classList.add('blk-prop-ref')
+    }
     pair.append(name, value)
-    pair.addEventListener('click', () => deps.inspect(blockId, row.propId))
+    pair.addEventListener('click', (e) => {
+      // 值那一段是引用：点击归事件层（去目标块），整对按钮不抢这一下
+      if ((e.target as HTMLElement | null)?.closest('[data-ref-to]')) return
+      deps.inspect(blockId, row.propId)
+    })
     into.appendChild(pair)
   })
 

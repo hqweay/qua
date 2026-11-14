@@ -391,6 +391,7 @@ export const MSG = {
   // 附件（asset）：值可以是库内资产，也可以是一条外链——两态同一个 kind
   'ui.props.kind.asset': '附件',
   'ui.props.pickRef': '选择一个块',
+  'ui.props.refOpenHint': '点击更换目标；按住 ⇧ 或 ⌘ 点击打开它',
   'ui.props.refEmpty': '库里还没有别的块',
   // ref 的候选域（`_refTags` 软约束）：只过滤候选，已引用的块不受影响
   'ui.props.pickRefScoped': '选择一个块 · 限 {tags}',

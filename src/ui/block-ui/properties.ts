@@ -211,7 +211,7 @@ export type FieldRowDeps = Pick<PropertiesDeps, 'shortId' | 'setValue' | 'clearV
  * 全都可以缺省：表格格子里没有属性区那套依赖时，控件退化成只读/短 id 显示，
  * 而不是「点了报错」。
  */
-export type CellEditorDeps = Partial<Pick<FieldRowDeps, 'pickRef' | 'pickChoice' | 'refLabel' | 'tagName'>>
+export type CellEditorDeps = Partial<Pick<FieldRowDeps, 'pickRef' | 'pickChoice' | 'refLabel' | 'tagName' | 'openRef'>>
 
 export interface PropertiesEls {
   /** 卡片本身：`hidden` 与否表达「有没有主体」 */
@@ -297,6 +297,11 @@ export function makeCellEditor(
    *
    * ⚠️ **不提供手打 id 的输入框**：32 位 hex 没人记得住，让它可编辑等于让人拼手速。
    *    值的形状仍然是「一个块 id」（模型层不变），只是入口换成了选择器。
+   *
+   * **带修饰键 ⇒ 去那个块**（不带＝换目标）。这一支与正文引用同一份语义：
+   * `openRef` 把 mods 原样交给 `openActionOf`（⇧ 右槽／⌘ 新 tab／⌥ 详情），
+   * 这里不发明第二套「哪个键去哪儿」。编辑面（面板／表格）的主动作仍是换值——
+   * 阅读面（块下行）反过来：点值就跳，见 `props-line.ts`。
    */
   if (kind === 'ref' && deps?.pickRef && owner) {
     const pick = deps.pickRef
@@ -305,8 +310,14 @@ export function makeCellEditor(
     btn.type = 'button'
     btn.className = 'prop-input prop-ref'
     btn.dataset.refId = current
+    btn.dataset.tip = current === '' ? t('ui.props.pickRef') : t('ui.props.refOpenHint')
     btn.textContent = current === '' ? t('ui.props.pending') : (deps.refLabel?.(current) ?? current)
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', (e) => {
+      const mods = clickModsOf(e)
+      if (current !== '' && deps.openRef && (mods.altKey || mods.metaKey || mods.shiftKey || mods.ctrlKey)) {
+        deps.openRef(current, mods)
+        return
+      }
       pick(owner, row.propId, current, (targetId) => send(targetId === '' ? undefined : targetId), btn.getBoundingClientRect(), btn)
     })
     return btn
