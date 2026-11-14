@@ -147,13 +147,13 @@ const openFirstPage = (page) =>
   page.evaluate(() => window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[0].id }))
 
 /**
- * 打开种子里那个查询块（`产品设计` 页里的 `_query`），返回它的 id。
+ * 打开种子里那个查询块（`欢迎使用相` 页里的 `_query`），返回它的 id。
  *
  * 条件树的用例都从「一个真的查询块」出发：空壳 DOM 测不出 `$self`／冻结／撤销这些装配。
  */
 const openSeedQuery = async (page) => {
   const qid = await page.evaluate(() => {
-    const p = window.__qua.pages().find((x) => x.title.includes('产品设计'))
+    const p = window.__qua.pages().find((x) => x.title.includes('欢迎使用相'))
     window.__qua.invoke('core.page/open', { pageId: p.id })
     let found = ''
     const walk = (list) => {
@@ -1013,7 +1013,7 @@ await check('T5b 行内资产：真图按内容地址画出来（naturalWidth > 
   const { ctx, page, errors } = await freshPage(browser, base)
   // 打开含样本资产的页
   await page.evaluate(() => {
-    const p = window.__qua.pages().find((x) => x.title.includes('输入面笔记')) ?? window.__qua.pages()[1]
+    const p = window.__qua.pages().find((x) => x.title.includes('写作示范')) ?? window.__qua.pages()[1]
     window.__qua.invoke('core.page/open', { pageId: p.id })
   })
   await page.waitForTimeout(500)
@@ -1063,7 +1063,7 @@ await check('T5b 行内资产：真图按内容地址画出来（naturalWidth > 
 await check('T5c 行内资产：字节到达才画出图（首帧是占位，第二帧换成真图，不重排整页）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => {
-    const p = window.__qua.pages().find((x) => x.title.includes('输入面笔记')) ?? window.__qua.pages()[1]
+    const p = window.__qua.pages().find((x) => x.title.includes('写作示范')) ?? window.__qua.pages()[1]
     window.__qua.invoke('core.page/open', { pageId: p.id })
   })
   /**
@@ -1089,7 +1089,7 @@ await check('T5c 行内资产：字节到达才画出图（首帧是占位，第
 await check('T5d 行内资产：DOM 里有、模型里没有时按 kind 还原成资产 run（不是悬空引用）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => {
-    const p = window.__qua.pages().find((x) => x.title.includes('输入面笔记')) ?? window.__qua.pages()[1]
+    const p = window.__qua.pages().find((x) => x.title.includes('写作示范')) ?? window.__qua.pages()[1]
     window.__qua.invoke('core.page/open', { pageId: p.id })
   })
   await page.waitForTimeout(300)
@@ -1117,7 +1117,7 @@ await check('T5d 行内资产：DOM 里有、模型里没有时按 kind 还原�
 await check('T5e 行内资产：左键开 lightbox（点图不关、Esc 关），⌥ 看详情，缺失不开空 lightbox', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => {
-    const p = window.__qua.pages().find((x) => x.title.includes('输入面笔记')) ?? window.__qua.pages()[1]
+    const p = window.__qua.pages().find((x) => x.title.includes('写作示范')) ?? window.__qua.pages()[1]
     window.__qua.invoke('core.page/open', { pageId: p.id })
   })
   await page.waitForTimeout(400)
@@ -1971,7 +1971,7 @@ await check('T38 查询视图：冻结成员与顺序、内容按 id 实时、�
    * 它自己那一行下面 —— 与它在正文里子行时是同一种画法。
    */
   const qid = await page.evaluate(() => {
-    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
+    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('欢迎使用相'))
     window.__qua.invoke('core.page/open', { pageId: p.id })
     let found = ''
     // 值返回的先序遍历：先找到的那份查询块获胜，外层不许覆盖
@@ -2019,7 +2019,7 @@ await check('T38 查询视图：冻结成员与顺序、内容按 id 实时、�
       (e) => e.textContent ?? '',
     ),
   )
-  assert(firstCrumbs.includes('产品设计 · 决策日志'), `查询结果行应显示祖先链（面包屑）：${JSON.stringify(firstCrumbs)}`)
+  assert(firstCrumbs.includes('欢迎使用相'), `查询结果行应显示祖先链（面包屑）：${JSON.stringify(firstCrumbs)}`)
   /**
    * 查询结果与反链共用同一条手势：普通点＝就地展开上下文（中心不动），
    * 展开根行首的「收起上下文」逐层退回。
@@ -2048,7 +2048,7 @@ await check('T38 查询视图：冻结成员与顺序、内容按 id 实时、�
     let found = ''
     const walk = (list) => {
       for (const b of list) {
-        if (b.content.filter((r) => r.t === 'text').map((r) => r.v).join('').includes('引用某段')) {
+        if (b.content.filter((r) => r.t === 'text').map((r) => r.v).join('').includes('欢迎页改成自己的样子')) {
           found = b.id
           return
         }
@@ -2595,7 +2595,7 @@ await check('T195 查询在正文内联渲染：不打开就在原位出结果�
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const qid = await page.evaluate(() => {
-    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
+    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('欢迎使用相'))
     window.__qua.invoke('core.page/open', { pageId: p.id })
     let found = ''
     // 值返回的先序遍历：先找到的那份查询块获胜，外层不许覆盖
@@ -2796,7 +2796,7 @@ await check('T216 挂载栏本地查询：缺省大纲仍有抬头/条件 chip�
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const hostId = await page.evaluate(() => {
-    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
+    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('欢迎使用相'))
     window.__qua.invoke('core.page/open', { pageId: p.id })
     return p.id
   })
@@ -2886,7 +2886,7 @@ await check('T196 查询块在右槽窗口也画结果：同一台 ViewHost；�
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const qid = await page.evaluate(() => {
-    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
+    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('欢迎使用相'))
     window.__qua.invoke('core.page/open', { pageId: p.id })
     let found = ''
     // 值返回的先序遍历：先找到的那份查询块获胜，外层不许覆盖
@@ -3042,7 +3042,7 @@ await check('T197 露面的身体由源决定：查询块露面出结果；$self
 
   // ① 在源所在的页里露面它：身体是**投影** —— 有结果、有名字、只有一颗「看法」
   await page.evaluate((id) => {
-    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
+    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('欢迎使用相'))
     window.__qua.invoke('core.page/open', { pageId: p.id })
     const first = window.__qua.__editor.doc.roots[0]
     window.__qua.invoke('core.embed/insert', { blockId: first.id, targetId: id, view: 'mirror' })
@@ -3331,7 +3331,7 @@ await check('T197 露面的身体由源决定：查询块露面出结果；$self
   // ⑤ 同一个查询露面到**另一页**：$self 跟着放它的地方走
   await page.evaluate((id) => {
     // 种子 id 每次随机 ⇒ 按**页名**找，不写死 id
-    const p2 = window.__qua.pages().find((x) => (x.title ?? '') === '输入面笔记')
+    const p2 = window.__qua.pages().find((x) => (x.title ?? '') === '写作示范')
     window.__qua.invoke('core.page/open', { pageId: p2.id })
     const first = window.__qua.__editor.doc.roots[0]
     window.__qua.invoke('core.embed/insert', { blockId: first.id, targetId: id, view: 'mirror' })
@@ -3342,7 +3342,7 @@ await check('T197 露面的身体由源决定：查询块露面出结果；$self
 
   // ⑥ 回到源页：查询块自己的结果没变（锚点不跟露面走，是露面自己带上下文）
   await page.evaluate((id) => {
-    const p1 = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
+    const p1 = window.__qua.pages().find((x) => (x.title ?? '').includes('欢迎使用相'))
     window.__qua.invoke('core.page/open', { pageId: p1.id })
     window.__qua.__editor.reveal(id)
   }, qid)
@@ -3362,7 +3362,7 @@ await check('T238 查询块标题的行内编辑与普通块同档：划选加�
   await page.evaluate(() => window.__qua.quiet(true))
   const fx = await page.evaluate(() => {
     const q = window.__qua
-    const p = q.pages().find((x) => (x.title ?? '').includes('产品设计')) ?? q.pages()[0]
+    const p = q.pages().find((x) => (x.title ?? '').includes('欢迎使用相')) ?? q.pages()[0]
     q.invoke('core.page/open', { pageId: p.id })
     let qb = null
     const walk = (l) => {
@@ -3528,11 +3528,11 @@ await check('T238 查询块标题的行内编辑与普通块同档：划选加�
 
 await check('T39 显示名 = 主别名：改正文＝改描述；别名编辑器改主名 ⇒ chip 跟着变；删除 ⇒ dangling', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  // 打开「产品设计 · 决策日志」：seed 里那一页有指向别处的 `[[..]]`
+  // 打开「欢迎使用相」：seed 里那一页有指向别处的 `[[..]]`
   // ⚠️ 把它的 id 记下来，之后**全程按 id 导航**：改名之后按标题找它可能就找不到了。
   const homeId = await page.evaluate(() => {
-    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
-    if (!p) throw new Error(`前置：找不到「产品设计」页，现有 ${JSON.stringify(window.__qua.pages().map((x) => x.title))}`)
+    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('欢迎使用相'))
+    if (!p) throw new Error(`前置：找不到「欢迎使用相」页，现有 ${JSON.stringify(window.__qua.pages().map((x) => x.title))}`)
     window.__qua.invoke('core.page/open', { pageId: p.id })
     return p.id
   })
@@ -6302,7 +6302,7 @@ await check('T19 zoom in：进子树、面包屑可退回、顶层时面包屑�
   await new Promise((r) => setTimeout(r, 250))
   const zoomed = await st()
   assert(zoomed.trailShown, `zoom 后应出现面包屑：${JSON.stringify(zoomed)}`)
-  assert(zoomed.trail.length === 1 && zoomed.trail[0] === '产品设计 · 决策日志', `面包屑应是祖先链（不含自己）：${JSON.stringify(zoomed.trail)}`)
+  assert(zoomed.trail.length === 1 && zoomed.trail[0] === '欢迎使用相', `面包屑应是祖先链（不含自己）：${JSON.stringify(zoomed.trail)}`)
   assert(zoomed.here < top.here, `zoom 后应只剩子树：${top.here} → ${zoomed.here}`)
   assert(zoomed.firstRow === target.text.trim(), `被聚焦的块应是**正文第一行**（不是标题）：${JSON.stringify({ want: target.text.trim(), got: zoomed.firstRow })}`)
   // **关键不变量**：zoom 收窄 ed.doc，但库级锚点一条都不能掉（修的那条在这里也守着）
@@ -6416,7 +6416,7 @@ await check('T22 首行即当前对象：页块正文（描述）可编辑、在
     const el = document.querySelector('#editor .blk[data-depth="0"]')
     return { id: el.dataset.blockId, text: el.querySelector('.tx').textContent.trim() }
   })
-  assert(first.text === '产品设计 · 决策日志', `首行应是页块正文：${JSON.stringify(first)}`)
+  assert(first.text === '欢迎使用相', `首行应是页块正文：${JSON.stringify(first)}`)
 
   // ② 在首行末尾敲字 ⇒ 改的是**页块的描述**（`text`），不是页名（主别名）
   await page.evaluate((id) => window.__qua.focusBlock(id, 999), first.id)
@@ -6427,8 +6427,8 @@ await check('T22 首行即当前对象：页块正文（描述）可编辑、在
     return { text: b?.text ?? '', primary: b?.aliases?.[0] ?? '', title: p?.title ?? '(gone)' }
   }, first.id)
   assert(edited.text.endsWith('！'), `在首行敲字应改到页块的正文（描述）：${JSON.stringify(edited)}`)
-  assert(edited.primary === '产品设计 · 决策日志', `改正文不该改地址（主别名）：${JSON.stringify(edited)}`)
-  assert(edited.title === '产品设计 · 决策日志', `页列表标题应显示主名，不跟正文走：${JSON.stringify(edited)}`)
+  assert(edited.primary === '欢迎使用相', `改正文不该改地址（主别名）：${JSON.stringify(edited)}`)
+  assert(edited.title === '欢迎使用相', `页列表标题应显示主名，不跟正文走：${JSON.stringify(edited)}`)
   await page.keyboard.press('Backspace')
 
   // ③ 首行按 Enter：**不自环**（拆块的 children 转移会让「对象变成自己的子块」）
@@ -12464,13 +12464,13 @@ await check('T117 Shift+点反链 footer 的块标／面包屑 ⇒ 右槽窗口�
   assert(src, '当前页应有反链（footer 里有源块）')
   /**
    * 反链行要回答「这句话在哪」：来源块不是顶层时，行首给出祖先链（面包屑）。
-   * 第一页那条反链来自「输入面笔记」，正好是「祖先只有一层」的形态。
+   * 第一页那条反链来自「写作示范」，正好是「祖先只有一层」的形态。
    */
   const refCrumb = await page.evaluate((src) => {
     const cell = document.querySelector(`#editor .mount .blk[data-block-id="${src}"] > .blk-context .blk-context-cell`)
     return cell ? { text: cell.textContent ?? '', id: cell.dataset.crumbFor ?? '' } : null
   }, src)
-  assert(refCrumb?.text === '输入面笔记', `反链行应显示来源页的面包屑：${JSON.stringify(refCrumb)}`)
+  assert(refCrumb?.text === '写作示范', `反链行应显示来源页的面包屑：${JSON.stringify(refCrumb)}`)
   const before = await page.evaluate(() => ({
     active: window.__qua.snapshot().activeId,
     nav: window.__qua.snapshot().nav,
@@ -12726,7 +12726,7 @@ await check('T121 右槽挂载区卡的引用栏与正文同一种东西：一�
   await page.waitForTimeout(350) // 卡首次装载（查询走索引，但仍走一次拍板）
   const card = '#dock-right .dock-card[data-card-id="mount"]'
   /**
-   * 第一页被「输入面笔记」里的**两块**分别引用 ⇒ 卡里两行真实块（不是按来源根聚合的摘要行）。
+   * 第一页被「写作示范」里的**两块**分别引用 ⇒ 卡里两行真实块（不是按来源根聚合的摘要行）。
    * 行首面包屑说明「这一句住哪」，与正文「引用」栏同一条机制。
    */
   const rows = await page.evaluate(
@@ -12742,7 +12742,7 @@ await check('T121 右槽挂载区卡的引用栏与正文同一种东西：一�
   assert(rows.length === 2, `卡里应一行一个源块（本页有两块引用它）：${JSON.stringify(rows)}`)
   assert(new Set(rows.map((r) => r.id)).size === 2, `两行应是两个不同的源块：${JSON.stringify(rows)}`)
   assert(rows.every((r) => /^[0-9a-f]{32}$/.test(r.id)), `每行要带源块 id：${JSON.stringify(rows)}`)
-  assert(rows.every((r) => r.crumb === '输入面笔记'), `每行要带来源路径（页名）：${JSON.stringify(rows)}`)
+  assert(rows.every((r) => r.crumb === '写作示范'), `每行要带来源路径（页名）：${JSON.stringify(rows)}`)
 
   /**
    * **卡里直接编辑**（不是点开某个页面）：点这一行的文本、在行尾敲一个字。
@@ -12807,7 +12807,7 @@ await check('T121 右槽挂载区卡的引用栏与正文同一种东西：一�
   assert(after.active === before.active, `反链行 Shift+点不换中心：${before.active} → ${after.active}`)
 
   await ctx.close()
-  return `卡里两行源块（面包屑「输入面笔记」）；直接编辑/⌘Z；面包屑就地展开；Shift 开源块`
+  return `卡里两行源块（面包屑「写作示范」）；直接编辑/⌘Z；面包屑就地展开；Shift 开源块`
 })
 
 await check('T123 标签页成员块标的 Shift ⇒ 右槽窗口；中心不动', async () => {
@@ -14994,7 +14994,7 @@ const viewState = (page) =>
 await check('T151 平表：行＝直接子块、正文只画根行、切回大纲子树回来；标题列是块投影不是纯文本', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
-  const id = await pageByTitle(page, '输入面笔记')
+  const id = await pageByTitle(page, '写作示范')
   await page.waitForTimeout(300)
   const before = await viewState(page)
   const children = await page.evaluate((pid) => {
@@ -15091,7 +15091,7 @@ await check('T151 平表：行＝直接子块、正文只画根行、切回大�
 await check('T152 标题列＝块本身：点文字就地进单块编辑器；Enter 提交、Esc 取消不写；点引用先导航', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
-  const id = await pageByTitle(page, '输入面笔记')
+  const id = await pageByTitle(page, '写作示范')
   await page.waitForTimeout(300)
   await page.evaluate((pid) => window.__qua.invoke('core.view/add', { blockId: pid, kind: 'table' }), id)
   await page.waitForTimeout(400)
@@ -15229,7 +15229,7 @@ await check('T152 标题列＝块本身：点文字就地进单块编辑器；En
   assert(!cancelled.overlay, 'Esc 之后浮层关掉')
   assert(afterCancel.text === beforeCancel.text, `Esc 不写：${beforeCancel.text.slice(-6)} → ${afterCancel.text.slice(-6)}`)
 
-  // 点引用先导航（不进编辑）：标题里那一枚 `[[产品设计 · 决策日志]]`
+  // 点引用先导航（不进编辑）：标题里那一枚 `[[欢迎使用相]]`
   const refRow = page.locator('.tv-row .tv-title-inner [data-ref-to]').first()
   const hasRef = (await refRow.count()) > 0
   assert(hasRef, '标题列里应能看到行内引用（run 投影）')
@@ -15250,7 +15250,7 @@ await check('T152 标题列＝块本身：点文字就地进单块编辑器；En
 await check('T153 属性列：number 提交的是 number、排序不退化成字典序、一次提交一条 op；children 顺序不变', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
-  const id = await pageByTitle(page, '输入面笔记')
+  const id = await pageByTitle(page, '写作示范')
   await page.waitForTimeout(300)
 
   // 造一个 number 属性（声明给子块），给前三个子块写 2 / 10 / 9
@@ -15351,7 +15351,7 @@ await check('T153 属性列：number 提交的是 number、排序不退化成字
 await check('T154 checkbox 三态分得开（未填／false／true）；点一下写一条 op', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
-  const id = await pageByTitle(page, '产品设计')
+  const id = await pageByTitle(page, '欢迎使用相')
   await page.waitForTimeout(300)
 
   // 种子不再自带 checkbox 字段（任务状态已升 select）：这里**造一个**——
@@ -15415,7 +15415,7 @@ await check('T154 checkbox 三态分得开（未填／false／true）；点一�
 await check('T155 规模：300 行不窗口化（全挂）、3000 行窗口化（首屏 ≤60 行、DOM ≤2000）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
-  const id = await pageByTitle(page, '输入面笔记')
+  const id = await pageByTitle(page, '写作示范')
   await page.waitForTimeout(300)
 
   /**
@@ -15497,7 +15497,7 @@ await check('T155 规模：300 行不窗口化（全挂）、3000 行窗口化�
 await check('T156 窄容器：表格不降级（横向滚动可用、标题列钉住），点行首打开那一块', async () => {
   const { ctx, page } = await freshPage(browser, base, { viewport: { width: 900, height: 800 } })
   await page.evaluate(() => window.__qua.quiet(true))
-  const id = await pageByTitle(page, '输入面笔记')
+  const id = await pageByTitle(page, '写作示范')
   await page.waitForTimeout(300)
   await page.evaluate((pid) => window.__qua.invoke('core.view/add', { blockId: pid, kind: 'table' }), id)
   await page.waitForTimeout(500)
@@ -15562,7 +15562,7 @@ await check('T156 窄容器：表格不降级（横向滚动可用、标题列�
 await check('T157 入口：块菜单「视图…」→ 新建表格 ⇒ _activeView 指向新视图；叶子块不给这一项', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
-  const id = await pageByTitle(page, '输入面笔记')
+  const id = await pageByTitle(page, '写作示范')
   await page.waitForTimeout(300)
 
   // 块菜单的 `when` 认「聚焦的是哪一块」⇒ 先真的把光标落到它上面
@@ -15653,7 +15653,7 @@ await check('T158 查询源也能是表格：行＝冻结命中（不折叠祖�
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const qid = await page.evaluate(() => {
-    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
+    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('欢迎使用相'))
     window.__qua.invoke('core.page/open', { pageId: p.id })
     let found = ''
     // 值返回的先序遍历：先找到的那份查询块获胜，外层不许覆盖
@@ -18097,7 +18097,7 @@ await check('T183 冻结按实例：两个表面各持一份；刷新不动 modi
   await page.evaluate(() => window.__qua.quiet(true))
   // 用种子里那一页的查询块
   const qid = await page.evaluate(() => {
-    const p = window.__qua.pages().find((x) => x.title.includes('产品设计'))
+    const p = window.__qua.pages().find((x) => x.title.includes('欢迎使用相'))
     window.__qua.invoke('core.page/open', { pageId: p.id })
     let found = ''
     const walk = (list) => {
@@ -18164,7 +18164,7 @@ await check('T184 表头排序只改显示序：_query.sort 不变、成员不�
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const qid = await page.evaluate(() => {
-    const p = window.__qua.pages().find((x) => x.title.includes('产品设计'))
+    const p = window.__qua.pages().find((x) => x.title.includes('欢迎使用相'))
     window.__qua.invoke('core.page/open', { pageId: p.id })
     let found = ''
     const walk = (list) => {
@@ -18295,7 +18295,7 @@ await check('T188 条件树：就地展开、拆成一行一句话；应用一�
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const qid = await page.evaluate(() => {
-    const p = window.__qua.pages().find((x) => x.title.includes('产品设计'))
+    const p = window.__qua.pages().find((x) => x.title.includes('欢迎使用相'))
     window.__qua.invoke('core.page/open', { pageId: p.id })
     let found = ''
     const walk = (list) => {
@@ -19146,7 +19146,7 @@ await check('M5 种子「全部页面」：role 条件按露面挑页，树上�
   }))
   assert(st.count === 5, `种子 5 页应全部命中（实际 ${st.count}）`)
   assert(
-    st.names.some((x) => x.includes('产品设计')) && st.names.some((x) => x.includes('输入面')),
+    st.names.some((x) => x.includes('欢迎使用相')) && st.names.some((x) => x.includes('写作示范')),
     `结果里是页不是别的：${JSON.stringify(st.names.slice(0, 3))}`,
   )
 
@@ -19204,7 +19204,7 @@ await check('T190 卡片两副面孔（看板／画廊）：就地编辑；换�
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const qid = await page.evaluate(() => {
-    const p = window.__qua.pages().find((x) => x.title.includes('产品设计'))
+    const p = window.__qua.pages().find((x) => x.title.includes('欢迎使用相'))
     window.__qua.invoke('core.page/open', { pageId: p.id })
     let found = ''
     const walk = (list) => {
@@ -19530,7 +19530,7 @@ await check('T190 卡片两副面孔（看板／画廊）：就地编辑；换�
 
   // ⑤ 导图只接子树：给一页（children 源）建导图，节点数＝它的子树块数
   const pageInfo = await page.evaluate(() => {
-    const p = window.__qua.pages().find((x) => x.title.includes('产品设计'))
+    const p = window.__qua.pages().find((x) => x.title.includes('欢迎使用相'))
     window.__qua.invoke('core.page/open', { pageId: p.id })
     let size = 0
     const walk = (list) => {
@@ -19951,9 +19951,9 @@ await check('T269 露面行的菜单与删除语义：源行菜单带「这一�
 
 await check('T197 全部收起／全部展开：一个按钮、文案随状态变；只作用于顶层行；非大纲视图下隐藏', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  // ① 打开「产品设计」页里那个查询块（条件＝本页之下未完成的待办）
+  // ① 打开「欢迎使用相」页里那个查询块（条件＝本页之下未完成的待办）
   const qid = await page.evaluate(() => {
-    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
+    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('欢迎使用相'))
     window.__qua.invoke('core.page/open', { pageId: p.id })
     let found = ''
     // 值返回的先序遍历：先找到的那份查询块获胜，外层不许覆盖
@@ -20524,7 +20524,7 @@ await check('T201 岛界：点镜像行的折叠三角只折这一次露面（�
 await check('T203 返回恢复位置：历史/面包屑/左槽回原位置；点块标仍是去目标', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
-  const aid = await pageByTitle(page, '产品设计')
+  const aid = await pageByTitle(page, '欢迎使用相')
   await page.waitForTimeout(250)
   const pick = await page.evaluate(() => {
     const bs = window.__qua.blocks().filter((b) => b.id !== window.__qua.snapshot().activeId && b.text?.length > 1)
@@ -20594,7 +20594,7 @@ await check('T203 返回恢复位置：历史/面包屑/左槽回原位置；点
 await check('T204 tab：新建/切换/关闭；每个 tab 各自的位置与历史', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
-  const aid = await pageByTitle(page, '产品设计')
+  const aid = await pageByTitle(page, '欢迎使用相')
   await page.waitForTimeout(250)
   const pick = await page.evaluate(() => {
     const bs = window.__qua.blocks().filter((b) => b.id !== window.__qua.snapshot().activeId && b.text?.length > 1)
@@ -21240,7 +21240,7 @@ await check(
 
     // 种子页里有一条**没有 to** 的悬空引用（[[这份页面还没写]]）
     const host = await page.evaluate(() => {
-      const p = window.__qua.pages().find((x) => x.title.includes('产品设计'))
+      const p = window.__qua.pages().find((x) => x.title.includes('欢迎使用相'))
       window.__qua.invoke('core.page/open', { pageId: p.id })
       return p.id
     })
@@ -21339,7 +21339,7 @@ await check('T214 结果面字号：引用栏／查询块里的正文行与正�
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await page.evaluate(() => {
-    const p = window.__qua.pages().find((x) => x.title.includes('输入面笔记'))
+    const p = window.__qua.pages().find((x) => x.title.includes('写作示范'))
     if (!p) throw new Error('seed page missing')
     window.__qua.invoke('core.page/open', { pageId: p.id })
   })
@@ -22165,7 +22165,7 @@ await check('T225 嵌入的查询大纲里：组合期不换承载行；提交�
   })
   assert(qid, '前置：种子库里有查询块')
   await page.evaluate((id) => {
-    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
+    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('欢迎使用相'))
     window.__qua.invoke('core.page/open', { pageId: p.id })
     const first = window.__qua.__editor.doc.roots[0]
     window.__qua.invoke('core.embed/insert', { blockId: first.id, targetId: id, view: 'mirror' })
@@ -22241,7 +22241,7 @@ await check('T226 多露面的结构传播：镜像里建块，源当场长出�
   //    页 P ← 露面 B（→ 查询 A）；A 的容器 U 里有普通命中行 C1。
   //    B 故意放在 A 的结果集之外（U 的孩子才是命中），避免「投影里的露面行再展开投影」套娃。
   const ids = await page.evaluate(() => {
-    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
+    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('欢迎使用相'))
     window.__qua.invoke('core.page/open', { pageId: p.id })
     window.__qua.forceForest((forest) => {
       const pageBlk = forest.find((b) => b.id === p.id)
@@ -22385,7 +22385,7 @@ await check('T227 点父块的竖线：查询块（无 children、有身体）�
   const fx = await page.evaluate(() => {
     const q = window.__qua
     const inv = (n, a = {}) => q.invoke(n, a)
-    const p = q.pages().find((x) => (x.title ?? '').includes('产品设计')) ?? q.pages()[0]
+    const p = q.pages().find((x) => (x.title ?? '').includes('欢迎使用相')) ?? q.pages()[0]
     inv('core.page/open', { pageId: p.id })
     const rows = q.__editor.rows()
     const parent = rows[1]?.block
@@ -22614,7 +22614,7 @@ await check('T229 聚焦一个有露面的查询块：段尾挂载区只搬进�
       return null
     }
     const query = walk(q.__editor.store.blocks)
-    const pageOf = q.pages().find((x) => (x.title ?? '').includes('产品设计'))
+    const pageOf = q.pages().find((x) => (x.title ?? '').includes('欢迎使用相'))
     q.invoke('core.page/open', { pageId: pageOf.id })
     const first = q.__editor.doc.roots[0]
     q.invoke('core.embed/insert', { blockId: first.id, targetId: query.id, view: 'mirror' })
@@ -22672,7 +22672,7 @@ await check('T229 聚焦一个有露面的查询块：段尾挂载区只搬进�
 await check('T230 分组：入口按覆盖率给候选；卡片禁多值分组列；表格按标签分堆一块进多段', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
-  const pid = await pageByTitle(page, '产品设计')
+  const pid = await pageByTitle(page, '欢迎使用相')
   await page.waitForTimeout(300)
 
   // 前置：给本页一个任务成员再挂第二个标签（一块两标签 ⇒ fan-out 的可验形态）。
@@ -25724,7 +25724,7 @@ await check('T265 块下属性行：有值才出现；点一项打开属性面�
     assert(line.pairs.some((x) => x.includes('作者') && x.includes('张三')), `属性行要写名字和值：${JSON.stringify(line)}`)
     assert(line.more.includes('1'), `进度声明了但没填 ⇒ 收进 +N：${JSON.stringify(line)}`)
     assert(!line.inTx && line.inRow, `属性行是 .blk 的直接子节点、不在正文槽里：${JSON.stringify(line)}`)
-    assert(line.rowText === '把「引用某段」的 UI 补上' || !line.rowText.includes('张三'), `属性行不能进正文读数：${JSON.stringify(line)}`)
+    assert(!line.rowText.includes('张三'), `属性行不能进正文读数：${JSON.stringify(line)}`)
 
     /**
      * 几何：属性行与正文**同一起笔列**（内容列），高度等于定高 token（虚拟化按它估）。
@@ -26899,13 +26899,13 @@ await check('T281 快速筛选：新建查询默认不查询；查询块的漏�
 
   // ③ 中心顶栏的漏斗：筛当前这一屏的大纲；正在编辑的那一块永远可见
   const opened = await page.evaluate(() => {
-    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
+    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('欢迎使用相'))
     if (!p) return 0
     window.__qua.invoke('core.page/open', { pageId: p.id })
     return 1
   })
   await page.waitForTimeout(500)
-  assert(opened === 1, '前置：打开了种子页「产品设计」')
+  assert(opened === 1, '前置：打开了种子页「欢迎使用相」')
   const before = await page.evaluate(() => ({
     rows: document.querySelectorAll('#editor .blk').length,
     visible: !document.querySelector('#center-filter')?.hidden,
@@ -27046,7 +27046,7 @@ await check('T283 看板拖卡让位（FLIP）：手势落点出 200ms 动画、
   await page.evaluate(() => window.__qua.quiet(true))
   // 前置与 T190 同一条：查询「任务」→ 卡片看法 → 按 select 分组
   const qid = await page.evaluate(() => {
-    const p = window.__qua.pages().find((x) => x.title.includes('产品设计'))
+    const p = window.__qua.pages().find((x) => x.title.includes('欢迎使用相'))
     window.__qua.invoke('core.page/open', { pageId: p.id })
     let found = ''
     const walk = (list) => {
@@ -27968,7 +27968,7 @@ const notesState = (page, kidId) =>
       }
       return null
     }
-    const note = blocks.find((b) => b.props?._type === 'core/note')
+    const note = blocks.find((b) => b.props?._type === 'core/note' && (b.props?._annotates ?? []).some((p) => p.block === kid))
     const host = find(blocks, kid)
     return {
       noteId: note?.id ?? null,
@@ -28053,13 +28053,16 @@ await check('T294 跨块备注：块选区拖过两块 → 一条备注带走全
 
   await page.evaluate(() => window.__qua.invoke('core.notes/create'))
   await page.waitForSelector('.popover .note-popover-body', { timeout: 3000 })
-  const st = await page.evaluate(() => {
+  const st = await page.evaluate((hosts) => {
     const blocks = window.__qua.__editor.store.blocks
-    const note = blocks.find((b) => b.props?._type === 'core/note')
+    // 按宿主认备注（种子自带一枚示例备注，全局 find 会撞上它）
+    const note = blocks.find(
+      (b) => b.props?._type === 'core/note' && (b.props?._annotates ?? []).some((p) => p.block === hosts[0]),
+    )
     let hostAnnoCount = 0
     const walk = (list) => {
       for (const b of list) {
-        if ((b.annos ?? []).length > 0) hostAnnoCount++
+        if (hosts.includes(b.id) && (b.annos ?? []).length > 0) hostAnnoCount++
         walk(b.children ?? [])
       }
     }
@@ -28070,7 +28073,7 @@ await check('T294 跨块备注：块选区拖过两块 → 一条备注带走全
       markSize: ([...CSS.highlights.entries()].find(([k]) => k.startsWith('anno-mark-')) ?? [null, { size: 0 }])[1]
         .size,
     }
-  })
+  }, fx.ids)
   assert(st.pairs.length === count, `一条备注应带走选区内全部块：${JSON.stringify({ count, pairs: st.pairs.length })}`)
   assert(st.hostAnnoCount === count, `每个宿主一块一枚锚：${JSON.stringify(st.hostAnnoCount)}`)
   assert(st.markSize >= count, `淡标记应逐块亮起：${JSON.stringify(st.markSize)}`)
@@ -28230,7 +28233,11 @@ await check('T297 标记字＝正文手势不劫持：Shift 延伸选区／修�
   await page.keyboard.type('这是备注')
   await page.waitForTimeout(200)
   const noteId = await page.evaluate(
-    () => window.__qua.__editor.store.blocks.find((b) => b.props?._type === 'core/note')?.id ?? '',
+    (host) =>
+      window.__qua.__editor.store.blocks.find(
+        (b) => b.props?._type === 'core/note' && (b.props?._annotates ?? []).some((p) => p.block === host),
+      )?.id ?? '',
+    fx.ids[0],
   )
   assert(noteId, '前置：备注块应已存在')
   await page.keyboard.press('Escape')
@@ -28318,7 +28325,11 @@ await check('T298 右键备注标记：三行菜单；删除＝软删（标记�
   await page.keyboard.press('Escape')
   await page.waitForFunction(() => !document.querySelector('.note-popover-body'), null, { timeout: 3000 })
   const noteId = await page.evaluate(
-    () => window.__qua.__editor.store.blocks.find((b) => b.props?._type === 'core/note')?.id ?? '',
+    (host) =>
+      window.__qua.__editor.store.blocks.find(
+        (b) => b.props?._type === 'core/note' && (b.props?._annotates ?? []).some((p) => p.block === host),
+      )?.id ?? '',
+    fx.ids[0],
   )
   assert(noteId, '前置：备注块应已存在且有内容')
 

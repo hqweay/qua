@@ -941,7 +941,7 @@ await check('E10 行内资产：CSP 下真图直出（qua-asset 协议），字�
    */
   const r = await page.evaluate(async () => {
     // 选一张含样本资产的页
-    const p = window.__qua.pages().find((x) => x.title.includes('输入面笔记')) ?? window.__qua.pages()[1]
+    const p = window.__qua.pages().find((x) => x.title.includes('写作示范')) ?? window.__qua.pages()[1]
     window.__qua.invoke('core.page/open', { pageId: p.id })
     for (let i = 0; i < 60; i++) {
       if (document.querySelector('#editor .atom-image img')?.naturalWidth > 0) break

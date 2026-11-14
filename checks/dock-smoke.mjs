@@ -2119,7 +2119,7 @@ await check('A28 日记段与面板有可见的分层：段间留白/分隔线�
 
   // 正文内联的查询体：抬一层面板，别和手写正文同一条底
   const qid = await page.evaluate(() => {
-    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('产品设计'))
+    const p = window.__qua.pages().find((x) => (x.title ?? '').includes('欢迎使用相'))
     window.__qua.invoke('core.page/open', { pageId: p.id })
     let found = ''
     // 值返回的先序遍历：先找到的那份查询块获胜，外层不许覆盖

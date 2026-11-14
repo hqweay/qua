@@ -9,7 +9,7 @@
  * 为什么是「id 索引的扁平表」而不是 `t('中文原文')`：将来加语言＝加一份字典，不是全库翻。
  * v1 只有 zh ——但 id 从第一天就在。
  *
- * 参数用 `{name}` 占位：`t('ui.atom.pageTitle', { label: '产品设计' })`。
+ * 参数用 `{name}` 占位：`t('ui.atom.pageTitle', { label: '欢迎使用相' })`。
  * 本文件是**零依赖叶子**（不 import 任何东西）⇒ 任何层都可以 import 它（含 Electron 主进程）。
  */
 

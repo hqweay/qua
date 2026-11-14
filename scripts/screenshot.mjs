@@ -84,7 +84,7 @@ await scene(
 await scene(
   'readme-page',
   async (p) => {
-    await openPage(p, '产品设计')
+    await openPage(p, '欢迎使用相')
     await p.waitForTimeout(120)
     const id = await blockByText(p, '行内图片也走这一层')
     await p.evaluate((bid) => window.__qua.focusBlock(bid, 0), id)
@@ -170,7 +170,7 @@ await scene(
 await scene(
   'query-条件树',
   async (p) => {
-    await openPage(p, '产品设计')
+    await openPage(p, '欢迎使用相')
     await p.waitForTimeout(150)
     const id = await blockByText(p, '本页的待办')
     await p.evaluate((bid) => window.__qua.invoke('core.block/focus-block', { blockId: bid }), id)
@@ -192,10 +192,10 @@ await scene(
 await scene(
   'embed-大纲表格',
   async (p) => {
-    await openPage(p, '输入面笔记')
+    await openPage(p, '写作示范')
     await p.waitForTimeout(150)
     const at = await blockByText(p, '一行里塞满行内原子')
-    const target = await p.evaluate(() => window.__qua.pages().find((x) => (x.title ?? '').startsWith('产品设计')).id)
+    const target = await p.evaluate(() => window.__qua.pages().find((x) => (x.title ?? '').startsWith('欢迎使用相')).id)
     await p.evaluate(
       ([blockId, targetId]) =>
         window.__qua.invoke('core.embed/insert', { blockId, targetId, view: 'table' }),
@@ -219,7 +219,7 @@ await scene(
 await scene(
   'dock-窗口卡',
   async (p) => {
-    await openPage(p, '产品设计')
+    await openPage(p, '欢迎使用相')
     await p.waitForTimeout(150)
     const sub = await blockByText(p, '交付层：槽里只有块')
     await p.evaluate((bid) => window.__qua.invoke('core.dock/open-block', { blockId: bid, side: 'right' }), sub)

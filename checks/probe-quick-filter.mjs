@@ -149,13 +149,13 @@ if (cleared.active === '1') fail('② 清除之后漏斗应回到未筛态')
 /* ③ 中心槽顶栏的漏斗：筛当前这一屏的大纲 */
 const pageOpen = await page.evaluate(() => {
   const q = window.__qua
-  const p = q.pages().find((x) => (x.title ?? '').includes('产品设计'))
+  const p = q.pages().find((x) => (x.title ?? '').includes('欢迎使用相'))
   if (!p) return null
   q.invoke('core.page/open', { pageId: p.id })
   return { id: p.id, title: p.title }
 })
 await page.waitForTimeout(500)
-if (!pageOpen) fail('③ 找不到种子页「产品设计」')
+if (!pageOpen) fail('③ 找不到种子页「欢迎使用相」')
 const center = await page.evaluate(() => ({
   visible: !document.querySelector('#center-filter')?.hidden,
   rows: document.querySelectorAll('#editor .blk').length,

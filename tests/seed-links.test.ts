@@ -146,20 +146,20 @@ test('镜像、算作、子块行头属性三份样本的数据形状（要拿�
     }
     return hit
   }
-  const p3 = ws.blocks.find((b) => plainText(b.content).trim() === '开发日志 · 2026-W44')
-  assert.ok(p3, '应有「开发日志 · 2026-W44」页')
+  const p3 = ws.blocks.find((b) => plainText(b.content).trim() === '每周复盘')
+  assert.ok(p3, '应有「每周复盘」页')
   const nextStep = p3!.children.find((c) => plainText(c.content).startsWith('下一步'))
   assert.ok(nextStep, 'p3 应有「下一步」块')
 
   // 镜像：p1 有一枚宿主块，_embed 指向「下一步」（view:'' ＝ 跟随源）
-  const p1 = ws.blocks.find((b) => plainText(b.content).trim() === '产品设计 · 决策日志')
-  assert.ok(p1, '应有「产品设计 · 决策日志」页')
+  const p1 = ws.blocks.find((b) => plainText(b.content).trim() === '欢迎使用相')
+  assert.ok(p1, '应有「欢迎使用相」页')
   const mirror = p1!.children.find((c) => c.props?._embed)
   assert.ok(mirror, 'p1 底部应有一枚镜像宿主块')
   assert.deepEqual(mirror!.props!._embed, { block: nextStep!.id, view: '' })
 
   // 算作：p2 的迁移笔记同时挂在「下一步」下（_belongsTo 多一条父边）
-  const migration = byPlain('多库迁移的注意点')
+  const migration = byPlain('把内容搬去别的库之前')
   assert.ok(migration, 'p2 应有迁移笔记块')
   const edges = (migration!.props as Record<string, string[]> | undefined)?._belongsTo ?? []
   assert.ok(edges.includes(nextStep!.id), `迁移笔记应算作「下一步」的一员：${JSON.stringify(edges)}`)

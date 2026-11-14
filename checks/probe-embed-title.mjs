@@ -34,7 +34,7 @@ await sleep(900)
 const fx = await page.evaluate(() => {
   const q = window.__qua
   const inv = (n, a = {}) => q.invoke(n, a)
-  const p = q.pages().find((x) => (x.title ?? '').includes('产品设计')) ?? q.pages()[0]
+  const p = q.pages().find((x) => (x.title ?? '').includes('欢迎使用相')) ?? q.pages()[0]
   inv('core.page/open', { pageId: p.id })
   const root = q.__editor.doc.roots[0]
   const stub = root.children[0]

@@ -50,7 +50,7 @@ const setup = await page.evaluate(() => {
     return null
   }
   const query = walk(q.__editor.store.blocks)
-  const pageOf = q.pages().find((x) => (x.title ?? '').includes('产品设计'))
+  const pageOf = q.pages().find((x) => (x.title ?? '').includes('欢迎使用相'))
   q.invoke('core.page/open', { pageId: pageOf.id })
   const first = q.__editor.doc.roots[0]
   q.invoke('core.embed/insert', { blockId: first.id, targetId: query.id, view: 'mirror' })

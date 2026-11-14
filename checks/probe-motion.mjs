@@ -26,7 +26,7 @@ const caps = await page.evaluate(() => ({
 /* ---------------------------------------------------------- 值分组 */
 
 const qid = await page.evaluate(() => {
-  const p = window.__qua.pages().find((x) => x.title.includes('产品设计'))
+  const p = window.__qua.pages().find((x) => x.title.includes('欢迎使用相'))
   window.__qua.invoke('core.page/open', { pageId: p.id })
   let found = ''
   const walk = (list) => {

@@ -19,7 +19,7 @@ await page.evaluate(() => window.__qua.quiet(true))
 
 const info = await page.evaluate(() => {
   const q = window.__qua
-  const p = q.pages().find((x) => (x.title ?? '').includes('产品设计'))
+  const p = q.pages().find((x) => (x.title ?? '').includes('欢迎使用相'))
   q.invoke('core.page/open', { pageId: p.id })
   const find = (l) => {
     for (const b of l) {
