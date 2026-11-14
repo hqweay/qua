@@ -263,6 +263,7 @@ export const MSG = {
   'ui.props.create': '新建',
   'ui.props.cancel': '取消',
   'ui.props.clear': '删除这个值',
+  'ui.props.dropField': '删掉这一栏',
   'ui.props.openDef': '打开这条属性的定义（改类型/选项）',
   /* 勾选框属性只有两种值，而一个方框在表格列里读不出「这一格是什么」——
      两句只读说明文字跟在方框后面，值本身仍只由方框改。 */

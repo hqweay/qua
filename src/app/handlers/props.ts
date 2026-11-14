@@ -27,7 +27,7 @@ export const PROPS_HANDLERS: Record<string, Handler> = {
     const blockId = S(a.blockId)
     const propId = S(a.propId)
     if (!blockId || !propId) return false
-    app.clearPropValue(blockId, propId)
+    app.clearPropValue(blockId, propId, a.drop === true ? { drop: true } : undefined)
     return true
   },
   'core.props/create-def': (a, app) => {

@@ -99,7 +99,8 @@ export interface PropertiesDeps {
   /** 短 id（未知属性的显示） */
   shortId: (id: string) => string
   setValue: (b: Block, propId: string, value: unknown) => void
-  clearValue: (b: Block, propId: string) => void
+  /** `drop`：连自有槽一起删（「删掉这一栏」）；缺省＝只清值 */
+  clearValue: (b: Block, propId: string, opts?: { drop?: boolean }) => void
   /** 把已有属性加进**这一块自己的值槽**（`_ownProps`） */
   addOwnProp: (b: Block, propId: string) => void
   /** 新建一条定义并加进**这一块自己的值槽**（`mode: 'new'` ＝ 同名也新建） */
@@ -491,12 +492,22 @@ export function makeFieldRow(
     ),
   )
 
+  /**
+   * **这一行的删除键**（`×`）。
+   *
+   * 语义按行的来源分：**本块自有** ⇒ 删掉这一栏（值连同自有槽）；**标签声明来的** ⇒
+   * 只清值 —— 声明在标签上，这里删不掉它，行会留着（那才是「待填」）。
+   * 两件事共用这颗按钮是因为它们对用户是同一个动作（「这条我不要了」）；
+   * 分开做成两颗按钮只会让用户在「清空」与「删除」之间猜。
+   */
+  const own = row.sources.length === 0
   const clear = document.createElement('button')
   clear.type = 'button'
   clear.className = 'prop-clear ghost'
-  clear.dataset.tip = t('ui.props.clear')
+  clear.dataset.dropField = own ? '1' : '0'
+  clear.dataset.tip = t(own ? 'ui.props.dropField' : 'ui.props.clear')
   clear.textContent = '×'
-  clear.addEventListener('click', () => deps.clearValue(target, row.propId))
+  clear.addEventListener('click', () => deps.clearValue(target, row.propId, own ? { drop: true } : undefined))
 
   el.append(label, value, clear)
   return el

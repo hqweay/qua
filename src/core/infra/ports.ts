@@ -298,7 +298,17 @@ export interface App {
   showSelectionRefPicker(): void
   /* 属性（属性是块第一公民；值在块上 `props[propId]`，一块一槽） */
   setPropValue(blockId: string, propId: string, value: unknown): void
-  clearPropValue(blockId: string, propId: string): void
+  /**
+   * 清一格的值。两种语义由调用方说（缺省不说＝只清值）：
+   *   · 缺省：清值；定义给了缺省值（`_default`）时**留栏**（行回到「待填」）；
+   *   · `drop: true`：**摘掉这一栏**（值连同自有槽一起删）。
+   *
+   * ⚠️ 为什么两件事要分开：`keepField` 的口子（有缺省值的字段留栏）给的是
+   *    「值控件清空」那一路；把它套到「删这一栏」的按钮上，按钮就永远只能清值，
+   *    自有槽留着 ⇒ 行停在「待填」、再点也没反应（零 op）。声明来的行本来摘不掉
+   *    （声明在标签上），`drop` 对它只清值 —— 那是正确行为，不是失败。
+   */
+  clearPropValue(blockId: string, propId: string, opts?: { drop?: boolean }): void
   /**
    * 新建字段定义，并按 `target` 挂到该块上；返回 `propId`（空串＝没建）。
    *

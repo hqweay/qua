@@ -699,3 +699,65 @@ test('asset：值只收资产 id 或 http(s) 链接（两态同一个 kind）', 
   assert.equal(isAssetRef('随便一段字'), false)
   assert.equal(isAssetRef(''), false)
 })
+
+/* ------------------------------------------------------------ 12. 删掉这一栏 */
+
+test('属性行的删除键：自有行摘栏（连槽），声明来的行只清值（声明在标签上）', () => {
+  const def = mkPropDef('任务状态', 'select', { _default: 'c-todo' }, 'p-status')
+  const tag = blk('tag', '任务', { _aliases: ['任务'], _lists: ['tag'], _fieldDefs: ['p-status'] })
+  const own: Block = {
+    id: 'own',
+    content: textRuns('本块自有'),
+    children: [],
+    created: 1,
+    modified: 1,
+    props: { _ownProps: ['p-status'], 'p-status': 'c-done' },
+  }
+  const declared: Block = {
+    id: 'declared',
+    content: textRuns('靠标签声明'),
+    children: [],
+    created: 1,
+    modified: 1,
+    props: { _tags: ['tag'], 'p-status': 'c-done' },
+  }
+  const plain: Block = {
+    id: 'plain',
+    content: textRuns('只登记了槽'),
+    children: [],
+    created: 1,
+    modified: 1,
+    props: { _ownProps: ['p-status'] },
+  }
+  const store = new BlockStore([def, tag, own, declared, plain])
+  const kb = new MemoryKb(store)
+  const deps: PropsDeps = {
+    kb,
+    write: (_blockId, mutate) => mutate(),
+    run: (fn) => {
+      const r = kb.tx(fn)
+      return { ops: r.ops, result: r.result }
+    },
+    toast: () => {},
+  }
+  const cmds = propsCommands(deps)
+  const rowsOf = (id: string): string[] => fieldRows(kb.get(id)!, kb.roots()).map((r) => r.propId)
+
+  // 自有行：× ＝ 摘掉这一栏（值连同槽），行消失
+  cmds.clearPropValue('own', 'p-status', { drop: true })
+  assert.equal('p-status' in (kb.get('own')?.props ?? {}), false, '值走了')
+  assert.deepEqual(kb.get('own')?.props?._ownProps ?? [], [], '自有槽也摘掉')
+  assert.deepEqual(rowsOf('own'), [], '行不再出现（不是停在「待填」）')
+
+  // 声明来的行：drop 只清值，声明不动 ⇒ 行仍是「待填」
+  cmds.clearPropValue('declared', 'p-status', { drop: true })
+  assert.equal('p-status' in (kb.get('declared')?.props ?? {}), false, '值走了')
+  assert.deepEqual(rowsOf('declared'), ['p-status'], '声明在标签上，这里删不掉它')
+
+  // 已验证的坑：只登记了槽、没有值 —— 不传 drop 时是**零改动**（点了没反应）
+  const before = JSON.stringify(kb.get('plain')?.props)
+  cmds.clearPropValue('plain', 'p-status')
+  assert.equal(JSON.stringify(kb.get('plain')?.props), before, '缺省语义：有缺省值的定义留栏，这一格本来就没值 ⇒ 不动')
+  cmds.clearPropValue('plain', 'p-status', { drop: true })
+  assert.deepEqual(kb.get('plain')?.props?._ownProps ?? [], [], 'drop 才真摘掉那个空槽')
+})

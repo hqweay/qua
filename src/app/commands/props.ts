@@ -152,13 +152,19 @@ export function propsCommands(
       d.write(blockId, () => setValue(b, propId, value))
     },
 
-    clearPropValue: (blockId, propId) => {
+    clearPropValue: (blockId, propId, opts) => {
       const b = find(blockId)
       if (!b) return
-      // 定义给了缺省值的字段（如任务状态）：清空停在「待填」，行不摘 ——
-      // 「未填」是定义支持的读侧状态；摘栏走这类字段专属的命令（取消待办）
       const def = d.kb.propDefs().find((x) => x.id === propId)
-      d.write(blockId, () => clearValue(b, propId, { keepField: clearKeepsField(def) }))
+      /**
+       * 两条语义：
+       *   · 值控件清空（不传 `drop`）：定义给了缺省值的字段停在「待填」，行不摘 ——
+       *     「未填」是定义支持的读侧状态；
+       *   · 「删掉这一栏」（`drop`）：值连自有槽一起走。对自有行这就是行消失；
+       *     对标签声明来的行只是清值（声明在标签上，行该留着）——那是正确结果。
+       */
+      const keepField = opts?.drop === true ? false : clearKeepsField(def)
+      d.write(blockId, () => clearValue(b, propId, { keepField }))
     },
 
     /**
