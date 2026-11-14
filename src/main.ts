@@ -2890,6 +2890,46 @@ const refLabelOf = (targetId: string): string => {
 }
 
 /**
+ * **这一块的属性区用哪一档**：单块覆盖优先，没有覆盖才跟随默认档。
+ *
+ * 判据只有这一处——渲染、估高、菜单勾选态都问它。三处各算一遍的典型症状是
+ * 「菜单里勾着『一栏一行』、正文却画成摘要」。
+ */
+const propsLineModeOf = (blockId: string): { effective: 'summary' | 'list'; covered: boolean } => {
+  const override = prefs().propsLineMode[blockId]
+  return { effective: override ?? prefs().propsDensity, covered: override !== undefined }
+}
+
+/**
+ * **「这一块怎么排」的三态菜单**（行尾 `⋯` 的落点；将来右键同一份）。
+ *
+ * 三态而不是两态切换：覆盖必须**可清除**（回到跟随默认），否则用户在某块上试过
+ * 一次 `list` 之后，默认档再改也管不到它——一块永远回不去的脏状态。
+ * 浮层归装配层（命令层不碰 DOM），勾选态用 `propsLineModeOf` 那一份判据。
+ */
+const openPropsLineMenu = (blockId: string, anchor: DOMRect): void => {
+  const mode = propsLineModeOf(blockId)
+  const row = (id: string, label: string, on: boolean): Row => ({
+    id,
+    label,
+    icon: on ? 'lucide:check' : 'lucide:minus',
+  })
+  layers.openMenu({
+    rows: [
+      row('mode/follow', t('ui.props.lineMode.follow'), !mode.covered),
+      row('mode/summary', t('ui.props.lineMode.summary'), mode.effective === 'summary'),
+      row('mode/list', t('ui.props.lineMode.list'), mode.effective === 'list'),
+    ],
+    anchor,
+    title: t('ui.props.lineMode'),
+    onPick: (r) => {
+      const pick = String(r.id).slice('mode/'.length)
+      app.setPropsLineMode(blockId, pick === 'follow' ? '' : (pick as 'summary' | 'list'))
+    },
+  })
+}
+
+/**
  * **一台视图编辑器的完整事件表**：正文、挂载区、查询结果**共用这一份**。
  *
  * 为什么收成一个函数：这些编辑器是同一种东西（`BlockEditor` ＋ 一份 roots），
@@ -3062,21 +3102,21 @@ function viewEvents(
      * 两者合成**这一块此刻的排布**，与虚拟化的估高（`propsRows`）吃同一份判据。
      * 点一项 ⇒ 打开属性面板并聚焦那一栏；点 `+N` ⇒ 就地展开；写入仍走同一条命令。
      */
-    propsLine: (block: Block, data, into: HTMLElement) =>
+    propsLine: (block: Block, data, into: HTMLElement) => {
+      const mode = propsLineModeOf(block.id)
       renderPropsLine(block.id, data, into, {
         inspect: (id, propId) => app.openPropertiesDrawer(id, propId),
         refLabel: refLabelOf,
-        density: prefs().propsDensity,
-        expanded: prefs().propsExpanded[block.id] === true,
-        onExpand: (id) => app.togglePropsExpanded(id),
-        onCollapse: (id) => app.togglePropsExpanded(id),
-      }),
+        density: mode.effective,
+        onSetMode: (id, next) => app.setPropsLineMode(id, next),
+        onMenu: (id, anchor) => openPropsLineMenu(id, anchor),
+      })
+    },
     /**
      * **块下属性区画几行**（虚拟化估高用）：与上面那次渲染同一个判据
      * （`belowFieldsRows`），所以「可见区」与「占位」不会各算一遍而漂。
      */
-    propsRows: (id: string, data: BelowFields) =>
-      belowFieldsRows(data, prefs().propsDensity, prefs().propsExpanded[id] === true),
+    propsRows: (id: string, data: BelowFields) => belowFieldsRows(data, propsLineModeOf(id).effective),
     // 复盘空天格子里落笔：中心＝物化并回到这一屏；Shift/⌘＝同一天开右槽/新 tab
     shellWrite: (date, place) => {
       if (place && place !== 'center') {

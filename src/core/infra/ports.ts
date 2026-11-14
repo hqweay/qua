@@ -566,12 +566,16 @@ export interface App {
   setTheme(mode: string): void
   toggleTheme(): void
   /**
-   * **块下属性区的密度档**（设备态）：`summary` 一行摘要／`list` 一栏一行。
-   * 它改行高 ⇒ 实现里要重排这一屏（虚拟化占位按行高累加）。
+   * **块下属性的默认密度**（设备态）：`summary` 一行摘要／`list` 一栏一行。
+   * 它只是默认值（单块覆盖照旧生效）；改行高 ⇒ 实现里要重排这一屏。
    */
   setPropsDensity(density: string): void
-  /** 单块就地展开／收起（`summary` 档下的临时覆盖；设备态，不进撤销） */
-  togglePropsExpanded(blockId: string): void
+  /**
+   * **单块显式覆盖**（设备态，不进撤销）：`'list'` 读全／`'summary'` 收成一行／
+   * **`''` 清除覆盖、回到跟随默认**。双向是硬要求：只能展开不能收起，
+   * 默认档一切到 list 就把每块永久锁死在全显。
+   */
+  setPropsLineMode(blockId: string, mode: string): void
   /** 开/关一个槽（槽的开关归槽自己；`side` 只有左右，中心槽常驻） */
   toggleDock(side: 'left' | 'right'): void
   /**

@@ -29591,17 +29591,19 @@ await check('T310 块下属性行的 ref 值可点跳转；点名字仍开属性
 })
 
 /**
- * **块下属性的两档密度**：`summary` 一行摘要／`list` 一栏一行，
- * 外加**单块就地展开**（`+N` 不再跳面板）。
+ * **块下属性的两档密度**：默认档 ＋ **单块双向覆盖**。
  *
- * 判据（为什么这些断言）：档位是「这一台机器读多密」（设备态），展开是「这一块我读过」
- * （单块覆盖）；两者粒度不同但**必须落在同一套渲染上**——所以这里同时验
- * 「档位切换」与「单块展开」，且都不许把属性抽屉顺手打开（那是第三个动作了）。
+ * 判据（为什么这条用例这么长）：只验「切设置面」是不够的——那样做出来的是
+ * 一个全局开关，默认档一改就把每块锁死在同一档。真正要钉的是三件事：
+ *   ① `+N` 就地展开（写**这一块的覆盖**，不是改全局）；
+ *   ② 覆盖成摘要之后**改全局档，这块不跟着变**（每块的决定不被默认值撤销）；
+ *   ③ 「跟随默认」把覆盖清掉，这块才回到跟全局走。
+ * 三条缺一条，用户就会在某块上试过一次之后再也回不去。
  *
- * ⚠️ 估高不在这里验（默认虚拟化关着，占位不参与）：那条由
+ * ⚠️ 估高不在这里验（默认虚拟化关着，占位不参与）：由
  *    `tests/props-line-density.test.ts` 的 `visibleRowHeight` 断言钉住。
  */
-await check('T311 块下属性：一行摘要 ↔ 一栏一行（设置面）；+N 就地展开与收起，不跳面板', async () => {
+await check('T311 块下属性：+N 就地展开／菜单三态覆盖；改默认档不动已覆盖的块', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
@@ -29627,60 +29629,83 @@ await check('T311 块下属性：一行摘要 ↔ 一栏一行（设置面）；
         density: el?.dataset.propsDensity ?? '',
         pairs: el?.querySelectorAll('.blk-prop').length ?? 0,
         more: el?.querySelector('.blk-prop-more')?.textContent ?? '',
-        fold: Boolean(el?.querySelector('.blk-prop-fold')),
+        mode: Boolean(el?.querySelector('.blk-prop-mode')),
         pending: el?.querySelectorAll('.blk-prop--pending').length ?? 0,
-        // 高度：一栏一行应该明显更高（4 栏 ≈ 4 × 20，摘要 ≈ 一行）
         h: el ? Math.round(el.getBoundingClientRect().height) : 0,
         drawer: Boolean(document.querySelector('.props-drawer')),
       }
     }, host)
 
-  // ① 默认 summary：一行、cap 3、收 1 项
+  /**
+   * 打开这一块的「怎么排」菜单并选一项。
+   *
+   * ⚠️ 用 DOM `click()` 而不是 `page.click`：`⋯` 平时 `opacity: 0`（悬停才显形），
+   *    Playwright 的可操作性检查会把它判成「不可见」并一直重试。这里要验的是
+   *    「点它会发生什么」，不是「它能不能被自动化悬停」。
+   */
+  const pickMode = async (label) => {
+    await page.evaluate((id) => {
+      document.querySelector(`.blk[data-block-id="${id}"] > .blk-props-line .blk-prop-mode`)?.click()
+    }, host)
+    await page.waitForSelector('.layer .layer-item', { timeout: 4000 })
+    await page.evaluate((want) => {
+      const item = [...document.querySelectorAll('.layer-item')].find((el) => el.textContent?.includes(want))
+      item?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    }, label)
+    await page.waitForTimeout(320)
+  }
+
+  // ① 默认 summary：一行、cap 3、收 2 项（1 有值 + 1 待填）
   const summary = await read()
   assert(summary.density === 'summary', '默认是一行摘要：' + JSON.stringify(summary))
-  assert(summary.pairs === 3 && summary.more.includes('2'), '超出 cap 的收进 +N（1 条有值 + 1 条待填）：' + JSON.stringify(summary))
+  assert(summary.pairs === 3 && summary.more.includes('2'), '超出 cap 的收进 +N：' + JSON.stringify(summary))
+  assert(summary.mode, '每一块都要有「怎么排」的入口（否则收起来就回不去）：' + JSON.stringify(summary))
   assert(summary.h > 0 && summary.h < 30, '摘要档只占一行：' + JSON.stringify(summary))
 
-  // ② 点 +N ⇒ 就地展开（不跳面板）
-  await page.click(`.blk[data-block-id="${host}"] > .blk-props-line .blk-prop-more`)
+  // ② `+N` ⇒ 就地展开（写这一块的覆盖，不跳面板）
+  await page.evaluate((id) => {
+    document.querySelector(`.blk[data-block-id="${id}"] > .blk-props-line .blk-prop-more`)?.click()
+  }, host)
   await page.waitForTimeout(350)
   const expanded = await read()
-  assert(expanded.density === 'list', '+N 应就地展开成一栏一行：' + JSON.stringify(expanded))
-  assert(expanded.pairs === 5 && expanded.more === '', '展开后四栏＋一条待填全画，没有 +N：' + JSON.stringify(expanded))
-  assert(expanded.pending === 1, '待填的栏在 list 档要画出来（读全不许藏东西）：' + JSON.stringify(expanded))
-  assert(expanded.fold, '展开态要有「收起」：' + JSON.stringify(expanded))
+  assert(expanded.density === 'list', '+N 应就地展开：' + JSON.stringify(expanded))
+  assert(expanded.pairs === 5 && expanded.more === '', '四栏＋一条待填全画，没有 +N：' + JSON.stringify(expanded))
+  assert(expanded.pending === 1, '待填的栏在 list 档要画出来：' + JSON.stringify(expanded))
   assert(!expanded.drawer, '+N 不该顺手打开属性抽屉：' + JSON.stringify(expanded))
-  assert(expanded.h > summary.h + 40, '四栏应明显高于一行：' + JSON.stringify({ summary: summary.h, expanded: expanded.h }))
+  assert(expanded.h > summary.h + 40, '五栏应明显高于一行：' + JSON.stringify({ s: summary.h, l: expanded.h }))
 
-  // ③ 收起 ⇒ 回一行摘要
-  await page.click(`.blk[data-block-id="${host}"] > .blk-props-line .blk-prop-fold`)
-  await page.waitForTimeout(350)
-  const back = await read()
-  assert(back.density === 'summary' && back.pairs === 3 && back.fold === false, '收起应回到摘要：' + JSON.stringify(back))
+  // ③ 菜单改成「一行摘要」⇒ 覆盖生效（仍是这一块的事）
+  await pickMode('一行摘要')
+  const backToSummary = await read()
+  assert(backToSummary.density === 'summary' && backToSummary.pairs === 3, '菜单「一行摘要」应收回一行：' + JSON.stringify(backToSummary))
 
-  // ④ 设置面切「一栏一行」⇒ 全局档生效（无 +N）
+  // ④ **改默认档不动已覆盖的块**：切到 list 后，这块仍是 summary
   await page.evaluate(() => window.__qua.invoke('core.settings/open'))
   await page.waitForSelector('[data-props-density="list"]', { timeout: 5000 })
   await page.click('[data-props-density="list"]')
   await page.waitForTimeout(300)
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), host)
-  await page.waitForTimeout(400)
-  const list = await read()
-  assert(list.density === 'list' && list.pairs === 5 && list.more === '', '全局 list 档应全显（含待填）且没有 +N：' + JSON.stringify(list))
-  assert(!list.fold, '全局 list 档没有「收起」（它不是展开态）：' + JSON.stringify(list))
+  await page.waitForTimeout(420)
+  const kept = await read()
+  assert(kept.density === 'summary', '默认档改了，已覆盖成摘要的块不该跟着变：' + JSON.stringify(kept))
 
-  // ⑤ 切回摘要 ⇒ 又收成一行
+  // ⑤ 「跟随默认」⇒ 覆盖被清掉，这块回到 list
+  await pickMode('跟随默认')
+  const followed = await read()
+  assert(followed.density === 'list' && followed.pairs === 5, '清除覆盖后应跟随默认（list）：' + JSON.stringify(followed))
+
+  // ⑥ 再把默认切回摘要 ⇒ 这块跟着回到一行（证明覆盖真的清掉了，不是被 list 顶住）
   await page.evaluate(() => window.__qua.invoke('core.settings/open'))
   await page.waitForSelector('[data-props-density="summary"]', { timeout: 5000 })
   await page.click('[data-props-density="summary"]')
   await page.waitForTimeout(300)
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), host)
-  await page.waitForTimeout(400)
+  await page.waitForTimeout(420)
   const again = await read()
-  assert(again.density === 'summary' && again.pairs === 3 && again.more.includes('2'), '切回摘要：' + JSON.stringify(again))
+  assert(again.density === 'summary' && again.pairs === 3 && again.more.includes('2'), '跟随默认的块应随默认档回到摘要：' + JSON.stringify(again))
 
   await ctx.close()
-  return `摘要 3+1 收进 +N ⇒ 点它展开 4 栏（不跳面板）⇒ 收起回一行 ⇒ 设置面切 list 全显 ⇒ 切回摘要`
+  return `默认摘要 3+2 ⇒ +N 就地展开 5 栏 ⇒ 菜单「一行摘要」⇒ 默认切 list 不变 ⇒「跟随默认」⇒ 默认切回摘要跟着变`
 })
 
 const known = results.filter((r) => !r.ok && r.known)

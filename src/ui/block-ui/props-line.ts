@@ -27,15 +27,18 @@ export interface PropsLineDeps {
   refLabel: (targetId: string) => string
   /**
    * **这一块此刻用哪一档**（`summary` 一行／`list` 一栏一行）。
-   * 由调用方按「全局密度档 ＋ 这块有没有就地展开」算好——渲染不认识偏好。
+   * 由调用方按「默认档 ＋ 这一块的显式覆盖」算好——渲染不认识偏好。
    */
   density?: PropsLineDensity
-  /** 这一块是不是**就地展开**的（`list` 呈现来自展开 ⇒ 行尾给「收起」） */
-  expanded?: boolean
-  /** 就地展开这一块（`+N` 的落点：不跳面板，原地长出来） */
-  onExpand?: (blockId: string) => void
-  /** 收起这一块（只对「展开态」出现；全局 `list` 档没有收起这回事） */
-  onCollapse?: (blockId: string) => void
+  /**
+   * **改这一块的档**：`'list'` 展开／`'summary'` 收起／`''` 清除覆盖回默认。
+   *
+   * 三个动作走同一条回调：它们是同一件事（这一块怎么排）的三个取值，
+   * 分成三个回调就会有一条忘了接（症状：某个入口点了没反应）。
+   */
+  onSetMode?: (blockId: string, mode: PropsLineDensity | '') => void
+  /** 打开「这一块怎么排」的菜单（三态；`⋯` 与右键共用，浮层归装配层） */
+  onMenu?: (blockId: string, anchor: DOMRect) => void
   /** 最多画几对（其余收成 `+N`）；缺省 3，与多值图标的 `cap` 同一档 */
   cap?: number
 }
@@ -71,14 +74,12 @@ export function renderPropsLine(
   deps: PropsLineDeps,
 ): void {
   const cap = deps.cap ?? 3
-  const density: PropsLineDensity = deps.density ?? 'summary'
-  const expanded = deps.expanded === true
+  const list = (deps.density ?? 'summary') === 'list'
   /**
    * **画几行与「画什么」是同一件事**：行数由 `belowFieldsRows` 给（与虚拟化估高
    * 同一个函数），`list` 时每栏占一行、`summary` 时全部挤在一行里。
    */
-  const rows = density === 'list' || expanded ? data.rows : data.rows.slice(0, cap)
-  const list = density === 'list' || expanded
+  const rows = list ? data.rows : data.rows.slice(0, cap)
   into.replaceChildren()
   into.dataset.propsDensity = list ? 'list' : 'summary'
 
@@ -103,15 +104,12 @@ export function renderPropsLine(
       pair.dataset.propPending = '1'
       into.appendChild(pair)
     }
-    if (expanded && deps.onCollapse) {
-      const fold = document.createElement('button')
-      fold.type = 'button'
-      fold.className = 'blk-prop-fold'
-      fold.dataset.propCollapse = blockId
-      fold.textContent = t('ui.props.lineCollapse')
-      fold.addEventListener('click', () => deps.onCollapse?.(blockId))
-      into.appendChild(fold)
-    }
+    /*
+     * **不摆「收起」按钮**：它会独占一行，而估高是按「行数 × 行高」算的——
+     * 多出来的那一行没人算，滚动条就会偏小。三个动作（跟随默认／一行／一栏一行）
+     * 统一由行尾那颗 `⋯` 的菜单承担；`+N` 保留成「一栏一行」的快捷入口。
+     */
+    appendModeButton(blockId, into, deps)
     return
   }
 
@@ -142,11 +140,32 @@ export function renderPropsLine(
     btn.textContent = t('ui.props.lineMore', { n: more })
     btn.dataset.tip = t('ui.props.lineMoreHint')
     btn.addEventListener('click', () => {
-      if (deps.onExpand) deps.onExpand(blockId)
+      if (deps.onSetMode) deps.onSetMode(blockId, 'list')
       else deps.inspect(blockId)
     })
     into.appendChild(btn)
   }
+  appendModeButton(blockId, into, deps)
+}
+
+/**
+ * 行尾那颗「这一块怎么排」（三态菜单的入口）。
+ *
+ * 为什么每块都给、且不依赖有没有被截断：**覆盖必须双向**——只有 `+N` 时，
+ * 一个只有两栏的块在 `list` 默认下永远收不回去，而一个满栏的块在 `summary`
+ * 下也没有「回到默认」的路。这颗按钮只在悬停/聚焦时显形，不占阅读时的视觉。
+ */
+function appendModeButton(blockId: string, into: HTMLElement, deps: PropsLineDeps): void {
+  if (!deps.onMenu) return
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = 'blk-prop-mode'
+  btn.dataset.propMode = blockId
+  btn.dataset.tip = t('ui.props.lineMode')
+  btn.setAttribute('aria-haspopup', 'menu')
+  btn.textContent = '⋯'
+  btn.addEventListener('click', () => deps.onMenu?.(blockId, btn.getBoundingClientRect()))
+  into.appendChild(btn)
 }
 
 /**

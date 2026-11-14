@@ -12,7 +12,7 @@ export function viewCommands(
   d: ViewDeps,
 ): Pick<
   App,
-  'setTheme' | 'toggleTheme' | 'toggleDock' | 'journalFeedLayout' | 'setPropsDensity' | 'togglePropsExpanded'
+  'setTheme' | 'toggleTheme' | 'toggleDock' | 'journalFeedLayout' | 'setPropsDensity' | 'setPropsLineMode'
 > {
   return {
     /**
@@ -67,7 +67,10 @@ export function viewCommands(
     },
 
     /**
-     * **块下属性区的密度档**（设备态）：`summary` 一行摘要／`list` 一栏一行。
+     * **块下属性的默认密度**（设备态）：`summary` 一行摘要／`list` 一栏一行。
+     *
+     * 它只是**默认值**：`propsLineMode` 里那些单块覆盖照旧生效，改默认**不清**它们
+     * （每一条都是用户对某一块的显式决定，默认值不该替他撤销）。
      *
      * 与主题那种「只换 token」的偏好不同，它**改行高** ⇒ 必须重排这一屏：
      * 虚拟化的占位是按行高累加的，不重排就只是「可见区对了、滚动条不对」。
@@ -76,28 +79,28 @@ export function viewCommands(
       const m: PropsLineDensity = density === 'list' ? 'list' : 'summary'
       if (d.prefs().propsDensity === m) return
       d.prefs().propsDensity = m
-      /*
-       * 切到 `list` 时清掉单块展开集：档位已经是「读全」，
-       * 留着那些标记只会在切回 `summary` 时突然冒出一堆展开的块（一次没人要求的副作用）。
-       */
-      if (m === 'list') d.prefs().propsExpanded = {}
       d.scheduleDeviceSave()
       d.refreshLayout()
       d.scheduleBadge()
     },
 
     /**
-     * **单块就地展开／收起**（设备态，`summary` 档下的临时覆盖）。
+     * **单块显式覆盖**（设备态，与块折叠 `folded` 同族：按块 id、不写库、不进撤销）。
      *
-     * 只记展开的（与块折叠 `folded` 同一口径）：没有这一格 ＝ 按档位画。
-     * 它**不写库、不进撤销**——「这块我读过」不是内容。
+     * `mode === ''` ⇒ **清除覆盖**，这一块回到跟随默认。三种状态各有入口：
+     *   · `+N` / 「展开」⇒ `'list'`
+     *   · 「收起」⇒ `'summary'`（默认档是 list 时也收得回去）
+     *   · 「跟随默认」⇒ `''`
+     *
+     * 双向是硬要求：只有「展开」没有「收起」时，把默认档切到 list 就等于把每一块
+     * 永久锁死在全显——那不叫默认值，叫一刀切。
      */
-    togglePropsExpanded: (blockId) => {
+    setPropsLineMode: (blockId, mode) => {
       if (blockId === '') return
-      const next = { ...d.prefs().propsExpanded }
-      if (next[blockId]) delete next[blockId]
-      else next[blockId] = true
-      d.prefs().propsExpanded = next
+      const next = { ...d.prefs().propsLineMode }
+      if (mode === 'summary' || mode === 'list') next[blockId] = mode
+      else delete next[blockId]
+      d.prefs().propsLineMode = next
       d.scheduleDeviceSave()
       d.refreshLayout()
       d.scheduleBadge()

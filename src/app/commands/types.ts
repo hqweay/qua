@@ -189,10 +189,10 @@ export interface ViewDeps {
     theme: ThemeMode
     feedLayout: SecLayout
     dock: { left: { open: boolean }; right: { open: boolean } }
-    /** 块下属性密度（设备态）：`summary` 一行／`list` 一栏一行 */
+    /** 块下属性的**默认**密度（设备态）：`summary` 一行／`list` 一栏一行 */
     propsDensity: 'summary' | 'list'
-    /** 就地展开的块（设备态，单块覆盖密度档） */
-    propsExpanded: Record<string, true>
+    /** 单块显式覆盖（设备态；没有键＝跟随默认），双向 */
+    propsLineMode: Record<string, 'summary' | 'list'>
   }
   applyChrome: () => void
   /**

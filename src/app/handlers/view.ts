@@ -89,10 +89,10 @@ export const VIEW_HANDLERS: Record<string, Handler> = {
     app.setPropsDensity(S(a.density, 'summary'))
     return true
   },
-  'core.view/toggle-props-expanded': (a, app) => {
+  'core.view/set-props-line-mode': (a, app) => {
     const blockId = S(a.blockId)
     if (!blockId) return false
-    app.togglePropsExpanded(blockId)
+    app.setPropsLineMode(blockId, S(a.mode, ''))
     return true
   },
   'core.dock/toggle-left': (_a, app) => {

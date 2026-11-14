@@ -1169,6 +1169,7 @@
  */
 .blk-props-line {
   flex: 0 0 auto;
+  position: relative;
   width: calc(100% - var(--ui-marker-slot) - var(--ui-gap-4));
   margin-inline-start: calc(var(--ui-marker-slot) + var(--ui-gap-4));
   height: var(--ui-props-h);
@@ -1239,20 +1240,39 @@
   max-width: 60%;
   text-align: end;
 }
-/* 「收起」只出现在「单块展开」这一态（全局 list 档没有收起这回事） */
-.blk-props-line .blk-prop-fold {
+/*
+  **这一块怎么排**（`⋯`，三态菜单的入口）：悬停/聚焦才显形。
+
+  ⚠️ 它**不能占行**：估高按「行数 × 行高」算，多出来的任何一行都会让实际高度
+     大于占位，滚动条只在滚到底部时露馅。所以两种档各有各的摆法：
+       · `summary`：行内贴尾（`margin-inline-start: auto`）——这一行恒 1 行，挤在里面不改高度；
+       · `list`：绝对定位在最末一行右侧（不参与 flex 布局，也就不加行）。
+*/
+.blk-props-line .blk-prop-mode {
   appearance: none;
   border: 0;
   background: none;
-  padding: 0;
   margin: 0;
+  padding: 0 var(--ui-gap-2);
   font: inherit;
   color: var(--ui-text-tertiary);
   cursor: pointer;
-  align-self: flex-end;
-  height: 20px;
+  opacity: 0;
+  flex: 0 0 auto;
 }
-.blk-props-line .blk-prop-fold:hover {
+.blk-props-line[data-props-density='summary'] .blk-prop-mode {
+  margin-inline-start: auto;
+}
+.blk-props-line[data-props-density='list'] .blk-prop-mode {
+  position: absolute;
+  inset-inline-end: 0;
+  bottom: 0;
+}
+.blk-props-line:hover .blk-prop-mode,
+.blk-props-line:focus-within .blk-prop-mode {
+  opacity: 1;
+}
+.blk-props-line .blk-prop-mode:hover {
   color: var(--ui-text);
 }
 .blk-props-line .blk-prop-value {
