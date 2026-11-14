@@ -1084,7 +1084,7 @@ const refPeek = createRefPeek({
     // 等 zoom 落定一帧：新段的挂载区实例由 renderMounts() 建好再激活
     requestAnimationFrame(() => {
       panels.activateRefsFor(id)
-      document.querySelector<HTMLElement>('#editor .sec-mount')?.scrollIntoView({ block: 'end' })
+      document.querySelector<HTMLElement>('#editor .sec-mount')?.scrollIntoView({ block: 'start' })
     })
   },
 })
