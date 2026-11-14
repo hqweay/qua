@@ -87,6 +87,12 @@ const run = async (browser, base) => {
       },
       sel: '.layer',
     },
+    {
+      name: 'badge',
+      // 常驻的状态徽标：不打开任何菜单，只要它在页面上
+      open: async () => {},
+      sel: '#badge',
+    },
   ]
 
   for (const c of cases) {

@@ -455,7 +455,8 @@ body[data-dock-resizing='1'] * {
   width: 100%;
 }
 .page-item:hover {
-  background: var(--ui-accent-soft);
+  /* 悬停是中性的「指针在这儿」；选中态见下面的 [data-active] —— 两者同色就分不清 */
+  background: var(--ui-bg-hover);
   color: var(--ui-text);
 }
 .page-item[data-active='1'] {

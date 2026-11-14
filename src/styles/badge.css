@@ -35,9 +35,10 @@
   align-items: center;
   padding: var(--ui-gap-2) var(--ui-gap-4);
   background: var(--ui-surface-raised);
-  border: 1px solid var(--ui-border);
+  /* 浮在正文之上的状态条：与菜单同一条——极淡边框描边界，影分三层 */
+  border: 1px solid var(--ui-border-subtle);
   border-radius: var(--ui-radius-pill);
-  box-shadow: var(--ui-shadow-pop);
+  box-shadow: var(--ui-shadow-float);
   font-family: var(--ui-font-mono);
   font-size: var(--ui-fs-xs);
   color: var(--ui-text-secondary);
@@ -69,8 +70,9 @@
   max-height: 62vh;
   overflow: auto;
   background: var(--ui-surface-raised);
-  border: 1px solid var(--ui-border);
-  border-radius: var(--ui-radius-md);
+  /* 同上：临时面用同一套外壳 */
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-float);
   box-shadow: var(--ui-shadow-pop);
   padding: var(--ui-gap-5);
   font-size: var(--ui-fs-xs);

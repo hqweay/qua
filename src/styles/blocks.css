@@ -1456,9 +1456,10 @@
   height: 24px;
   padding: 0 var(--ui-gap-3);
   background: var(--ui-surface-raised);
-  border: 1px solid var(--ui-border);
+  /* 跟随提及浮出的小卡：临时面，淡边 + 三层影 */
+  border: 1px solid var(--ui-border-subtle);
   border-radius: var(--ui-radius-sm);
-  box-shadow: var(--ui-shadow-mid);
+  box-shadow: var(--ui-shadow-float);
   color: var(--ui-text-secondary);
   font: inherit;
   font-size: var(--ui-fs-sm);

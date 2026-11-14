@@ -62,7 +62,8 @@
   color: var(--ui-text-secondary);
 }
 .ui-btn:hover {
-  background: var(--ui-accent-soft);
+  /* 与 [data-active='1'] 分家：悬停中性，激活才用强调色 */
+  background: var(--ui-bg-hover);
   color: var(--ui-text);
 }
 .ui-btn[data-active='1'] {
