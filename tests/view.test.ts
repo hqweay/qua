@@ -407,6 +407,16 @@ test('bodyHosts：children 源激活视图的身体替换子块行——判据�
   assert.equal(visibleRows(doc, { bodyHosts: hasChildrenViewBody }).length, 6, '无激活视图：子块照常画')
 })
 
+test('属性定义的子块进正文：那是说明文档，与内容行同构（选项早已搬出 children）', () => {
+  const note = mk('note', '定义的说明：只填年份')
+  const def = mk('def', '上映年份', [note], { _kind: 'date' })
+  const doc = { roots: [def], folded: {} }
+  const rows = visibleRows(doc)
+  assert.deepEqual(rows.map((r) => r.block.id), ['def', 'note'], '定义块的 children 是内容，不再被整棵摘掉')
+  assert.equal(rows[0]!.hasChildren, true, '有子块 ⇒ 给折叠三角（能收起说明）')
+  assert.equal(rows[1]!.depth, 1)
+})
+
 test('ownFieldIds 是 defaultColumns 的输入：只认块自己的槽（不扫全库）', () => {
   const { root } = pageWith5()
   const ids = ownFieldIds(root.children[0]!)

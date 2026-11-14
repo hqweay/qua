@@ -16,7 +16,6 @@ import {
   hasLiveChildren,
   isDeleted,
   liveChildren,
-  isPropDefBlock,
   isQueryBlock,
   mkBlock,
   writeBlockContent,
@@ -72,10 +71,13 @@ export interface VisibleRow {
  * 正文再画一遍就是同一批块出现两次。那一行的 `hasChildren` 也判成 false ——
  * 折叠三角要回答「点它能收起子块吗」，而此刻子块在别处展开着。
  *
- * ⚠️ **属性定义的子块是选项，不是内容行**：选项只在属性卡的选项编辑器里露面。
- *    让它们进正文大纲，就会多出一批「能折叠、能拖、回车能拆块」的普通块，
- *    而那些动作对「一个选项」没有意义。语义与视图宿主那条 `childless` 相同：
- *    子树由别处渲染。
+ * ⚠️ **属性定义的子块是内容，不是选项**：选项早已改成定义块上的记录
+ *    （`props._choices`，不进森林），所以子树里留下的都是作者写的说明／约定／示例——
+ *    与日记块同构（正文＝投影只读、children＝内容）。这里曾经把它们整棵摘掉，
+ *    理由是「选项不该进大纲」；选项搬走之后那条理由就不成立了。
+ *
+ *    查询面仍不扫定义块子树（schema 子树在求值入口排除）：这一轮只开「能写、能看、能折」，
+ *    「定义页的出边／内容进查询」另排轮。
  *
  * `opts.bodyHosts` 是调用方给的「这一屏真会画身体」的判据（容器型视图，如页签）：
  *    命中的块只画根行，子块行让位给身体。调用方必须**真的**会画身体才给——
@@ -86,7 +88,7 @@ export function visibleRows(doc: Doc, opts: { bodyHosts?: (b: Block) => boolean 
   const childless = new Set<string>()
   if (doc.viewRootId) childless.add(doc.viewRootId)
   for (const b of flatten(doc)) {
-    if (isPropDefBlock(b) || opts.bodyHosts?.(b)) childless.add(b.id)
+    if (opts.bodyHosts?.(b)) childless.add(b.id)
   }
   walkForest(
     doc.roots,
