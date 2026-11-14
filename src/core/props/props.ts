@@ -715,13 +715,11 @@ export function legacyChoiceOf(b: Block): PropChoice {
   const scope = parseChoiceScope(prop<unknown>(b, CHOICE_SCOPE_PROP))
   const icon = prop<string>(b, ICON_PROP)
   const color = prop<string>(b, COLOR_PROP)
-  const desc: string | undefined = undefined
   return {
     id: b.id,
     label,
     ...(icon ? { icon } : {}),
     ...(color ? { color } : {}),
-    ...(desc ? { desc } : {}),
     ...(scope ? { scope } : {}),
     ...(isDeleted(b) ? { deleted: true as const } : {}),
   }
