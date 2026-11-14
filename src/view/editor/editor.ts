@@ -1576,6 +1576,10 @@ export class BlockEditor {
         folded: foldStateOf(this.doc),
         gutter,
         find,
+        // 行尾标签 chips 拖拽重排：写回走同一份 reorderTags（只许换序，一笔撤销）
+        onReorderTags: (blockId, orderedIds) => {
+          void this.reorderTags(blockId, orderedIds)
+        },
         // 只有装载根会带上下文：子行的位置已经由缩进表达
         context: r.depth === 0 ? this.doc.contexts?.get(r.block.id) : undefined,
         // 来源说明与面包屑同一格：都在说明「这一行为什么在这一屏里」

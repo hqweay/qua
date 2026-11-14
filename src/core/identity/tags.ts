@@ -181,6 +181,32 @@ export function removeTagId(block: Block, tagId: string): boolean {
 }
 
 /**
+ * 把「用户重排的可见子集」并回完整归属序。
+ *
+ * 行尾 chip 槽**不画内联的那几枚**（正文里 `#名` 提到的标签让位，见 `inlineTagIdsOf`），
+ * 所以拖拽只重排了子集：子集成员按新序**依次占住它们在原序里的位次**，
+ * 不在子集里的成员原地不动——拖看得见的，不动看不见的。
+ *
+ * @returns 并好的完整序；`orderedSubset` 不是 `current` 的一个无重子集 ⇒ `null`
+ *          （调用方整笔拒绝——重排不是加/摘的第二入口）
+ */
+export function mergeTagOrder(current: readonly string[], orderedSubset: readonly string[]): string[] | null {
+  const subset = new Set(orderedSubset)
+  if (subset.size !== orderedSubset.length) return null
+  let i = 0
+  const out: string[] = []
+  for (const id of current) {
+    if (subset.has(id)) {
+      if (i >= orderedSubset.length) return null
+      out.push(orderedSubset[i++]!)
+    } else {
+      out.push(id)
+    }
+  }
+  return i === orderedSubset.length ? out : null
+}
+
+/**
  * 一个块当前带着哪些标签块（**活引用**，顺序＝打的先后）。
  *
  * ⚠️ 返回标签块本身，不是名字 —— 要 id 取 `.id`，要显示名走 `blockLabel`（会跟着改名）。

@@ -37,6 +37,7 @@ import {
   isQueryBlock,
   journalDate,
   journalDateLabel,
+  mergeTagOrder,
   primaryAliasOf,
   prop,
   resolveEmbed,
@@ -510,11 +511,16 @@ export function fillBlockText(
  * ⚠️ **没有标签就不生成这个节点**（同 `.fold` 的口径，不是隐藏）：空槽是纯噪声。
  * ⚠️ 分割线没有正文槽，也不画标签槽。
  *
+ * `onReorder` 给了且标签 ≥2 枚 ⇒ chips 可**拖拽重排**：拖动中实时搬 DOM 预览落点，
+ * 落下按 DOM 序并回完整归属序（`mergeTagOrder`——内联让位的那几枚保位）整笔交回调。
+ * 顺序喂着块标的借形/借色取「第一个」，是用户可编辑的数据，不是打标先打的偶然。
+ *
  * @returns 标签槽元素；无标签可显示时返回 null
  */
 export function makeTagsEl(
   b: Block,
   find?: FindBlock,
+  onReorder?: (orderedFull: string[]) => void,
 ): HTMLElement | null {
   if (!find) return null
   const inline = new Set(inlineTagIdsOf(b))
@@ -523,9 +529,43 @@ export function makeTagsEl(
   const el = document.createElement('span')
   el.className = 'blk-tags'
   el.contentEditable = 'false'
+  const draggable = tags.length >= 2 && onReorder !== undefined
+  const draggingOf = (): HTMLElement | null => el.querySelector<HTMLElement>('.tag-chip[data-dragging]')
   for (const tagId of tags) {
     const tag = find(tagId)!
-    el.appendChild(makeTagChipEl(tagId, blockLabel(tag, find), prop<string>(tag, '_icon'), prop<string>(tag, COLOR_PROP)))
+    const chip = makeTagChipEl(tagId, blockLabel(tag, find), prop<string>(tag, '_icon'), prop<string>(tag, COLOR_PROP))
+    if (draggable) {
+      chip.draggable = true
+      chip.addEventListener('dragstart', (e) => {
+        chip.dataset.dragging = '1'
+        // Electron 要 dataTransfer 里有非空数据才起拖（内容无关，id 只是载体）
+        e.dataTransfer?.setData('text/plain', tagId)
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+      })
+      chip.addEventListener('dragend', () => {
+        delete chip.dataset.dragging
+      })
+      // 悬停在另一枚 chip 上 ⇒ 按指针在前半/后半决定预览落点（挪的是正在拖的那枚）
+      chip.addEventListener('dragover', (e) => {
+        e.preventDefault()
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+        const dragging = draggingOf()
+        if (!dragging || dragging === chip) return
+        const mid = chip.getBoundingClientRect().left + chip.offsetWidth / 2
+        chip.parentNode?.insertBefore(dragging, e.clientX < mid ? chip : chip.nextSibling)
+      })
+    }
+    el.appendChild(chip)
+  }
+  // 落下＝按预览序并回全序整笔交回调；判负（集合不一致）由调用方不写，预览随重渲染复原
+  if (draggable) {
+    el.addEventListener('dragover', (e) => e.preventDefault())
+    el.addEventListener('drop', (e) => {
+      e.preventDefault()
+      const order = [...el.querySelectorAll<HTMLElement>('.tag-chip[data-tag-id]')].map((c) => c.dataset.tagId!)
+      const full = mergeTagOrder(tagIdsOf(b), order)
+      if (full !== null) onReorder!(full)
+    })
   }
   return el
 }
@@ -612,6 +652,8 @@ export function makeBlockEl(
     folded?: FoldState
     gutter?: readonly GutterField[]
     find?: FindBlock
+    /** 标签 chips 拖拽重排的落点（≥2 枚才可拖）：收并回内联位次后的完整归属序，由编辑器写回 */
+    onReorderTags?: (blockId: string, orderedIds: string[]) => void
     context?: readonly Block[]
     /** 这一行为什么出现在这一屏里（`Doc.rootNotes`）；省略 ＝ 不画那一格 */
     note?: string
@@ -1251,7 +1293,11 @@ export function makeBlockEl(
    * ⚠️ `ALLOWED_ROW_CHILDREN` 已登记 `blk-tags`：漏了它，第一次收光标
    *    （`reclaimCaret`）就会把这枚槽当游离节点删掉。
    */
-  const tags = makeTagsEl(b, opts.find)
+  const tags = makeTagsEl(
+    b,
+    opts.find,
+    opts.onReorderTags ? (full) => opts.onReorderTags!(b.id, full) : undefined,
+  )
   if (tags) el.appendChild(tags)
 
   /**

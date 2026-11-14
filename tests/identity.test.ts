@@ -26,6 +26,7 @@ import {
   isPropDefBlock,
   isQueryBlock,
   mergeIntoPrev,
+  mergeTagOrder,
   mkBlock,
   type Block,
   type Doc,
@@ -205,4 +206,21 @@ test('复制子树：`_mounts` **随块走**（它是内容），但 local 栏�
   assert.equal(mounts.length, 1, '只有 local 栏跟着走；linked 栏不再是合法形状')
   assert.notEqual(mounts[0]!.spec, spec, 'local 栏的 spec 深拷：改副本不该动原件')
   assert.deepEqual(mounts[0]!.spec, spec, '内容一样')
+})
+
+test('mergeTagOrder：子集序依次占住原来的位次，不在子集里的（内联让位的）原地不动', () => {
+  // 可见序 [乙, 甲] 并回：甲乙占住第 1、3 位，丙（内联没进槽）仍卡在第 2 位
+  assert.deepEqual(mergeTagOrder(['甲', '丙', '乙'], ['乙', '甲']), ['乙', '丙', '甲'])
+  // 全集重排（属性面板路径）退化为普通换序
+  assert.deepEqual(mergeTagOrder(['甲', '乙', '丙'], ['丙', '甲', '乙']), ['丙', '甲', '乙'])
+  // 同序（拖完没动）原样返回
+  assert.deepEqual(mergeTagOrder(['甲', '乙'], ['甲', '乙']), ['甲', '乙'])
+})
+
+test('mergeTagOrder：陌生 id／重复整笔拒绝（重排不是加/摘的第二入口）；真子集是合法形态', () => {
+  assert.equal(mergeTagOrder(['甲', '乙'], ['甲', '乙', '丙']), null) // 多了
+  assert.equal(mergeTagOrder(['甲', '乙'], ['甲', '丙']), null) // 陌生 id
+  assert.equal(mergeTagOrder(['甲', '乙'], ['甲', '甲']), null) // 重复
+  // 子集小于全集＝正常态（内联让位的那几枚不进槽）；两枚可见成员互换，甲（内联）仍卡在首位
+  assert.deepEqual(mergeTagOrder(['甲', '乙', '丙'], ['丙', '乙']), ['甲', '丙', '乙'])
 })

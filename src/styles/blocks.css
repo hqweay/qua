@@ -1730,6 +1730,13 @@
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+/* 多标签（≥2）时 chips 可拖拽重排：抓手指向可拖，拖动中压暗（落点预览由 DOM 实时搬位） */
+.blk-tags .tag-chip[draggable='true'] {
+  cursor: grab;
+}
+.tag-chip[data-dragging] {
+  opacity: 0.4;
+}
 /* chip 上的小图标（只在标签显式配了图标时出现，见 makeTagChipEl） */
 .tag-chip .tag-chip-ico {
   display: inline-flex;
