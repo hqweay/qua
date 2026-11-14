@@ -25,6 +25,7 @@ import {
   choicesOf,
   fieldRows,
   formatOf,
+  isAssetRef,
   isChoicesValue,
   isMultiValueKey,
   legacyChoiceOf,
@@ -34,6 +35,7 @@ import {
   runQuery,
   setChoices,
   sortRecords,
+  textFormatOk,
   type ChoiceScope,
   type PropChoice,
 } from '../src/core/index.ts'
@@ -637,4 +639,63 @@ test('sortRecords：select 列按记录顺序（resolver），不在列表的值
   // 不传 resolver 时行为不变（按值本身比较）——这条确保默认语义没被改掉
   const byDefault = sortRecords(records, [{ by: 'def', dir: 'asc' }]).map((r) => r.block.id)
   assert.deepEqual(byDefault, ['r4', 'r1', 'r3', 'r2'], `默认按字符串、空值最后：${byDefault}`)
+})
+
+/* ------------------------------------------------------------ 11. 写路径的格式校验 */
+
+test('textFormatOk：url 只收 http(s)（与打开端同一白名单）、email/phone 形状、空串恒合法', () => {
+  assert.equal(textFormatOk('url', 'https://qua.leay.net/a?b=1'), true)
+  assert.equal(textFormatOk('url', 'http://x.y'), true)
+  assert.equal(textFormatOk('url', 'qua.leay.net'), false, '没写协议 ⇒ 拒（与插入端同一口径）')
+  assert.equal(textFormatOk('url', 'file:///etc/passwd'), false, '非 http(s) 协议一律拒')
+  assert.equal(textFormatOk('url', ''), true, '空是「没填」，不是格式错')
+  assert.equal(textFormatOk('email', 'a@b.co'), true)
+  assert.equal(textFormatOk('email', 'a@b'), false, '没有点号的域名不收')
+  assert.equal(textFormatOk('phone', '+86 138-0000-0000'), true)
+  assert.equal(textFormatOk('phone', 'abc'), false)
+  assert.equal(textFormatOk('plain', '随便什么'), true, 'plain 不校验')
+  assert.equal(textFormatOk(undefined, '随便什么'), true)
+})
+
+test('setPropValue 按 kind／format 校验：坏值不写并提示；合法值照写', () => {
+  const { cmds, kb, toasts } = commandHarness()
+  const url = cmds.createPropDef('', '主页', 'text', 'own')
+  cmds.setPropFormat(url, 'url')
+  const host = blk('host', '一块')
+  kb.tx((tx) => tx.insert(host, null, 0))
+
+  cmds.setPropValue('host', url, 'qua.leay.net')
+  assert.equal(kb.get('host')?.props?.[url], undefined, '不合格式 ⇒ 一个字节都没写')
+  assert.ok(toasts.some((x) => x.includes('链接')), `应有格式提示：${JSON.stringify(toasts)}`)
+
+  cmds.setPropValue('host', url, 'https://qua.leay.net')
+  assert.equal(kb.get('host')?.props?.[url], 'https://qua.leay.net', '合法值照写')
+
+  // 形状不对（number 收到字符串）⇒ 拒
+  const num = cmds.createPropDef('', '评分', 'number', 'own', 'new')
+  cmds.setPropValue('host', num, '五星')
+  assert.equal(kb.get('host')?.props?.[num], undefined)
+})
+
+test('setPropFormat：写槽／plain 摘键／无格式轴的 kind 拒绝', () => {
+  const { cmds, kb, toasts } = commandHarness()
+  const text = cmds.createPropDef('', '备注', 'text', 'own')
+  cmds.setPropFormat(text, 'email')
+  assert.equal(kb.get(text)?.props?._format, 'email')
+  cmds.setPropFormat(text, 'plain')
+  assert.equal('_format' in (kb.get(text)?.props ?? {}), false, 'plain 是缺省 ⇒ 摘键')
+
+  cmds.setPropFormat(text, 'sparkles')
+  assert.equal('_format' in (kb.get(text)?.props ?? {}), false, '未知格式不写')
+
+  const box = cmds.createPropDef('', '勾', 'checkbox', 'own', 'new')
+  cmds.setPropFormat(box, 'plain')
+  assert.ok(toasts.some((x) => x.includes('没有格式轴')), `应有提示：${JSON.stringify(toasts)}`)
+})
+
+test('asset：值只收资产 id 或 http(s) 链接（两态同一个 kind）', () => {
+  assert.equal(isAssetRef('0123456789abcdef0123'), true, '内态：资产库 hash')
+  assert.equal(isAssetRef('https://example.com/a.png'), true, '外态：外链')
+  assert.equal(isAssetRef('随便一段字'), false)
+  assert.equal(isAssetRef(''), false)
 })

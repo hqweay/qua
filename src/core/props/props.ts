@@ -37,6 +37,7 @@ import { derivedId, pad, uuidv7Hex } from '../model/ids.ts'
 import { journalDate, todayISO } from '../identity/journal.ts'
 import { allTags, resolveTagIds, TAGS_PROP, tagIdsOf, tagsById } from '../identity/tags.ts'
 import { t } from '../infra/msg.ts'
+import { checkExternalUrl } from '../relations/link.ts'
 
 /**
  * 选项记录域：类型、形状判据、墓碑、作用域住 `./choices.ts`；
@@ -461,6 +462,56 @@ export function formatOf(def: Block): string | undefined {
 /** 格式名的形状（写侧用）：非空字符串；按 kind 的允许集收窄在命令层做 */
 export function isFormatValue(v: unknown): boolean {
   return typeof v === 'string' && v !== ''
+}
+
+/* ------------------------------------------------------------ 格式与值校验 */
+
+/**
+ * `text` 的四种格式（`_format` 的允许集）。
+ *
+ * `url` 是**格式**不是 kind：多链接＝`text + url + many`。这条判据来自
+ * 「值的存储形状不同才算 kind」—— 链接与纯文本都是字符串，只是校验与画法不同。
+ */
+export type TextFormat = 'plain' | 'url' | 'email' | 'phone'
+
+export const TEXT_FORMATS: readonly TextFormat[] = ['plain', 'url', 'email', 'phone']
+
+export function isTextFormat(v: unknown): v is TextFormat {
+  return typeof v === 'string' && (TEXT_FORMATS as readonly string[]).includes(v)
+}
+
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+/** 电话按「宽松形状」收：国家码、括号、空格、连字符都合法，不猜哪种规范 */
+const PHONE_SHAPE = /^[+()\d][+()\d\s-]{2,}$/
+
+/**
+ * 一格文本值合不合声明的格式。
+ *
+ * **空串恒合法**：空是「没填」，不是「格式错」—— 把清空挡在格式校验里，
+ * 用户就永远填不了第二遍（先得把错的那半截清掉，而清空也算错）。
+ *
+ * `url` 只收 `http:`／`https:`（与「打开链接」同一份白名单，
+ * `relations/link.ts:checkExternalUrl`）：这里放行的协议，插入端和打开端都放行。
+ */
+export function textFormatOk(format: string | undefined, value: string): boolean {
+  const s = value.trim()
+  if (s === '') return true
+  if (format === 'url') return checkExternalUrl(s).ok
+  if (format === 'email') return EMAIL_SHAPE.test(s)
+  if (format === 'phone') return PHONE_SHAPE.test(s)
+  return true
+}
+
+/**
+ * `asset` 的值：两态来源引用（内态资产库 hash ／ 外态 http(s) URL）。
+ *
+ * 判据只看**形状**，不看字节在不在库：本地性是值的状态维度，不是 kind 维度。
+ * 缺失/腐烂是**显示态**（真图／缺失／不可用三态），不是写不进去的理由。
+ */
+export function isAssetRef(v: unknown): boolean {
+  if (typeof v !== 'string' || v === '') return false
+  if (/^[0-9a-f]{16,}$/i.test(v)) return true
+  return checkExternalUrl(v).ok
 }
 
 
@@ -1333,7 +1384,9 @@ export interface FieldRow {
   /** 显示名：定义块的正文；定义缺失时退回 propId（数据不静默消失） */
   label: string
   kind: PropKind
-  /** 值形态：`one`（缺省）／`many`（`select` 的多值） */
+  /** 格式（同值形状内的约束与画法；缺省＝该 kind 的缺省格式） */
+  format?: string
+  /** 值形态：`one`（缺省）／`many` */
   cardinality: Cardinality
   value: unknown
   /** 有值 ⇔ 不是「待填」 */
@@ -1448,6 +1501,7 @@ function fieldRowOf(
     propId,
     label: def ? propLabel(def) || propId : propId,
     kind: def ? propKindOf(def) : 'text',
+    ...(def && formatOf(def) !== undefined ? { format: formatOf(def) } : {}),
     cardinality: def ? cardinalityOf(def) : 'one',
     // 引擎属性的值住在块顶层字段，`valueOf` 只读 props 袋 ⇒ 这里一处桥接
     value: isEngineProp(propId) ? enginePropValue(block, propId) : valueOf(block, propId),

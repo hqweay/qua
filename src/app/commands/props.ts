@@ -4,6 +4,8 @@
 import {
   CARDINALITY_PROP,
   CHECK_PROP,
+  FORMAT_PROP,
+  PROP_KIND_SPECS,
   CHILD_PROPS_PROP,
   UI_POSITION_PROP,
   USE_PROP,
@@ -13,7 +15,9 @@ import {
   checkOf,
   childDisplayProps,
   flatten,
+  formatOf,
   hasList,
+  isAssetRef,
   isCurrentPropKind,
   parseCheckSpec,
   useOf,
@@ -34,7 +38,9 @@ import {
   propLabel,
   setChoices,
   setValue,
+  textFormatOk,
   undeclareField,
+  valuesOk,
   type Block,
   type Cardinality,
   type UiPosition,
@@ -42,6 +48,14 @@ import {
 import { t } from '../../core/infra/msg.ts'
 import type { App, PropCreateMode, PropTarget } from '../../core/infra/ports.ts'
 import type { PropsDeps } from './types.ts'
+
+/** 文本格式的显示名（`ui.props.format.*` 的一张小表；缺省按纯文本） */
+function textFormatLabel(format: string | undefined): string {
+  if (format === 'url') return t('ui.props.format.url')
+  if (format === 'email') return t('ui.props.format.email')
+  if (format === 'phone') return t('ui.props.format.phone')
+  return t('ui.props.format.plain')
+}
 
 export function propsCommands(
   d: PropsDeps,
@@ -63,6 +77,7 @@ export function propsCommands(
   | 'setChildProps'
   | 'deleteChoice'
   | 'restoreChoice'
+  | 'setPropFormat'
 > {
   const find = (id: string): Block | undefined => d.kb.get(id)
 
@@ -103,9 +118,37 @@ export function propsCommands(
     d.kb.propDefs().find((def) => allChoicesOf(def).some((c) => c.id === choiceId))
 
   return {
+    /**
+     * 写一格值：**按定义声明的 kind／format 校验**，不合就不写。
+     *
+     * 为什么校验放在命令这一侧、而不是控件里：值的形状是**模型**的事
+     * （查询算子全靠它正确），控件只是入口之一；只在校验控件里做，
+     * 换一个入口（表格、命令面、将来的同步）就能落进坏值。
+     * 拒写时不静默：给一句提示，用户知道刚才那次没生效。
+     */
     setPropValue: (blockId, propId, value) => {
       const b = find(blockId)
       if (!b) return
+      const def = d.kb.propDefs().find((x) => x.id === propId)
+      if (def && value !== undefined && value !== null) {
+        const kind = propKindOf(def)
+        if (!valuesOk(kind, value)) {
+          d.toast(t('ui.props.valueShapeInvalid', { kind: t(`ui.props.kind.${kind}`) }), 'warn')
+          return
+        }
+        const list = Array.isArray(value) ? value : [value]
+        if (kind === 'text') {
+          const fmt = formatOf(def)
+          if (!list.every((v) => typeof v === 'string' && textFormatOk(fmt, v))) {
+            d.toast(t('ui.props.formatInvalid', { format: textFormatLabel(fmt) }), 'warn')
+            return
+          }
+        }
+        if (kind === 'asset' && !list.every((v) => isAssetRef(v))) {
+          d.toast(t('ui.props.assetInvalid'), 'warn')
+          return
+        }
+      }
       d.write(blockId, () => setValue(b, propId, value))
     },
 
@@ -362,6 +405,30 @@ export function propsCommands(
       d.run((tx) =>
         tx.patch(defId, (b) => patchProp(b, CARDINALITY_PROP, cardinality === 'many' ? 'many' : undefined)),
       )
+    },
+
+    /**
+     * 写/摘定义的**格式**（同值形状内的约束与画法）。
+     *
+     * 没有格式轴的 kind（checkbox／select／ref）拒绝写入 —— 写进去也没人读，
+     * 而「读不出来」会让人以为格式坏了。
+     * `plain` 与「没有这一格」是同一个答案：摘键，不留空壳。
+     */
+    setPropFormat: (defId, format) => {
+      const def = find(defId)
+      if (!def) return
+      const kind = propKindOf(def)
+      const spec = PROP_KIND_SPECS[kind]
+      if (spec.formats.length === 0) {
+        d.toast(t('ui.props.formatNotAllowed', { kind: t(`ui.props.kind.${kind}`) }), 'warn')
+        return
+      }
+      const next = format.trim()
+      if (next !== '' && next !== 'plain' && !spec.formats.includes(next)) {
+        d.toast(t('ui.props.formatUnknown', { format: next }), 'warn')
+        return
+      }
+      d.run((tx) => tx.patch(defId, (b) => patchProp(b, FORMAT_PROP, next === '' || next === 'plain' ? undefined : next)))
     },
 
     /** 写定义块的快捷入口位置（`panel` ＝ 摘键，回到缺省） */

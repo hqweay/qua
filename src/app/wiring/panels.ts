@@ -625,6 +625,8 @@ export function setupPanels(deps: PanelsDeps) {
         remove: (choiceId) => void deps.getRegistry().invoke('core.props/delete-choice', { choiceId }, 'ui'),
         restore: (choiceId) => void deps.getRegistry().invoke('core.props/restore-choice', { choiceId }, 'ui'),
       },
+      setFormat: (defId, format) =>
+        void deps.getRegistry().invoke('core.props/set-format', { defId, format }, 'ui'),
   })
 
   const propertiesPanel = new PropertiesPanel(

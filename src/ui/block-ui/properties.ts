@@ -31,9 +31,11 @@ import {
   displayNameOf,
   declaredFieldIds,
   hasList,
+  formatOf,
   isPropDef,
   normalizeAlias,
   PROP_KINDS,
+  PROP_KIND_SPECS,
   prop,
   propKindOf,
   propLabel,
@@ -51,6 +53,19 @@ import {
   tagsContent,
   type ConfigSectionsCtx,
 } from './config-sections.ts'
+
+/** 格式的显示名（一张小表：格式是封闭集，翻不出去） */
+function formatLabelOf(format: string): string {
+  if (format === 'url') return t('ui.props.format.url')
+  if (format === 'email') return t('ui.props.format.email')
+  if (format === 'phone') return t('ui.props.format.phone')
+  if (format === 'date') return t('ui.props.format.date')
+  if (format === 'datetime') return t('ui.props.format.datetime')
+  if (format === 'image') return t('ui.props.format.image')
+  if (format === 'file') return t('ui.props.format.file')
+  if (format === 'any') return t('ui.props.format.any')
+  return t('ui.props.format.plain')
+}
 
 export interface PropertiesDeps {
   /**
@@ -159,6 +174,8 @@ export interface PropertiesDeps {
   fieldDeclarations: () => ReadonlyMap<string, readonly Block[]>
   /** 选项的写入口（命令；组件不直接改块） */
   choices: ChoiceActions
+  /** 定义格式的写入口（同值形状内的约束与画法；`plain` ＝ 摘键） */
+  setFormat: (defId: string, format: string) => void
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
 }
 
@@ -361,8 +378,23 @@ export function makeCellEditor(
   }
   const input = document.createElement('input')
   input.className = 'prop-input'
-  input.type = kind === 'date' ? 'date' : 'text'
+  /**
+   * 输入框类型跟着**格式**走（不是跟着 kind）：`url`／`email`／`tel` 的原生键盘与
+   * 浏览器提示是白拿的；校验仍在写路径（命令层），这里只影响键盘与拼写检查。
+   */
+  input.type =
+    kind === 'date'
+      ? 'date'
+      : row.format === 'url'
+        ? 'url'
+        : row.format === 'email'
+          ? 'email'
+          : row.format === 'phone'
+            ? 'tel'
+            : 'text'
+  if (row.format === 'url' || row.format === 'email' || row.format === 'phone') input.spellcheck = false
   if (kind === 'number') input.inputMode = 'decimal'
+  if (kind === 'asset') input.placeholder = t('ui.props.assetPlaceholder')
   input.placeholder = t('ui.props.pending')
   input.value = row.value === undefined || row.value === null ? '' : String(row.value)
   input.addEventListener('change', () => {
@@ -643,6 +675,17 @@ export class PropertiesPanel {
      * **select 定义的选项编辑器**：这条属性「能选什么」就是它自己的子块。
      * 主体是定义块时画在这里（属性行之后、系统信息之前），改完立刻看得到。
      */
+    /**
+     * **定义的类型配置**：格式（同值形状内的约束与画法）。
+     *
+     * 只有有格式轴的 kind 才有这一段（select 的配置是选项编辑器；checkbox/ref 没有格式）。
+     * 格式改动**不动任何值**：值仍是同一个字符串，只是校验与输入框类型变了。
+     */
+    if (isPropDef(target)) {
+      const fmt = this.buildDefFormat(target)
+      if (fmt) this.els.body.appendChild(fmt)
+    }
+
     if (this.selectDef()) {
       this.choicesFull.render()
       this.els.body.appendChild(this.choicesFull.root)
@@ -650,6 +693,35 @@ export class PropertiesPanel {
 
     // 系统信息在**最后**：它是这一块的出生与改动记录，不是可编辑的数据
     this.els.body.appendChild(this.buildSystem(target))
+  }
+
+  /** 定义格式的一段（没有格式轴的 kind 返回 null：不给一个点了没用的下拉） */
+  private buildDefFormat(def: Block): HTMLElement | null {
+    const kind = propKindOf(def)
+    const spec = PROP_KIND_SPECS[kind]
+    if (spec.formats.length === 0) return null
+    const row = document.createElement('div')
+    row.className = 'prop-row prop-def-format ui-row'
+    const label = document.createElement('label')
+    label.className = 'prop-label'
+    const name = document.createElement('span')
+    name.className = 'prop-name'
+    name.textContent = t('ui.props.format.label')
+    label.append(name)
+    const sel = document.createElement('select')
+    sel.className = 'prop-input'
+    sel.dataset.defFormat = '1'
+    for (const f of spec.formats) {
+      const o = document.createElement('option')
+      o.value = f
+      o.textContent = formatLabelOf(f)
+      sel.appendChild(o)
+    }
+    // 没写过 `_format` 时显示该 kind 的第一个格式（text 的 plain／asset 的 image）
+    sel.value = formatOf(def) ?? spec.formats[0] ?? ''
+    sel.addEventListener('change', () => this.deps.setFormat(def.id, sel.value))
+    row.append(label, sel)
+    return row
   }
 
   /**

@@ -48,6 +48,12 @@ export const PROPS_HANDLERS: Record<string, Handler> = {
     app.addProp(blockId, propId, target)
     return true
   },
+  'core.props/set-format': (a, app) => {
+    const defId = S(a.defId)
+    if (!defId) return false
+    app.setPropFormat(defId, S(a.format))
+    return true
+  },
   'core.props/undeclare': (a, app) => {
     const blockId = S(a.blockId)
     const propId = S(a.propId)

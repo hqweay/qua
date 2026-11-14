@@ -344,6 +344,11 @@ export interface App {
    * 切回 `one` 时若仍有块选了多个值 ⇒ **拒绝**并给一句提示，不静默只显示第一个。
    */
   setChoiceCardinality(defId: string, cardinality: Cardinality): void
+  /**
+   * 写/摘定义的**格式**（同值形状内的约束与画法；`plain` 与「没有这一格」同义）。
+   * 没有格式轴的 kind 拒绝写入。
+   */
+  setPropFormat(defId: string, format: string): void
   /** 写定义块的快捷入口位置（`block-left` ＝ 块左侧图标；`panel` ＝ 只留属性面板） */
   setUiPosition(defId: string, position: UiPosition): void
   /**
