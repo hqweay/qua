@@ -17,6 +17,7 @@ import {
   blockLabel,
   findInForest,
   hasIdentity,
+  iconOf,
   plainText,
   tagIdsOf,
   walkForest,
@@ -56,7 +57,8 @@ export function memberRows(tag: MemberTagRef, query: string, deps: MemberDeps): 
           id: `retrieval/obj/${b.id}`,
           label: `#${label}`,
           hint: `#${tag.name}`,
-          icon: 'lucide:square-dashed',
+          // 实例是普通块：空白但占位（iconOf 给显式图标让路——实例配了脸就跟着走）
+          icon: iconOf(b) ?? '',
           group: 'retrieval/1-instance',
           pick: { kind: 'instance', id: b.id, name: label, tag: tag.name, tagId: tag.tagId! },
         },

@@ -29,6 +29,7 @@ import {
   findByAlias,
   flatten,
   hasList,
+  iconOf,
   normalizeAlias,
   parentsOf,
   primaryAliasOf,
@@ -175,14 +176,18 @@ export function createNameChoice(
   /**
    * 行投影：身份源（tag/page/pageOrTag）按身份画（标签带 `#`、页是文件），引用源按「是页还是块」画。
    * 页/标签身份组复用 `pick/1`／`pick/2`（分组标题表里已有）；引用组沿用块选择器的两组。
+   *
+   * 图标统一走 `iconOf`（指位链）：标签显式配了图标，改一处全库的候选行都跟随；
+   * 普通块＝空白但占位（`''`）——页/块的区分由有图标/无图标继续承载。
    */
   const rowFor = (b: Block): Row => {
+    const icon = iconOf(b) ?? ''
     if (kind === 'tag') {
       return {
         id: `${idPrefix}/${b.id}`,
         label: `#${rowName(b)}`,
         hint: [parentHint(b), countHint(b)].filter((s) => s !== '').join(' · '),
-        icon: 'lucide:hash',
+        icon,
         group: tagGroup,
         keyHint: keyHintOf(b),
         pick: { kind: 'tag', id: b.id, name: primaryAliasOf(b) || displayNameOf(b).trim() },
@@ -195,7 +200,7 @@ export function createNameChoice(
         id: `${idPrefix}/${b.id}`,
         label: title,
         hint: isPage ? t('ui.props.refIsPage') : t('ui.props.refIsBlock'),
-        icon: isPage ? 'lucide:file' : 'lucide:square',
+        icon,
         group: isPage ? 'ref/1-page' : 'ref/2-block',
         keyHint: keyHintOf(b),
         pick: { kind: 'block', id: b.id, name: title },
@@ -206,7 +211,7 @@ export function createNameChoice(
       id: `${idPrefix}/${b.id}`,
       label: isTag ? `#${rowName(b)}` : rowName(b),
       hint: parentHint(b),
-      icon: isTag ? 'lucide:hash' : 'lucide:file',
+      icon,
       group: isTag ? 'pick/2' : 'pick/1',
       keyHint: keyHintOf(b),
       pick: { kind: 'block', id: b.id, name: displayNameOf(b).trim() },

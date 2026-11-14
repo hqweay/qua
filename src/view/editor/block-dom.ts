@@ -21,6 +21,7 @@ import {
   blockTypeOf,
   displayNameOf,
   embedBodyOf,
+  faceOf,
   hasChildrenViewBody,
   hasQueryBody,
   identityTags,
@@ -360,13 +361,21 @@ function assetAtomContent(
  * ⚠️ `data-tag-id`（读数：占 0 格）与 `data-ref-to`（导航：指向标签块）**两格都要有**：
  *    它们是两个事实（「这枚不占正文」与「它指向谁」），合成一格就会让读数或点击其一失效。
  */
-export function makeTagChipEl(tagId: string, name: string): HTMLElement {
+export function makeTagChipEl(tagId: string, name: string, icon?: string): HTMLElement {
   const el = document.createElement('span')
   el.className = 'tag-chip'
   el.dataset.tagId = tagId
   el.dataset.refTo = tagId
   el.contentEditable = 'false'
-  el.textContent = `#${name}`
+  // **标签有显式图标才画**（小图标＋`#名`）：缺省 hash 不上 chip——满屏默认 hash 是噪音；
+  // 标签的脸改一处全库跟随，chip 是它的一个露面
+  if (icon !== undefined && icon.trim() !== '') {
+    const ico = document.createElement('span')
+    ico.className = 'tag-chip-ico'
+    renderIcon(ico, icon, 'circle-help', 'sm')
+    el.appendChild(ico)
+  }
+  el.appendChild(document.createTextNode(`#${name}`))
   el.dataset.tip = t('ui.chip.tagTitle', { label: name })
   return el
 }
@@ -500,7 +509,10 @@ export function makeTagsEl(
   const el = document.createElement('span')
   el.className = 'blk-tags'
   el.contentEditable = 'false'
-  for (const tagId of tags) el.appendChild(makeTagChipEl(tagId, blockLabel(find(tagId)!, find)))
+  for (const tagId of tags) {
+    const tag = find(tagId)!
+    el.appendChild(makeTagChipEl(tagId, blockLabel(tag, find), prop<string>(tag, '_icon')))
+  }
   return el
 }
 
@@ -956,21 +968,20 @@ export function makeBlockEl(
     marker.draggable = true
     marker.dataset.dragFor = markerTargetId
     /**
-     * **特殊身份进块标形状**（形状优先，颜色在暗色主题下不可靠）：
-     *   · 查询块 ＝ 漏斗（它的正文是名字，这一块还会摊开一张结果视图）；
-     *   · 属性定义 ＝ 滑杆（它不是内容，是「字段声明」；正文就是定义名，直接打字改不动）。
-     * 图标与点互斥（CSS），悬停时都让位给抓手——「任何块标悬停＝把手」这一条不变。
+     * **块标＝脸位**：`faceOf` 的结果画在这里——用户配的 `_icon`（脸）优先，
+     * 缺省回落结构旗（标签=hash／查询=漏斗／定义=滑杆）；都没有就是圆点（无脸默认）。
+     * 信号回答「这是哪类东西」，脸回答「这是哪一个东西」，同一个槽承载两者。
+     *
+     * ⚠️ 三条行为锚（左键 zoom／右键菜单／拖动）与脸无关：被动图像不吃行为，
+     *    块标上的脸**不挂任何事件**——点它还是聚焦/缩进，`dragstart` 还是抓手的事。
+     * ⚠️ 图标与点互斥（CSS），悬停时都让位给抓手——「任何块标悬停＝把手」这一条不变。
      */
-    const special = isQueryBlock(b)
-      ? { cls: 'marker-query', icon: 'list-filter' as const }
-      : isPropDefBlock(b)
-        ? { cls: 'marker-schema', icon: 'sliders-horizontal' as const }
-        : null
-    if (special) {
-      marker.classList.add(special.cls)
+    const face = faceOf(b)
+    if (face !== undefined) {
+      marker.classList.add(isPropDefBlock(b) ? 'marker-schema' : isQueryBlock(b) ? 'marker-query' : 'marker-face')
       const ico = document.createElement('span')
       ico.className = 'marker-ico'
-      ico.appendChild(createIcon(special.icon, 'sm'))
+      renderIcon(ico, face, 'circle-help', 'sm')
       marker.appendChild(ico)
       // 属性定义的正文是定义名，行内改不了；悬停块标时把「它是什么」说清
       if (isPropDefBlock(b)) marker.dataset.tip = t('ui.block.schemaHint')
@@ -978,22 +989,6 @@ export function makeBlockEl(
     left.appendChild(marker)
   }
 
-  /**
-   * **身份图标**：挂在块标**之后**的附加信息，不占用块标本身。
-   *
-   * 顺序是**先标签后待办**：标签说的是「这块是什么」，待办只是某个属性的取值；
-   * 越本质、越少变的信息越靠左，读起来才稳。两者可以同时存在。
-   *
-   * ⚠️ 「方框」这个身份图标同时是待办的点击入口（`data-todo-for`）——
-   *    它自己 `cursor:pointer`，与块标各占一块命中区，互不遮挡。
-   */
-  if (left && roles.includes('tag')) {
-    const tagMark = document.createElement('span')
-    tagMark.className = 'identity tag-mark'
-    tagMark.appendChild(createIcon('hash', 'sm'))
-    tagMark.dataset.tip = t('ui.tag.mark')
-    left.appendChild(tagMark)
-  }
   /**
    * **gutter 上的快捷入口＝一列图标**，一条归 gutter 的属性一枚（顺序沿用
    * `gutterFieldsOf`：标签声明在前、自有属性在后）。

@@ -396,8 +396,11 @@ export class Layers {
       if (r.disabled) item.disabled = true
       const ico = document.createElement('span')
       ico.className = 'layer-ico'
-      // 行没有图标时保留原来的 `·` 占位（不硬塞一个图标，免得每行都长一样）
+      // 三档：有图标 → 画；**空串 → 空白但占位**（候选行的普通块——页/块的区分
+      // 由有图标/无图标承载，塞个图形就把区分抹了）；缺省 → `·` 占位（命令行，
+      // 不硬塞一个图标免得每行都长一样）
       if (r.icon) renderIcon(ico, r.icon, 'circle-help')
+      else if (r.icon !== undefined) { /* 空白但占位 */ }
       else ico.textContent = '·'
       const label = document.createElement('span')
       label.className = 'layer-label ui-ellipsis ui-ellipsis-grow'

@@ -28723,6 +28723,93 @@ await check('T300 划选气泡颜色值轴：主条只放轴、二级向上展�
   return '主条只留 2 个值轴入口、二级 7 槽向上长不盖选区、当前色标、点当前色即取消、高亮与 bg 黄槽同源'
 })
 
+/**
+ * T302 块标＝脸位。
+ *
+ * 钉三件：① 标签行的块标画 hash（faceOf 的结构旗），行里不再有第二枚身份图标——
+ * 「一个位置只放一个主件」；② 给标签配显式图标（脸）后，块标、行尾 chip、候选行
+ * 三处全跟随——标签的脸改一处全库跟随；③ 未配图标的标签不上 chip（满屏默认 hash
+ * 是噪音）。显式图标用带外改动写入：图标值还没有生产入口（选择器是后续轮次），
+ * 而这一条要验的是**读路径怎么跟随**，不是写入口。
+ */
+await check('T302 块标＝脸位：标签行块标画 hash 且行无第二枚身份图标；改标签图标后块标/chip/候选行全跟随；缺省 hash 不上 chip', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+
+  // 打一个标签：归属写块上，标签块物化在顶层
+  const tagInfo = await page.evaluate(() => {
+    const root = window.__qua.__editor.doc.roots[0]
+    const b = window.__qua.blocks().find((x) => x.id !== root.id && !x.roles?.includes('journal') && x.text.length > 2)
+    window.__qua.focusBlock(b.id, b.text.length)
+    window.__qua.invoke('core.editor/insert-tag', { tag: '脸位标签' })
+    const after = window.__qua.blocks().find((x) => x.id === b.id)
+    return { blockId: b.id, tagId: after?.tags?.[0] ?? '' }
+  })
+  assert(tagInfo.tagId, `应建出标签块：${JSON.stringify(tagInfo)}`)
+
+  // ① 标签行：块标上画 hash（结构旗），没有第二枚身份图标
+  // 标签块物化在森林顶层、不在当前页里 ⇒ 先打开它再读行
+  await page.evaluate((id) => window.__qua.invoke('core.dock/open-block', { blockId: id, side: 'right' }), tagInfo.tagId)
+  await page.waitForSelector(`.blk[data-block-id="${tagInfo.tagId}"]`, { timeout: 5000 })
+  const row = await page.evaluate((tagId) => {
+    const el = document.querySelector(`.blk[data-block-id="${tagId}"]`)
+    const marker = el?.querySelector(':scope > .left .marker')
+    return {
+      faceIcon: marker?.querySelector('.marker-ico')?.dataset.icon ?? '',
+      face: marker?.classList.contains('marker-face') ?? false,
+      extraMark: Boolean(el?.querySelector('.identity.tag-mark')),
+    }
+  }, tagInfo.tagId)
+  assert(row.faceIcon === 'lucide:hash' && row.face, `标签行的块标应画 hash（faceOf 的结构旗）：${JSON.stringify(row)}`)
+  assert(!row.extraMark, `hash 并进块标后，行里不应再有第二枚身份图标：${JSON.stringify(row)}`)
+
+  // ② 成员行的 chip：标签没显式图标 ⇒ 不上 hash（只有 #名）
+  const plainChip = await page.evaluate((blockId) => {
+    const chip = document.querySelector(`.blk[data-block-id="${blockId}"] .blk-tags .tag-chip`)
+    return { text: chip?.textContent ?? '', hasIco: Boolean(chip?.querySelector('.tag-chip-ico')) }
+  }, tagInfo.blockId)
+  assert(plainChip.text === '#脸位标签' && !plainChip.hasIco, `缺省 hash 不上 chip（只有 #名）：${JSON.stringify(plainChip)}`)
+
+  // ③ 给标签配显式图标 ⇒ 块标 / chip / 候选行三处全跟随
+  await page.evaluate((tagId) => {
+    window.__qua.forceForest((forest) => {
+      const tag = forest.find((x) => x.id === tagId)
+      if (tag) tag.props = { ...(tag.props ?? {}), _icon: 'lucide:target' }
+    })
+  }, tagInfo.tagId)
+  await page.waitForTimeout(200)
+  const follow = await page.evaluate(({ tagId, blockId }) => {
+    const tagEl = document.querySelector(`.blk[data-block-id="${tagId}"]`)
+    const marker = tagEl?.querySelector(':scope > .left .marker')
+    const chip = document.querySelector(`.blk[data-block-id="${blockId}"] .blk-tags .tag-chip`)
+    return {
+      markerIcon: marker?.querySelector('.marker-ico')?.dataset.icon ?? '',
+      chipIcon: chip?.querySelector('.tag-chip-ico')?.dataset.icon ?? '',
+      chipText: chip?.textContent ?? '',
+    }
+  }, tagInfo)
+  assert(follow.markerIcon === 'lucide:target', `块标应换成显式图标（脸赢过结构旗）：${JSON.stringify(follow)}`)
+  assert(follow.chipIcon === 'lucide:target' && follow.chipText === '#脸位标签', `chip 应画小图标＋#名：${JSON.stringify(follow)}`)
+
+  // 候选行跟随：打开标签选择器，那一行的图标也是 target
+  await page.evaluate(() => {
+    const b = window.__qua.blocks().find((x) => x.roles.length === 0 && x.children === 0 && x.text.length > 2)
+    window.__qua.focusBlock(b.id, 0)
+    window.__qua.invoke('core.editor/pick-tag')
+  })
+  await page.waitForSelector('.layer-input', { timeout: 3000 })
+  const rowIcon = await page.evaluate(() => {
+    const item = [...document.querySelectorAll('.layer-item')].find((r) =>
+      r.querySelector('.layer-label')?.textContent?.includes('脸位标签'))
+    return item?.querySelector('.layer-ico')?.dataset.icon ?? ''
+  })
+  assert(rowIcon === 'lucide:target', `候选行应跟随标签的脸：${JSON.stringify(rowIcon)}`)
+  await page.keyboard.press('Escape')
+
+  await ctx.close()
+  return '标签行块标单件画 hash、行无第二枚身份图标；显式图标后块标/chip/候选行全跟随；缺省 hash 不上 chip'
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

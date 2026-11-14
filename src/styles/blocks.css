@@ -579,10 +579,6 @@
   color: var(--ui-text-tertiary);
   white-space: nowrap;
 }
-.blk .identity.tag-mark {
-  opacity: 0.8;
-  cursor: default;
-}
 .blk[data-todo='done'] .tx {
   color: var(--ui-text-tertiary);
   text-decoration: line-through;
@@ -1726,6 +1722,12 @@
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+/* chip 上的小图标（只在标签显式配了图标时出现，见 makeTagChipEl） */
+.tag-chip .tag-chip-ico {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 2px;
+}
 
 /* ：块选区（跨块拖拽/全选块）。
    颜色只用语义 token（--ui-*），不直接引 --c-*（arch 19）。
@@ -1858,11 +1860,13 @@
   opacity: 0.7;
 }
 .blk .marker.marker-query::before,
-.blk .marker.marker-schema::before {
+.blk .marker.marker-schema::before,
+.blk .marker.marker-face::before {
   opacity: 0;
 }
 .blk .marker.marker-query:hover .marker-ico,
-.blk .marker.marker-schema:hover .marker-ico {
+.blk .marker.marker-schema:hover .marker-ico,
+.blk .marker.marker-face:hover .marker-ico {
   opacity: 0;
 }
 /* 投影（源的结果视图）：高度与正文行内体同一条口径——**自然高**（紧凑性归折叠）。

@@ -29,6 +29,7 @@ import {
   displayNameOf,
   hasValue,
   liveChildren,
+  prop,
   propDisplayLabels,
   propKindOf,
   propLabel,
@@ -549,7 +550,7 @@ export class ViewTable {
     if (key === TAGS_COLUMN) {
       const box = document.createElement('div')
       box.className = 'tv-tags'
-      for (const tag of r.tags) box.appendChild(makeTagChipEl(tag.id, displayNameOf(tag)))
+      for (const tag of r.tags) box.appendChild(makeTagChipEl(tag.id, displayNameOf(tag), prop<string>(tag, '_icon')))
       if (r.tags.length === 0) box.dataset.empty = '1'
       return box
     }

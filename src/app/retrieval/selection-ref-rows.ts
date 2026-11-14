@@ -20,6 +20,7 @@ import {
   displayNameOf,
   flatten,
   hasList,
+  iconOf,
   plainText,
   type Block,
 } from '../../core/index.ts'
@@ -68,7 +69,7 @@ export function selectionRefRows(deps: SelectionRefRowsDeps): (query: string) =>
         id: `selref/exact/${exact.id}`,
         label: nameOf(exact),
         hint: t('ui.selRef.exactHint'),
-        icon: hasList(exact, 'page') ? 'lucide:file' : 'lucide:list-tree',
+        icon: iconOf(exact) ?? '',
         group: 'selref/1-exact',
         pick: { kind: 'block', id: exact.id, name: nameOf(exact) },
       })
@@ -86,7 +87,7 @@ export function selectionRefRows(deps: SelectionRefRowsDeps): (query: string) =>
         id: `selref/page/${b.id}`,
         label: nameOf(b),
         hint: trailOf(b),
-        icon: hasList(b, 'tag') ? 'lucide:hash' : 'lucide:file',
+        icon: iconOf(b) ?? '',
         group: 'retrieval/1-page',
         pick: { kind: 'block', id: b.id, name: nameOf(b) },
       })
@@ -106,7 +107,8 @@ export function selectionRefRows(deps: SelectionRefRowsDeps): (query: string) =>
         label: snippet(text),
         parts,
         hint: trailOf(b),
-        icon: 'lucide:list-tree',
+        // 普通块＝空白但占位：页/块的区分由有图标/无图标承载
+        icon: iconOf(b) ?? '',
         group: 'retrieval/2-block',
         pick: { kind: 'block', id: b.id, name: snippet(text) },
       })

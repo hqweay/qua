@@ -16,7 +16,7 @@
  *    见 D2），「journal 天」是「改这件事发生在哪天」——那是另一件事，语义另议。
  *    把它们放进 target 会让「移动到…」变成两个动词混在一个入口里。
  */
-import { displayNameOf, hasList, isJournal, type Block } from '../../core/index.ts'
+import { displayNameOf, hasList, iconOf, isJournal, type Block } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import type { App } from '../../core/infra/ports.ts'
 import type { Row } from '../../ui/overlay/layers.ts'
@@ -51,7 +51,7 @@ export function moveCommands(d: PageDeps): Pick<App, 'showMovePicker' | 'moveBlo
         // 用户找得到它、也知道为什么不行，而不是以为这个目标不存在）
         hint: bad ?? '',
         disabled: bad !== null,
-        icon: hasList(c, 'tag') ? 'lucide:hash' : d.pageIcon(c),
+        icon: iconOf(c) ?? '',
         group: hasList(c, 'tag') ? 'pick/2' : 'pick/1',
       }
     })

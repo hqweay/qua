@@ -19,6 +19,7 @@ import {
   blockLabel,
   groupsByStructure,
   openActionOf,
+  prop,
   sortRecords,
   type BelowFields,
   type Block,
@@ -473,7 +474,7 @@ export class ViewCards {
     if (r.tags.length > 0) {
       const tags = document.createElement('div')
       tags.className = 'vcard-tags'
-      for (const tag of r.tags) tags.appendChild(makeTagChipEl(tag.id, blockLabel(tag, this.kbFind)))
+      for (const tag of r.tags) tags.appendChild(makeTagChipEl(tag.id, blockLabel(tag, this.kbFind), prop<string>(tag, '_icon')))
       meta.appendChild(tags)
     }
     const below = this.below.get(r.block.id)

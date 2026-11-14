@@ -14,12 +14,12 @@ import {
   findInForest,
   findPath,
   hasLiveChildren,
+  iconOf,
   isEmbedBlock,
   isJournal,
   journalId,
   liveChildren,
   mkBlock,
-  prop,
   surfaceRefKey,
   surfaceTitleOf,
   todayISO,
@@ -495,8 +495,8 @@ export function setupPages(deps: PagesDeps) {
   }
   /** 页名 ＝ 主别名叶子（没有名字才回落到描述）；空则交给调用方做兜底文案 */
   const pageTitle = (p: Block): string => displayNameOf(p)
-  /** 页图标 ＝ 系统属性 `_icon`；空值用 `file`，与 `view/icons.ts` 的角色默认一致 */
-  const pageIcon = (p: Block): string => prop<string>(p, '_icon') ?? 'lucide:file'
+  /** 页图标 ＝ 指位链（`iconOf`）：显式 `_icon` 优先，缺省角色默认 file——不再各自兜一份 */
+  const pageIcon = (p: Block): string => iconOf(p) ?? ''
 
   /**
    * **第一个可编辑的行**：journal 的首行是**只读日期**（`contenteditable=false`），

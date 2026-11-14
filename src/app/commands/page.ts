@@ -9,6 +9,7 @@ import {
   flatten,
   hasList,
   hasTag,
+  iconOf,
   isEmbedBlock,
   isJournal,
   isPropDefBlock,
@@ -378,7 +379,8 @@ export function pageCommands(d: PageDeps): Pick<
       const tagRow = (tag: Block): Row => ({
         id: `pick/${tag.id}`,
         label: `#${displayNameOf(tag)}`,
-        icon: 'lucide:hash',
+        // 标签的脸改一处全库跟随：显式图标优先，缺省 hash（指位链）
+        icon: iconOf(tag) ?? '',
         group: 'pick/2',
         command: 'core.editor/insert-page-ref',
         args: { pageId: tag.id },
