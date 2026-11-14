@@ -725,7 +725,8 @@
 }
 .props-empty {
   margin: 0;
-  font-size: var(--ui-fs-xs);
+  /* 空态是旁注角色：说明「这里可以有什么」，不与行内容争字号 */
+  font-size: var(--ui-fs-2xs);
   color: var(--ui-text-tertiary);
 }
 /* 属性区的添加入口：一行，贴着属性列表长（它不是卡头的控件） */

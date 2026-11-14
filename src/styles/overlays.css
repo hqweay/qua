@@ -415,14 +415,16 @@
 }
 .alias-full {
   color: var(--ui-text-tertiary);
-  font-size: var(--ui-fs-xs);
+  /* 全名是行内辅助值，走旁注档（与来源标注同一角色） */
+  font-size: var(--ui-fs-2xs);
   overflow-wrap: anywhere;
 }
 .alias-section {
   margin-top: var(--ui-gap-4);
 }
 .alias-section-title {
-  color: var(--ui-text-tertiary);
+  /* 段标题角色（fs-xs ＋ secondary）与面板段头同一份——一个角色一种样子 */
+  color: var(--ui-text-secondary);
   font-size: var(--ui-fs-xs);
   margin-bottom: var(--ui-gap-2);
 }
