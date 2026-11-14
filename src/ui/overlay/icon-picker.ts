@@ -20,6 +20,7 @@ import { ICON_PATHS, createIcon, isIconRef } from '../../view/icons.ts'
 import { identityTokenVar } from '../../core/identity/faces.ts'
 import type { Layers } from './layers.ts'
 import { t } from '../../core/infra/msg.ts'
+import type { EmojiEntry } from './emoji-catalog.ts'
 
 export interface IconPickerOpts {
   layers: Layers
@@ -46,11 +47,25 @@ export interface IconPickerOpts {
 /** 网格列数：键盘 ←→ 按它跨行（与 CSS 的 `grid-template-columns` 同一个数） */
 const GRID_COLS = 8
 
+/**
+ * emoji 数据（**懒加载 chunk**：开选择器才拉——emoji 是默认 tab，
+ * 但数据集有几十 KB gzip，不该在主包里等它）。
+ * 静态 import 会被打进主包，所以这里必须是动态 import。
+ */
+let emojiData: EmojiEntry[] | null = null
+const emojiReady: Promise<EmojiEntry[]> = import('./emoji-catalog.ts').then((m) => {
+  emojiData = m.EMOJI_ENTRIES
+  return emojiData
+})
+
 interface Cell {
   /** 图标槽的值（`lucide:<name>` 或字面）；'' ＝ ⊘ 摘键 */
   value: string
   el: HTMLButtonElement
 }
+
+/** 三源：emoji（默认）／矢量（lucide）／手动（任意字面） */
+type Tab = 'emoji' | 'vector' | 'manual'
 
 export function openIconPicker(o: IconPickerOpts): void {
   o.layers.openPopover(
@@ -63,7 +78,7 @@ export function openIconPicker(o: IconPickerOpts): void {
 
 /** 把选择器画进 `host`（独立浮层与内嵌宿主共用这一份装配；选中态每次现算） */
 export function renderIconPicker(host: HTMLElement, o: IconPickerOpts): void {
-  let tab: 'vector' | 'manual' = 'vector'
+  let tab: Tab = 'emoji'
   let query = ''
   let cells: Cell[] = []
   let active = -1
@@ -111,18 +126,22 @@ export function renderIconPicker(host: HTMLElement, o: IconPickerOpts): void {
 
   const tabs = document.createElement('div')
   tabs.className = 'icon-picker-tabs'
-  const tabVector = document.createElement('button')
-  tabVector.type = 'button'
-  tabVector.className = 'icon-picker-tab ui-btn'
-  tabVector.textContent = t('ui.iconPicker.tabVector')
-  const tabManual = document.createElement('button')
-  tabManual.type = 'button'
-  tabManual.className = 'icon-picker-tab ui-btn'
-  tabManual.textContent = t('ui.iconPicker.tabManual')
-  tabs.append(tabVector, tabManual)
+  /** 一枚 tab（emoji 是默认 tab——字符即数据，用户的第一个直觉就是它） */
+  const mkTab = (key: Tab, label: string): HTMLButtonElement => {
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.className = 'icon-picker-tab ui-btn'
+    b.textContent = label
+    b.addEventListener('click', () => setTab(key))
+    tabs.appendChild(b)
+    return b
+  }
+  const tabEmoji = mkTab('emoji', t('ui.iconPicker.tabEmoji'))
+  const tabVector = mkTab('vector', t('ui.iconPicker.tabVector'))
+  const tabManual = mkTab('manual', t('ui.iconPicker.tabManual'))
   box.appendChild(tabs)
 
-  /* ------------------------------------------------------------ 矢量面 */
+  /* ------------------------------------------------------------ 共用面 */
 
   const search = document.createElement('input')
   search.type = 'text'
@@ -139,27 +158,58 @@ export function renderIconPicker(host: HTMLElement, o: IconPickerOpts): void {
   const grid = document.createElement('div')
   grid.className = 'icon-picker-grid'
 
-  const setTab = (next: 'vector' | 'manual'): void => {
+  /** 分类导航（只 emoji 有：lucide 没有机器可读分类，缓） */
+  const catsRow = document.createElement('div')
+  catsRow.className = 'icon-picker-cats'
+  let emojiCat = ''
+  const renderCats = (): void => {
+    catsRow.replaceChildren()
+    if (tab !== 'emoji') return
+    const mkCat = (key: string, label: string): void => {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.className = 'icon-picker-cat'
+      b.textContent = label
+      if (emojiCat === key) b.dataset.on = '1'
+      b.addEventListener('click', () => {
+        emojiCat = emojiCat === key ? '' : key
+        renderCats()
+        renderGrid()
+      })
+      catsRow.appendChild(b)
+    }
+    mkCat('', t('ui.iconPicker.catAll'))
+    void import('./emoji-catalog.ts').then((m) => {
+      for (const [key, label] of Object.entries(m.EMOJI_GROUPS)) mkCat(key, label)
+    })
+  }
+
+  const setTab = (next: Tab): void => {
     tab = next
-    if (tab === 'vector') tabVector.dataset.on = '1'
-    else delete tabVector.dataset.on
-    if (tab === 'manual') tabManual.dataset.on = '1'
-    else delete tabManual.dataset.on
+    for (const [b, key] of [
+      [tabEmoji, 'emoji'],
+      [tabVector, 'vector'],
+      [tabManual, 'manual'],
+    ] as const) {
+      if (tab === key) b.dataset.on = '1'
+      else delete b.dataset.on
+    }
     manualBox.hidden = tab !== 'manual'
-    search.hidden = tab !== 'vector'
-    recentRow.hidden = tab !== 'vector' || (o.recent?.length ?? 0) === 0
-    recentTitle.hidden = recentRow.hidden
-    if (tab === 'vector') {
-      renderGrid()
-      search.focus()
-    } else {
+    search.hidden = tab === 'manual'
+    catsRow.hidden = tab !== 'emoji'
+    const hasRecent = (o.recent?.length ?? 0) > 0
+    recentRow.hidden = !hasRecent
+    recentTitle.hidden = !hasRecent
+    renderCats()
+    renderGrid()
+    if (tab === 'manual') {
       cells = []
       markActive()
       manualInput.focus()
+    } else {
+      search.focus()
     }
   }
-  tabVector.addEventListener('click', () => setTab('vector'))
-  tabManual.addEventListener('click', () => setTab('manual'))
   search.addEventListener('input', () => {
     query = search.value.trim().toLowerCase()
     renderGrid()
@@ -201,12 +251,25 @@ export function renderIconPicker(host: HTMLElement, o: IconPickerOpts): void {
     const none = mkCell('', t('ui.iconPicker.noIcon'))
     cells.push(none)
     grid.appendChild(none.el)
-    const names = Object.keys(ICON_PATHS).filter((n) => n.includes(query))
-    // 集合大 ⇒ 上限不是砍功能，是把「翻不到底」变成「打字就有」（搜索是主入口）
-    for (const n of names.slice(0, 96)) {
-      const cell = mkCell(`lucide:${n}`, n)
-      cells.push(cell)
-      grid.appendChild(cell.el)
+    if (tab === 'emoji') {
+      // 数据未到（chunk 在拉）⇒ 网格先空着，到了就补——不占位不转圈
+      if (emojiData === null) return
+      const hit = (e: EmojiEntry): boolean =>
+        query === '' || e.l.includes(query) || (e.t ?? []).some((k) => k.includes(query))
+      const list = emojiData.filter((e) => (emojiCat === '' || e.g === emojiCat) && hit(e))
+      for (const e of list.slice(0, 128)) {
+        const cell = mkCell(e.u, e.l)
+        cells.push(cell)
+        grid.appendChild(cell.el)
+      }
+    } else {
+      const names = Object.keys(ICON_PATHS).filter((n) => n.includes(query))
+      // 集合大 ⇒ 上限不是砍功能，是把「翻不到底」变成「打字就有」（搜索是主入口）
+      for (const n of names.slice(0, 96)) {
+        const cell = mkCell(`lucide:${n}`, n)
+        cells.push(cell)
+        grid.appendChild(cell.el)
+      }
     }
     markActive()
   }
@@ -221,6 +284,10 @@ export function renderIconPicker(host: HTMLElement, o: IconPickerOpts): void {
     }
   }
   renderRecent()
+  // emoji chunk 到了就补网格（默认 tab 是 emoji，不劫持用户正在打的搜索）
+  void emojiReady.then(() => {
+    if (tab === 'emoji') renderGrid()
+  })
 
   /* ------------------------------------------------------------ 手动面 */
 
@@ -273,7 +340,7 @@ export function renderIconPicker(host: HTMLElement, o: IconPickerOpts): void {
       }
       return
     }
-    if (tab !== 'vector' || cells.length === 0) return
+    if (tab === 'manual' || cells.length === 0) return
     const move = (delta: number): void => {
       e.preventDefault()
       active = Math.min(cells.length - 1, Math.max(0, (active < 0 ? 0 : active) + delta))
@@ -296,7 +363,7 @@ export function renderIconPicker(host: HTMLElement, o: IconPickerOpts): void {
 
   /* ------------------------------------------------------------ 装配 */
 
-  box.append(search, recentTitle, recentRow, grid, manualBox)
-  setTab('vector')
+  box.append(search, catsRow, recentTitle, recentRow, grid, manualBox)
+  setTab('emoji')
   host.replaceChildren(box)
 }

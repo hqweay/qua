@@ -1074,3 +1074,26 @@
 .prop-face .prop-value {
   display: inline-flex;
 }
+
+/* 分类导航（emoji tab）：一行横向 chips，选中 accent——与 tab 同语言但小一号 */
+.icon-picker-cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-gap-2);
+}
+.icon-picker-cat {
+  border: none;
+  background: none;
+  padding: 1px 6px;
+  border-radius: var(--ui-radius-pill);
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-secondary);
+  cursor: pointer;
+}
+.icon-picker-cat:hover {
+  background: var(--ui-bg-hover);
+}
+.icon-picker-cat[data-on='1'] {
+  background: var(--ui-accent-soft);
+  color: var(--ui-accent);
+}

@@ -176,8 +176,14 @@ const INDEX_HTML = join(ROOT, 'index.html')
 {
   // 假数据按**目录前缀**豁免：种子内容拆到 `fixtures/` 下的多个文件之后，逐文件登记会
   // 在下一次拆分时静默失效（新文件立刻变成裸中文命中）。`bootstrap.ts` 是首屏那几行内容，
-  // 不属于夹具目录，所以单列。
-  const WL_FILES = new Set(['src/core/infra/msg.ts', 'src/core/infra/bootstrap.ts'])
+  // 不属于夹具目录，所以单列。两个 `*-catalog.ts` 是**生成产物**（脚本从上游数据集读出来的
+  // 数据表：图标 path／emoji 中文标注）——数据不是文案，文案的产地在 msg.ts 与上游数据集。
+  const WL_FILES = new Set([
+    'src/core/infra/msg.ts',
+    'src/core/infra/bootstrap.ts',
+    'src/view/icon-catalog.ts',
+    'src/ui/overlay/emoji-catalog.ts',
+  ])
   const WL_PREFIXES = ['src/core/fixtures/']
   const hits = []
   let whitelisted = 0

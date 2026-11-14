@@ -39,6 +39,7 @@
     "@types/node": "^26.6.5",
     "electron": "^44.9.0",
     "electron-builder": "^26.15.3",
+    "emojibase-data": "^18.0.0",
     "esbuild": "^0.28.2",
     "lucide-static": "^1.72.0",
     "playwright-core": "^1.49.0",

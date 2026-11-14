@@ -28920,6 +28920,8 @@ await check('T304 图标选择器：选项入口网格化；标签配置头/页�
   await page.waitForSelector('.icon-picker .icon-picker-cell', { timeout: 3000 })
   const opened = await page.evaluate(() => document.querySelector('.icon-picker') !== null)
   assert(opened, `选项图标的入口应打开网格选择器：${opened}`)
+  // emoji 是默认 tab；矢量目录在第二个 tab
+  await page.click('.icon-picker-tabs .icon-picker-tab:nth-child(2)')
   await page.fill('.icon-picker .icon-picker-search', 'flag')
   await page.waitForTimeout(120)
   await page.click('.icon-picker .icon-picker-cell[data-icon="lucide:flag"]')
@@ -28949,6 +28951,7 @@ await check('T304 图标选择器：选项入口网格化；标签配置头/页�
   await page.click('.alias-editor .alias-face-btn')
   await page.waitForSelector('.alias-editor .icon-picker', { timeout: 3000 })
   await page.fill('.alias-editor .icon-picker .icon-picker-search', 'target')
+  await page.click('.alias-editor .icon-picker-tabs .icon-picker-tab:nth-child(2)')
   await page.waitForTimeout(120)
   await page.click('.alias-editor .icon-picker .icon-picker-cell[data-icon="lucide:target"]')
   await page.waitForTimeout(200)
@@ -28978,6 +28981,81 @@ await check('T304 图标选择器：选项入口网格化；标签配置头/页�
 
   await ctx.close()
   return '选项图标入口网格化可搜索；标签配置头内嵌选择器选图标/点色就地生效；页属性面板同一枚入口写命令面'
+})
+
+/**
+ * T305 emoji 源：默认 tab、中文可搜、分类导航。
+ *
+ * 钉四件：① 选择器开在 emoji tab（默认 tab，字符即数据）；② 中文标注可搜
+ * （label/tags 来自 CLDR zh）；③ 分类导航过滤（数据集自带分组）；④ 选中 emoji
+ * 写 `_icon` 的字面值，且在界面上按字面渲染——「选什么渲染什么」。
+ */
+await check('T305 emoji：默认 tab、中文搜索命中、分类导航过滤；选中写字面值并按字面渲染', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+
+  const host = await pickLeaf(page)
+  assert(host, '第一页里应有可编辑的内容块')
+  const choiceId = await page.evaluate(async (hostId) => {
+    window.__qua.focusBlock(hostId, 0)
+    await window.__qua.invoke('core.props/create-def', { blockId: hostId, label: '心情', kind: 'select', target: 'own' })
+    const defId = window.__qua.propDefs().find((d) => d.label === '心情')?.id ?? ''
+    await window.__qua.invoke('core.props/add-choice', { defId, label: '好' })
+    const def = window.__qua.__editor.store.find(defId)
+    return { defId, choiceId: def.children[0].id }
+  }, host.id)
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), choiceId.defId)
+  await page.waitForTimeout(200)
+  await page.waitForSelector('.choice-icon', { timeout: 3000 })
+  await page.click('.choice-icon')
+  await page.waitForSelector('.icon-picker .icon-picker-cell', { timeout: 3000 })
+
+  // ① 默认 tab 是 emoji（第一枚 tab 亮着，网格里是字面字符不是 lucide svg）
+  const emojiTab = await page.evaluate(() => {
+    const first = document.querySelector('.icon-picker-tabs .icon-picker-tab')
+    const cells = [...document.querySelectorAll('.icon-picker-grid:not(.icon-picker-recent) .icon-picker-cell')]
+    return {
+      on: first?.dataset.on === '1',
+      literal: cells.filter((c) => c.dataset.icon && !c.dataset.icon.startsWith('lucide:')).length,
+    }
+  })
+  assert(emojiTab.on && emojiTab.literal > 0, `开选选择器应落在 emoji tab 且网格是字面字符：${JSON.stringify(emojiTab)}`)
+
+  // ② 中文搜索命中（CLDR zh 标注）
+  await page.fill('.icon-picker .icon-picker-search', '微笑')
+  await page.waitForTimeout(150)
+  const found = await page.evaluate(() =>
+    [...document.querySelectorAll('.icon-picker-grid:not(.icon-picker-recent) .icon-picker-cell')]
+      .map((c) => c.dataset.tip ?? ''))
+  assert(found.some((tip) => tip.includes('微笑')), `中文标注应可搜：${JSON.stringify(found.slice(0, 6))}`)
+
+  // ③ 分类导航：点一个分组 chip，网格只剩那一组的条目
+  await page.fill('.icon-picker .icon-picker-search', '')
+  await page.waitForTimeout(120)
+  await page.click('.icon-picker-cats .icon-picker-cat:nth-child(2)')
+  await page.waitForTimeout(120)
+  const cats = await page.evaluate(() => ({
+    on: document.querySelector('.icon-picker-cats .icon-picker-cat:nth-child(2)')?.dataset.on === '1',
+    tips: [...document.querySelectorAll('.icon-picker-grid:not(.icon-picker-recent) .icon-picker-cell')]
+      .slice(0, 12)
+      .map((c) => c.dataset.tip ?? ''),
+  }))
+  assert(cats.on && cats.tips.length > 0, `分类导航应可点且过滤后仍有条目：${JSON.stringify(cats)}`)
+
+  // ④ 选中一枚 emoji ⇒ `_icon` 是字面值，选项行按字面渲染
+  const firstEmoji = await page.evaluate(
+    () => document.querySelector('.icon-picker-grid:not(.icon-picker-recent) .icon-picker-cell:nth-child(2)')?.dataset.icon ?? '',
+  )
+  await page.click('.icon-picker-grid:not(.icon-picker-recent) .icon-picker-cell:nth-child(2)')
+  await page.waitForTimeout(150)
+  const picked = await page.evaluate((id) => window.__qua.__editor.store.find(id)?.props?._icon ?? '', choiceId.choiceId)
+  assert(picked === firstEmoji && picked !== '' && !picked.startsWith('lucide:'), `选中应写字面值：${JSON.stringify({ picked, firstEmoji })}`)
+  const shown = await page.evaluate(() => document.querySelector('.choice-icon')?.dataset.icon ?? '')
+  assert(shown === firstEmoji, `选项行应按字面渲染选中的 emoji：${JSON.stringify(shown)}`)
+  await page.keyboard.press('Escape')
+
+  await ctx.close()
+  return 'emoji 默认 tab、中文标注可搜、分类导航过滤、选中写字面值并按字面渲染'
 })
 
 const known = results.filter((r) => !r.ok && r.known)
