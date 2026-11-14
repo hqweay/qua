@@ -376,6 +376,7 @@ export const MSG = {
   'ui.alias.title': '别名',
   'ui.alias.primary': '主名',
   'ui.alias.add': '添加别名',
+  'ui.alias.addShort': '添加',
   'ui.alias.remove': '删除别名',
   'ui.alias.needOne': '列表里至少要有一个名字',
   'ui.alias.lists': '露面',

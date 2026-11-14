@@ -940,6 +940,43 @@
   align-items: center;
   gap: var(--ui-gap-1);
 }
+
+/* ---- 面板的主次从三处来 ----
+ * 1. 身份行的值是轻动作（勾选/按钮/chips）：贴着标签，不铺满右半——
+ *    铺满会把「一行一个字段」读成「标签在左、答案在很远的右边」；
+ *    要填的值（字段行、系统信息）才铺满。
+ */
+.prop-hug .prop-label {
+  flex: 0 0 auto;
+}
+.prop-hug .prop-value {
+  flex: 0 1 auto;
+}
+/* 2. 名字段是身份区的一员：不领段的分隔线（上下两线会把身份区切碎）；
+ *    它内部的小节也不另起间距（properties-body 的 gap 管节奏）。
+ */
+.prop-names {
+  border-top: 0;
+  margin-top: 0;
+  padding-top: 0;
+}
+.prop-names .alias-section {
+  margin-top: 0;
+}
+/* 3. 段的动作住进段头：它是这一段的，不是清单下面又一行字 */
+.props-section-head .props-add {
+  width: auto;
+  margin: 0 0 0 auto;
+  padding: 2px var(--ui-gap-2);
+}
+/* 声明段的说明折到标题下一整行：标题与动作同排，说明是旁注 */
+.props-section-head .props-section-hint {
+  flex: 1 1 100%;
+}
+/* 系统信息：记录不是待填的数据，标签也降为三级（与值同一档灰度） */
+.prop-system .prop-name {
+  color: var(--ui-text-tertiary);
+}
 /* 声明段的添加入口：与「＋ 添加属性」同形，贴着它自己的清单 */
 .props-declare-add {
   font: inherit;

@@ -13087,11 +13087,11 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
       formBeforeSection: Boolean(
         form && section && (form.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING),
       ),
-      addInBody: document.querySelector('#properties-add')?.parentElement?.id === 'properties-body',
+      addInSection: Boolean(document.querySelector('#properties-add')?.closest('.prop-fields')),
     }
   })
   assert(ownPlacement.formBeforeSection, `自己的表单要长在「标签属性」段前面（否则像在给声明段加东西）：${JSON.stringify(ownPlacement)}`)
-  assert(ownPlacement.addInBody, `「＋ 添加属性」要贴在块属性行下面，不是在卡片最下面：${JSON.stringify(ownPlacement)}`)
+  assert(ownPlacement.addInSection, `「＋ 添加属性」要住进「属性」段头（段的动作跟段走）：${JSON.stringify(ownPlacement)}`)
   const ownPick = await page.evaluate((id) => {
     const sel = document.querySelector('.props-form--own .props-pick')
     const opt = [...sel.options].find((o) => o.value === id)

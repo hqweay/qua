@@ -187,7 +187,8 @@ export function namesContent(ctx: ConfigSectionsCtx, root: HTMLElement): HTMLEle
   const add = document.createElement('button')
   add.type = 'submit'
   add.className = 'alias-add-btn ui-btn'
-  add.textContent = t('ui.alias.add')
+  // 输入框的占位已经说了「添加别名」，按钮只留动作（界面少字）
+  add.textContent = t('ui.alias.addShort')
   form.append(input, add)
   box.appendChild(form)
   return box

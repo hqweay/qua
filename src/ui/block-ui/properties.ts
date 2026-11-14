@@ -584,11 +584,35 @@ export class PropertiesPanel {
     this.els.body.appendChild(this.buildTags(target))
     this.els.body.appendChild(this.buildBelongs(target))
 
+    /**
+     * **数据段：这一块自己的值**（弹窗没有的一段）。
+     *
+     * 段头给「属性」一个名字 ＋ 入口——没有段头时它与上面的身份行混成一张平清单，
+     * 「主次」就是从这里丢的：身份行是轻动作行，这里往下是表单区，节奏必须断开。
+     */
+    const fields = document.createElement('section')
+    fields.className = 'props-section prop-fields'
+    const fieldsHead = document.createElement('div')
+    fieldsHead.className = 'props-section-head'
+    const fieldsTitle = document.createElement('span')
+    fieldsTitle.className = 'props-section-title'
+    fieldsTitle.textContent = t('ui.block.properties')
+    /**
+     * **入口和表单都紧贴它们写的那一组**。
+     *
+     * `els.add` 原来挂在 body 外面（卡片最下面），结果是：点「＋ 添加属性」以后，
+     * 表单长在「声明给成员」段**下面** —— 看起来像在给声明段加东西。
+     * 现在入口住进段头、own 的行和表单在段里，声明段另起一段（`buildDeclared`）。
+     */
+    fieldsHead.appendChild(fieldsTitle)
+    fieldsHead.appendChild(this.els.add)
+    fields.appendChild(fieldsHead)
+
     if (rows.length === 0) {
       const empty = document.createElement('p')
       empty.className = 'props-empty'
       empty.textContent = t('ui.props.empty')
-      this.els.body.appendChild(empty)
+      fields.appendChild(empty)
     }
 
     // 同名不同 propId 必须能区分（C4）：两行 label 一样时把来源带进显示名
@@ -597,18 +621,10 @@ export class PropertiesPanel {
     const labels = this.deps.propLabels()
 
     for (const row of rows) {
-      this.els.body.appendChild(makeFieldRow(row, target, this.deps, { labelCount, labels }))
+      fields.appendChild(makeFieldRow(row, target, this.deps, { labelCount, labels }))
     }
-
-    /**
-     * **入口和表单都紧贴它们写的那一组**。
-     *
-     * `els.add` 原来挂在 body 外面（卡片最下面），结果是：点「＋ 添加属性」以后，
-     * 表单长在「声明给成员」段**下面** —— 看起来像在给声明段加东西。
-     * 现在 own 的行、按钮、表单在同一个位置，声明段另起一段（`buildDeclared`）。
-     */
-    this.els.body.appendChild(this.els.add)
-    if (this.formOpen === 'own') this.els.body.appendChild(this.buildForm(target, labels))
+    if (this.formOpen === 'own') fields.appendChild(this.buildForm(target, labels))
+    this.els.body.appendChild(fields)
 
     /**
      * **标签属性**：只有标签有。
@@ -699,6 +715,24 @@ export class PropertiesPanel {
     title.className = 'props-section-title'
     title.textContent = t('ui.props.tagPropsTitle')
     head.appendChild(title)
+
+    /**
+     * 这一段的添加入口住进段头：它是这一段的动作，不是清单下面的又一行字。
+     * `data-declare-add` 是给断言认「这是声明那一个，不是自己的值那一个」的。
+     */
+    const add = document.createElement('button')
+    add.type = 'button'
+    add.className = 'props-add props-declare-add'
+    add.dataset.declareAdd = '1'
+    add.textContent = t('ui.props.addTagProp')
+    add.dataset.tip = t('ui.props.addTagPropTitle')
+    add.addEventListener('click', () => {
+      this.formOpen = this.formOpen === 'declared' ? null : 'declared'
+      this.render()
+    })
+    head.appendChild(add)
+
+    // 说明折到标题下一整行：标题与动作同排，说明是这一段「为什么存在」的旁注
     const hint = document.createElement('span')
     hint.className = 'props-section-hint'
     hint.textContent = t('ui.props.tagPropsHint')
@@ -760,22 +794,6 @@ export class PropertiesPanel {
       section.appendChild(this.choicesTag.root)
     }
 
-    /**
-     * 这一段的添加入口。`data-declare-add` 是给断言认「这是声明那一个，不是自己的值那一个」的。
-     * 形状与「＋ 添加属性」相同（`.props-add`），但位置在它自己的清单下面。
-     */
-    const add = document.createElement('button')
-    add.type = 'button'
-    add.className = 'props-add props-declare-add'
-    add.dataset.declareAdd = '1'
-    add.textContent = t('ui.props.addTagProp')
-    add.dataset.tip = t('ui.props.addTagPropTitle')
-    add.addEventListener('click', () => {
-      this.formOpen = this.formOpen === 'declared' ? null : 'declared'
-      this.render()
-    })
-    section.appendChild(add)
-
     if (this.formOpen === 'declared') section.appendChild(this.buildDeclareForm(target, labels))
     return section
   }
@@ -785,10 +803,14 @@ export class PropertiesPanel {
     return this.deps.configOps(target.id, () => this.render())
   }
 
-  /** 身份/归属段的行 chrome：左标签 ＋ 右值（弹窗的同一段包的是小节标题） */
+  /**
+   * 身份/归属段的行 chrome：左标签 ＋ 轻值贴着标签（`prop-hug`）。
+   * 这些行的值是轻动作（勾选/按钮/chips），铺满右半会把「一行一个字段」读成
+   * 「标签在左、答案在很远的右边」；铺满只属于要填的值（字段行、系统信息）。
+   */
   private labeledRow(cls: string, title: string, value: HTMLElement): HTMLElement {
     const row = document.createElement('div')
-    row.className = `prop-row ${cls} ui-row`
+    row.className = `prop-row prop-hug ${cls} ui-row`
     const label = document.createElement('label')
     label.className = 'prop-label'
     const name = document.createElement('span')
@@ -846,15 +868,6 @@ export class PropertiesPanel {
    * 按钮自己是当前值的样子（脸＋色点）——入口读作「它现在长这样，点开改」。
    */
   private buildFace(target: Block): HTMLElement {
-    const row = document.createElement('div')
-    row.className = 'prop-row prop-face ui-row'
-    const label = document.createElement('label')
-    label.className = 'prop-label'
-    const name = document.createElement('span')
-    name.className = 'prop-name'
-    name.textContent = t('ui.iconPicker.faceEntry')
-    label.append(name)
-
     const btn = document.createElement('button')
     btn.type = 'button'
     btn.className = 'prop-face-btn'
@@ -871,8 +884,7 @@ export class PropertiesPanel {
       btn.appendChild(dot)
     }
     btn.addEventListener('click', () => this.deps.pickFace?.(target, btn.getBoundingClientRect()))
-    row.append(label, btn)
-    return row
+    return this.labeledRow('prop-face', t('ui.iconPicker.faceEntry'), btn)
   }
 
   /**
