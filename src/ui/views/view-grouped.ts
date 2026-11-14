@@ -19,6 +19,8 @@ export interface ViewGroupedDeps {
   choices: (propId: string) => readonly { id: string; label: string }[]
   /** 字段基数解析：多值字段 fan-out（一块进每个所属组） */
   cardinalityOf?: (propId: string) => 'one' | 'many'
+  /** **段头的值名解析**（ref 等值是块 id 的字段）：段头不露裸 id（判据见 grouping.ts） */
+  valueLabel?: (propId: string, raw: unknown) => string | undefined
   /** 造一个装某组记录的段身（宿主决定用哪台渲染器） */
   makeBody: (records: () => ViewRecord[]) => { root: HTMLElement; render(): void; dispose(): void }
 }
@@ -54,6 +56,7 @@ export class ViewGrouped {
       choices: this.deps.choices,
       groupOrder: view?.groupOrder,
       ...(this.deps.cardinalityOf ? { cardinalityOf: this.deps.cardinalityOf } : {}),
+      ...(this.deps.valueLabel ? { valueLabel: this.deps.valueLabel } : {}),
     }
     const { buckets, order } = bucketize(recordsForGrouping(this.deps.records(), view), key, o)
     const ordered = orderBuckets(buckets, order).filter((b) => b.records.length > 0 || b.unset)
@@ -66,7 +69,7 @@ export class ViewGrouped {
       this.slots.delete(id)
     }
     for (const b of ordered) {
-      const slot = this.slots.get(b.id) ?? this.addSlot(b)
+      const slot = this.slots.get(b.id) ?? this.addSlot(b, o)
       slot.records = b.records
       slot.count.textContent = String(b.records.length)
       slot.body.render()
@@ -75,14 +78,14 @@ export class ViewGrouped {
   }
 
   /** 段头文案：与看板列头同一份解析（块 id 值翻译成名字） */
-  private addSlot(b: GroupBucket): Slot {
+  private addSlot(b: GroupBucket, o: BucketizeOptions): Slot {
     const wrap = document.createElement('section')
     wrap.className = 'vgroup-sec'
     const head = document.createElement('div')
     head.className = 'vgroup-head'
     const name = document.createElement('span')
     name.className = 'vgroup-name ui-ellipsis'
-    name.textContent = bucketLabel(b, this.deps.view()?.groupBy ?? '', { choices: this.deps.choices })
+    name.textContent = bucketLabel(b, this.deps.view()?.groupBy ?? '', o)
     const count = document.createElement('span')
     count.className = 'vgroup-count'
     head.append(name, count)

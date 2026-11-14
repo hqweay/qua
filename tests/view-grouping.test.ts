@@ -94,3 +94,15 @@ test('bucketize：空值（含空串）算「未设置」；类型前缀不让 `
   assert.equal(buckets.length, 3, '1 与 "1" 的合成键不同，不混桶')
   assert.equal(buckets.every((b) => b.raw !== '' || b.unset), true, '空串落「未设置」桶')
 })
+
+test('bucketLabel：ref 的值是块 id，走 valueLabel 翻译；非 ref 字段不碰它（text 组的值是普通字）', () => {
+  const { buckets } = bucketize([rec('a', { g: 'blk1' }), rec('b', { g: '一段普通文本' })], 'g', {
+    choices: () => [],
+  })
+  const o = {
+    choices: () => [] as readonly { id: string; label: string }[],
+    valueLabel: (propId: string, raw: unknown) => (raw === 'blk1' ? '目标块' : undefined),
+  }
+  assert.equal(bucketLabel(buckets[0]!, 'g', o), '目标块', 'ref 值翻译成名字，不露裸 id')
+  assert.equal(bucketLabel(buckets[1]!, 'g', o), '一段普通文本', '解析不了的原样回落（text 组不被误翻）')
+})

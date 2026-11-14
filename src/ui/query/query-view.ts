@@ -41,6 +41,7 @@ import {
   quickFilterAdd,
   quickFilterDrop,
   quickFilterNode,
+  propKindOf,
   resolveRows,
   resolveFrozen,
   resolveBoundView,
@@ -1772,6 +1773,7 @@ export class ViewHost {
           records: () => this.records(),
           choices: (id) => (id === '_tags' ? this.tagChoices() : this.deps.choices?.(id) ?? []),
           cardinalityOf: (id) => this.cardinalityOf(id),
+          valueLabel: (propId, raw) => this.groupValueLabel(propId, raw),
           makeBody: (records) => this.buildTable(records, view),
         })
         this.els.table.replaceChildren(this.grouped.root)
@@ -1828,6 +1830,7 @@ export class ViewHost {
           ...(this.deps.refLabel ? { refLabel: (id: string) => this.deps.refLabel!(id) } : {}),
           choices: (id) => (id === '_tags' ? this.tagChoices() : this.deps.choices?.(id) ?? []),
           cardinalityOf: (id) => this.cardinalityOf(id),
+          valueLabel: (propId, raw) => this.groupValueLabel(propId, raw),
           setValue: (blockId, propId, value) => this.deps.invoke('core.props/set-value', { blockId, propId, value }),
           clearValue: (blockId, propId) => this.deps.invoke('core.props/clear-value', { blockId, propId }),
           // 结构分组只接 children 源：组＝直接子块、记录＝它的孩子（query 命中是平的，没有一级）
@@ -1976,6 +1979,20 @@ export class ViewHost {
   /** 字段基数（多值键的唯一口径：卡片列排除、表格 fan-out） */
   private cardinalityOf(propId: string): 'one' | 'many' {
     return this.deps.fields().find((f) => f.id === propId)?.cardinality ?? 'one'
+  }
+
+  /**
+   * **分组头/列头的值名解析**：只对 `ref` 字段生效（值是块 id，得翻成名字——
+   * 裸 id 不许露）；其它 kind 的值本身就是名字，不认识就是原样回落。
+   * kind 按 kb 现读判（不依赖 `fields()` 的覆盖面）；目标没了走 `refLabel`
+   * 的「已删除」兜底，那条链与检视卡同源。
+   */
+  private groupValueLabel(propId: string, raw: unknown): string | undefined {
+    const def = this.deps.kb.get(propId)
+    if (!def || propKindOf(def) !== 'ref') return undefined
+    const id = raw === undefined || raw === null ? '' : String(raw)
+    if (id === '') return undefined
+    return this.deps.refLabel?.(id)
   }
 
   private records(): ViewRecord[] {

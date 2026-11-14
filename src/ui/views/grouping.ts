@@ -33,6 +33,13 @@ export interface BucketizeOptions {
   groupOrder?: readonly string[]
   /** 字段基数解析（多值字段一块进每个所属组；缺省只认 `_tags`） */
   cardinalityOf?: (propId: string) => 'one' | 'many'
+  /**
+   * **值的名字解析**（`ref` 等值是块 id 的字段）：`select` 的值已被 `choices`
+   * 覆盖，`ref` 的值是任意块 id——没有这一档，列头/段头就把 32 位 id 露给用户。
+   * 按 propId 判 kind 是调用方的事（text 组的值是普通字，不能拿去 kb 里碰）；
+   * 返回 undefined ＝ 解析不了，回落原始值。
+   */
+  valueLabel?: (propId: string, raw: unknown) => string | undefined
 }
 
 const keyOfValue = (v: unknown): string => {
@@ -100,10 +107,12 @@ export function orderBuckets(buckets: readonly GroupBucket[], order: readonly st
   return out
 }
 
-/** 桶名：`select`／`_tags` 的值是块 id，得翻译成它的名字；其余属性的值本身就是名字 */
+/** 桶名：`select`／`_tags` 的值走 choices，`ref` 的值走 valueLabel（块 id → 名字）；其余属性的值本身就是名字 */
 export function bucketLabel(b: GroupBucket, key: string, o: BucketizeOptions): string {
   if (b.unset) return t('ui.board.unset')
-  return o.choices(key).find((c) => c.id === b.raw)?.label ?? String(b.raw)
+  const viaChoice = o.choices(key).find((c) => c.id === b.raw)?.label
+  if (viaChoice !== undefined) return viaChoice
+  return o.valueLabel?.(key, b.raw) ?? String(b.raw)
 }
 
 /** 分组前的显示排序（与看板同一条：按视图配置的显示序排，不改成员集合） */

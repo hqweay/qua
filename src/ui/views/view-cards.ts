@@ -36,7 +36,7 @@ import { renderPropsLine } from '../block-ui/props-line.ts'
 import { makeTagChipEl } from '../../view/editor/block-dom.ts'
 import { t } from '../../core/infra/msg.ts'
 import { assetViewOf } from '../../view/asset-views.ts'
-import { bucketize, bucketLabel, orderBuckets, recordsForGrouping, GROUP_UNSET, type GroupBucket } from './grouping.ts'
+import { bucketize, bucketLabel, orderBuckets, recordsForGrouping, GROUP_UNSET, type BucketizeOptions, type GroupBucket } from './grouping.ts'
 import { viewNote } from './view-note.ts'
 import { flip } from '../motion.ts'
 
@@ -71,6 +71,8 @@ export interface ViewCardsDeps {
   inspect: (blockId: string, propId?: string) => void
   /** `ref` 值的显示名（块下属性行用） */
   refLabel?: (targetId: string) => string
+  /** **列头的值名解析**（ref 等值是块 id 的字段）：列头不露裸 id（判据见 grouping.ts） */
+  valueLabel?: (propId: string, raw: unknown) => string | undefined
 }
 
 /** 「未设置」这一列的内部键与分桶口径都住在 `grouping.ts`（表格的分组共用） */
@@ -143,11 +145,7 @@ export class ViewCards {
      */
     const key = view?.groupBy ?? ''
     if (cardLayoutOf(view) === 'columns' && key !== '') {
-      const o = {
-        choices: (pid: string) => this.deps.choices(pid),
-        groupOrder: view?.groupOrder,
-        ...(this.deps.cardinalityOf ? { cardinalityOf: this.deps.cardinalityOf } : {}),
-      }
+      const o = this.bucketOpts(view)
       const colOf = new Map<string, string>()
       for (const b of bucketize(this.deps.records(), key, o).buckets) {
         for (const r of b.records) colOf.set(r.block.id, b.id)
@@ -256,11 +254,7 @@ export class ViewCards {
      * （加一个还是换一个？别的组里那张卡怎么办）。分组下拉也不提供多值候选——
      * 配置里存着的多值键（从别处带过来）在这里如实说明，而不是静默 fan-out。
      */
-    const o = {
-      choices: (propId: string) => this.deps.choices(propId),
-      groupOrder: view?.groupOrder,
-      ...(this.deps.cardinalityOf ? { cardinalityOf: this.deps.cardinalityOf } : {}),
-    }
+    const o = this.bucketOpts(view)
     const { multi } = bucketize(this.deps.records(), key, o)
     if (multi) {
       this.multi = true
@@ -281,11 +275,21 @@ export class ViewCards {
     }
 
     for (const b of orderBuckets(buckets, order)) {
-      this.root.appendChild(this.column(b, key, this.cardOpts(view)))
+      this.root.appendChild(this.column(b, key, view, this.cardOpts(view)))
     }
   }
 
-  private column(b: GroupBucket, propId: string, card: { cover: boolean }): HTMLElement {
+  /** 分桶口径一处声明：choices／组序／基数／值名解析（列头与换列判据同一份，不会各漂各的） */
+  private bucketOpts(view: ViewConfig | null): BucketizeOptions {
+    return {
+      choices: (propId: string) => this.deps.choices(propId),
+      groupOrder: view?.groupOrder,
+      ...(this.deps.cardinalityOf ? { cardinalityOf: this.deps.cardinalityOf } : {}),
+      ...(this.deps.valueLabel ? { valueLabel: this.deps.valueLabel } : {}),
+    }
+  }
+
+  private column(b: GroupBucket, propId: string, view: ViewConfig | null, card: { cover: boolean }): HTMLElement {
     const id = b.id
     const col = document.createElement('div')
     col.className = 'vcol'
@@ -296,7 +300,7 @@ export class ViewCards {
     head.className = 'vcol-head'
     const name = document.createElement('span')
     name.className = 'vcol-name ui-ellipsis'
-    name.textContent = bucketLabel(b, propId, { choices: (pid) => this.deps.choices(pid) })
+    name.textContent = bucketLabel(b, propId, this.bucketOpts(view))
     const count = document.createElement('span')
     count.className = 'vcol-count'
     count.textContent = String(b.records.length)
