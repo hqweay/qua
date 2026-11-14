@@ -67,7 +67,8 @@ export class UndoStack {
   /**
    * 记一笔（`capture === null` ＝ 这次动作没有开过事务：不新建条目）。
    *
-   * **合并窗口**只对 `insert`／`delete` 在 1200ms 内成立（连续打字/连删算一步）。
+   * **合并窗口**对 `insert`／`delete`／`mark` 在 1200ms 内成立（连续打字/连删算一步；
+   * 连续格式操作算一步——色盘拖动逐 tick 落一笔 `mark`，合并窗口把一次拖动收成一步）。
    * 合并时**不新建条目**：`before` 保留第一次（撤销要回到开始打字之前），
    * `after` 用最后一次（重做要回到停手那一刻）；`sel` 也保留第一次。
    */
@@ -76,7 +77,7 @@ export class UndoStack {
     const mergeable =
       last !== undefined &&
       last.kind === kind &&
-      (kind === 'insert' || kind === 'delete') &&
+      (kind === 'insert' || kind === 'delete' || kind === 'mark') &&
       at - last.at <= this.mergeWindowMs
     this.future = []
     if (capture === null) return false

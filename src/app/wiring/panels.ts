@@ -1487,6 +1487,7 @@ export function setupPanels(deps: PanelsDeps) {
     createDockMountArea,
     createRefPeekArea,
     activateRefsFor,
+    recordRecentColor,
     renderProperties,
     scheduleProperties,
     pickRefValue,

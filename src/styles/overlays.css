@@ -24,6 +24,21 @@
   }
 }
 
+/*
+  浮层永远不参与拖窗：顶栏（#topbar）整条是窗口拖拽区，而拖窗区在**事件层**吞掉
+  它的整个矩形——浮层 z 再高也只是画在上面，重叠部分的悬停与点击照样落进拖窗
+  （真踩过：划选气泡开到顶栏下面，色点悬停无手型、点击不落）。浮层根逐个标回
+  no-drag，与 topbar「容器 drag、控件逐个标回」是同一条继承判据的反向用法。
+*/
+.layer,
+.popover,
+.selbar,
+.drawer,
+.confirm-backdrop {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
 .layer {
   position: fixed;
   z-index: var(--ui-z-menu);
@@ -246,6 +261,13 @@
 .selbar .sel-swatch-custom {
   position: relative;
   border-style: dashed;
+}
+/* 最近自定义色段与色盘入口之间的一道切分；最近色的颜色全在 inline style（值即数据） */
+.selbar .selbar-color-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--ui-border);
+  margin: 0 2px;
 }
 .selbar .selbar-eye {
   position: absolute;

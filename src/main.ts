@@ -757,8 +757,19 @@ function refreshSelectionBar(): void {
     anchor: rect,
     activeMarks: new Set(ed.marksAtSel()),
     expandedAxis: selColorAxis,
+    recentColors: prefs().recentColors,
     onPick: (row) => {
       if (row.command) registry.invoke(row.command, (row.args as Record<string, unknown>) ?? {}, 'selection', ctx)
+      // 色盘的两条通道：`-live`（拖动实时上色）只发命令——收轴或重建气泡都会销毁那枚
+      // input，面板后面的 input/change 就全落空；`-custom`（面板关掉）只记账最近色，
+      // 格式命令在 input 里已经实时发过，这里重画一次把按压态与最近段跟上
+      if (row.id.endsWith('-live')) return
+      if (row.id.endsWith('-custom')) {
+        const slot = (row.args as { slot?: unknown } | undefined)?.slot
+        if (typeof slot === 'string') panels.recordRecentColor(slot)
+        refreshSelectionBar()
+        return
+      }
       // 值用完即收：色点和入口都走同一条 onPick，只有真正选了值才收二级
       if (row.command === 'core.anno/set-ink' || row.command === 'core.anno/set-bg') selColorAxis = null
       // 命令改了格式 ⇒ 气泡的**按压态**要跟着变（高亮那颗该亮起来）。
@@ -3283,6 +3294,7 @@ const {
   viewShown,
   createRefPeekArea,
   activateRefsFor,
+  recordRecentColor,
 } = setupPanels({
   blocks,
   kb,
@@ -3335,6 +3347,7 @@ panels = {
   viewShown,
   createRefPeekArea,
   activateRefsFor,
+  recordRecentColor,
 }
 /**
  * **首帧要在事件表与画法都就位之后重画一次**。

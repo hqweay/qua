@@ -532,6 +532,8 @@ export class Layers {
     activeMarks: Set<string>
     /** 当前展开的值轴（null ＝ 只画主条）；状态由装配层持有，气泡只负责画 */
     expandedAxis: ColorAxis | null
+    /** 最近自定义色（设备态，与块脸/图标选择器同一份账本）：展开轴里的快捷段 */
+    recentColors?: readonly string[]
     onPick: (row: Row) => void
   }): void {
     const box = document.createElement('div')
@@ -592,8 +594,33 @@ export class Layers {
         extra.appendChild(b)
       }
       // 自由色是显式动作——板常驻，hex 跟着原生色盘走（自建 HSV 面板不做）。
-      // 当前值是 hex 时这颗亮起来并垫上那份色；按压态每次重画（onPick 后 refresh）从 activeMarks 现读
+      // 最近自定义色是快捷段：点一颗直接上色（与七槽同一条 onPick），不用再开色盘。
       const hexCurrent = [...o.activeMarks].find((d) => d.startsWith(`${axis}:#`))?.slice(axis.length + 1)
+      const recent = o.recentColors ?? []
+      if (recent.length > 0) {
+        const sep = document.createElement('span')
+        sep.className = 'selbar-color-sep'
+        extra.appendChild(sep)
+        for (const hex of recent) {
+          const b = document.createElement('button')
+          b.type = 'button'
+          b.className = 'sel-swatch sel-swatch-recent'
+          b.style.background = hex
+          b.dataset.tip = hex
+          if (hex === hexCurrent) b.dataset.on = '1'
+          b.addEventListener('mousedown', (e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            o.onPick({
+              id: `swatch-${axis}-${hex}`,
+              label: `${axisTitle(axis)}·${hex}`,
+              command: `core.anno/set-${axis}`,
+              args: { slot: hex },
+            })
+          })
+          extra.appendChild(b)
+        }
+      }
       const custom = document.createElement('button')
       custom.type = 'button'
       custom.className = 'sel-swatch sel-swatch-custom'
@@ -609,12 +636,30 @@ export class Layers {
       eye.className = 'selbar-eye'
       eye.tabIndex = -1
       if (hexCurrent) eye.value = hexCurrent
-      // 选定（色盘确认）那一刻才算改：拖拽过程的 input 不发（一次确认一笔撤销，不是一格一档）
+      // 拖动实时上色（所见即所拖）：走 `-live` id —— 装配层对它只发命令，不收轴不重建气泡
+      // （气泡一重建这枚 input 就没了，色盘后面的 input/change 全部落空）。撤销由 mark
+      // 合并窗口收成一步。防误撤比对**最近一次真正落笔的值**（不是打开时的初值）：
+      // 值没变的 tick 不发命令，否则「选区已覆盖此色」会被 toggle 语义撤掉。
+      let applied = hexCurrent
+      eye.addEventListener('input', () => {
+        const hex = eye.value.toLowerCase()
+        if (hex === applied) return
+        applied = hex
+        custom.style.background = hex
+        o.onPick({
+          id: `swatch-${axis}-live`,
+          label: `${axisTitle(axis)}·${hex}`,
+          command: `core.anno/set-${axis}`,
+          args: { slot: hex },
+        })
+      })
+      // 确认（面板关掉）那一刻记进最近色：一次确认一笔，拖动的中间色不进账本。
+      // command 留空 ⇒ 装配层只做记账与按压态重画，不重复发格式命令（input 已经实时上过）
       eye.addEventListener('change', () => {
         o.onPick({
           id: `swatch-${axis}-custom`,
           label: `${axisTitle(axis)}·${eye.value.toLowerCase()}`,
-          command: `core.anno/set-${axis}`,
+          command: '',
           args: { slot: eye.value.toLowerCase() },
         })
       })
