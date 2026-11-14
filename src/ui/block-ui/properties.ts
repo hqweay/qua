@@ -18,7 +18,7 @@
  * ⚠️ 组件不写模型：所有写入经注入的回调（由装配层转成命令）。
  */
 import type { Block, ClickMods } from '../../core/index.ts'
-import { clickModsOf, enginePropText, identityColorCss, isEngineProp } from '../../core/index.ts'
+import { clickModsOf, COLOR_PROP, enginePropText, identityColorCss, isColorValue, isEngineProp } from '../../core/index.ts'
 import { plainText } from '../../core/model/runs.ts'
 import { onCommitKeys } from './keys.ts'
 import type { FieldRow, PropKind } from '../../core/index.ts'
@@ -465,9 +465,7 @@ export function makeFieldRow(
   label.className = 'prop-label'
   const name = document.createElement('span')
   name.className = 'prop-name'
-  const source = row.sources.length
-    ? t('ui.props.source', { tags: row.sources.map((s) => `#${displayNameOf(s)}`).join('、') })
-    : t('ui.props.own')
+  const source = t('ui.props.own')
   const duplicated = (opts.labelCount?.get(row.label) ?? 0) > 1
   const disambiguated = duplicated ? `${row.label}（${row.sources[0] ? displayNameOf(row.sources[0]) : t('ui.props.own')}）` : row.label
   // 有 `labels` 就用它（同名属性带声明来源；仍重名带短 id）——只在一个地方决定「这一行叫什么」
@@ -486,7 +484,33 @@ export function makeFieldRow(
   if (opts.showSource !== false) {
     const src = document.createElement('span')
     src.className = 'prop-source'
-    src.textContent = source
+    /**
+     * **来源是一枚色点＋#名**，不是一句灰字：这条值「归谁管」（改选项去哪个标签、
+     * 摘标签会不会带走它）在聚焦编辑时也要读得出来，2xs 灰字与「本块自有」
+     * 几乎同形 ⇒ 读不出。点用标签自己的显式身份色（与块标同一套信号，
+     * 「色是涂料」——只染点这一个形状）；没配色的标签回落中性点——
+     * 「来自标签」是在场信号，色是标签之间的区分。
+     */
+    if (row.sources.length) {
+      const from = document.createElement('span')
+      from.textContent = t('ui.props.sourceFrom')
+      src.appendChild(from)
+      for (const tag of row.sources) {
+        const item = document.createElement('span')
+        item.className = 'prop-source-tag'
+        const dot = document.createElement('span')
+        dot.className = 'prop-source-dot'
+        dot.setAttribute('aria-hidden', 'true')
+        const c = prop<string>(tag, COLOR_PROP)
+        if (c !== undefined && isColorValue(c)) dot.style.setProperty('--identity-c', identityColorCss(c))
+        const nm = document.createElement('span')
+        nm.textContent = `#${displayNameOf(tag)}`
+        item.append(dot, nm)
+        src.appendChild(item)
+      }
+    } else {
+      src.textContent = source
+    }
     label.appendChild(src)
   }
 
@@ -708,22 +732,38 @@ export class PropertiesPanel {
      * 主体是定义块时画在这里（属性行之后、系统信息之前），改完立刻看得到。
      */
     /**
-     * **定义的类型配置**：格式（同值形状内的约束与画法）。
+     * **定义块的值配置归组**：格式（同值形状内的约束与画法）、`ref` 的候选域、
+     * select 的选项编辑器——三件事都是「这条属性的值」的配置，散着画就是三段断片
+     * （空属性段 → 一行格式 → 裸标题「选项」），读者拼不出它们的归属。
+     * 归组后「选项」降为组内的一个名字，组头说明这组配置管的是**成员块的值**。
      *
-     * 只有有格式轴的 kind 才有这一段（select 的配置是选项编辑器；checkbox/ref 没有格式）。
+     * 只有有格式轴的 kind 才有格式段（select 的配置是选项编辑器；checkbox/ref 没有格式）；
      * 格式改动**不动任何值**：值仍是同一个字符串，只是校验与输入框类型变了。
      */
     if (isPropDef(target)) {
+      const config = document.createElement('section')
+      config.className = 'props-section prop-def-config'
+      const head = document.createElement('div')
+      head.className = 'props-section-head'
+      const title = document.createElement('span')
+      title.className = 'props-section-title'
+      title.textContent = t('ui.props.defValuesTitle')
+      head.appendChild(title)
+      const hint = document.createElement('span')
+      hint.className = 'props-section-hint'
+      hint.textContent = t('ui.props.defValuesHint')
+      head.appendChild(hint)
+      config.appendChild(head)
       const fmt = this.buildDefFormat(target)
-      if (fmt) this.els.body.appendChild(fmt)
+      if (fmt) config.appendChild(fmt)
       // `ref` 的候选域：只对 ref 定义出现（别的 kind 没有「候选」这回事）
       const refTags = this.buildRefTargets(target)
-      if (refTags) this.els.body.appendChild(refTags)
-    }
-
-    if (this.selectDef()) {
-      this.choicesFull.render()
-      this.els.body.appendChild(this.choicesFull.root)
+      if (refTags) config.appendChild(refTags)
+      if (this.selectDef()) {
+        this.choicesFull.render()
+        config.appendChild(this.choicesFull.root)
+      }
+      this.els.body.appendChild(config)
     }
 
     // 系统信息在**最后**：它是这一块的出生与改动记录，不是可编辑的数据

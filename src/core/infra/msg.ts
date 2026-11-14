@@ -235,7 +235,11 @@ export const MSG = {
   'ui.props.createdAt': '创建于',
   'ui.props.modifiedAt': '修改于',
   'ui.props.timeUnknown': '未知',
-  'ui.props.source': '来自 {tags}',
+  /* 来源徽章（值行旁）：「来自」后跟逐个「色点＋#名」。色点与块标同一套身份色信号。 */
+  'ui.props.sourceFrom': '来自',
+  /* 属性定义块检视卡的归组段头：格式／候选域／选项都是「这条属性的值」的配置 */
+  'ui.props.defValuesTitle': '这条属性的值',
+  'ui.props.defValuesHint': '成员块的值由这里定义',
   'ui.props.pending': '待填',
   'ui.props.unknown': '未知属性 {id}',
   'ui.props.pick': '选择已有属性…',

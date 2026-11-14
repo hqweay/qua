@@ -17,7 +17,7 @@
  *    但「这一行写什么」只有这一份，免得同一块在四个面上给出四种说法。
  */
 import { t } from '../../core/infra/msg.ts'
-import { enginePropText, isEngineProp } from '../../core/index.ts'
+import { COLOR_PROP, enginePropText, identityColorCss, isColorValue, isEngineProp, prop } from '../../core/index.ts'
 import type { BelowFields, FieldRow, PropsLineDensity } from '../../core/index.ts'
 
 export interface PropsLineDeps {
@@ -181,7 +181,22 @@ function pairOf(blockId: string, row: FieldRow, deps: PropsLineDeps, pendingText
   pair.dataset.propId = row.propId
   const name = document.createElement('span')
   name.className = 'blk-prop-name'
-  name.textContent = row.label
+  /**
+   * **标签声明来的行带一枚来源色点**（与检视卡的来源徽章同一套信号）：
+   * 「这条值归哪个标签管」在块下扫视时也读得出来，自有行没有点。
+   * 行内空间小 ⇒ 多来源只点主标签（第一个）一颗；点色用标签自己的显式身份色，
+   * 没配色回落中性（「来自标签」是在场信号，色是标签之间的区分）。
+   */
+  const mainSource = row.sources[0]
+  if (mainSource) {
+    const dot = document.createElement('span')
+    dot.className = 'blk-prop-source-dot'
+    dot.setAttribute('aria-hidden', 'true')
+    const c = prop<string>(mainSource, COLOR_PROP)
+    if (c !== undefined && isColorValue(c)) dot.style.setProperty('--identity-c', identityColorCss(c))
+    name.appendChild(dot)
+  }
+  name.appendChild(document.createTextNode(row.label))
   const value = document.createElement('span')
   value.className = 'blk-prop-value ui-ellipsis'
   value.textContent = pendingText ?? fieldRowText(row, deps.refLabel)
