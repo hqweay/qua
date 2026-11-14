@@ -15,7 +15,9 @@
  *    它们分别是恒真／恒假，拼回来不能换。
  */
 import { literalOf, type DraftOp } from './query-draft.ts'
+import { normMarks, type Marks } from '../model/runs.ts'
 import { SELF, type QueryNode, type QuerySpec, type SortKey } from './query.ts'
+import type { RefKind } from '../relations/relations.ts'
 import { canonicalSpec } from './query-view.ts'
 import { ENGINE_CREATED, ENGINE_MODIFIED } from '../props/props.ts'
 import { dateOfMs, dayStartMs, isJournalDate, shiftISO } from '../identity/journal.ts'
@@ -28,9 +30,23 @@ export type TreeRow =
   | { kind: 'tag'; value: string }
   | { kind: 'text'; value: string }
   | { kind: 'prop'; field: string; op: DraftOp; value: string }
-  | { kind: 'ref'; target: string }
+  /**
+   * 引用行。`target: ''` ＝ **不限目标**（「有引用即可」，`{ref:{}}`，一条完整条件）；
+   * 填了目标 ＝ 指名（字符串形态拼回，既有写法不变）。`kinds` 收窄引用种类
+   * （缺省 `undefined` ＝ 三类全算）——它出现在条件里时拼回对象形态（canonical 的样子）。
+   */
+  | { kind: 'ref'; target: string; kinds?: readonly RefKind[] }
   | { kind: 'is'; target: string }
   | { kind: 'role'; role: 'journal' | 'page' }
+  /**
+   * **正文里有一段带这组 marks 的内容**（`{mark}` 原子，子集匹配）。
+   *
+   * 值是归一化前的自由态，拼回时过 `normMarks`（与 run 上的 marks 同一份口径）；
+   * **空（归一化后无键）＝ 还没选**，行未完成（空 marks 恒真，不许拼出去）。
+   */
+  | { kind: 'mark'; value: Marks }
+  /** **正文里有外链**；`url: ''` ＝「有外链即可」（一条完整条件），填了比 contains */
+  | { kind: 'link'; url: string }
   /**
    * **某一天**（日记身份）：三种值形态，拼回去各是一种既有原子。
    *
@@ -54,7 +70,7 @@ export type TreeRow =
 export type TreeRowKind = TreeRow['kind']
 
 /** 行种类下拉的顺序（与「加一条条件」的选择器分开） */
-export const TREE_ROW_KINDS: readonly TreeRowKind[] = ['tag', 'prop', 'text', 'ref', 'is', 'role', 'day', 'stamp']
+export const TREE_ROW_KINDS: readonly TreeRowKind[] = ['tag', 'prop', 'text', 'ref', 'is', 'role', 'day', 'stamp', 'mark', 'link']
 
 export interface TreeLeaf {
   kind: 'leaf'
@@ -251,12 +267,28 @@ export function treeRowOf(node: QueryNode): TreeRow | null {
   if ('ref' in node) {
     if (typeof node.ref === 'string') return { kind: 'ref', target: node.ref }
     /**
-     * 对象形态的 `ref`（哪怕没有 kind）整份走 JSON：树上的引用行只有一个值位（目标 id），
-     * 拼回去会变成 `{ref:'id'}` —— 语义相同、字节不同，`specKey` 会误判「条件变了」。
+     * 对象形态分两半：**缺 `to`**（不限目标）可编辑——值位「目标」就是空的，
+     * 拼回去还是对象；**有 `kind` 收窄**的指名目标也可编辑（拼回带 kind 的对象，
+     * 与 canonical 字节相等）。只有 `{ref:{to}}`（对象、无 kind）拼回去会变字符串形态
+     * ——语义同、字节不同，`specKey` 会误判「条件变了」⇒ 走只读 JSON。
      */
+    if (node.ref.to === undefined || node.ref.kind !== undefined) {
+      const kinds =
+        node.ref.kind === undefined
+          ? undefined
+          : typeof node.ref.kind === 'string'
+            ? [node.ref.kind]
+            : [...node.ref.kind]
+      return { kind: 'ref', target: node.ref.to ?? '', ...(kinds ? { kinds } : {}) }
+    }
     return null
   }
   if ('is' in node) return { kind: 'is', target: node.is }
+  if ('mark' in node) {
+    const m = normMarks(node.mark)
+    return m ? { kind: 'mark', value: m } : null
+  }
+  if ('link' in node) return { kind: 'link', url: node.link.url ?? '' }
   if ('role' in node) {
     return node.role === 'journal' || node.role === 'page' ? { kind: 'role', role: node.role } : null
   }
@@ -332,8 +364,20 @@ export function treeOfSpec(spec: QuerySpec): TreeDraft | null {
 export function treeNodeOfRow(row: TreeRow): QueryNode | null {
   if (row.kind === 'tag') return row.value.trim() === '' ? null : { tag: row.value }
   if (row.kind === 'text') return row.value.trim() === '' ? null : { text: row.value }
-  if (row.kind === 'ref') return row.target === '' ? null : { ref: row.target }
+  if (row.kind === 'ref') {
+    const target = row.target.trim()
+    if (target !== '') return row.kinds ? { ref: { to: target, kind: row.kinds } } : { ref: target }
+    return row.kinds ? { ref: { kind: row.kinds } } : { ref: {} }
+  }
   if (row.kind === 'is') return row.target === '' ? null : { is: row.target }
+  if (row.kind === 'mark') {
+    const m = normMarks(row.value)
+    return m ? { mark: m } : null
+  }
+  if (row.kind === 'link') {
+    const url = row.url.trim()
+    return url === '' ? { link: {} } : { link: { url } }
+  }
   if (row.kind === 'role') return { role: row.role }
   if (row.kind === 'day') {
     if (row.date === SELF) return { all: [{ role: 'journal' }, { prop: { id: '_date', eq: SELF } }] }

@@ -131,13 +131,35 @@ test('条件树：拆不动的形状返回 null（调用方走只读 JSON，不�
     { where: { up: { down: { text: 'x' } } } },
     // 「非」不在最外层：`{up:{not:…}}` 与 `{not:{up:…}}` 语义不同，只认后者
     { where: { up: { not: { text: 'x' } } } },
+    // 对象、无 kind：拼回去会变字符串形态（语义同、字节不同，specKey 会误判「条件变了」）
     { where: { ref: { to: 'x' } } },
-    { where: { ref: { to: 'x', kind: 'inline' } } },
     { where: { role: 'nope' } },
     { where: { not: { not: { tag: 'x' } } } },
     { where: { prop: { id: 'p', eq: 1, neq: 2 } } },
   ]
   for (const spec of hard) assert.equal(treeOfSpec(spec as QuerySpec), null, JSON.stringify(spec))
+})
+
+test('引用行：指名＋kind 收窄可编辑（拼回与 canonical 字节相等）；不限目标是空目标位', () => {
+  roundTrip({ where: { ref: { to: 'x', kind: 'inline' } } })
+  roundTrip({ where: { ref: { kind: ['inline', 'embed'] } } })
+  roundTrip({ where: { ref: {} } })
+  // 收窄 kind 的字符串形态先过 canonical 再进树（读路径给的都是 canonical）
+  roundTrip(canonicalSpec({ where: { ref: { to: 'x', kind: 'inline' } } }))
+})
+
+test('格式行与外链行：往返逐字节相等；空 marks ＝ 还没选（未完成），空 url ＝ 有外链即可', () => {
+  roundTrip({ where: { mark: { bg: 'red' } } })
+  roundTrip({ where: { mark: { bg: 'red', bold: true } } })
+  // 未按固定键序的写法进来、归一化形状出去——specKey 相同
+  roundTrip({ where: { mark: { bold: true, bg: 'red' } } })
+  roundTrip({ where: { link: { url: 'example.com' } } })
+  roundTrip({ where: { link: {} } })
+  assert.equal(treeNodeOfRow({ kind: 'mark', value: {} }), null, '空 marks 恒真 ⇒ 行未完成，不许拼出去')
+  assert.deepEqual(treeNodeOfRow({ kind: 'link', url: '' }), { link: {} }, '空 url ＝「有外链即可」，是完整条件')
+  // 新行缺省即完整：不限目标的引用也是一条成立的条件
+  assert.deepEqual(treeNodeOfRow({ kind: 'ref', target: '' }), { ref: {} })
+  assert.deepEqual(treeNodeOfRow({ kind: 'ref', target: '', kinds: ['inline'] }), { ref: { kind: ['inline'] } })
 })
 
 test('「非」在外、方向在内：两种语义不混成一种形状', () => {

@@ -13,9 +13,11 @@
  *    所以「非」在最外、方向次之、组在内 —— 与条件的拼装顺序同构。
  */
 import {
+  MARK_KINDS,
   SELF,
   systemQueryFieldLabel,
   treeOfSpec,
+  type Marks,
   type QuerySpec,
   type TreeRow,
   type TreeNode,
@@ -122,13 +124,21 @@ function rowSentence(row: TreeRow, deps: ConditionTextDeps): string {
     }
     case 'text':
       return row.value === SELF ? t('ui.query.selfText') : t('ui.query.label.text', { text: row.value })
-    case 'ref':
-      return `${t('ui.query.prefix.ref')} ${targetText(row.target, deps)}`
+    case 'ref': {
+      // 不限目标是一条完整条件（「有引用」），不是没填完
+      const suffix = row.kinds ? `（${row.kinds.map((k) => t(`ui.query.refkind.${k}` as MsgId)).join('／')}）` : ''
+      if (row.target === '') return `${t('ui.query.chip.refAny')}${suffix}`
+      return `${t('ui.query.prefix.ref')} ${targetText(row.target, deps)}${suffix}`
+    }
     case 'is':
       return `${t('ui.query.prefix.is')} ${targetText(row.target, deps)}`
     case 'role':
       // 身份用名词直出（「日记」），不垫系动词——「是」是给模型看的区分
       return t(row.role === 'page' ? 'ui.query.role.page' : 'ui.query.role.journal')
+    case 'mark':
+      return t('ui.query.chip.mark', { marks: markPhrase(row.value) })
+    case 'link':
+      return row.url.trim() === '' ? t('ui.query.chip.link') : t('ui.query.chip.linkUrl', { url: row.url.trim() })
     case 'day':
       return dayText(row)
     case 'stamp':
@@ -153,6 +163,27 @@ function rowSentence(row: TreeRow, deps: ConditionTextDeps): string {
 function targetText(target: string, deps: ConditionTextDeps): string {
   if (target === SELF) return t('ui.query.rootBlock')
   return deps.refLabel?.(target) ?? target
+}
+
+/** 一组 marks 的人话短语（布尔轴用按钮同款词，值轴是「红字」「红底」式槽名短语） */
+const BOOL_LABEL: Record<'bold' | 'italic' | 'underline' | 'strike' | 'code', MsgId> = {
+  bold: 'menu.label.bold',
+  italic: 'menu.label.italic',
+  underline: 'menu.label.underline',
+  strike: 'menu.label.strike',
+  code: 'menu.label.code',
+}
+
+function markPhrase(m: Marks): string {
+  const parts: string[] = []
+  for (const k of MARK_KINDS) {
+    const v = m[k]
+    if (v === undefined) continue
+    if (v === true) parts.push(t(BOOL_LABEL[k as keyof typeof BOOL_LABEL]))
+    else if (k === 'ink') parts.push(t('ui.query.mark.inkSlot', { slot: t(`ui.color.${v}` as MsgId) }))
+    else parts.push(t('ui.query.mark.bgSlot', { slot: t(`ui.color.${v}` as MsgId) }))
+  }
+  return parts.join('·')
 }
 
 function dayText(row: Extract<TreeRow, { kind: 'day' }>): string {

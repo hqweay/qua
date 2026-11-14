@@ -31,6 +31,7 @@ import {
   type DraftOp,
   type PropKind,
   type QuerySpec,
+  type RefKind,
   type TreeDraft,
   type TreeGroup,
   type TreeLeaf,
@@ -39,6 +40,7 @@ import {
   isJournalDate,
 } from '../../core/index.ts'
 import { t, type MsgId } from '../../core/infra/msg.ts'
+import { markPicker } from './mark-picker.ts'
 
 export interface QueryTreeDeps {
   /** 当前条件（现读：可能被命令／撤销改过） */
@@ -94,6 +96,8 @@ const ROW_KIND_TEXT: Record<TreeRowKind, MsgId> = {
   role: 'ui.query.kind.role',
   day: 'ui.query.kind.day',
   stamp: 'ui.query.kind.stamp',
+  mark: 'ui.query.prefix.mark',
+  link: 'ui.query.prefix.link',
 }
 
 const OP_TEXT: Record<DraftOp, MsgId> = {
@@ -116,6 +120,8 @@ function defaultRow(kind: TreeRowKind, field: string): TreeRow {
   if (kind === 'ref') return { kind: 'ref', target: '' }
   if (kind === 'is') return { kind: 'is', target: '' }
   if (kind === 'role') return { kind: 'role', role: 'journal' }
+  if (kind === 'mark') return { kind: 'mark', value: {} }
+  if (kind === 'link') return { kind: 'link', url: '' }
   if (kind === 'day') {
     // 新加的「某一天」默认「今天」（`{today:{offset:0}}`）：加一行就是一条完整条件
     return { kind: 'day', date: '', rel: 0 }
@@ -495,6 +501,8 @@ export class QueryTree {
       { pick: 'row:role', label: t('ui.query.kind.role') },
       { pick: 'row:day', label: t('ui.query.kind.day') },
       { pick: 'row:stamp', label: t('ui.query.kind.stamp') },
+      { pick: 'row:mark', label: t('ui.query.kind.mark') },
+      { pick: 'row:link', label: t('ui.query.kind.link') },
     ])
     return picker
   }
@@ -562,6 +570,8 @@ export class QueryTree {
         el.append(...this.propControls(leaf))
         break
       case 'ref':
+        el.append(...this.refRowControls(row))
+        break
       case 'is':
         el.append(this.refControls(row))
         break
@@ -587,6 +597,12 @@ export class QueryTree {
         break
       case 'stamp':
         el.append(...this.stampControls(row))
+        break
+      case 'mark':
+        el.append(this.markControls(row))
+        break
+      case 'link':
+        el.append(this.linkControl(row))
         break
     }
 
@@ -827,6 +843,90 @@ export class QueryTree {
       row.target = id
       this.paint()
     })
+  }
+
+  /**
+   * 引用行：kind 收窄一格 ＋ 目标值位。
+   *
+   * **空目标 ＝ 不限目标**（「有引用即可」）——那是一条完整的条件，不是没填完；
+   * 点选块收窄成「只认引用它的块」。kind 缺省三类全算（与求值同一口径）。
+   */
+  private refRowControls(row: Extract<TreeRow, { kind: 'ref' }>): HTMLElement[] {
+    const out: HTMLElement[] = []
+    const kinds = row.kinds
+    const single = kinds !== undefined && kinds.length === 1 ? kinds[0]! : ''
+    const options: { value: string; label: string }[] = [
+      { value: '', label: t('ui.query.refkind.all') },
+      { value: 'inline', label: t('ui.query.refkind.inline') },
+      { value: 'property', label: t('ui.query.refkind.property') },
+      { value: 'embed', label: t('ui.query.refkind.embed') },
+    ]
+    // 收窄到多个 kind 的形状（手工 JSON 来的）如实显示；换到任何一格都会重写成单值
+    if (kinds !== undefined && single === '') {
+      options.push({ value: 'multi', label: kinds.map((k) => t(`ui.query.refkind.${k}` as MsgId)).join('／') })
+    }
+    out.push(
+      selectEl(options, kinds === undefined ? '' : single === '' ? 'multi' : single, (next) => {
+        if (next === '' || next === 'multi') delete row.kinds
+        else row.kinds = [next as RefKind]
+        this.paint()
+      }, 'qt-refkind', 'refkind'),
+    )
+    const label =
+      row.target === ''
+        ? t('ui.query.tree.refAny')
+        : row.target === SELF
+          ? t('ui.query.rootBlock')
+          : (this.deps.refLabel?.(row.target) ?? row.target)
+    const b = buttonEl(label, `qt-value qt-ref qt-slot${row.target === '' ? ' qt-placeholder' : ''}`, 'ref')
+    if (!this.deps.pickRef && row.target !== '') {
+      b.disabled = true
+      b.dataset.tip = t('ui.query.noBlockPicker')
+    } else {
+      if (row.target === '') b.dataset.tip = t('ui.query.tree.refAnyHint')
+      b.addEventListener('click', () => {
+        this.deps.pickRef?.(
+          this.deps.owner,
+          '',
+          row.target,
+          (id) => {
+            row.target = id
+            this.paint()
+          },
+          b.getBoundingClientRect(),
+          b,
+          { rootBlock: true },
+        )
+      })
+    }
+    out.push(b)
+    return out
+  }
+
+  /** 格式行：词汇表组件（按钮 ＋ 色轴 ＋ 预览）；空 marks ＝ 还没选，行未完成 */
+  private markControls(row: Extract<TreeRow, { kind: 'mark' }>): HTMLElement {
+    const picker = markPicker({
+      marks: () => row.value,
+      onChange: (next) => {
+        row.value = next
+        this.syncRow(picker, row)
+      },
+    })
+    return picker
+  }
+
+  /** 外链行：空 ＝「有外链即可」（完整条件）；填了比 contains */
+  private linkControl(row: Extract<TreeRow, { kind: 'link' }>): HTMLElement {
+    const input = document.createElement('input')
+    input.className = 'qt-value ui-input qt-slot'
+    input.dataset.qt = 'value'
+    input.placeholder = t('ui.query.link.any')
+    input.value = row.url
+    input.addEventListener('input', () => {
+      row.url = input.value
+      this.syncRow(input, row)
+    })
+    return input
   }
 
   /**

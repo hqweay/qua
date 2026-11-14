@@ -480,3 +480,98 @@
 .qsp-apply {
   align-self: flex-end;
 }
+
+/* ---------------------------------------------------------- 格式行（{mark}） */
+
+/* 按钮条 ＋ 展开的色槽 ＋ 预览，纵排成一小块；预览复用正文渲染的 mk-* class（颜色只在 token 上） */
+.qt-markwrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-1);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.qt-markbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+.qt-mkbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  width: 26px;
+  height: 24px;
+  border: none;
+  border-radius: var(--ui-radius-sm);
+  background: transparent;
+  color: var(--ui-text-secondary);
+  cursor: pointer;
+}
+.qt-mkbtn:hover {
+  background: var(--ui-bg-hover);
+}
+.qt-mkbtn[data-on='1'] {
+  background: var(--ui-hit-bg);
+  color: var(--ui-text);
+}
+/* 轴的当前值只占图标下缘一条 2px 色标（划选气泡同款），值域在展开层里 */
+.qt-axisvalue {
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  width: 14px;
+  height: 2px;
+  transform: translateX(-50%);
+  border-radius: 1px;
+}
+.qt-axisvalue[data-slot='red'] { background: var(--ui-ink-red); }
+.qt-axisvalue[data-slot='orange'] { background: var(--ui-ink-orange); }
+.qt-axisvalue[data-slot='yellow'] { background: var(--ui-ink-yellow); }
+.qt-axisvalue[data-slot='green'] { background: var(--ui-ink-green); }
+.qt-axisvalue[data-slot='blue'] { background: var(--ui-ink-blue); }
+.qt-axisvalue[data-slot='violet'] { background: var(--ui-ink-violet); }
+.qt-axisvalue[data-slot='gray'] { background: var(--ui-ink-gray); }
+
+.qt-swatches {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface);
+}
+.qt-swatch {
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.qt-swatch[data-on='1'] {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: 1px;
+}
+/* 字色轴用墨色、背景轴用底色——槽的颜色就是它套到字上的颜色 */
+.qt-swatches[data-axis='ink'] .qt-swatch[data-slot='red'] { background: var(--ui-ink-red); }
+.qt-swatches[data-axis='ink'] .qt-swatch[data-slot='orange'] { background: var(--ui-ink-orange); }
+.qt-swatches[data-axis='ink'] .qt-swatch[data-slot='yellow'] { background: var(--ui-ink-yellow); }
+.qt-swatches[data-axis='ink'] .qt-swatch[data-slot='green'] { background: var(--ui-ink-green); }
+.qt-swatches[data-axis='ink'] .qt-swatch[data-slot='blue'] { background: var(--ui-ink-blue); }
+.qt-swatches[data-axis='ink'] .qt-swatch[data-slot='violet'] { background: var(--ui-ink-violet); }
+.qt-swatches[data-axis='ink'] .qt-swatch[data-slot='gray'] { background: var(--ui-ink-gray); }
+.qt-swatches[data-axis='bg'] .qt-swatch[data-slot='red'] { background: var(--ui-bg-red); }
+.qt-swatches[data-axis='bg'] .qt-swatch[data-slot='orange'] { background: var(--ui-bg-orange); }
+.qt-swatches[data-axis='bg'] .qt-swatch[data-slot='yellow'] { background: var(--ui-bg-yellow); }
+.qt-swatches[data-axis='bg'] .qt-swatch[data-slot='green'] { background: var(--ui-bg-green); }
+.qt-swatches[data-axis='bg'] .qt-swatch[data-slot='blue'] { background: var(--ui-bg-blue); }
+.qt-swatches[data-axis='bg'] .qt-swatch[data-slot='violet'] { background: var(--ui-bg-violet); }
+.qt-swatches[data-axis='bg'] .qt-swatch[data-slot='gray'] { background: var(--ui-bg-gray); }
+
+.qt-markpreview {
+  font-size: var(--ui-fs-sm);
+  color: var(--ui-text);
+}
