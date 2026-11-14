@@ -11144,7 +11144,7 @@ await check(
             id: b.dataset.blockId?.slice(0, 6) ?? '?',
             text: [...b.childNodes].filter((n) => n.nodeType === 3 && (n.data ?? '').trim() !== '').map((n) => n.data),
             extra: [...b.childNodes]
-              .filter((n) => n.nodeType === 1 && !['blk-alias', 'rails', 'rail-self', 'left', 'tx', 'blk-tags'].includes(n.classList[0] ?? ''))
+              .filter((n) => n.nodeType === 1 && !['blk-alias', 'rails', 'rail-self', 'left', 'tx', 'blk-kind', 'blk-tags'].includes(n.classList[0] ?? ''))
               .map((n) => n.nodeName),
           }))
           .filter((o) => o.text.length > 0 || o.extra.length > 0),

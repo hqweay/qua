@@ -35,6 +35,7 @@ import {
   isEmbedBlock,
   isPropDefBlock,
   isQueryBlock,
+  propKindOf,
   journalDate,
   journalDateLabel,
   mergeTagOrder,
@@ -663,6 +664,7 @@ export const ALLOWED_ROW_CHILDREN: ReadonlySet<string> = new Set([
   'rail-self',
   'left',
   'tx',
+  'blk-kind',
   'blk-tags',
   'blk-embed-body',
   'blk-view-body',
@@ -1314,6 +1316,12 @@ export function makeBlockEl(
     tx.contentEditable = 'false'
     tx.dataset.readonly = '1'
     /**
+     * **定义名读作字段名，不读作正文**（次要色）：定义块的行是它的**签名**——
+     * 名字是 label（这里降档），kind 是身份的另一半（尾上的徽章）。没有这一档，
+     * 树里的定义块与内容块读成同一种东西，扫视时要靠滑杆图标逐个认。
+     */
+    if (isPropDefBlock(b)) tx.dataset.propDef = '1'
+    /**
      * 占位文案只属于 **journal**：它的「正文」是 `_date` 的投影，投影要看得见。
      * 类型不可写的块没有可显示的内容（分割线的线本身就是全部），不挂占位——
      * 否则会在一条线旁边多出一行日期。属性定义的正文是定义名，已经画在行里了，也不挂。
@@ -1335,6 +1343,20 @@ export function makeBlockEl(
     tx.dataset.ph = opts.placeholder ?? t('ui.block.placeholderFirst')
   }
 
+  /**
+   * **kind 徽章**（属性定义独有）：定义块＝（名字，kind，格式…），树里这一行是它在
+   * 正文世界的唯一身体，只画名字＝只显示对象的一半——kind 决定成员块的值长什么、
+   * 怎么编辑，却只能进检视卡才知道。徽章与标签槽同一个理由住在 `.tx` **之外**：
+   * 正文读数与插入点只走 `.tx`，徽章不参与。
+   */
+  let kindBadge: HTMLElement | null = null
+  if (isPropDefBlock(b) && !embedBodyEl) {
+    kindBadge = document.createElement('span')
+    kindBadge.className = 'blk-kind'
+    kindBadge.contentEditable = 'false'
+    kindBadge.textContent = t(`ui.props.kind.${propKindOf(b)}`)
+  }
+
   if (embedBodyEl) {
     /**
      * 露面行的 DOM 序＝视觉序：投影行**先 chrome 后身体**（块标回左边）；
@@ -1345,7 +1367,8 @@ export function makeBlockEl(
     // 身体接进文档之后再画：岛编辑器／ViewHost 的构造会量 DOM
     embedMount?.()
   } else {
-    el.append(left!, tx)
+    if (kindBadge) el.append(left!, tx, kindBadge)
+    else el.append(left!, tx)
   }
 
   /**

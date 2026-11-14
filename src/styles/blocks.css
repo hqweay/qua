@@ -593,6 +593,21 @@
   overflow-wrap: anywhere;
   outline: none;
 }
+/* 属性定义的行读作签名（名字 ＋ kind 徽章）：名字降为字段名档（次要色）——
+   定义块是 schema 件不是内容，全强度正文色会让它在树里读成一段笔记。
+   行内原子自带色不受影响（它们有自己的类）。 */
+.blk .tx[data-prop-def='1'] {
+  color: var(--ui-text-secondary);
+}
+/* kind 是定义块身份的另一半（判据见 block-dom.ts 徽章处）：2xs 三级灰，
+   与「· 未声明」后缀同一档的旁注角色 */
+.blk .blk-kind {
+  flex: none;
+  font-size: var(--ui-fs-2xs);
+  color: var(--ui-text-tertiary);
+  white-space: nowrap;
+  margin-left: var(--ui-gap-2);
+}
 /* 空块的幽灵占位：CSS 生成内容不进 DOM 文本，所以 readText() 读不到它 */
 .blk .tx[data-ph]::before {
   content: attr(data-ph);
