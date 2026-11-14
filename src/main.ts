@@ -2760,6 +2760,12 @@ const openAliasEditor = (blockId: string, anchor: HTMLElement | DOMRect | null, 
         close: () => layers.closePopover(),
         toast: (text, kind) => app.toast(text, kind),
         layers,
+        recentColors: () => prefs().recentColors,
+        recordColor: (hex) => {
+          const prev = prefs().recentColors ?? []
+          prefs().recentColors = [hex, ...prev.filter((n) => n !== hex)].slice(0, 6)
+          scheduleDeviceSave()
+        },
         autofocus,
       }),
     // 元素锚点会跟着那一颗按钮走（行随重渲染被换掉时由 `anchorOf` 兜住「不在了」）

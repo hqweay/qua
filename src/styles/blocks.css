@@ -1864,6 +1864,20 @@
   color: var(--identity-c, var(--ui-text-tertiary));
   opacity: 0.7;
 }
+/*
+ * **多标签的外环**（258.2）：≥2 个有色标签时垫在点下的一圈 conic——
+ * 内点取第一色（主标签的身份可读），环说「不止一个」。它**常驻**（不是悬停件），
+ * 但只是一层淡色：薄到不与折叠底盘抢戏（底盘悬停才浮起，见 `.marker::after`）。
+ */
+.blk .marker .marker-ring {
+  position: absolute;
+  z-index: var(--ui-z-plate);
+  width: var(--ui-marker-halo-size);
+  height: var(--ui-marker-halo-size);
+  border-radius: var(--ui-radius-pill);
+  background: var(--identity-ring);
+  opacity: 0.45;
+}
 .blk .marker.marker-query::before,
 .blk .marker.marker-schema::before,
 .blk .marker.marker-face::before {

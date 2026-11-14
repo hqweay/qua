@@ -320,6 +320,7 @@ export const MSG = {
   'ui.iconPicker.noIcon': '无图标（摘掉，回落默认）',
   'ui.iconPicker.noColor': '无颜色（中性）',
   'ui.iconPicker.colorTip': '身份色：{color}',
+  'ui.iconPicker.customColor': '自定义颜色…',
   'ui.iconPicker.manualPlaceholder': '任意字符或 emoji…',
   'ui.iconPicker.manualHint': '输入什么就用什么——选什么渲染什么，平台原生样式是它自己的脸。',
   'ui.iconPicker.manualApply': '使用',

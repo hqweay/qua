@@ -60,11 +60,13 @@ test('iconOf：兼位按「越本质越靠前」——页＋标签读作标签',
   assert.equal(iconOf(block({ _aliases: ['a'], _lists: ['page', 'tag'] })), 'lucide:hash')
 })
 
-test('colorOf：显式 _color 上自己的脸；色板外的值按没配色处理', () => {
+test('colorOf：显式 _color 上自己的脸（板 key 与 hex 都算，258.1）；真正的坏值按没配色处理', () => {
   const byId = new Map<string, Block>()
   assert.deepEqual(colorOf(block({ _color: 'red' }), byId), { kind: 'solid', color: 'red' })
-  // 未知值渲染中性——「无颜色」是合法态不是错误态
-  assert.deepEqual(colorOf(block({ _color: '#ff0000' as string }), byId), { kind: 'none' })
+  assert.deepEqual(colorOf(block({ _color: '#12ab34' }), byId), { kind: 'solid', color: '#12ab34' })
+  // 坏值（非 key 非 hex）渲染中性——「无颜色」是合法态不是错误态
+  assert.deepEqual(colorOf(block({ _color: 'mauve' }), byId), { kind: 'none' })
+  assert.deepEqual(colorOf(block({ _color: '#ff000' }), byId), { kind: 'none' })
 })
 
 test('colorOf：恰一个有色标签→借色；标签自己没配色不借', () => {

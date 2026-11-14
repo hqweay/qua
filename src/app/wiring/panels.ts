@@ -25,6 +25,7 @@ import {
   hasChildrenViewBody,
   findInForest,
   ICON_PROP,
+  isHexColor,
   isJournal,
   isViewRoot,
   journalDate,
@@ -349,13 +350,21 @@ export function setupPanels(deps: PanelsDeps) {
   const pickFace = (b: Block, anchor: DOMRect, trigger?: HTMLElement, onDone?: () => void): void => {
     const registry = deps.getRegistry()
     const done = (): void => onDone?.()
+    /** 自定义色进「最近自定义」（设备态）；内置板 key 不记——板本身常驻 */
+    const recordColor = (color: string): void => {
+      if (!isHexColor(color)) return
+      const prev = deps.prefs().recentColors ?? []
+      deps.prefs().recentColors = [color.toLowerCase(), ...prev.filter((n) => n !== color.toLowerCase())].slice(0, 6)
+      deps.scheduleDeviceSave()
+    }
     openIconPicker({
       layers,
       anchor,
       ...(trigger ? { trigger } : {}),
       current: prop<string>(b, ICON_PROP) ?? '',
       color: prop<string>(b, COLOR_PROP) ?? '',
-      recent: deps.prefs().recentIcons,
+      recent: () => deps.prefs().recentIcons,
+      recentColors: () => deps.prefs().recentColors,
       onPick: (value) => {
         void registry.invoke('core.block/set-icon', { blockId: b.id, icon: value }, 'ui')
         if (value !== '') {
@@ -367,6 +376,7 @@ export function setupPanels(deps: PanelsDeps) {
       },
       onColor: (color) => {
         void registry.invoke('core.block/set-color', { blockId: b.id, color }, 'ui')
+        recordColor(color)
         done()
       },
     })

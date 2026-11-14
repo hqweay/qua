@@ -1027,6 +1027,7 @@
 /* 颜色行：⊘ 中性 ＋ 色板封闭集；色点用各自的 token（不在这里写色值）。
    悬停**不吃**通用按钮的底色——色点自己的颜色就是它的悬停态（换底色＝变色） */
 .popover .icon-picker-colors {
+  position: relative; /* 原生色盘 input 的定位宿主 */
   display: flex;
   gap: var(--ui-gap-2);
   align-items: center;
@@ -1112,4 +1113,26 @@
 .popover .icon-picker-cat[data-on='1'] {
   background: var(--ui-accent-soft);
   color: var(--ui-accent);
+}
+/* 色行的三段分隔与「＋ 自定义」：＋号是虚线空点（点了弹原生色盘），
+   原生 input 只是宿主（视觉藏掉，几何压在＋号上让点击落得进） */
+.popover .icon-picker-color-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--ui-border);
+  margin: 0 2px;
+}
+.popover .icon-picker-custom,
+.popover .icon-picker-custom:hover {
+  background: none;
+  border: 1.5px dashed var(--ui-border);
+}
+.popover .icon-picker-eye {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  border: none;
+  padding: 0;
+  pointer-events: none;
 }

@@ -76,6 +76,11 @@ export interface Prefs {
    * 只记选过的图标值，最新在前、去重封顶；收藏卡从块退到设备状态的同一判据。
    */
   recentIcons: string[]
+  /**
+   * 最近的自定义色（hex，258.1；设备态同上）——色行上的「最近自定义」快捷点。
+   * 内置板 key 不进来（板本身常驻）；跨设备的「我的色板」要色值进 KB，另行立项。
+   */
+  recentColors: string[]
   /** @deprecated 2026-10-19 起的旧形状；只用于读迁移，写一律写 `dock` */
   railOpen?: boolean
 }
@@ -177,6 +182,7 @@ export const DEFAULT_PREFS: Prefs = {
   keys: {},
   recentCommands: [],
   recentIcons: [],
+  recentColors: [],
 }
 
 /**
@@ -306,6 +312,17 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
     ? [...new Set(p.recentIcons.filter((n): n is string => typeof n === 'string' && n !== ''))].slice(0, 24)
     : []
 
+  // 最近的自定义色：只收 hex 形状（`#rrggbb`）且统一小写，去重、封顶 6——色行一行的量
+  const recentColors = Array.isArray(p.recentColors)
+    ? [
+        ...new Set(
+          p.recentColors
+            .filter((n): n is string => typeof n === 'string' && /^#[0-9a-fA-F]{6}$/.test(n))
+            .map((n) => n.toLowerCase()),
+        ),
+      ].slice(0, 6)
+    : []
+
   return {
     ...DEFAULT_PREFS,
     ...p,
@@ -318,6 +335,7 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
     keys,
     recentCommands,
     recentIcons,
+    recentColors,
     dock: {
       // `legacyPinned` 只在归一内部用，不进落盘形状
       left: { open: left.open, width: left.width, cards: left.cards },

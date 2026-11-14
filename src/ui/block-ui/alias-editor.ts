@@ -35,7 +35,7 @@ import {
 import type { KbClient } from '../../core/kb/types.ts'
 import { t } from '../../core/infra/msg.ts'
 import { renderIcon } from '../../view/icons.ts'
-import { identityTokenVar } from '../../core/identity/faces.ts'
+import { identityColorCss } from '../../core/identity/faces.ts'
 import { renderIconPicker } from '../overlay/icon-picker.ts'
 import type { Layers } from '../overlay/layers.ts'
 
@@ -52,6 +52,10 @@ export interface AliasEditorDeps {
   toast?: (text: string, kind?: 'ok' | 'warn' | 'info') => void
   /** 浮层装配（「图标＋颜色」内嵌在选择器里用——别名编辑器已经占着 popover 位） */
   layers?: Layers
+  /** 最近自定义色（hex；设备态在装配层）——色行的快捷段 */
+  recentColors?: () => readonly string[]
+  /** 选了自定义色时记账（设备态的落盘也归装配层） */
+  recordColor?: (hex: string) => void
   /**
    * 打开时就把光标放进「添加别名」输入框。
    *
@@ -138,7 +142,7 @@ export function renderAliasEditor(host: HTMLElement, deps: AliasEditorDeps): voi
     if (faceColor !== undefined) {
       const dot = document.createElement('span')
       dot.className = 'alias-face-dot'
-      dot.style.setProperty('--swatch', identityTokenVar(faceColor))
+      dot.style.setProperty('--swatch', identityColorCss(faceColor))
       faceBtn.appendChild(dot)
     }
     head.appendChild(faceBtn)
@@ -158,6 +162,7 @@ export function renderAliasEditor(host: HTMLElement, deps: AliasEditorDeps): voi
         anchor: null,
         current: prop<string>(cur, ICON_PROP) ?? '',
         color: prop<string>(cur, COLOR_PROP) ?? '',
+        recentColors: deps.recentColors,
         keepOpen: true,
         onPick: (value) => {
           host.dataset.faceOpen = '1'
@@ -167,6 +172,7 @@ export function renderAliasEditor(host: HTMLElement, deps: AliasEditorDeps): voi
         onColor: (color) => {
           host.dataset.faceOpen = '1'
           deps.write(() => setFaceProp(cur, COLOR_PROP, color))
+          deps.recordColor?.(color)
           redraw()
         },
       })

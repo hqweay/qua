@@ -24,8 +24,9 @@ import {
   embedBodyOf,
   faceOf,
   colorOfByFind,
-  identityColorVar,
-  identityTokenVar,
+  identityDotColor,
+  identityRingGradient,
+  identityColorCss,
   hasChildrenViewBody,
   hasQueryBody,
   identityTags,
@@ -386,8 +387,8 @@ export function makeTagChipEl(tagId: string, name: string, icon?: string, color?
   // **chip 染各染各的标签色**（soft 底＋solid 字）：标签显式配了 `_color` 才染；
   // 未配色的维持 accent 现状——色是叠加的身份通道，永远不是唯一载体
   if (color !== undefined && color !== '') {
-    el.style.setProperty('--chip-c', identityTokenVar(color))
-    el.style.setProperty('--chip-bg', identityTokenVar(color, 'soft'))
+    el.style.setProperty('--chip-c', identityColorCss(color))
+    el.style.setProperty('--chip-bg', identityColorCss(color, 'soft'))
   }
   el.dataset.tip = t('ui.chip.tagTitle', { label: name })
   return el
@@ -1001,11 +1002,21 @@ export function makeBlockEl(
     }
     /**
      * **自位色**：自己的脸自己上色——显式 `_color` 染点/脸；恰一个有色标签借色；
-     * ≥2 个有色标签上色环（conic，10px 级小面积）。值的形状（描边/圆点）归 CSS：
-     * 这里只把 token 引用写进行上的局部槽，交互件（grip/折叠 halo）照旧中性。
+     * ≥2 个有色标签＝**内点＋外环**（258.2）：内点取第一个有色标签（`_tags` 序，
+     * 主标签的身份保持可读），外环是按序全色的 conic——环说「不止一个」，
+     * 分层比整点铺色环干净（小面积上色环直接铺在点上会糊）。值的形状归 CSS：
+     * 这里只把色值写进行上的局部槽，交互件（grip/折叠 halo）照旧中性。
      */
-    const idc = identityColorVar(colorOfByFind(b, opts.find))
-    if (idc !== undefined) marker.style.setProperty('--identity-c', idc)
+    const idc = colorOfByFind(b, opts.find)
+    const dot = identityDotColor(idc)
+    if (dot !== undefined) marker.style.setProperty('--identity-c', dot)
+    const ring = identityRingGradient(idc)
+    if (ring !== undefined) {
+      marker.style.setProperty('--identity-ring', ring)
+      const ringEl = document.createElement('span')
+      ringEl.className = 'marker-ring'
+      marker.appendChild(ringEl)
+    }
     left.appendChild(marker)
   }
 

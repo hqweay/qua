@@ -30,8 +30,9 @@
 import {
   COLOR_PROP,
   ICON_PROP,
-  IDENTITY_COLORS,
   hasList,
+  isColorValue,
+  isHexColor,
   isJournalBlock,
   isPropDefBlock,
   isQueryBlock,
@@ -109,20 +110,15 @@ export type IdentityFaceColor =
  */
 export function colorOf(b: Block, byId: ReadonlyMap<string, Block>): IdentityFaceColor {
   const own = prop<string>(b, COLOR_PROP)
-  if (own !== undefined && isPaletteKey(own)) return { kind: 'solid', color: own }
+  if (own !== undefined && isColorValue(own)) return { kind: 'solid', color: own }
   const colors: string[] = []
   for (const t of resolveTagIds(b, byId)) {
     const c = prop<string>(t, COLOR_PROP)
-    if (c !== undefined && isPaletteKey(c)) colors.push(c)
+    if (c !== undefined && isColorValue(c)) colors.push(c)
   }
   if (colors.length === 1) return { kind: 'solid', color: colors[0]! }
   if (colors.length >= 2) return { kind: 'ring', colors }
   return { kind: 'none' }
-}
-
-/** 色板封闭集判据：色板外的值一律按「没配色」处理，不报错 */
-function isPaletteKey(v: string): boolean {
-  return (IDENTITY_COLORS as readonly string[]).includes(v)
 }
 
 /**
@@ -142,23 +138,37 @@ export function colorOfByFind(b: Block, find?: FindBlock): IdentityFaceColor {
 /** 身份 token 的名字前缀（`tokens.css` 的 `--ui-identity-<key>[-soft]`；封闭集测试钉两表一一对应） */
 const IDENTITY_VAR_PREFIX = '--ui-identity-'
 
-/** 身份色板的一个 token 引用（solid＝描边/圆点，soft＝chip 底）。key 只来自色板封闭集 */
-export function identityTokenVar(key: string, variant: 'solid' | 'soft' = 'solid'): string {
-  return `var(${IDENTITY_VAR_PREFIX}${key}${variant === 'soft' ? '-soft' : ''})`
+/**
+ * 身份色的一个 CSS 值（solid＝描边/圆点/字，soft＝chip 底）。
+ * **板 key 走预调 token 对；hex（用户色）走程序化**——没有第二份 soft token 可引：
+ * soft 用 `color-mix` 现算（15% 叠透明，与内置 soft 同一观感档），
+ * solid 在暗色主题下提亮一档（纯 hex 在暗底上会陷进去；`light-dark` 两臂由 CSS 按主题取）。
+ * 登记的代价：自定义色的可读性没有预调兜底（258.1）。
+ */
+export function identityColorCss(value: string, variant: 'solid' | 'soft' = 'solid'): string {
+  if (isHexColor(value)) {
+    if (variant === 'soft') return `color-mix(in srgb, ${value} 15%, transparent)`
+    return `light-dark(${value}, color-mix(in srgb, ${value} 72%, white))`
+  }
+  return `var(${IDENTITY_VAR_PREFIX}${value}${variant === 'soft' ? '-soft' : ''})`
 }
 
 /**
- * 身份色 → **元素上的局部槽**的值：solid ＝ 一个 token；ring ＝ 按 `_tags` 序的
- * conic-gradient（10px 级小面积）；中性 ＝ `undefined`（调用方回落默认色，
- * 交互语言不吃身份色）。
- *
- * ⚠️ 只产字符串，不碰 DOM —— 颜色的出现方式（描边/圆点/底色）归 view。
+ * 块标**内点**的色（258.2）：solid ＝ 自己的色；ring ＝ 第一个有色标签（`_tags` 序）；
+ * 中性 ＝ `undefined`（回落默认，交互语言不吃身份色）。
  */
-export function identityColorVar(c: IdentityFaceColor): string | undefined {
-  if (c.kind === 'solid') return identityTokenVar(c.color)
-  if (c.kind === 'ring') {
-    const stops = c.colors.map((k) => identityTokenVar(k)).join(', ')
-    return `conic-gradient(from 0deg, ${stops})`
-  }
+export function identityDotColor(c: IdentityFaceColor): string | undefined {
+  if (c.kind === 'solid') return identityColorCss(c.color)
+  if (c.kind === 'ring') return identityColorCss(c.colors[0]!)
   return undefined
+}
+
+/**
+ * 块标**外环**的渐变（258.2）：≥2 个有色标签时按 `_tags` 序的 conic——
+ * 点保持可读（主标签的身份），环说「不止一个」。恰 2 个时读作双色环（Tana 同观感）。
+ */
+export function identityRingGradient(c: IdentityFaceColor): string | undefined {
+  if (c.kind !== 'ring') return undefined
+  const stops = c.colors.map((k) => identityColorCss(k)).join(', ')
+  return `conic-gradient(from 0deg, ${stops})`
 }

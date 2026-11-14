@@ -752,10 +752,14 @@ function commandDecls() {
     for (const lit of literalsOf(sf)) {
       if (!COLOR_LIT.test(lit.text) && !LENGTH_LIT.test(lit.text)) continue
       const inThumb = r === 'src/view/editor/block-dom.ts' && SVG_URI_WL.test(lit.text)
+      // `identityColorCss` 的拼装串：颜色值来自**数据**（`_color` 的板 key／用户 hex），
+      // 这里是「数据 → CSS 值」的唯一翻译点（soft 现算、暗色提亮都在这一处）——
+      // 串里没有设计 token，出现 rgb( 只是 color-mix 语法的一部分
+      const inIdentity = r === 'src/core/identity/faces.ts' && /color-mix\(|light-dark\(/.test(lit.text)
       // 主进程不是渲染层：没有 CSS、也 import 不到 token ⇒ 窗口底色只能由 shell 给
       const inShellBg = r === 'electron/main.ts' && /backgroundColor\s*:/.test(lines[lit.line - 1] ?? '')
       const row = `${r}:${lit.line}  ${JSON.stringify(lit.text.slice(0, 60))}`
-      if (inThumb || inShellBg) wl.push(row)
+      if (inThumb || inShellBg || inIdentity) wl.push(row)
       else hits.push(row)
     }
   }

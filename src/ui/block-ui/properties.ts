@@ -18,7 +18,7 @@
  * ⚠️ 组件不写模型：所有写入经注入的回调（由装配层转成命令）。
  */
 import type { Block, ClickMods } from '../../core/index.ts'
-import { clickModsOf, enginePropText, identityTokenVar, isEngineProp } from '../../core/index.ts'
+import { clickModsOf, enginePropText, identityColorCss, isEngineProp } from '../../core/index.ts'
 import { plainText } from '../../core/model/runs.ts'
 import { onCommitKeys } from './keys.ts'
 import type { Dangling, FieldRow, PropKind } from '../../core/index.ts'
@@ -905,7 +905,7 @@ export class PropertiesPanel {
     if (color !== undefined) {
       const dot = document.createElement('span')
       dot.className = 'prop-face-dot'
-      dot.style.setProperty('--swatch', identityTokenVar(color))
+      dot.style.setProperty('--swatch', identityColorCss(color))
       btn.appendChild(dot)
     }
     btn.addEventListener('click', () => this.deps.pickFace?.(target, btn.getBoundingClientRect(), btn))

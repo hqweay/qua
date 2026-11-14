@@ -28852,14 +28852,24 @@ await check('T303 身份色：单色借色／多色环／chip 各染各色；摘
     }, info.blockId)
   const chipBase = await chipOf()
 
-  // ② 两个有色标签 ⇒ 块标点是色环；chip 各染各的标签色（soft 底＋solid 字）
-  await page.evaluate(({ tagA, tagB }) => {
-    window.__qua.invoke('core.block/set-color', { blockId: tagA, color: 'red' })
-    window.__qua.invoke('core.block/set-color', { blockId: tagB, color: 'blue' })
+  // ② 两个有色标签 ⇒ 内点＋外环（258.2）：环元素是按序全色的 conic，点取第一色
+  await page.evaluate(async ({ tagA, tagB }) => {
+    await window.__qua.invoke('core.block/set-color', { blockId: tagA, color: 'red' })
+    await window.__qua.invoke('core.block/set-color', { blockId: tagB, color: 'blue' })
   }, info)
   await page.waitForTimeout(150)
-  const ring = await dotOf(info.blockId)
-  assert(ring.img.includes('conic-gradient'), `两个有色标签 ⇒ 块标应是色环：${JSON.stringify(ring)}`)
+  const ring = await page.evaluate((blockId) => {
+    const marker = document.querySelector(`.blk[data-block-id="${blockId}"] > .left .marker`)
+    const ringEl = marker?.querySelector('.marker-ring')
+    const s = getComputedStyle(marker, '::before')
+    return {
+      ringBg: marker?.style.getPropertyValue('--identity-ring') ?? '',
+      ringEl: Boolean(ringEl),
+      dot: s.backgroundColor,
+    }
+  }, info.blockId)
+  assert(ring.ringEl && ring.ringBg.includes('conic-gradient'), `两个有色标签 ⇒ 应有外环元素（conic）：${JSON.stringify(ring)}`)
+  assert(ring.dot !== 'rgba(0, 0, 0, 0)' && !ring.dot.includes('gradient'), `内点应取第一色（不是整点铺色环）：${JSON.stringify(ring)}`)
   const chips = await page.evaluate((blockId) => {
     const list = [...document.querySelectorAll(`.blk[data-block-id="${blockId}"] .blk-tags .tag-chip`)]
     return list.map((el) => {
@@ -29057,6 +29067,54 @@ await check('T305 emoji：默认 tab、中文搜索命中、分类导航过滤�
 
   await ctx.close()
   return 'emoji 默认 tab、中文标注可搜、分类导航过滤、选中写字面值并按字面渲染'
+})
+
+/**
+ * T306 自定义色（258.1）：内置板之外，色盘（原生 input type=color）选的 hex
+ * 写进 `_color`、进「最近自定义」（设备态）；chip 的 soft 底用 color-mix 现算；
+ * 下一次打开选择器，色行上能看到它。
+ */
+await check('T306 自定义色：色盘选 hex 写入并进最近色；chip soft 现算；重开选择器可见', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+
+  const pageId = await page.evaluate(() => window.__qua.pages()[0].id)
+  await page.waitForSelector('.prop-face-btn', { timeout: 5000 })
+  await page.click('.prop-face-btn')
+  await page.waitForSelector('.icon-picker .icon-picker-colors', { timeout: 3000 })
+
+  // 原生色盘无法在无头浏览器里真点，但它的值就是那条 input 的 value＋input 事件——
+  // 与用户在色盘里拖出来的输入是同一条路
+  await page.evaluate(() => {
+    const eye = document.querySelector('.icon-picker-eye')
+    eye.value = '#12ab34'
+    eye.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await page.waitForTimeout(200)
+  const color = await page.evaluate((id) => window.__qua.__editor.store.find(id)?.props?._color ?? '', pageId)
+  assert(color === '#12ab34', `自定义色应写 _color：${JSON.stringify(color)}`)
+  const chip = await page.evaluate(() => {
+    const el = document.querySelector('.icon-picker-colors .icon-picker-swatch[data-on="1"]')
+    return { swatch: el?.style.getPropertyValue('--swatch') ?? '', tip: el?.dataset.tip ?? '' }
+  })
+  // 用户色的 --swatch 是拼装值（light-dark＋color-mix），认得出原 hex 即可
+  assert(chip.swatch.includes('#12ab34') && chip.tip === '#12ab34', `色行应出现自定义色的点且选中：${JSON.stringify(chip)}`)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(150)
+
+  // 重开：最近自定义那段还在，且当前色就是它
+  await page.click('.prop-face-btn')
+  await page.waitForSelector('.icon-picker .icon-picker-colors', { timeout: 3000 })
+  const again = await page.evaluate(() => {
+    const dots = [...document.querySelectorAll('.icon-picker-colors .icon-picker-swatch')]
+    const custom = dots.find((d) => d.dataset.tip === '#12ab34')
+    return { present: Boolean(custom), on: custom?.dataset.on === '1' }
+  })
+  assert(again.present && again.on, `重开选择器应看到最近自定义色且选中态跟上：${JSON.stringify(again)}`)
+  await page.keyboard.press('Escape')
+
+  await ctx.close()
+  return '色盘选 hex 写 _color 并进最近自定义；chip soft 现算；重开选择器可见且选中'
 })
 
 const known = results.filter((r) => !r.ok && r.known)

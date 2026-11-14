@@ -17,7 +17,7 @@
  */
 import { IDENTITY_COLORS } from '../../core/index.ts'
 import { ICON_PATHS, createIcon, isIconRef } from '../../view/icons.ts'
-import { identityTokenVar } from '../../core/identity/faces.ts'
+import { identityColorCss } from '../../core/identity/faces.ts'
 import type { Layers } from './layers.ts'
 import { t } from '../../core/infra/msg.ts'
 import type { EmojiEntry } from './emoji-catalog.ts'
@@ -34,8 +34,13 @@ export interface IconPickerOpts {
   color?: string
   /** 选了色（'' ＝ 摘）⇒ 不关浮层、就地更新选中态 */
   onColor?: (color: string) => void
-  /** 最近使用的图标值（最新在前）；给了才画那一行 */
-  recent?: readonly string[]
+  /**
+   * 最近使用的图标值（最新在前）；给了才画那一行。**给函数**：选择器会在
+   * 自定义色后整棵重画（让新色立刻出现在色行），getter 保证读到的是最新一份。
+   */
+  recent?: readonly string[] | (() => readonly string[])
+  /** 最近的自定义色（hex，258.1）；给了才画色行的那一段快捷点（同上，建议给函数） */
+  recentColors?: readonly string[] | (() => readonly string[])
   /**
    * **选完不关**（宿主自己管理生命周期）：嵌在别的浮层/面板里时用——
    * 别的浮层（别名编辑器）已经占着 popover 位，再开一层就是把宿主顶掉了。
@@ -78,6 +83,9 @@ export function openIconPicker(o: IconPickerOpts): void {
 
 /** 把选择器画进 `host`（独立浮层与内嵌宿主共用这一份装配；选中态每次现算） */
 export function renderIconPicker(host: HTMLElement, o: IconPickerOpts): void {
+  const recentOf = (): readonly string[] => (typeof o.recent === 'function' ? o.recent() : o.recent ?? [])
+  const recentColorsOf = (): readonly string[] =>
+    typeof o.recentColors === 'function' ? o.recentColors() : o.recentColors ?? []
   let tab: Tab = 'emoji'
   let query = ''
   let cells: Cell[] = []
@@ -91,33 +99,60 @@ export function renderIconPicker(host: HTMLElement, o: IconPickerOpts): void {
   if (o.onColor) {
     const colorRow = document.createElement('div')
     colorRow.className = 'icon-picker-colors'
-    const mkSwatch = (key: string, tip: string): HTMLButtonElement => {
-      const b = document.createElement('button')
-      b.type = 'button'
-      b.className = 'icon-picker-swatch'
-      b.dataset.tip = tip
-      if (key === '') b.dataset.none = '1'
-      else b.style.setProperty('--swatch', identityTokenVar(key))
-      b.addEventListener('click', () => {
-        o.onColor!(key)
-        syncColor(key)
-      })
-      return b
-    }
-    const none = mkSwatch('', t('ui.iconPicker.noColor'))
-    colorRow.appendChild(none)
-    const swatches = new Map<string, HTMLButtonElement>([['', none]])
-    for (const key of IDENTITY_COLORS) {
-      const b = mkSwatch(key, t('ui.iconPicker.colorTip', { color: key }))
-      swatches.set(key, b)
-      colorRow.appendChild(b)
-    }
+    /** 每颗色点的选中态都归 `syncColor` 记账（含最近自定义色——重画后仍要对上） */
+    const swatches = new Map<string, HTMLButtonElement>()
     const syncColor = (key: string): void => {
       for (const [k, el] of swatches) {
         if (k === key) el.dataset.on = '1'
         else delete el.dataset.on
       }
     }
+    const mkSwatch = (key: string, tip: string): HTMLButtonElement => {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.className = 'icon-picker-swatch'
+      b.dataset.tip = tip
+      if (key === '') b.dataset.none = '1'
+      else b.style.setProperty('--swatch', identityColorCss(key))
+      b.addEventListener('click', () => {
+        o.onColor!(key)
+        syncColor(key)
+      })
+      swatches.set(key, b)
+      return b
+    }
+    // 三段：⊘ ＋ 内置板 ＋ 最近自定义 ＋ ＋（色盘）。内置板是默认路径（预调可读），
+    // 自由色是显式动作（258.1）——板常驻，用户色跟着「最近」走
+    colorRow.appendChild(mkSwatch('', t('ui.iconPicker.noColor')))
+    for (const key of IDENTITY_COLORS) {
+      colorRow.appendChild(mkSwatch(key, t('ui.iconPicker.colorTip', { color: key })))
+    }
+    const recent = recentColorsOf()
+    if (recent.length > 0) {
+      const sep = document.createElement('span')
+      sep.className = 'icon-picker-color-sep'
+      colorRow.appendChild(sep)
+      for (const hex of recent) colorRow.appendChild(mkSwatch(hex, hex))
+    }
+    const custom = document.createElement('button')
+    custom.type = 'button'
+    custom.className = 'icon-picker-swatch icon-picker-custom'
+    custom.dataset.tip = t('ui.iconPicker.customColor')
+    const eye = document.createElement('input')
+    eye.type = 'color'
+    // 原生色盘（色盘＋吸管＋RGB）是平台自己的脸——自建 HSV 面板不做
+    eye.className = 'icon-picker-eye'
+    eye.tabIndex = -1
+    eye.addEventListener('input', () => {
+      const hex = eye.value.toLowerCase()
+      o.onColor!(hex)
+      // 当前值同步进 opts（重画时的选中态从这里读）；记账归调用方，这里整棵重画一次
+      // ——「最近」段要**立刻**出现新色，getter 保证读到的是记账后的最新一份
+      o.color = hex
+      renderIconPicker(host, o)
+    })
+    custom.addEventListener('click', () => eye.click())
+    colorRow.append(custom, eye)
     syncColor(o.color ?? '')
     box.appendChild(colorRow)
   }
@@ -197,7 +232,7 @@ export function renderIconPicker(host: HTMLElement, o: IconPickerOpts): void {
     manualBox.hidden = tab !== 'manual'
     search.hidden = tab === 'manual'
     catsRow.hidden = tab !== 'emoji'
-    const hasRecent = (o.recent?.length ?? 0) > 0
+    const hasRecent = recentOf().length > 0
     recentRow.hidden = !hasRecent
     recentTitle.hidden = !hasRecent
     renderCats()
@@ -277,7 +312,7 @@ export function renderIconPicker(host: HTMLElement, o: IconPickerOpts): void {
   /** 最近使用：同一套格子，行在最上（点了也记账——记账归调用方的 onPick） */
   const renderRecent = (): void => {
     recentRow.replaceChildren()
-    for (const v of o.recent ?? []) {
+    for (const v of recentOf()) {
       // 名字已不在 catalog 的（vendor 升级后改名）不画——画出来只会是占位问号
       if (isIconRef(v) && !(v.slice('lucide:'.length) in ICON_PATHS)) continue
       recentRow.appendChild(mkCell(v, v.startsWith('lucide:') ? v.slice('lucide:'.length) : v).el)

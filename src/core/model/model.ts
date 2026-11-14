@@ -84,9 +84,19 @@ export const COLOR_PROP = '_color' as const
 export const IDENTITY_COLORS = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple', 'pink'] as const
 export type IdentityColorKey = (typeof IDENTITY_COLORS)[number]
 
-/** `_color` 的形状判据（读路径与落盘校验共用同一份）：值 ∈ 色板封闭集 */
+/** 用户自定义色的形状：`#rrggbb`（大小写都收，写侧/选择器统一小写） */
+export function isHexColor(v: unknown): boolean {
+  return typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v)
+}
+
+/**
+ * `_color` 的形状判据（读路径与落盘校验共用同一份）：**板 key ∪ hex 字面**。
+ * 封闭板是默认路径（预调可读的保证只对它成立）；hex 是显式动作（258：原生色盘），
+ * 可读性没有预调兜底是登记过的代价。坏值渲染中性照旧。
+ */
 export function isColorValue(v: unknown): boolean {
-  return (IDENTITY_COLORS as readonly string[]).includes(v as string)
+  if (typeof v !== 'string') return false
+  return (IDENTITY_COLORS as readonly string[]).includes(v) || isHexColor(v)
 }
 
 /**
