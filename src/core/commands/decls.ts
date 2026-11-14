@@ -198,13 +198,12 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.block/untag', title: t('cmd.block.untag'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['tag', 'role', 'remove'] },
   { name: 'core.block/set-color', title: t('cmd.block.set-color'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, color: { type: 'string' } }, keywords: ['color', 'identity'], hidden: true },
   { name: 'core.block/set-icon', title: t('cmd.block.set-icon'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, icon: { type: 'string' } }, keywords: ['icon', 'identity'], hidden: true },
-  /**
-   * 任意块的「图标＋颜色」选择器入口（块菜单）：读路径（借形/借色）对所有块一致，
-   * 写入口也一致——选择器本体在装配层开，这里只指路。
-   */
-  { name: 'core.block/edit-face', title: t('cmd.block.edit-face'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['icon', 'color', 'face'] },
   { name: 'core.tag/delete', title: t('cmd.tag.delete'), capability: 'admin', undoable: false, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['tag', 'delete', 'remove'] },
-  { name: 'core.block/edit-aliases', title: t('cmd.block.edit-aliases'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['alias', 'name', 'list'] },
+  /**
+   * 块配置弹窗（名字／露面／显示模式／脸）：一个块只有这一个配置面，
+   * 脸跟名字住同一个弹窗——读路径对所有块一致，写入口也一致。
+   */
+  { name: 'core.block/configure', title: t('cmd.block.configure'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['config', 'alias', 'name', 'list', 'icon', 'color', 'face'] },
   { name: 'core.block/set-type', title: t('cmd.block.set-type'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, type: { type: 'string' } }, keywords: ['type', 'convert'], hidden: true },
   /**
    * 把一处纯文本提及换成一枚指向目标块的引用（`start`/`end` 是 plain 偏移区间）。

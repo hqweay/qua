@@ -911,7 +911,7 @@ export function makeBlockEl(
     config.type = 'button'
     config.className = 'blk-alias-btn'
     config.dataset.aliasAction = 'config'
-    config.dataset.tip = t('ui.alias.configTitle')
+    config.dataset.tip = t('ui.blockConfig.title')
     config.appendChild(createIcon('sliders-horizontal', 'sm'))
     head.appendChild(config)
 

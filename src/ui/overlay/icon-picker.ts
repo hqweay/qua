@@ -39,7 +39,7 @@ export interface IconPickerOpts {
    * 自定义色后整棵重画（让新色立刻出现在色行），getter 保证读到的是最新一份。
    */
   recent?: readonly string[] | (() => readonly string[])
-  /** 最近的自定义色（hex，258.1）；给了才画色行的那一段快捷点（同上，建议给函数） */
+  /** 最近的自定义色（hex）；给了才画色行的那一段快捷点（同上，建议给函数） */
   recentColors?: readonly string[] | (() => readonly string[])
   /**
    * **选完不关**（宿主自己管理生命周期）：嵌在别的浮层/面板里时用——

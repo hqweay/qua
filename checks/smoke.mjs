@@ -28924,14 +28924,14 @@ await check('T303 身份色：单色借色／多色环／chip 各染各色；摘
 })
 
 /**
- * T304 图标选择器与「图标＋颜色」入口。
+ * T304 图标选择器与块配置弹窗。
  *
- * 钉三件：① 选项图标入口升到网格选择器（可搜索；选完写 `_icon`）；② 标签配置头的
- * 「图标＋颜色」**内嵌**在选择器里（不另开一层 popover），选图标与点色都就地生效；
- * ③ 页属性面板有同一枚入口，选色写走命令面。三处都验「选中态 ＋ 写路径」，
- * 写路径用真命令（不是带外改动）。
+ * 钉三件：① 选项图标入口升到网格选择器（可搜索；选完写 `_icon`）；② 块配置弹窗的
+ * 脸位（任意块都有）**内嵌**在选择器里（不另开一层 popover），选图标与点色都就地生效；
+ * ③ 页属性面板的脸行开同一个弹窗（脸面板直接展开），选色写走命令面。
+ * 三处都验「选中态 ＋ 写路径」，写路径用真命令（不是带外改动）。
  */
-await check('T304 图标选择器：选项入口网格化；标签配置头/页属性面板的「图标＋颜色」就地生效', async () => {
+await check('T304 图标选择器：选项入口网格化；块配置弹窗（配置头/属性面板脸行）就地生效', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
 
@@ -29000,21 +29000,21 @@ await check('T304 图标选择器：选项入口网格化；标签配置头/页�
   assert(tagColor === 'red', `配置头点色应写 _color：${JSON.stringify(tagColor)}`)
   await page.keyboard.press('Escape')
 
-  // ③ 页属性面板：同一枚入口，选色写走命令面
+  // ③ 页属性面板的脸行：开同一个块配置弹窗，脸面板直接展开，选色写走命令面
   const pageId = await page.evaluate(() => window.__qua.pages()[0].id)
   await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), pageId)
   await page.waitForTimeout(200)
   await page.waitForSelector('.prop-face-btn', { timeout: 3000 })
   await page.click('.prop-face-btn')
-  await page.waitForSelector('.icon-picker .icon-picker-colors', { timeout: 3000 })
-  await page.click('.icon-picker-colors .icon-picker-swatch:nth-child(3)')
+  await page.waitForSelector('.alias-editor .icon-picker-colors', { timeout: 3000 })
+  await page.click('.alias-editor .icon-picker-colors .icon-picker-swatch:nth-child(3)')
   await page.waitForTimeout(200)
   const pageColor = await page.evaluate((id) => window.__qua.__editor.store.find(id)?.props?._color ?? '', pageId)
-  assert(pageColor !== '' && pageColor !== undefined, `页属性面板点色应写 _color：${JSON.stringify(pageColor)}`)
+  assert(pageColor !== '' && pageColor !== undefined, `属性面板脸行点色应写 _color：${JSON.stringify(pageColor)}`)
   await page.keyboard.press('Escape')
 
   await ctx.close()
-  return '选项图标入口网格化可搜索；标签配置头内嵌选择器选图标/点色就地生效；页属性面板同一枚入口写命令面'
+  return '选项图标入口网格化可搜索；块配置弹窗脸位内嵌选择器选图标/点色就地生效；属性面板脸行开同一弹窗写命令面'
 })
 
 /**

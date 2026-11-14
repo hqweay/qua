@@ -32,7 +32,6 @@ import {
     type MenuRequest,
 } from './core/commands/index.ts'
 import { Layers, paletteRows, rowsFromBindings, type PickMods, type Row } from './ui/overlay/layers.ts'
-import { openIconPicker } from './ui/overlay/icon-picker.ts'
 import { createTriggers, memberRows, type MemberTagRef, type TriggerDeps } from './app/retrieval/triggers.ts'
 import { openTagChoice } from './app/retrieval/name-choice.ts'
 import { selectionRefRows } from './app/retrieval/selection-ref-rows.ts'
@@ -1279,7 +1278,7 @@ function addBlockRole(blockId: string, role: 'page' | 'tag'): boolean {
       // 标签的价值就是名字（`#未命名-abc` 没有意义），但拒绝不该是死路：
       // 起名是下一步，所以直接把别名编辑器打开、把光标放进输入框。
       app.toast(t('ui.toast.roleNeedName'), 'warn')
-      app.openAliasEditor(b.id, true)
+      app.openAliasEditor(b.id, { autofocus: true })
       return false
     } else {
       name = t('ui.page.untitledAlias', { id: b.id.slice(-6) })
@@ -1348,33 +1347,14 @@ function recordRecentColor(color: string): void {
 }
 
 /**
- * **任意块的「图标＋颜色」选择器**（块菜单入口）：读路径（借形/借色）对所有块一致，
- * 写入口也一致——不再按「有没有露面位」限流。写走命令面（`set-icon`/`set-color`），
- * 撤销与落盘都在那条路上；图标选完即收（脸选完是一次显式动作），色不关浮层（两条轴一次一条）。
+ * **图标值进「最近使用」**（设备态，不进 KB）：去重封顶 24。
+ * 摘键不进——「没有脸」不是「用了一张脸」，进了反而把 ⊘ 挤进名单。
  */
-function openFacePicker(blockId: string, anchor: DOMRect | null): void {
-  const b = findInForest(ws.blocks, blockId)
-  if (!b) return
-  openIconPicker({
-    layers,
-    anchor,
-    current: prop<string>(b, ICON_PROP) ?? '',
-    color: prop<string>(b, COLOR_PROP) ?? '',
-    recent: () => prefs().recentIcons,
-    recentColors: () => prefs().recentColors,
-    onPick: (value) => {
-      void registry.invoke('core.block/set-icon', { blockId, icon: value }, 'ui')
-      if (value !== '') {
-        const prev = prefs().recentIcons ?? []
-        prefs().recentIcons = [value, ...prev.filter((n) => n !== value)].slice(0, 24)
-        scheduleDeviceSave()
-      }
-    },
-    onColor: (color) => {
-      void registry.invoke('core.block/set-color', { blockId, color }, 'ui')
-      recordRecentColor(color)
-    },
-  })
+function recordRecentIcon(icon: string): void {
+  if (icon === '') return
+  const prev = prefs().recentIcons ?? []
+  prefs().recentIcons = [icon, ...prev.filter((n) => n !== icon)].slice(0, 24)
+  scheduleDeviceSave()
 }
 
 /**
@@ -2452,8 +2432,7 @@ const app: App = {
     })
     return true
   },
-  openAliasEditor: (blockId, autofocus) => openAliasEditor(blockId, ed.caretRect(), autofocus),
-  openFacePicker: (blockId) => openFacePicker(blockId, ed.caretRect()),
+  openAliasEditor: (blockId, opts) => openAliasEditor(blockId, opts?.anchor ?? ed.caretRect(), opts),
   openPropertiesDrawer: (blockId, focusPropId) => panels.openPropertiesDrawer(blockId, focusPropId),
   setBlockType: (blockId, typeId) => applyBlockType(blockId, typeId),
 
@@ -2814,7 +2793,16 @@ async function backupBeforeReplace(failMsg: MsgId): Promise<string | null | fals
  * @param anchor 可以是**那颗按钮**（浮层跟着它走），也可以是一个矩形（没有稳定元素时，
  *   例如命令面按光标位置打开）。两者都收，是因为调用者确实有这两种情形。
  */
-const openAliasEditor = (blockId: string, anchor: HTMLElement | DOMRect | null, autofocus = false): void => {
+/**
+ * **块配置弹窗**（名字／露面／显示模式／脸）：一个块只有这一个配置面。
+ * 名字与露面走 `writeProps`（与正文同一条写路径）；脸走命令面（`set-icon`/`set-color`，
+ * 撤销与落盘都在那条路上）——同一个字段只有一条路。「最近」记账是设备态，归装配层。
+ */
+const openAliasEditor = (
+  blockId: string,
+  anchor: HTMLElement | DOMRect | null,
+  opts: { autofocus?: boolean; faceOpen?: boolean } = {},
+): void => {
   if (!findInForest(ws.blocks, blockId)) return
   layers.openPopover(
     (host) =>
@@ -2826,8 +2814,18 @@ const openAliasEditor = (blockId: string, anchor: HTMLElement | DOMRect | null, 
         toast: (text, kind) => app.toast(text, kind),
         layers,
         recentColors: () => prefs().recentColors,
-        recordColor: (hex) => recordRecentColor(hex),
-        autofocus,
+        setFace: (patch) => {
+          if (patch.icon !== undefined) {
+            void registry.invoke('core.block/set-icon', { blockId, icon: patch.icon }, 'ui')
+            recordRecentIcon(patch.icon)
+          }
+          if (patch.color !== undefined) {
+            void registry.invoke('core.block/set-color', { blockId, color: patch.color }, 'ui')
+            recordRecentColor(patch.color)
+          }
+        },
+        autofocus: opts.autofocus,
+        faceOpen: opts.faceOpen,
       }),
     // 元素锚点会跟着那一颗按钮走（行随重渲染被换掉时由 `anchorOf` 兜住「不在了」）
     anchor === null ? null : anchor instanceof HTMLElement ? popovers.anchorOf(anchor) : anchor,

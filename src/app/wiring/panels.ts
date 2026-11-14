@@ -11,7 +11,6 @@ import {
   buildAdjacency,
   choiceDisplayLabel,
   choicesFor,
-  COLOR_PROP,
   danglingOf,
   declaredFieldIds,
   applyQuickFilter,
@@ -24,8 +23,6 @@ import {
   hasQueryBody,
   hasChildrenViewBody,
   findInForest,
-  ICON_PROP,
-  isHexColor,
   isJournal,
   isViewRoot,
   journalDate,
@@ -34,7 +31,6 @@ import {
   derivedTabId,
   normalizeAlias,
   parentsOf,
-  prop,
   propDisplayLabels,
   propKindOf,
   propLabel,
@@ -343,43 +339,12 @@ export function setupPanels(deps: PanelsDeps) {
   }
 
   /**
-   * **「图标＋颜色」选择器**（标签配置头／页属性面板的入口）：色与脸两条轴一次只动一条。
-   * 写走命令面（`set-icon`／`set-color`），撤销与落盘都在那条路上；
-   * 写完由调用方的 `onDone` 刷自己的面板（命令路径不自动重画宿主）。
+   * **页属性面板的脸行**：开同一个块配置弹窗（脸面板直接展开）——一个块只有一个
+   * 配置面。脸的写与「最近」记账都在弹窗那条路上，面板自己不用再管；
+   * 写完由 `writeProps` 的重画链刷这张卡。
    */
-  const pickFace = (b: Block, anchor: DOMRect, trigger?: HTMLElement, onDone?: () => void): void => {
-    const registry = deps.getRegistry()
-    const done = (): void => onDone?.()
-    /** 自定义色进「最近自定义」（设备态）；内置板 key 不记——板本身常驻 */
-    const recordColor = (color: string): void => {
-      if (!isHexColor(color)) return
-      const prev = deps.prefs().recentColors ?? []
-      deps.prefs().recentColors = [color.toLowerCase(), ...prev.filter((n) => n !== color.toLowerCase())].slice(0, 6)
-      deps.scheduleDeviceSave()
-    }
-    openIconPicker({
-      layers,
-      anchor,
-      ...(trigger ? { trigger } : {}),
-      current: prop<string>(b, ICON_PROP) ?? '',
-      color: prop<string>(b, COLOR_PROP) ?? '',
-      recent: () => deps.prefs().recentIcons,
-      recentColors: () => deps.prefs().recentColors,
-      onPick: (value) => {
-        void registry.invoke('core.block/set-icon', { blockId: b.id, icon: value }, 'ui')
-        if (value !== '') {
-          const prev = deps.prefs().recentIcons ?? []
-          deps.prefs().recentIcons = [value, ...prev.filter((n) => n !== value)].slice(0, 24)
-          deps.scheduleDeviceSave()
-        }
-        done()
-      },
-      onColor: (color) => {
-        void registry.invoke('core.block/set-color', { blockId: b.id, color }, 'ui')
-        recordColor(color)
-        done()
-      },
-    })
+  const pickFace = (b: Block, anchor: DOMRect): void => {
+    deps.app.openAliasEditor(b.id, { anchor, faceOpen: true })
   }
 
   /**
@@ -506,8 +471,8 @@ export function setupPanels(deps: PanelsDeps) {
       pickChoice: (b, propId, current, onPick, anchor, trigger) => pickChoiceValue(b, propId, current, onPick, anchor, trigger),
       /** 选项图标：同一份 catalog 现画成网格（可搜索、⊘、最近使用） */
       pickIcon: pickIconValue,
-      /** 页的脸（图标＋颜色）：写走命令面，写完回来刷这张卡 */
-      pickFace: (b, anchor, trigger) => pickFace(b, anchor, trigger, repaint),
+      /** 页的脸（图标＋颜色）：开同一个块配置弹窗，脸面板直接展开 */
+      pickFace: (b, anchor) => pickFace(b, anchor),
       refLabel: (targetId) => {
         const b = kb.get(targetId)
         if (!b) return t('ui.props.refMissing', { id: shortId(targetId) })

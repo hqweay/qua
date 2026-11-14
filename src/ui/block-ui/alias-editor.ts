@@ -1,5 +1,6 @@
 /**
- * **别名与露面**（这一行叫什么、出现在哪个列表里、这一行显示哪个）。
+ * **块配置**（这一块的非内容半边）：叫什么（地址）、出现在哪个列表里（露面）、
+ * 这一行的头显示哪个（显示模式）、长什么脸（图标＋颜色）。
  *
  * 判据：地址（`_aliases`）与描述（`text`）是两件事 ——
  *   · 名字全局唯一、有顺序（首个是主名）；
@@ -7,6 +8,8 @@
  *   · `_display` 只决定**这一行自己的头**显示什么，引用永远叫主名叶子。
  * 把这个编辑器做成一个浮层，是因为名字的写入必须和正文编辑走**同一条写路径**
  * （撤销、落盘、重画都在 `deps.write` 后面），而不是在渲染层里改模型。
+ * 脸是身份的一部分，与名字住在同一个弹窗里——读路径对所有块一致，写入口也一致；
+ * 它的写不走 `deps.write` 而走 `deps.setFace`（命令面），同一个字段只有一条路。
  *
  * ⚠️ 组件不持有森林：`forest()` / `block()` 每次现取（库会被整体替换）。
  * ⚠️ 每次写操作后**重绘自己**（不关闭）：连续添加/改主名/摘露面是同一轮动作。
@@ -50,12 +53,15 @@ export interface AliasEditorDeps {
   close: () => void
   /** 冲突/拒绝的提示（装配层注入；缺省时静默，不抛） */
   toast?: (text: string, kind?: 'ok' | 'warn' | 'info') => void
-  /** 浮层装配（「图标＋颜色」内嵌在选择器里用——别名编辑器已经占着 popover 位） */
+  /**
+   * **脸的写入**（图标＋颜色，统一走命令面：撤销与落盘都在那条路上）——
+   * 给了才画脸段；不按露面位限流，读路径对所有块一致，写入口跟着一致。
+   */
+  setFace?: (patch: { icon?: string; color?: string }) => void
+  /** 浮层装配（「图标＋颜色」内嵌在选择器里用——本编辑器已经占着 popover 位） */
   layers?: Layers
-  /** 最近自定义色（hex；设备态在装配层）——色行的快捷段 */
+  /** 最近自定义色（hex；设备态在装配层）——色行的快捷段（记账归 `setFace` 一侧） */
   recentColors?: () => readonly string[]
-  /** 选了自定义色时记账（设备态的落盘也归装配层） */
-  recordColor?: (hex: string) => void
   /**
    * 打开时就把光标放进「添加别名」输入框。
    *
@@ -63,6 +69,8 @@ export interface AliasEditorDeps {
    * 所以下一步必须是起名，而不是让用户自己再点一次。
    */
   autofocus?: boolean
+  /** 打开时脸面板直接展开（属性面板脸行这类「冲着脸来」的入口用；只喂首次渲染） */
+  faceOpen?: boolean
 }
 
 /** 一个小节：标题 ＋ 内容（每个编辑器里重复三遍，抽出来只为一处排版） */
@@ -96,19 +104,13 @@ export function renderAliasEditor(host: HTMLElement, deps: AliasEditorDeps): voi
   const toast = (text: string, kind: 'ok' | 'warn' | 'info' = 'info'): void => deps.toast?.(text, kind)
   const redraw = (): void => renderAliasEditor(host, deps)
 
-  /** 写/摘一格系统属性（图标或颜色）：空值连槽位一起摘，属性袋不留空壳 */
-  const setFaceProp = (target: Block, key: string, value: string): void => {
-    const props = { ...(target.props ?? {}) }
-    if (value === '') delete props[key]
-    else props[key] = value
-    if (Object.keys(props).length === 0) delete target.props
-    else target.props = props
-  }
+  /** 脸面板的开合挂在**宿主元素**上：redraw 是整棵重画，局部变量活不过一次渲染 */
+  if (deps.faceOpen && host.dataset.faceOpen === undefined) host.dataset.faceOpen = '1'
 
   /* ------------------------------------------------------------ 头部 */
 
   const title = document.createElement('h4')
-  title.textContent = t('ui.alias.title')
+  title.textContent = t('ui.blockConfig.title')
   host.appendChild(title)
 
   const head = document.createElement('div')
@@ -124,11 +126,11 @@ export function renderAliasEditor(host: HTMLElement, deps: AliasEditorDeps): voi
     full.textContent = t('ui.alias.fullName', { name: primary })
     head.appendChild(full)
   }
-  // **配置头的脸位**：标签/页（有露面位的东西）在这里配「图标＋颜色」。
-  // 选择器**内嵌**（不另开一层 popover——这颗头自己就在 popover 里），选完就地更新。
-  // 写走 deps.write（与改名同一条路：撤销、落盘、重画都在那条路上）。
+  // **配置头的脸位**：在这里配「图标＋颜色」（任意块——读路径对所有块一致，
+  // 写入口跟着一致）。选择器**内嵌**（不另开一层 popover——这颗头自己就在 popover 里），
+  // 选完就地更新；写走 `deps.setFace`（命令面：撤销、落盘、重画都在那条路上）。
   // ⚠️ 开合状态挂在**宿主元素**上：redraw 是整棵重画，局部变量活不过一次渲染。
-  const hasFaceEntry = (hasList(b, 'tag') || hasList(b, 'page')) && deps.layers !== undefined
+  const hasFaceEntry = deps.layers !== undefined && deps.setFace !== undefined
   if (hasFaceEntry) {
     const faceBtn = document.createElement('button')
     faceBtn.type = 'button'
@@ -166,13 +168,12 @@ export function renderAliasEditor(host: HTMLElement, deps: AliasEditorDeps): voi
         keepOpen: true,
         onPick: (value) => {
           host.dataset.faceOpen = '1'
-          deps.write(() => setFaceProp(cur, ICON_PROP, value))
+          deps.setFace?.({ icon: value })
           redraw()
         },
         onColor: (color) => {
           host.dataset.faceOpen = '1'
-          deps.write(() => setFaceProp(cur, COLOR_PROP, color))
-          deps.recordColor?.(color)
+          deps.setFace?.({ color })
           redraw()
         },
       })

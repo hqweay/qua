@@ -96,10 +96,9 @@ export const MSG = {
   'cmd.block.untag': '取消标签标记',
   'cmd.block.set-color': '设置身份色',
   'cmd.block.set-icon': '设置图标',
-  'cmd.block.edit-face': '图标与颜色…',
   'cmd.tags.reorder': '调整标签顺序',
   'cmd.tag.delete': '删除标签',
-  'cmd.block.edit-aliases': '别名与露面…',
+  'cmd.block.configure': '块配置…',
   'cmd.anno.toggle-bold': '加粗',
   'cmd.anno.toggle-italic': '斜体',
   'cmd.anno.toggle-underline': '下划线',
@@ -372,8 +371,8 @@ export const MSG = {
   'ui.props.refIsBlock': '块',
   'ui.props.refMissing': '已删除（{id}）',
   'ui.props.refCurrent': '当前',
-  /* 别名（地址）与露面（列表）：行头浮层与字段声明 */
-  'ui.alias.title': '别名',
+  /* 块配置（叫什么／露面／显示模式／脸）与别名（地址）：行头浮层与字段声明 */
+  'ui.blockConfig.title': '块配置',
   'ui.alias.primary': '主名',
   'ui.alias.add': '添加别名',
   'ui.alias.remove': '删除别名',
@@ -387,7 +386,6 @@ export const MSG = {
   'ui.block.properties': '属性',
   'ui.alias.fullName': '全名：{name}',
   'ui.alias.needName': '先给它一个别名',
-  'ui.alias.configTitle': '别名与露面',
   'ui.alias.emptyName': '名字不能为空',
   'ui.alias.exists': '这个名字已经在它的别名里了',
   /* 标签层级（属于 / 包含 / 成员） */

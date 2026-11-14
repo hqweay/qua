@@ -398,10 +398,12 @@ export interface App {
    * 一次事务一条撤销；原块 id 不变，引用不受影响。
    */
   extractToPage(blockId: string): boolean
-  /** 打开别名编辑器（名字、露面、显示模式）——纯 UI，落在装配层 */
-  openAliasEditor(blockId: string, autofocus?: boolean): void
-  /** 打开「图标＋颜色」选择器（任意块的脸）——纯 UI，落在装配层 */
-  openFacePicker(blockId: string): void
+  /**
+   * 打开块配置弹窗（名字、露面、显示模式、脸）——纯 UI，落在装配层。
+   * `anchor` 缺省锚在当前光标；`faceOpen` 让脸面板直接展开（属性面板脸行用）；
+   * `autofocus` 把光标放进「添加别名」输入框（无名块被打成标签的那条路用）。
+   */
+  openAliasEditor(blockId: string, opts?: { anchor?: DOMRect | HTMLElement | null; autofocus?: boolean; faceOpen?: boolean }): void
   /**
    * **看这一块的属性**：打开属性抽屉（整高右滑的任务面）。
    *

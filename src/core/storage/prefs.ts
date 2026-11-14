@@ -77,7 +77,7 @@ export interface Prefs {
    */
   recentIcons: string[]
   /**
-   * 最近的自定义色（hex，258.1；设备态同上）——色行上的「最近自定义」快捷点。
+   * 最近的自定义色（hex；设备态同上）——色行上的「最近自定义」快捷点。
    * 内置板 key 不进来（板本身常驻）；跨设备的「我的色板」要色值进 KB，另行立项。
    */
   recentColors: string[]

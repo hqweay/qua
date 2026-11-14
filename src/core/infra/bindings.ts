@@ -194,10 +194,8 @@ export const BINDINGS: Binding[] = [
   { command: 'core.block/extract-to-page', kind: 'menu', when: 'blockFocused && blockCanExtractPage', group: 'block/3-role', order: 12, layer: 'core' },
   { command: 'core.block/as-tag', kind: 'menu', when: 'blockFocused && !blockHasTagRole', group: 'block/3-role', order: 20, layer: 'core' },
   { command: 'core.block/untag', kind: 'menu', when: 'blockFocused && blockHasTagRole', group: 'block/3-role', order: 21, layer: 'core' },
-  // 别名是「名字层」的配置，不属于任何具体列表：任何聚焦块都能打开
-  { command: 'core.block/edit-aliases', kind: 'menu', when: 'blockFocused', group: 'block/3-role', order: 30, layer: 'core' },
-  // 脸（图标＋颜色）是「属性层」的配置：任何聚焦块都能配——读路径对任意块一致，入口也一致
-  { command: 'core.block/edit-face', kind: 'menu', when: 'blockFocused', group: 'block/3-role', order: 32, layer: 'core' },
+  // 块配置（名字／露面／显示模式／脸）：一个块只有一个配置面，任何聚焦块都能打开
+  { command: 'core.block/configure', kind: 'menu', when: 'blockFocused', group: 'block/3-role', order: 30, layer: 'core' },
   // 显式入口：把「看这一块的属性」做成一次点击。落点是属性抽屉——不换中心、
   // 不动槽（侧槽开关只归 core.dock/*），能力不依赖任何面板是否在场。
   { command: 'core.block/inspect', kind: 'menu', when: 'blockFocused', group: 'block/3-role', order: 31, layer: 'core' },

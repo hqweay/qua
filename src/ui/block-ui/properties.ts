@@ -137,9 +137,10 @@ export interface PropertiesDeps {
    * **这一块的「图标＋颜色」**（装配层弹出选择器，写 `_icon`／`_color`）。
    *
    * 只给**有露面位的东西**（页——标签在配置头有同一枚）：没有露面位的东西不给入口，
-   * 写路径不拦（props 是自由槽）。写完由装配层 `onDone` 回来刷面板。
+   * 写路径不拦（props 是自由槽）。点击开的是块配置弹窗（脸面板直接展开），
+   * 写与「最近」记账都在弹窗那条路上。
    */
-  pickFace?: (b: Block, anchor: DOMRect, trigger?: HTMLElement) => void
+  pickFace?: (b: Block, anchor: DOMRect) => void
   /**
    * **这一块归在谁下面**（`props._belongsTo` 的活块，有序）。
    *
@@ -604,7 +605,7 @@ export class PropertiesPanel {
     this.els.body.appendChild(this.buildTags(target))
     // 归属紧随其后：与标签并列的另一种「它是谁的」。任何块都有这一行
     this.els.body.appendChild(this.buildBelongs(target))
-    // 页的脸：图标＋颜色一枚入口（标签在配置头有同一枚；普通块不给入口）
+    // 页的脸：一枚入口开块配置弹窗（弹窗里脸面板直接展开）
     if (hasList(target, 'page') && this.deps.pickFace) {
       this.els.body.appendChild(this.buildFace(target))
     }
@@ -903,7 +904,7 @@ export class PropertiesPanel {
     const btn = document.createElement('button')
     btn.type = 'button'
     btn.className = 'prop-face-btn'
-    btn.dataset.tip = t('ui.iconPicker.faceEntry')
+    btn.dataset.tip = t('ui.blockConfig.title')
     const ico = document.createElement('span')
     ico.className = 'prop-face-ico'
     renderIcon(ico, prop<string>(target, '_icon'), 'circle-help', 'sm')
@@ -915,7 +916,7 @@ export class PropertiesPanel {
       dot.style.setProperty('--swatch', identityColorCss(color))
       btn.appendChild(dot)
     }
-    btn.addEventListener('click', () => this.deps.pickFace?.(target, btn.getBoundingClientRect(), btn))
+    btn.addEventListener('click', () => this.deps.pickFace?.(target, btn.getBoundingClientRect()))
     row.append(label, btn)
     return row
   }
