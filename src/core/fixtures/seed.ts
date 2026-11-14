@@ -72,8 +72,9 @@ export function seedWorkspace(): Workspace {
     {
       text: '几个值得先存下的地址：',
       children: [
-        // 这三行是**首屏唯一的外链样本**：点一下交给系统浏览器、⌥ 看详情（地址与「打开」）。
+        // 这几行是**首屏唯一的外链样本**：点一下交给系统浏览器、⌥ 看详情（地址与「打开」）。
         // 显示名留空 ⇒ 显示地址本身，读者一眼看见要去哪；换成「仓库」这种名字就只剩一处可点的字。
+        { text: '下载安装包　[](https://github.com/hqweay/qua/releases) （Windows 与 macOS）' },
         { text: '仓库　[](https://github.com/hqweay/qua)' },
         { text: '在线演示　[](https://qua.leay.net/) （数据只落在你自己的浏览器里）' },
         { text: '架构与数据结构　[](https://qua.leay.net/arch.html) （写给想深入了解的人）' },

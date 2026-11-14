@@ -16,12 +16,13 @@ import { FEATURE_DATE_PROP_ID, FEATURE_STATUS_PROP_ID } from '../src/core/fixtur
 import { plainText, walkForest, checkExternalUrl, type Block, type Run } from '../src/core/index.ts'
 
 const CANONICAL = [
+  'https://github.com/hqweay/qua/releases',
   'https://github.com/hqweay/qua',
   'https://qua.leay.net/',
   'https://qua.leay.net/arch.html',
 ]
 
-test('首屏的三个地址是真 link run：名字留空 ⇒ 显示地址本身，地址过白名单', () => {
+test('首屏的四个地址是真 link run：名字留空 ⇒ 显示地址本身，地址过白名单', () => {
   const ws = seedWorkspace()
   const links: Extract<Run, { t: 'link' }>[] = []
   for (const b of ws.blocks) {
@@ -30,7 +31,7 @@ test('首屏的三个地址是真 link run：名字留空 ⇒ 显示地址本身
       return true
     })
   }
-  assert.ok(links.length >= 3, `种子里应至少有三枚外链，实际 ${links.length}`)
+  assert.ok(links.length >= 4, `种子里应至少有四枚外链，实际 ${links.length}`)
 
   for (const url of CANONICAL) {
     const hit = links.filter((l) => l.url === url)
