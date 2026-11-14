@@ -26,11 +26,27 @@ import { uuidv7Hex } from './ids.ts'
 /* ------------------------------------------------------------- marks 形状 */
 
 /**
- * 颜色槽：**只存槽名，不存颜色值**。槽名 → `--ui-ink-*`／`--ui-bg-*` → `--c-*` 的链
- * 住在 CSS；颜色值进正文会让主题改不动它，也会在 TS 里散落颜色字面量。
+ * 颜色槽：默认路径只存槽名（槽名 → `--ui-ink-*`／`--ui-bg-*` → `--c-*` 的链住在 CSS）；
+ * 自由色存 hex 字面——显式动作，颜色值进正文意味着主题改不动它（登记过的代价）。
  */
 export type ColorSlot = 'red' | 'orange' | 'yellow' | 'green' | 'blue' | 'violet' | 'gray'
 export const COLOR_SLOTS: readonly ColorSlot[] = ['red', 'orange', 'yellow', 'green', 'blue', 'violet', 'gray']
+
+/** 用户自定义色的形状：`#rrggbb`（大小写都收，写侧/选择器统一小写） */
+export function isHexColor(v: unknown): boolean {
+  return typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v)
+}
+
+/**
+ * 值轴的合法值：**板槽名 ∪ hex 字面**（与块身份色 `_color` 同口径）。
+ * 封闭板是默认路径（预调可读的保证只对它成立）；hex（自由色）是显式动作，
+ * 可读性没有预调兜底、主题改不动颜色字面量，是登记过的代价。坏值归一化时剥掉。
+ */
+export type ColorMarkValue = ColorSlot | string
+
+export function isColorMarkValue(v: unknown): v is ColorMarkValue {
+  return isColorSlot(v) || isHexColor(v)
+}
 
 /**
  * 颜色**轴**：一块文字同时可以有字色和背景色，两轴各自单值。
@@ -60,8 +76,8 @@ export interface Marks {
   underline?: true
   strike?: true
   code?: true
-  ink?: ColorSlot
-  bg?: ColorSlot
+  ink?: ColorMarkValue
+  bg?: ColorMarkValue
 }
 
 export type MarkKind = keyof Marks
@@ -76,10 +92,10 @@ export const MARK_VALUE_KINDS: readonly MarkKind[] = ['ink', 'bg']
  */
 export const MARK_KINDS: readonly MarkKind[] = ['bold', 'italic', 'underline', 'strike', 'code', 'ink', 'bg']
 
-/** 一次格式操作：恰好一个键（布尔轴为 `true`，值轴为槽名）。`toggleMark` 取第一个键。 */
+/** 一次格式操作：恰好一个键（布尔轴为 `true`，值轴为槽名或 hex）。`toggleMark` 取第一个键。 */
 export type MarkPatch = Partial<Marks>
 
-type MarkCell = [MarkKind, true | ColorSlot]
+type MarkCell = [MarkKind, true | ColorMarkValue]
 
 /** 取出 patch 里那一格（恰好一个键的约定由调用方保证，这里只按固定序取第一个）。 */
 function onePatch(patch: MarkPatch): MarkCell | null {
@@ -236,19 +252,20 @@ export function isEmptyContent(content: Content): boolean {
 /* ------------------------------------------------------------- 归一化 */
 
 /**
- * marks 归一化：非法键剥掉、值轴验槽名、按固定键序重建。
+ * marks 归一化：非法键剥掉、值轴验「槽名 ∪ hex」、按固定键序重建。
  * **查询条件复用它**（`{mark}` 原子的 canonical 形状）——条件里的 marks 与
  * run 上的 marks 是同一份词汇，归一化口径只能有一份，否则 `specKey` 会分叉。
  */
 export function normMarks(marks: Marks | undefined): Marks | undefined {
   if (!marks) return undefined
-  const out: Record<string, true | ColorSlot> = {}
+  const out: Record<string, true | ColorMarkValue> = {}
   for (const k of MARK_KINDS) {
     const v = marks[k]
     if (v === undefined) continue
     if (MARK_VALUE_KINDS.includes(k)) {
-      if (!isColorSlot(v)) continue
-      out[k] = v
+      if (!isColorMarkValue(v)) continue
+      // hex 统一小写：同一份自由色不许有两种字节形状（读回/选择器两条来路）
+      out[k] = isHexColor(v) ? v.toLowerCase() : v
     } else {
       if (v !== true) continue
       out[k] = true
@@ -557,8 +574,8 @@ export function clearMarks(content: Content, start: number, end: number): Run[] 
   return normalizeRuns(out)
 }
 
-function flipMarks(marks: Marks | undefined, k: MarkKind, v: true | ColorSlot, removing: boolean): Marks | undefined {
-  const next: Record<string, true | ColorSlot> = { ...(marks ?? {}) }
+function flipMarks(marks: Marks | undefined, k: MarkKind, v: true | ColorMarkValue, removing: boolean): Marks | undefined {
+  const next: Record<string, true | ColorMarkValue> = { ...(marks ?? {}) }
   if (removing) delete next[k]
   else next[k] = v
   return normMarks(next as Marks)

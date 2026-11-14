@@ -242,6 +242,20 @@
 .selbar .sel-swatch[data-on='1'] {
   box-shadow: 0 0 0 2px var(--ui-surface-raised), 0 0 0 3.5px var(--ui-text);
 }
+/* 自由色入口：虚线空圈是「这里可以填色」，当前有 hex 时由 inline style 垫色、[data-on] 亮双环 */
+.selbar .sel-swatch-custom {
+  position: relative;
+  border-style: dashed;
+}
+.selbar .selbar-eye {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  border: none;
+  padding: 0;
+  pointer-events: none;
+}
 
 .popover {
   position: fixed;

@@ -974,6 +974,7 @@ export const MSG = {
   'ui.color.violet': '紫',
   'ui.color.gray': '灰',
   'ui.selbar.colorCurrent': '当前色 · 再点一次取消',
+  'ui.selbar.customColor': '自定义颜色…',
 
   /* -------------------------------------------- 绑定表 keywords（搜索别名） */
   'menu.kw.enter': '回车',

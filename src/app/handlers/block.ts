@@ -5,7 +5,7 @@
  * 只经 `App` 门面改状态（`app.ed.*`），不碰 DOM。
  */
 import { t } from '../../core/infra/msg.ts'
-import { checkExternalUrl, isColorSlot, isJournalDate, journalDateLabel, rejectText } from '../../core/index.ts'
+import { checkExternalUrl, isColorMarkValue, isHexColor, isJournalDate, journalDateLabel, rejectText } from '../../core/index.ts'
 import { MISSING_ASSET_HASH, SEED_ASSET_HASH } from '../../core/fixtures/assets.ts'
 import type { App, Handler } from '../../core/infra/ports.ts'
 import { buildCopyHtml } from '../../view/editor/clipboard-flavor.ts'
@@ -479,17 +479,17 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     app.ed.toggleMark({ strike: true })
     return true
   },
-  // 色板的两个轴：slot 必须是登记过的槽名，非法值直接拒（不静默写进正文）
+  // 色板的两个轴：值必须是登记过的槽名或 hex（自由色，与块身份色同口径），非法值直接拒（不静默写进正文）
   'core.anno/set-ink': (a, app) => {
     const slot = S(a.slot)
-    if (!isColorSlot(slot)) return false
-    app.ed.toggleMark({ ink: slot })
+    if (!isColorMarkValue(slot)) return false
+    app.ed.toggleMark({ ink: isHexColor(slot) ? slot.toLowerCase() : slot })
     return true
   },
   'core.anno/set-bg': (a, app) => {
     const slot = S(a.slot)
-    if (!isColorSlot(slot)) return false
-    app.ed.toggleMark({ bg: slot })
+    if (!isColorMarkValue(slot)) return false
+    app.ed.toggleMark({ bg: isHexColor(slot) ? slot.toLowerCase() : slot })
     return true
   },
   'core.anno/clear-marks': (_a, app) => {

@@ -51,7 +51,7 @@ import {
   type RefView,
   type VisibleRow,
 } from '../../core/index.ts'
-import { MARK_KINDS, isEmptyContent, plainText, refRunsOf, type AssetRun, type MarkKind, type RunWithId } from '../../core/model/runs.ts'
+import { MARK_KINDS, isEmptyContent, isHexColor, plainText, refRunsOf, type AssetRun, type MarkKind, type RunWithId } from '../../core/model/runs.ts'
 import type { AssetView } from '../../core/infra/assets.ts'
 import { t } from '../../core/infra/msg.ts'
 import { blockLabel, danglingView, resolveRefs } from '../../core/relations/ref.ts'
@@ -161,6 +161,16 @@ const MARK_TAG: Record<MarkKind, string> = {
 
 export function tagForMark(k: MarkKind): string {
   return MARK_TAG[k]
+}
+
+/**
+ * 值轴值的**样式落点**（渲染与查询预览共用这一份）：槽名由 CSS 按 `data-slot` 给（token 链）；
+ * hex（自由色）没有槽规则，走身份色同一套程序化机制——solid（暗色提亮）／soft（15% 洗底，
+ * 与槽位底同构：正文背景色不是色块，是高亮）。显式动作的可读性代价由用户担。
+ */
+export function applyMarkColor(el: HTMLElement, kind: MarkKind, v: string): void {
+  if (!isHexColor(v)) return
+  el.style[kind === 'ink' ? 'color' : 'background'] = identityColorCss(v, kind === 'ink' ? 'solid' : 'soft')
 }
 
 /**
@@ -499,8 +509,12 @@ export function fillBlockText(
         if (v === undefined) continue
         const wrap = document.createElement(tagForMark(k))
         wrap.className = `mk mk-${k}`
-        // 值轴：槽名住在 data-slot 上，颜色值由 CSS 按槽名给（正文里不许出现颜色字面量）
-        if (v !== true) wrap.dataset.slot = v
+        // 值轴：值住在 data-slot 上。板槽名的颜色由 CSS 按槽名给（token 链）；
+        // hex（自由色）没有槽规则，由 applyMarkColor 落 inline style
+        if (v !== true) {
+          wrap.dataset.slot = v
+          applyMarkColor(wrap, k, v)
+        }
         wrap.appendChild(node)
         node = wrap
       }

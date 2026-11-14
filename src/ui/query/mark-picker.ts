@@ -9,7 +9,8 @@
  * 条件的 marks 值（点当前槽即取消，与气泡的手感一致）。气泡绑在选区与命令路径上
  * 不能整体搬，所以这里按同一份词汇自画按钮；两处共享的是 core 的常量与投影。
  */
-import { COLOR_SLOTS, MARK_KINDS, type ColorSlot, type Marks, type MarkKind } from '../../core/model/runs.ts'
+import { COLOR_SLOTS, MARK_KINDS, type ColorMarkValue, type ColorSlot, type Marks, type MarkKind } from '../../core/model/runs.ts'
+import { applyMarkColor } from '../../view/editor/block-dom.ts'
 import { t, type MsgId } from '../../core/infra/msg.ts'
 import { renderIcon } from '../../view/icons.ts'
 
@@ -46,6 +47,12 @@ export function markPicker(opts: MarkPickerOpts): HTMLElement {
   /** 展开的值轴（同一时刻最多一个；再点收回——气泡同款手势） */
   let openAxis: 'ink' | 'bg' | null = null
 
+  /** 展开层只画七槽；当前值是 hex（自由色）时槽点全不亮，chip/预览由 inline style 垫色 */
+  const slotOrHex = (el: HTMLElement, axis: 'ink' | 'bg', v: string): void => {
+    el.dataset.slot = v
+    applyMarkColor(el, axis, v)
+  }
+
   /** 预览文本：把 marks 套上去。两根色轴并存时嵌两层（与正文渲染同构） */
   const paintPreview = (marks: Marks): void => {
     const root = document.createElement('span')
@@ -56,12 +63,12 @@ export function markPicker(opts: MarkPickerOpts): HTMLElement {
     const inner = ink !== undefined ? document.createElement('span') : root
     if (bg !== undefined) {
       outer.className = 'mk-bg'
-      outer.dataset.slot = bg
+      slotOrHex(outer, 'bg', bg)
       outer.appendChild(root)
     }
     if (ink !== undefined) {
       inner.className = 'mk-ink'
-      inner.dataset.slot = ink
+      slotOrHex(inner, 'ink', ink)
       // 两个轴都在：ink 套在 bg 内层；只有一个轴时 inner === root，class 直接落上去
       if (inner !== root) outer.appendChild(inner)
     }
@@ -102,7 +109,7 @@ export function markPicker(opts: MarkPickerOpts): HTMLElement {
         // 当前值只占图标下缘一条 2px 色标（气泡同款），值域进展开层
         const chip = document.createElement('span')
         chip.className = 'qt-axisvalue'
-        chip.dataset.slot = cur
+        slotOrHex(chip, axis, cur)
         btn.appendChild(chip)
       }
       if (openAxis === axis) btn.dataset.on = '1'
@@ -116,8 +123,8 @@ export function markPicker(opts: MarkPickerOpts): HTMLElement {
     paintPreview(marks)
   }
 
-  /** 一个值轴的七个色槽；点当前槽即取消（`toggleMark` 的既有语义） */
-  const swatchRow = (axis: 'ink' | 'bg', current: ColorSlot | undefined): HTMLElement => {
+  /** 一个值轴的七个色槽；点当前槽即取消（`toggleMark` 的既有语义）。hex 当前值不在槽列里，只作比对 */
+  const swatchRow = (axis: 'ink' | 'bg', current: ColorMarkValue | undefined): HTMLElement => {
     const row = document.createElement('div')
     row.className = 'qt-swatches'
     row.dataset.axis = axis

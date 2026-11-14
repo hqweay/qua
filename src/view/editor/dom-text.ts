@@ -12,9 +12,10 @@
 import {
   MARK_KINDS,
   MARK_VALUE_KINDS,
-  isColorSlot,
+  isColorMarkValue,
+  isHexColor,
   normalizeRuns,
-  type ColorSlot,
+  type ColorMarkValue,
   type Marks,
   type RefRun,
   type Run,
@@ -24,16 +25,16 @@ import {
 /**
  * 一个包装元素身上带的格式（**渲染与读回共用 `mk-${kind}` 这份契约**，键表来自 core）。
  *
- * ⚠️ 值轴的槽名住在 `data-slot` 上：class 名固定是 `mk-ink`／`mk-bg`，只读 class
+ * ⚠️ 值轴的值住在 `data-slot` 上（槽名或 hex）：class 名固定是 `mk-ink`／`mk-bg`，只读 class
  *    会把颜色**读回即丢**，且不报错（保存后重开颜色没了）。
  */
 function markOfEl(el: HTMLElement): Marks {
-  const out: Record<string, true | ColorSlot> = {}
+  const out: Record<string, true | ColorMarkValue> = {}
   for (const k of MARK_KINDS) {
     if (!el.classList.contains(`mk-${k}`)) continue
     if (MARK_VALUE_KINDS.includes(k)) {
       const slot = el.dataset.slot
-      if (isColorSlot(slot)) out[k] = slot
+      if (isColorMarkValue(slot)) out[k] = isHexColor(slot) ? slot.toLowerCase() : slot
     } else {
       out[k] = true
     }

@@ -167,6 +167,27 @@ test('映射形状：highlight 与 bg:yellow 的双黄冲突写不出来（⌘E 
   assert.deepEqual(toggleMark(c, { bg: 'yellow' }, 0, 3), textRuns('abc'))
 })
 
+test('自由色：hex 进值轴与槽名同一路 toggle（换色互斥、再按取消）', () => {
+  const c = textRuns('abcdef')
+  const hexed = toggleMark(c, { ink: '#FF6699' }, 0, 6)
+  // hex 统一小写：同一份自由色不许有两种字节形状
+  assert.deepEqual(hexed, [{ t: 'text', v: 'abcdef', marks: { ink: '#ff6699' } }])
+  // 槽名换 hex 只剩一个值；hex 再按同一个 ⇒ 取消
+  const blue = toggleMark(hexed, { ink: 'blue' }, 0, 6)
+  assert.deepEqual(blue, [{ t: 'text', v: 'abcdef', marks: { ink: 'blue' } }])
+  assert.deepEqual(toggleMark(hexed, { ink: '#ff6699' }, 0, 6), c)
+})
+
+test('自由色：归一化把 hex 收进值域、坏值照旧剥掉', () => {
+  assert.deepEqual(normalizeRuns([{ t: 'text', v: 'x', marks: { ink: '#AABBCC' } }]),
+    [{ t: 'text', v: 'x', marks: { ink: '#aabbcc' } }])
+  assert.deepEqual(normalizeRuns([{ t: 'text', v: 'x', marks: { bg: '#zzz' } }]),
+    [{ t: 'text', v: 'x' }])
+  // 短 hex 不是合法自由色（判据与落盘校验共用，别放宽成「# 开头就算」）
+  assert.deepEqual(normalizeRuns([{ t: 'text', v: 'x', marks: { bg: '#abc' } }]),
+    [{ t: 'text', v: 'x' }])
+})
+
 test('四种新格式：underline/strike/ink/bg 能叠加，清格式连颜色一起清', () => {
   let c = textRuns('abcdef')
   for (const patch of [{ underline: true }, { strike: true }, { ink: 'green' }, { bg: 'violet' }] as MarkPatch[]) {

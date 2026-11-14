@@ -4,7 +4,7 @@
  */
 
 import { uuidv7Hex } from './ids.ts'
-import { normalizeRuns, textRuns, type Anno, type Run } from './runs.ts'
+import { isHexColor, normalizeRuns, textRuns, type Anno, type Run } from './runs.ts'
 import { mapAnnos } from './annos.ts'
 
 /**
@@ -84,10 +84,8 @@ export const COLOR_PROP = '_color' as const
 export const IDENTITY_COLORS = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple', 'pink'] as const
 export type IdentityColorKey = (typeof IDENTITY_COLORS)[number]
 
-/** 用户自定义色的形状：`#rrggbb`（大小写都收，写侧/选择器统一小写） */
-export function isHexColor(v: unknown): boolean {
-  return typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v)
-}
+/** 用户自定义色的形状：`#rrggbb`（大小写都收，写侧/选择器统一小写）。定义在 runs.ts（块色与文字色共用），这里转发给既有调用方 */
+export { isHexColor } from './runs.ts'
 
 /**
  * `_color` 的形状判据（读路径与落盘校验共用同一份）：**板 key ∪ hex 字面**。

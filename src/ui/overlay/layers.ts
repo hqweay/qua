@@ -591,6 +591,41 @@ export class Layers {
         })
         extra.appendChild(b)
       }
+      // 自由色是显式动作——板常驻，hex 跟着原生色盘走（自建 HSV 面板不做）。
+      // 当前值是 hex 时这颗亮起来并垫上那份色；按压态每次重画（onPick 后 refresh）从 activeMarks 现读
+      const hexCurrent = [...o.activeMarks].find((d) => d.startsWith(`${axis}:#`))?.slice(axis.length + 1)
+      const custom = document.createElement('button')
+      custom.type = 'button'
+      custom.className = 'sel-swatch sel-swatch-custom'
+      if (hexCurrent) {
+        custom.style.background = hexCurrent
+        custom.dataset.on = '1'
+        custom.dataset.tip = hexCurrent
+      } else {
+        custom.dataset.tip = t('ui.selbar.customColor')
+      }
+      const eye = document.createElement('input')
+      eye.type = 'color'
+      eye.className = 'selbar-eye'
+      eye.tabIndex = -1
+      if (hexCurrent) eye.value = hexCurrent
+      // 选定（色盘确认）那一刻才算改：拖拽过程的 input 不发（一次确认一笔撤销，不是一格一档）
+      eye.addEventListener('change', () => {
+        o.onPick({
+          id: `swatch-${axis}-custom`,
+          label: `${axisTitle(axis)}·${eye.value.toLowerCase()}`,
+          command: `core.anno/set-${axis}`,
+          args: { slot: eye.value.toLowerCase() },
+        })
+      })
+      // ⚠️ mousedown preventDefault：别让打开色盘这一下把正文选区清了（同色点的踩坑）
+      custom.addEventListener('mousedown', (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+      })
+      custom.addEventListener('click', () => eye.click())
+      custom.append(eye)
+      extra.appendChild(custom)
       stack.appendChild(extra)
     }
 
