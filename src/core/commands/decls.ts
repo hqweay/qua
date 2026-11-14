@@ -227,6 +227,8 @@ export const COMMANDS: CommandDecl[] = [
   /* ---- 视图 ---- */
   { name: 'core.view/toggle-theme', title: t('cmd.view.toggle-theme'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['dark', 'light', 'theme'] },
   { name: 'core.view/set-theme', title: t('cmd.view.set-theme'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { mode: { type: 'string', enum: ['system', 'light', 'dark'] } }, keywords: ['dark', 'light', 'theme'] },
+  { name: 'core.view/set-props-density', title: t('cmd.view.set-props-density'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { density: { type: 'string', enum: ['summary', 'list'] } }, keywords: ['property', 'density', 'layout', 'summary', 'list'] },
+  { name: 'core.view/toggle-props-expanded', title: t('cmd.view.toggle-props-expanded'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' } }, keywords: ['property', 'expand', 'collapse'], hidden: true },
   { name: 'core.dock/toggle-left', title: t('cmd.dock.toggle-left'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['dock', 'left', 'panel'] },
   { name: 'core.dock/toggle-right', title: t('cmd.dock.toggle-right'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['dock', 'right', 'panel'] },
   // 档位轴：进一档在三档间循环（常规→宽屏→全屏→常规），Esc 退一档到底不动。

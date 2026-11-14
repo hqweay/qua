@@ -4,10 +4,16 @@
 import { nextTheme } from '../../core/infra/theme.ts'
 import type { SecLayout } from '../../core/index.ts'
 import type { ThemeMode } from '../../core/infra/workspace.ts'
+import type { PropsLineDensity } from '../../core/props/props.ts'
 import type { App } from '../../core/infra/ports.ts'
 import type { ViewDeps } from './types.ts'
 
-export function viewCommands(d: ViewDeps): Pick<App, 'setTheme' | 'toggleTheme' | 'toggleDock' | 'journalFeedLayout'> {
+export function viewCommands(
+  d: ViewDeps,
+): Pick<
+  App,
+  'setTheme' | 'toggleTheme' | 'toggleDock' | 'journalFeedLayout' | 'setPropsDensity' | 'togglePropsExpanded'
+> {
   return {
     /**
      * 三档**直选**（不是循环切换）。
@@ -57,6 +63,43 @@ export function viewCommands(d: ViewDeps): Pick<App, 'setTheme' | 'toggleTheme' 
       if (d.prefs().feedLayout === m) return
       d.prefs().feedLayout = m
       d.scheduleDeviceSave()
+      d.scheduleBadge()
+    },
+
+    /**
+     * **块下属性区的密度档**（设备态）：`summary` 一行摘要／`list` 一栏一行。
+     *
+     * 与主题那种「只换 token」的偏好不同，它**改行高** ⇒ 必须重排这一屏：
+     * 虚拟化的占位是按行高累加的，不重排就只是「可见区对了、滚动条不对」。
+     */
+    setPropsDensity: (density) => {
+      const m: PropsLineDensity = density === 'list' ? 'list' : 'summary'
+      if (d.prefs().propsDensity === m) return
+      d.prefs().propsDensity = m
+      /*
+       * 切到 `list` 时清掉单块展开集：档位已经是「读全」，
+       * 留着那些标记只会在切回 `summary` 时突然冒出一堆展开的块（一次没人要求的副作用）。
+       */
+      if (m === 'list') d.prefs().propsExpanded = {}
+      d.scheduleDeviceSave()
+      d.refreshLayout()
+      d.scheduleBadge()
+    },
+
+    /**
+     * **单块就地展开／收起**（设备态，`summary` 档下的临时覆盖）。
+     *
+     * 只记展开的（与块折叠 `folded` 同一口径）：没有这一格 ＝ 按档位画。
+     * 它**不写库、不进撤销**——「这块我读过」不是内容。
+     */
+    togglePropsExpanded: (blockId) => {
+      if (blockId === '') return
+      const next = { ...d.prefs().propsExpanded }
+      if (next[blockId]) delete next[blockId]
+      else next[blockId] = true
+      d.prefs().propsExpanded = next
+      d.scheduleDeviceSave()
+      d.refreshLayout()
       d.scheduleBadge()
     },
   }

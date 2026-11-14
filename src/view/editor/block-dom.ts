@@ -94,14 +94,15 @@ export const VIEW_BODY_H = 168
 export const VIEW_BODY_GAP = 2
 
 /**
- * **块下属性行**额外占的高度（近似值，只给虚拟化的占位滚动条用）。
+ * **块下属性区每行**额外占的高度（近似值，只给虚拟化的占位滚动条用）。
  *
  * 一行小字（`--ui-fs-xs` × `--ui-lh-tight` ≈ 18）＋ `.blk` 的 `row-gap`
  * （＝ `--ui-gap-1`，2）＝ 20。与 `ALIAS_HEAD_H`／`VIEW_BODY_GAP` 同一条纪律：
  * 视觉走 token，虚拟化走这个数；改那行的高度就要两边一起改。
  *
- * 为什么它必须是**定高**：属性行不换行（超出收成 `+N`）。自由换行会让虚拟化的
- * 占位估算彻底失效（行高依赖宽度与内容），滚动条系统性偏小。
+ * ⚠️ **每行都是定高、行数由派生给出**（`belowFieldsRows`）：`summary` 档恒 1 行，
+ *    `list` 档＝有值的栏数。所以「多高」是可算的，不依赖宽度与内容——
+ *    让属性行自由换行会让占位估算彻底失效（滚动条系统性偏小）。
  */
 export const PROP_LINE_H = 20
 
@@ -129,10 +130,10 @@ export function rowHasInlineViewBody(r: VisibleRow): boolean {
  *    （宁可高估留白，也别低估让滚动条偏小）；聚焦档只发生在窗口里的那一行上，
  *    而占位算的是窗口**之外**的行。
  */
-export function visibleRowHeight(b: Block, extraHeads = 0, viewBody = false, propsLine = false): number {
+export function visibleRowHeight(b: Block, extraHeads = 0, viewBody = false, propRows = 0): number {
   const aliasHead = aliasesOf(b).length > 0 && prop<string>(b, DISPLAY_PROP) !== 'text' ? 1 : 0
   const extra = viewBody ? VIEW_BODY_H + VIEW_BODY_GAP : 0
-  return LINE_H + extra + (aliasHead + extraHeads) * ALIAS_HEAD_H + (propsLine ? PROP_LINE_H : 0)
+  return LINE_H + extra + (aliasHead + extraHeads) * ALIAS_HEAD_H + propRows * PROP_LINE_H
 }
 
 /**

@@ -432,11 +432,20 @@ export interface ViewEvents {
    */
   viewBody?: (block: Block, into: HTMLElement) => (() => void) | void
   /**
-   * **块下属性行**：值文本与「点值开属性面板」都在装配层。
+   * **块下属性区**：值文本、排布与「点值开属性面板」都在装配层。
    *
    * `view` 只负责「这一行有这一格」与高度；这里不返回卸载函数（行里没有订阅）。
    */
   propsLine?: (block: Block, data: BelowFields, into: HTMLElement) => void
+  /**
+   * **这一块的属性区占几行**（`0` ＝ 不画；`1` ＝ 一行摘要；`n` ＝ 一栏一行）。
+   *
+   * 为什么必须由装配层给、而不是 `view` 自己算：行数取决于**设备态的密度档**
+   * 与「这块有没有就地展开」，那两样都不在 `view` 的视野里。
+   * ⚠️ 它与 `propsLine` 必须吃同一份判据——两处各算一遍，滚动条就会系统性偏小，
+   *    而那种偏差不会报错，只在滚到底部时露出来。
+   */
+  propsRows?: (id: string, data: BelowFields) => number
   /**
    * **资产此刻的样子**（`view/asset-views.ts` 的 `assetViewOf`）。
    *
@@ -3138,6 +3147,11 @@ export class BlockEditor {
       (id) => this.parentOfRow(id),
       this.store.index.blocks,
     )
+    /** 这一块的属性区占几行（与装配层的渲染吃同一份判据；没有回调 ⇒ 不画） */
+    const propsRowCount = (id: string, data: BelowFields | undefined): number => {
+      if (!this.events.propsLine || !this.events.propsRows || !data) return 0
+      return this.events.propsRows(id, data)
+    }
     const rowH = (r: VisibleRow): number =>
       visibleRowHeight(
         r.block,
@@ -3146,7 +3160,8 @@ export class BlockEditor {
           (Boolean(this.events.embedBody) &&
             rowHasEmbedViewBody(r.block, (id) => this.store.find(id)) &&
             !isFolded(this.doc, r.block.id)),
-        Boolean(this.events.propsLine) && below.has(r.block.id),
+        // 行数由装配层给（密度档 ＋ 单块展开）；没有这一格 ⇒ 不画属性区
+        propsRowCount(r.block.id, below.get(r.block.id)),
       )
     if (from > 0) {
       const headH = rows.slice(0, from).reduce((n, r) => n + rowH(r), 0)

@@ -29590,6 +29590,99 @@ await check('T310 块下属性行的 ref 值可点跳转；点名字仍开属性
   return `值带 data-ref-to ⇒ 点值到「目标甲」、不开抽屉；点名字开面板、不导航`
 })
 
+/**
+ * **块下属性的两档密度**：`summary` 一行摘要／`list` 一栏一行，
+ * 外加**单块就地展开**（`+N` 不再跳面板）。
+ *
+ * 判据（为什么这些断言）：档位是「这一台机器读多密」（设备态），展开是「这一块我读过」
+ * （单块覆盖）；两者粒度不同但**必须落在同一套渲染上**——所以这里同时验
+ * 「档位切换」与「单块展开」，且都不许把属性抽屉顺手打开（那是第三个动作了）。
+ *
+ * ⚠️ 估高不在这里验（默认虚拟化关着，占位不参与）：那条由
+ *    `tests/props-line-density.test.ts` 的 `visibleRowHeight` 断言钉住。
+ */
+await check('T311 块下属性：一行摘要 ↔ 一栏一行（设置面）；+N 就地展开与收起，不跳面板', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  const host = await page.evaluate(() => {
+    const b = window.__qua.blocks().find((x) => x.roles.length === 0 && x.text.length > 2)
+    for (const [i, name] of ['作者', '译者', '出版社', '年份'].entries()) {
+      window.__qua.invoke('core.props/create-def', { blockId: b.id, label: name, kind: 'text', target: 'own' })
+      const def = window.__qua.propDefs().find((d) => d.label === name)
+      window.__qua.invoke('core.props/set-value', { blockId: b.id, propId: def.id, value: '值' + i })
+    }
+    // 再声明一条**没填**的：读全档必须把它也画出来（摘要档只把它算进 +N）
+    window.__qua.invoke('core.props/create-def', { blockId: b.id, label: '备注', kind: 'text', target: 'own' })
+    window.__qua.invoke('core.block/focus-block', { blockId: b.id })
+    return b.id
+  })
+  await page.waitForTimeout(500)
+
+  const read = async () =>
+    page.evaluate((id) => {
+      const el = document.querySelector(`.blk[data-block-id="${id}"] > .blk-props-line`)
+      return {
+        density: el?.dataset.propsDensity ?? '',
+        pairs: el?.querySelectorAll('.blk-prop').length ?? 0,
+        more: el?.querySelector('.blk-prop-more')?.textContent ?? '',
+        fold: Boolean(el?.querySelector('.blk-prop-fold')),
+        pending: el?.querySelectorAll('.blk-prop--pending').length ?? 0,
+        // 高度：一栏一行应该明显更高（4 栏 ≈ 4 × 20，摘要 ≈ 一行）
+        h: el ? Math.round(el.getBoundingClientRect().height) : 0,
+        drawer: Boolean(document.querySelector('.props-drawer')),
+      }
+    }, host)
+
+  // ① 默认 summary：一行、cap 3、收 1 项
+  const summary = await read()
+  assert(summary.density === 'summary', '默认是一行摘要：' + JSON.stringify(summary))
+  assert(summary.pairs === 3 && summary.more.includes('2'), '超出 cap 的收进 +N（1 条有值 + 1 条待填）：' + JSON.stringify(summary))
+  assert(summary.h > 0 && summary.h < 30, '摘要档只占一行：' + JSON.stringify(summary))
+
+  // ② 点 +N ⇒ 就地展开（不跳面板）
+  await page.click(`.blk[data-block-id="${host}"] > .blk-props-line .blk-prop-more`)
+  await page.waitForTimeout(350)
+  const expanded = await read()
+  assert(expanded.density === 'list', '+N 应就地展开成一栏一行：' + JSON.stringify(expanded))
+  assert(expanded.pairs === 5 && expanded.more === '', '展开后四栏＋一条待填全画，没有 +N：' + JSON.stringify(expanded))
+  assert(expanded.pending === 1, '待填的栏在 list 档要画出来（读全不许藏东西）：' + JSON.stringify(expanded))
+  assert(expanded.fold, '展开态要有「收起」：' + JSON.stringify(expanded))
+  assert(!expanded.drawer, '+N 不该顺手打开属性抽屉：' + JSON.stringify(expanded))
+  assert(expanded.h > summary.h + 40, '四栏应明显高于一行：' + JSON.stringify({ summary: summary.h, expanded: expanded.h }))
+
+  // ③ 收起 ⇒ 回一行摘要
+  await page.click(`.blk[data-block-id="${host}"] > .blk-props-line .blk-prop-fold`)
+  await page.waitForTimeout(350)
+  const back = await read()
+  assert(back.density === 'summary' && back.pairs === 3 && back.fold === false, '收起应回到摘要：' + JSON.stringify(back))
+
+  // ④ 设置面切「一栏一行」⇒ 全局档生效（无 +N）
+  await page.evaluate(() => window.__qua.invoke('core.settings/open'))
+  await page.waitForSelector('[data-props-density="list"]', { timeout: 5000 })
+  await page.click('[data-props-density="list"]')
+  await page.waitForTimeout(300)
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), host)
+  await page.waitForTimeout(400)
+  const list = await read()
+  assert(list.density === 'list' && list.pairs === 5 && list.more === '', '全局 list 档应全显（含待填）且没有 +N：' + JSON.stringify(list))
+  assert(!list.fold, '全局 list 档没有「收起」（它不是展开态）：' + JSON.stringify(list))
+
+  // ⑤ 切回摘要 ⇒ 又收成一行
+  await page.evaluate(() => window.__qua.invoke('core.settings/open'))
+  await page.waitForSelector('[data-props-density="summary"]', { timeout: 5000 })
+  await page.click('[data-props-density="summary"]')
+  await page.waitForTimeout(300)
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), host)
+  await page.waitForTimeout(400)
+  const again = await read()
+  assert(again.density === 'summary' && again.pairs === 3 && again.more.includes('2'), '切回摘要：' + JSON.stringify(again))
+
+  await ctx.close()
+  return `摘要 3+1 收进 +N ⇒ 点它展开 4 栏（不跳面板）⇒ 收起回一行 ⇒ 设置面切 list 全显 ⇒ 切回摘要`
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

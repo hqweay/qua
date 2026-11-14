@@ -1541,6 +1541,47 @@ export interface BelowFields {
   rows: FieldRow[]
   /** 没值但声明过的行数（面板里能看到「待填」） */
   pending: number
+  /**
+   * 没值但声明过的行本体（**只在「一栏一行」档用**）。
+   *
+   * 判据：`list` 是「让我读完这块」——藏着待填的栏等于没读全（用户切过去
+   * 发现栏反而变少）。摘要档仍只显示条数（`pending`），因为它要的是认出这块。
+   *
+   * ⚠️ 它不改变「没有任何有值属性就不出这一格」那条既有判据：块下空间是
+   *    「有东西可看」才占的，全空的声明由 `+N`／面板承担。
+   */
+  pendingRows: FieldRow[]
+}
+
+/**
+ * **块下属性区的两档密度**：`summary` ＝ 一行摘要（多出来的收进 `+N`）／
+ * `list` ＝ 一栏一行全显。
+ *
+ * 它是**看法**，不是值的形状：文档「这一块长多高」由读者与屏幕决定，
+ * 所以档位住设备态（见 `Prefs.propsDensity`），单块的临时展开住 `propsExpanded`。
+ */
+export type PropsLineDensity = 'summary' | 'list'
+
+/**
+ * 块下属性区**画几行**（`0` ＝ 这一格整块不画）。
+ *
+ * ⚠️ **渲染与虚拟化估高吃同一份判据**：两处各算一遍（一处按「有没有属性行」的布尔、
+ *    另一处按档位），长文档的滚动条就会系统性偏小或偏大——而那种偏差不会报错，
+ *    只在滚到底部时露出来。
+ *
+ * `summary` 恒 1 行（超出 `cap` 的收进 `+N`）；`list` 与「单块展开了」都是
+ * 「一栏一行」＝ 有值的行数。
+ */
+export function belowFieldsRows(
+  fields: Pick<BelowFields, 'rows' | 'pendingRows'> | undefined,
+  density: PropsLineDensity,
+  expanded = false,
+): number {
+  const n = fields?.rows.length ?? 0
+  if (n === 0) return 0
+  // 一栏一行时把**待填**也画出来（读全档不许藏东西）；摘要档只画一行
+  if (density === 'list' || expanded) return n + (fields?.pendingRows.length ?? 0)
+  return 1
 }
 
 /** 块下属性行：批级派生（整屏一次扫库，行级只查表） */
@@ -1585,13 +1626,13 @@ export function belowFieldsFor(
     }
 
     const visible: FieldRow[] = []
-    let pending = 0
+    const waiting: FieldRow[] = []
     for (const row of rows.values()) {
       if (isGutterRow(row)) continue
       if (row.filled) visible.push(row)
-      else pending++
+      else waiting.push(row)
     }
-    if (visible.length > 0) out.set(block.id, { rows: visible, pending })
+    if (visible.length > 0) out.set(block.id, { rows: visible, pending: waiting.length, pendingRows: waiting })
   }
   return out
 }

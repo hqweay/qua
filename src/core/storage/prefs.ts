@@ -17,6 +17,7 @@ import type { DerivedViewKind } from '../views/view.ts'
 import { DERIVED_VIEW_KINDS } from '../views/view.ts'
 import { canonicalMountEntries, type MountEntry } from '../views/mount.ts'
 import { canonicalDockEntries, dockKey, type DockEntry } from '../views/dock.ts'
+import type { PropsLineDensity } from '../props/props.ts'
 
 export type ThemeMode = 'system' | 'light' | 'dark'
 
@@ -83,7 +84,26 @@ export interface Prefs {
   recentColors: string[]
   /** @deprecated 2026-10-19 起的旧形状；只用于读迁移，写一律写 `dock` */
   railOpen?: boolean
+  /**
+   * **块下属性区的密度**（设备态）：`summary` ＝ 一行摘要（`+N` 收起来），
+   * `list` ＝ 一栏一行全显。
+   *
+   * 为什么是设备态而不是内容的属性：它回答的是「**我**读得多密」——同一份内容在
+   * 大屏与小屏、扫视与细读时答案不同，属于人和这一台机器；进库就会跟着库走到
+   * 另一台机器（还会多一份能分叉的配置）。判据：**密度不是「这条属性是什么」**，
+   * 所以它不在定义块上（定义块管 kind／format／基数）。
+   */
+  propsDensity: PropsLineDensity
+  /**
+   * **就地展开的块**（设备态，与块的 `folded` 同一口径：只记展开的）。
+   *
+   * 它是密度档的**单块覆盖**：`summary` 档下某一块想读全 ⇒ 展开成 list；
+   * 档位回答「这一台机器通常读多密」，这一格回答「**这一块**我读过」。
+   * 两者粒度不同，所以不合并成一个开关。
+   */
+  propsExpanded: Record<string, true>
 }
+
 
 /** 单个槽的本地状态（宽度、开关、卡片顺序都是设备状态，不入 KB） */
 export interface DockSlotPrefs {
@@ -183,6 +203,9 @@ export const DEFAULT_PREFS: Prefs = {
   recentCommands: [],
   recentIcons: [],
   recentColors: [],
+  // 块下属性默认**一行摘要**：正文是主角，属性是注记；长页里一栏一行会把长度翻倍
+  propsDensity: 'summary',
+  propsExpanded: {},
 }
 
 /**
@@ -328,6 +351,17 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
     ...p,
     // 段排列只认两档（grid 轴未开）：别的值一律回单列，不让坏形状进偏好
     feedLayout: p.feedLayout === 'row' ? 'row' : 'column',
+    // 块下属性密度只认两档；坏值回默认（「没选过」与「选了摘要」在这里同义：默认就是摘要）
+    propsDensity: p.propsDensity === 'list' ? 'list' : 'summary',
+    // 就地展开集：只收 `true`（与 dock 的 collapsedCards 同一口径，只记展开的）
+    propsExpanded: (() => {
+      const out: Record<string, true> = {}
+      const raw = p.propsExpanded
+      if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        for (const [k, v] of Object.entries(raw)) if (v === true && k !== '') out[k] = true
+      }
+      return out
+    })(),
     // 日记面板的栏：逐项重建（坏项丢掉），与 `_mounts` 共用同一份判据
     journalMounts: canonicalMountEntries(p.journalMounts),
     mountViews,

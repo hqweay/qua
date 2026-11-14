@@ -185,7 +185,15 @@ export interface PageDeps {
 
 export interface ViewDeps {
   /** 可直接改的偏好（装配层持有；设备状态，不进库） */
-  prefs: () => { theme: ThemeMode; feedLayout: SecLayout; dock: { left: { open: boolean }; right: { open: boolean } } }
+  prefs: () => {
+    theme: ThemeMode
+    feedLayout: SecLayout
+    dock: { left: { open: boolean }; right: { open: boolean } }
+    /** 块下属性密度（设备态）：`summary` 一行／`list` 一栏一行 */
+    propsDensity: 'summary' | 'list'
+    /** 就地展开的块（设备态，单块覆盖密度档） */
+    propsExpanded: Record<string, true>
+  }
   applyChrome: () => void
   /**
    * 这一侧槽**此刻**看得见吗（档位轴的 overlay 判据）。
@@ -198,6 +206,11 @@ export interface ViewDeps {
   renderDebugState: () => void
   /** 偏好变了要落**设备**（`qua.device`），与库的落盘是两条路 */
   scheduleDeviceSave: () => void
+  /**
+   * **块下属性区改了排布之后要重排这一屏**：行高变了，虚拟化的占位是按行高累加的，
+   * 不重排就会「可见区对了、滚动条不对」。与主题那种只换 token 的偏好不同。
+   */
+  refreshLayout: () => void
   scheduleBadge: () => void
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
 }

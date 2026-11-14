@@ -1213,6 +1213,48 @@
 .blk-props-line .blk-prop-name {
   color: var(--ui-text-secondary);
 }
+/*
+  **一栏一行**（`list` 档与「单块就地展开」）：每栏占一整行、名字靠左值靠右。
+
+  ⚠️ 每行高度写死 `20px` ＝ `block-dom.ts` 的 `PROP_LINE_H`（虚拟化估高那个常量）。
+     两份数值是同一件事：改一处必须改另一处，否则长文档的滚动条会系统性偏小/偏大。
+     不在 list 档里用 `--ui-props-h`（16.1）而写 20，是为了让「估高」在多的行上**精确相等**，
+     而不是每行都高估 3.9px（10 行就差 39px）。
+*/
+.blk-props-line[data-props-density='list'] {
+  height: auto;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  overflow: visible;
+  white-space: normal;
+}
+.blk-props-line[data-props-density='list'] .blk-prop {
+  height: 20px;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+}
+.blk-props-line[data-props-density='list'] .blk-prop-value {
+  max-width: 60%;
+  text-align: end;
+}
+/* 「收起」只出现在「单块展开」这一态（全局 list 档没有收起这回事） */
+.blk-props-line .blk-prop-fold {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+  align-self: flex-end;
+  height: 20px;
+}
+.blk-props-line .blk-prop-fold:hover {
+  color: var(--ui-text);
+}
 .blk-props-line .blk-prop-value {
   color: var(--ui-text);
   max-width: 24ch;

@@ -8,7 +8,7 @@
  */
 import './styles.css'
 import { addAlias, addList, blockLabel, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, COLOR_PROP, ICON_PROP, isColorValue, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, cardLayoutOf, DERIVED_VIEW_KINDS, propKindOf, propLabel, choicesOf, choicesFor, childDisplayProps, enginePropDefs, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec, withBlockOwnerData, VIEW_KIND_ICON, type StoredViewKind, type UndoKind, type ColorAxis } from './core/index.ts'
-import { choiceDisplayLabel, cardinalityOf, queryFieldsOf, singleValueOf, valueListOf } from './core/index.ts'
+import { belowFieldsRows, choiceDisplayLabel, cardinalityOf, queryFieldsOf, singleValueOf, valueListOf, type BelowFields } from './core/index.ts'
 import { openChoicePicker } from './app/choice-picker.ts'
 import { plainText } from './core/model/runs.ts'
 import { checkExternalUrl, rejectText } from './core/relations/link.ts'
@@ -2454,6 +2454,11 @@ const app: App = {
     noteSlotChanged: (side) => axis.noteSlotChanged(side),
     renderDebugState: () => chrome.renderDebugState(),
     scheduleDeviceSave,
+    /*
+     * 密度改的是**行高**：只重排窗口（`applyWindow`），不重装文档——
+     * `reloadFromStore` 会按 store 重建 roots，把正在阅读的位置与选区一起丢掉。
+     */
+    refreshLayout: () => ed.applyWindow(),
     scheduleBadge,
     toast: (text, kind) => app.toast(text, kind),
   }),
@@ -3051,14 +3056,27 @@ function viewEvents(
         }
       : {}),
     /**
-     * **块下属性行**：值文本与点击都在这一层（`view` 不 import `ui`）。
-     * 点一项 ⇒ 打开属性面板并聚焦那一栏；写入仍走面板里的同一条命令。
+     * **块下属性区**：值文本、密度与点击都在这一层（`view` 不 import `ui`）。
+     *
+     * 档位与「这块有没有就地展开」在这里现算（渲染器不认识偏好）：
+     * 两者合成**这一块此刻的排布**，与虚拟化的估高（`propsRows`）吃同一份判据。
+     * 点一项 ⇒ 打开属性面板并聚焦那一栏；点 `+N` ⇒ 就地展开；写入仍走同一条命令。
      */
     propsLine: (block: Block, data, into: HTMLElement) =>
       renderPropsLine(block.id, data, into, {
         inspect: (id, propId) => app.openPropertiesDrawer(id, propId),
         refLabel: refLabelOf,
+        density: prefs().propsDensity,
+        expanded: prefs().propsExpanded[block.id] === true,
+        onExpand: (id) => app.togglePropsExpanded(id),
+        onCollapse: (id) => app.togglePropsExpanded(id),
       }),
+    /**
+     * **块下属性区画几行**（虚拟化估高用）：与上面那次渲染同一个判据
+     * （`belowFieldsRows`），所以「可见区」与「占位」不会各算一遍而漂。
+     */
+    propsRows: (id: string, data: BelowFields) =>
+      belowFieldsRows(data, prefs().propsDensity, prefs().propsExpanded[id] === true),
     // 复盘空天格子里落笔：中心＝物化并回到这一屏；Shift/⌘＝同一天开右槽/新 tab
     shellWrite: (date, place) => {
       if (place && place !== 'center') {

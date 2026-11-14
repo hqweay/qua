@@ -85,6 +85,16 @@ export const VIEW_HANDLERS: Record<string, Handler> = {
     app.setTheme(S(a.mode, 'system'))
     return true
   },
+  'core.view/set-props-density': (a, app) => {
+    app.setPropsDensity(S(a.density, 'summary'))
+    return true
+  },
+  'core.view/toggle-props-expanded': (a, app) => {
+    const blockId = S(a.blockId)
+    if (!blockId) return false
+    app.togglePropsExpanded(blockId)
+    return true
+  },
   'core.dock/toggle-left': (_a, app) => {
     app.toggleDock('left')
     return true

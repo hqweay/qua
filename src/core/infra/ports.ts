@@ -565,6 +565,13 @@ export interface App {
   /** 三档直选（菜单用；`toggleTheme` 是给键位/常驻按钮的循环） */
   setTheme(mode: string): void
   toggleTheme(): void
+  /**
+   * **块下属性区的密度档**（设备态）：`summary` 一行摘要／`list` 一栏一行。
+   * 它改行高 ⇒ 实现里要重排这一屏（虚拟化占位按行高累加）。
+   */
+  setPropsDensity(density: string): void
+  /** 单块就地展开／收起（`summary` 档下的临时覆盖；设备态，不进撤销） */
+  togglePropsExpanded(blockId: string): void
   /** 开/关一个槽（槽的开关归槽自己；`side` 只有左右，中心槽常驻） */
   toggleDock(side: 'left' | 'right'): void
   /**

@@ -22,6 +22,8 @@ import { renderIcon } from '../../view/icons.ts'
  */
 interface SettingsPrefs {
   theme: 'system' | 'light' | 'dark'
+  /** 块下属性区的密度档（设备态） */
+  propsDensity: 'summary' | 'list'
   keys: Record<string, string | null>
 }
 
@@ -42,6 +44,12 @@ const THEME_MODES: readonly { mode: 'system' | 'light' | 'dark'; label: MsgId }[
   { mode: 'system', label: 'ui.theme.mode.system' },
   { mode: 'light', label: 'ui.theme.mode.light' },
   { mode: 'dark', label: 'ui.theme.mode.dark' },
+]
+
+/** 块下属性密度的两档（标签走字典：`ui.props.density.*`） */
+const DENSITIES: readonly { density: 'summary' | 'list'; label: MsgId }[] = [
+  { density: 'summary', label: 'ui.props.density.summary' },
+  { density: 'list', label: 'ui.props.density.list' },
 ]
 
 export class SettingsFace {
@@ -68,7 +76,7 @@ export class SettingsFace {
   }
 
   render(): void {
-    this.root.replaceChildren(this.sectionTheme(), this.sectionKeys())
+    this.root.replaceChildren(this.sectionTheme(), this.sectionPropsLine(), this.sectionKeys())
   }
 
   /* ---------------------------------------------------------- 外观 */
@@ -98,6 +106,45 @@ export class SettingsFace {
       row.append(b)
     }
     sec.append(row)
+    return sec
+  }
+
+  /* ---------------------------------------------------------- 块下属性 */
+
+  /**
+   * **块下属性区的密度**（设备态）：一行摘要 / 一栏一行。
+   *
+   * 为什么这个开关在这里、不在属性定义页：它决定的是「**这一屏**读多密」，
+   * 作用于所有块；放到某条属性的定义上就变成「这条占整行、那条挤半行」的混排，
+   * 而且用户要为每一条属性回答同一个排版问题。定义页管的是值与格式。
+   */
+  private sectionPropsLine(): HTMLElement {
+    const sec = document.createElement('section')
+    sec.className = 'settings-sec'
+    const title = document.createElement('h2')
+    title.className = 'settings-sec-title'
+    title.textContent = t('ui.settings.propsLine')
+    const hint = document.createElement('p')
+    hint.className = 'settings-hint'
+    hint.textContent = t('ui.settings.propsLineHint')
+    const row = document.createElement('div')
+    row.className = 'settings-theme'
+    row.dataset.settings = 'props-line'
+    const current = this.deps.prefs().propsDensity
+    for (const opt of DENSITIES) {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.className = 'ui-btn settings-theme-opt'
+      b.dataset.propsDensity = opt.density
+      b.textContent = t(opt.label)
+      if (current === opt.density) b.classList.add('settings-theme-opt--on')
+      b.addEventListener('click', () => {
+        this.deps.invoke('core.view/set-props-density', { density: opt.density })
+        this.render()
+      })
+      row.append(b)
+    }
+    sec.append(title, hint, row)
     return sec
   }
 
