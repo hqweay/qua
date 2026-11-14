@@ -48,16 +48,23 @@
           · 文案为空壳：按钮的 title/aria-label 由 msg.ts 在装配时灌入。
       -->
       <header id="topbar" class="topbar">
+        <!--
+          槽控件组的排布判据（2026-11-14）：**控件贴着它控制的对象**。
+            · 槽的整体开关控制窗口边缘那根列 ⇒ 贴窗口边缘（左右两端各在最外侧）；
+            · 组内按作用范围从外向内：槽的存在（开关）→ 槽内容（加卡 → 折卡）；
+            · 两端组互为镜像，一套心智扫两端；
+            · 加卡/折卡是内容动作，只在槽开着（内容在场）时露面，收起只剩开关。
+        -->
+        <div class="dock-head topbar-dock" id="dock-left-head" data-dock-side="left">
+          <span class="dock-title" id="dock-left-title"></span>
+          <button class="dock-btn dock-collapse" id="dock-left-collapse" type="button"></button>
+          <button class="dock-btn dock-add" id="dock-left-add" type="button"></button>
+          <button class="dock-btn dock-foldall" id="dock-left-foldall" type="button"></button>
+        </div>
         <div class="topbar-nav" role="group">
           <button id="topbar-back" class="topbar-btn" type="button"></button>
           <button id="topbar-forward" class="topbar-btn" type="button"></button>
           <button id="topbar-search" class="topbar-btn" type="button"></button>
-        </div>
-        <div class="dock-head topbar-dock" id="dock-left-head" data-dock-side="left">
-          <span class="dock-title" id="dock-left-title"></span>
-          <button class="dock-btn dock-foldall" id="dock-left-foldall" type="button"></button>
-          <button class="dock-btn dock-add" id="dock-left-add" type="button"></button>
-          <button class="dock-btn dock-collapse" id="dock-left-collapse" type="button"></button>
         </div>
         <div class="topbar-center">
           <div id="center-tabs" class="center-tabs" role="tablist"></div>
