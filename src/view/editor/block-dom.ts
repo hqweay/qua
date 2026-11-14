@@ -371,15 +371,18 @@ export function makeTagChipEl(tagId: string, name: string, icon?: string, color?
   el.dataset.tagId = tagId
   el.dataset.refTo = tagId
   el.contentEditable = 'false'
-  // **标签有显式图标才画**（小图标＋`#名`）：缺省 hash 不上 chip——满屏默认 hash 是噪音；
-  // 标签的脸改一处全库跟随，chip 是它的一个露面
+  // **图标与 `#` 互斥**：两者都是「这是标签」的标记，同屏就是重复计数
+  // （hash 脸＋`#名` 读成 ##）。有显式图标 ⇒ 图标＋名；没有 ⇒ `#名`——
+  // 缺省 hash 不上 chip（满屏默认 hash 是噪音），标签的脸改一处全库跟随
   if (icon !== undefined && icon.trim() !== '') {
     const ico = document.createElement('span')
     ico.className = 'tag-chip-ico'
     renderIcon(ico, icon, 'circle-help', 'sm')
     el.appendChild(ico)
+    el.appendChild(document.createTextNode(name))
+  } else {
+    el.appendChild(document.createTextNode(`#${name}`))
   }
-  el.appendChild(document.createTextNode(`#${name}`))
   // **chip 染各染各的标签色**（soft 底＋solid 字）：标签显式配了 `_color` 才染；
   // 未配色的维持 accent 现状——色是叠加的身份通道，永远不是唯一载体
   if (color !== undefined && color !== '') {

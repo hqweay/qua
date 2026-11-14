@@ -28789,7 +28789,8 @@ await check('T302 块标＝脸位：标签行块标画 hash 且行无第二枚�
     }
   }, tagInfo)
   assert(follow.markerIcon === 'lucide:target', `块标应换成显式图标（脸赢过结构旗）：${JSON.stringify(follow)}`)
-  assert(follow.chipIcon === 'lucide:target' && follow.chipText === '#脸位标签', `chip 应画小图标＋#名：${JSON.stringify(follow)}`)
+  // 图标与 # 互斥：有脸的 chip 是「图标＋名」，不再重复一个 #
+  assert(follow.chipIcon === 'lucide:target' && follow.chipText === '脸位标签', `chip 应画小图标＋名（不重复 #）：${JSON.stringify(follow)}`)
 
   // 候选行跟随：打开标签选择器，那一行的图标也是 target
   await page.evaluate(() => {

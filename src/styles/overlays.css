@@ -944,45 +944,53 @@
 }
 
 /* ============================================================ 图标选择器
-   浮层语言（影/圆角由 .popover 给）；36px 格＋2px gap、8 列——命中区推给指头。
+   浮层语言（影/圆角由 .popover 给）；32px 格＋2px gap、8 列。
+   ⚠️ 整组选择器都**限定在 `.popover` 下**：通用规则 `.popover button` 会给每颗按钮
+   加边框、内边距与悬停底色——不限定就是每一格一圈框、色点悬停泛白（暗色主题下
+   悬停底色是白 7%，叠在色点上读成「变白」）。
    选中态：hover 中性（只提亮底盘），选中 accent 描边；颜色行的选中同一条。 */
-.icon-picker {
-  width: calc(8 * 36px + 7 * 2px); /* 8 列＋格距，外壳的 padding 归 .popover */
+.popover .icon-picker {
+  width: calc(8 * 32px + 7 * 2px + 10px); /* 8 列＋格距＋竖向滚动条的一条槽 */
   display: flex;
   flex-direction: column;
-  gap: var(--ui-gap-3);
-}
-.icon-picker-tabs {
-  display: flex;
   gap: var(--ui-gap-2);
 }
-.icon-picker-tab[data-on='1'] {
+.popover .icon-picker-tabs {
+  display: flex;
+  gap: var(--ui-gap-1, 4px);
+}
+.popover .icon-picker-tab {
+  padding: 2px 10px;
+}
+.popover .icon-picker-tab[data-on='1'] {
   border-color: var(--ui-accent);
   color: var(--ui-accent);
 }
-.icon-picker-search,
-.icon-picker-manual-input {
+.popover .icon-picker-search,
+.popover .icon-picker-manual-input {
   width: 100%;
   box-sizing: border-box;
+  padding: 4px 8px;
 }
-.icon-picker-grid {
+.popover .icon-picker-grid {
   display: grid;
-  grid-template-columns: repeat(8, 36px);
+  grid-template-columns: repeat(8, 32px);
   gap: 2px;
-  max-height: 232px; /* 约 5 行半：搜索始终在场，滚动能到 */
+  max-height: 168px; /* 五行：搜索与分类都在场，滚动能到 */
   overflow-y: auto;
+  scrollbar-width: thin;
 }
-.icon-picker-recent {
-  max-height: 38px; /* 一行：它只是快捷行 */
+.popover .icon-picker-recent {
+  max-height: 34px; /* 一行：它只是快捷行 */
   overflow: hidden;
 }
-.icon-picker-section {
+.popover .icon-picker-section {
   font-size: var(--ui-fs-xs);
   color: var(--ui-text-tertiary);
 }
-.icon-picker-cell {
-  width: 36px;
-  height: 36px;
+.popover .icon-picker-cell {
+  width: 32px;
+  height: 32px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -992,50 +1000,53 @@
   cursor: pointer;
   color: var(--ui-text);
   padding: 0;
-  font-size: 20px;
+  font-size: 18px;
   line-height: 1;
 }
-.icon-picker-cell:hover {
+.popover .icon-picker-cell:hover {
   background: var(--ui-bg-hover);
 }
-.icon-picker-cell[data-active='1'] {
+.popover .icon-picker-cell[data-active='1'] {
   background: var(--ui-accent-soft);
   outline: 1.5px solid var(--ui-accent);
   outline-offset: -1.5px;
 }
-.icon-picker-cell[data-none='1'] {
+.popover .icon-picker-cell[data-none='1'] {
   color: var(--ui-text-tertiary);
 }
-.icon-picker-manual {
+.popover .icon-picker-manual {
   display: flex;
   flex-direction: column;
   gap: var(--ui-gap-2);
 }
-.icon-picker-manual-hint {
+.popover .icon-picker-manual-hint {
   margin: 0;
   font-size: var(--ui-fs-xs);
   color: var(--ui-text-tertiary);
 }
-/* 颜色行：⊘ 中性 ＋ 色板封闭集；色点用各自的 token（不在这里写色值） */
-.icon-picker-colors {
+/* 颜色行：⊘ 中性 ＋ 色板封闭集；色点用各自的 token（不在这里写色值）。
+   悬停**不吃**通用按钮的底色——色点自己的颜色就是它的悬停态（换底色＝变色） */
+.popover .icon-picker-colors {
   display: flex;
   gap: var(--ui-gap-2);
   align-items: center;
 }
-.icon-picker-swatch {
-  width: 20px;
-  height: 20px;
+.popover .icon-picker-swatch,
+.popover .icon-picker-swatch:hover {
+  width: 18px;
+  height: 18px;
   border-radius: var(--ui-radius-pill);
   border: none;
   padding: 0;
   cursor: pointer;
   background: var(--swatch, var(--ui-text-tertiary));
 }
-.icon-picker-swatch[data-none='1'] {
+.popover .icon-picker-swatch[data-none='1'],
+.popover .icon-picker-swatch[data-none='1']:hover {
   background: none;
   border: 1.5px dashed var(--ui-border);
 }
-.icon-picker-swatch[data-on='1'] {
+.popover .icon-picker-swatch[data-on='1'] {
   box-shadow: 0 0 0 2px var(--ui-surface-raised), 0 0 0 3.5px var(--ui-text);
 }
 
@@ -1066,7 +1077,7 @@
 }
 .alias-face-panel {
   margin-top: var(--ui-gap-2);
-  padding: var(--ui-gap-3);
+  padding: var(--ui-gap-2);
   border: 1px solid var(--ui-border-subtle);
   border-radius: var(--ui-radius-md);
   background: var(--ui-surface-sunken);
@@ -1075,13 +1086,18 @@
   display: inline-flex;
 }
 
-/* 分类导航（emoji tab）：一行横向 chips，选中 accent——与 tab 同语言但小一号 */
-.icon-picker-cats {
+/* 分类导航（emoji tab）：**单行**横向滚（换行会吃掉三行高度，整窗显得庞大），
+   选中 accent——与 tab 同语言但小一号 */
+.popover .icon-picker-cats {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--ui-gap-2);
+  flex-wrap: nowrap;
+  gap: var(--ui-gap-1, 4px);
+  overflow-x: auto;
+  scrollbar-width: none;
 }
-.icon-picker-cat {
+.popover .icon-picker-cat,
+.popover .icon-picker-cat:hover {
+  flex: 0 0 auto;
   border: none;
   background: none;
   padding: 1px 6px;
@@ -1090,10 +1106,10 @@
   color: var(--ui-text-secondary);
   cursor: pointer;
 }
-.icon-picker-cat:hover {
-  background: var(--ui-bg-hover);
+.popover .icon-picker-cat:hover {
+  color: var(--ui-text);
 }
-.icon-picker-cat[data-on='1'] {
+.popover .icon-picker-cat[data-on='1'] {
   background: var(--ui-accent-soft);
   color: var(--ui-accent);
 }
