@@ -382,6 +382,11 @@ export interface App {
   addBlockRole(blockId: string, role: 'page' | 'tag'): boolean
   removeBlockRole(blockId: string, role: 'page' | 'tag'): boolean
   /**
+   * **设身份色**（`_color`，色板封闭集）：`null`/空串 ＝ 摘色（「无颜色」是合法态）。
+   * 色板外的值拒绝——值域由判据登记表把守，未知值渲染中性是读侧的宽容，不是写侧的口子。
+   */
+  setBlockColor(blockId: string, color: string | null): boolean
+  /**
    * **提取为页**：补 `page` 露面 ＋ 搬到森林顶层 ＋ 原位置留一枚引用。
    *
    * 与 `addBlockRole(...,'page')` 的区别只在位置：那条原地不动，这条显式搬家。

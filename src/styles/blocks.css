@@ -447,7 +447,9 @@
   width: var(--ui-bullet-size);
   height: var(--ui-bullet-size);
   border-radius: var(--ui-radius-pill);
-  background: var(--ui-text-tertiary);
+  /* 身份色走行上的局部槽（--identity-c，由渲染层按 colorOf 写 token 引用）；
+     没有配色的块回落中性——无颜色是合法态。色环（≥2 有色标签）也是这一槽的值 */
+  background: var(--identity-c, var(--ui-text-tertiary));
   opacity: 0.6;
   transition: opacity 120ms ease, transform 120ms ease;
 }
@@ -1706,8 +1708,10 @@
   align-items: center;
   padding: 0 5px;
   border-radius: var(--ui-radius-sm);
-  background: var(--ui-accent-soft);
-  color: var(--ui-accent);
+  /* chip 染各染各的标签色：soft 底＋solid 字，渲染层把 token 引用写进行上的局部槽；
+     未配色的标签不吃这套槽，维持 accent 现状——色是叠加通道，不是唯一载体 */
+  background: var(--chip-bg, var(--ui-accent-soft));
+  color: var(--chip-c, var(--ui-accent));
   opacity: 0.8;
   font-size: 0.93em;
   line-height: 1.5;
@@ -1856,7 +1860,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--ui-text-tertiary);
+  /* 脸的描边吃身份色（行上的 --identity-c 槽）；emoji 自带色不受影响（它是字面文本） */
+  color: var(--identity-c, var(--ui-text-tertiary));
   opacity: 0.7;
 }
 .blk .marker.marker-query::before,

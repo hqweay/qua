@@ -38,7 +38,8 @@ import {
   prop,
   type Block,
 } from '../model/model.ts'
-import { resolveTagIds } from './tags.ts'
+import { resolveTagIds, tagIdsOf } from './tags.ts'
+import type { FindBlock } from '../relations/ref.ts'
 
 /** 结构旗：自位回落集（比指位小一档——页/日记在自位不借角色图标） */
 const STRUCTURAL_FACE: Record<string, string> = {
@@ -122,4 +123,42 @@ export function colorOf(b: Block, byId: ReadonlyMap<string, Block>): IdentityFac
 /** 色板封闭集判据：色板外的值一律按「没配色」处理，不报错 */
 function isPaletteKey(v: string): boolean {
   return (IDENTITY_COLORS as readonly string[]).includes(v)
+}
+
+/**
+ * `colorOf` 的逐行渲染形状：手里只有 `FindBlock` 时用这个，不必为每行建一张标签表。
+ * （整屏批量渲染仍请先 `tagsById` 建表走 `colorOf`，别逐行扫库。）
+ */
+export function colorOfByFind(b: Block, find?: FindBlock): IdentityFaceColor {
+  if (!find) return { kind: 'none' }
+  const byId = new Map<string, Block>()
+  for (const id of tagIdsOf(b)) {
+    const t = find(id)
+    if (t) byId.set(id, t)
+  }
+  return colorOf(b, byId)
+}
+
+/** 身份 token 的名字前缀（`tokens.css` 的 `--ui-identity-<key>[-soft]`；封闭集测试钉两表一一对应） */
+const IDENTITY_VAR_PREFIX = '--ui-identity-'
+
+/** 身份色板的一个 token 引用（solid＝描边/圆点，soft＝chip 底）。key 只来自色板封闭集 */
+export function identityTokenVar(key: string, variant: 'solid' | 'soft' = 'solid'): string {
+  return `var(${IDENTITY_VAR_PREFIX}${key}${variant === 'soft' ? '-soft' : ''})`
+}
+
+/**
+ * 身份色 → **元素上的局部槽**的值：solid ＝ 一个 token；ring ＝ 按 `_tags` 序的
+ * conic-gradient（10px 级小面积）；中性 ＝ `undefined`（调用方回落默认色，
+ * 交互语言不吃身份色）。
+ *
+ * ⚠️ 只产字符串，不碰 DOM —— 颜色的出现方式（描边/圆点/底色）归 view。
+ */
+export function identityColorVar(c: IdentityFaceColor): string | undefined {
+  if (c.kind === 'solid') return identityTokenVar(c.color)
+  if (c.kind === 'ring') {
+    const stops = c.colors.map((k) => identityTokenVar(k)).join(', ')
+    return `conic-gradient(from 0deg, ${stops})`
+  }
+  return undefined
 }

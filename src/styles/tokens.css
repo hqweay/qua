@@ -41,6 +41,27 @@
   --c-violet-soft: light-dark(#6b5bd226, #a394ff30);
   --c-gray-soft: light-dark(#6b707826, #8b929c30);
 
+  /* 身份色板：**封闭集 8 色**（红橙黄绿青蓝紫粉），键名与 core 的 IDENTITY_COLORS 一一对应。
+     身份色跟着块的脸走（块标/chip），与行内颜色槽（--c-*）是两条轴：
+     前者是「这一个东西是谁」，后者是「这段字长什么样」。solid 给图标描边/圆点，
+     soft 给 chip 底；对比度按两主题预调（不够读＝调这里的值，不是开自由色）。 */
+  --c-id-red: light-dark(#c4544b, #ef9d99);
+  --c-id-orange: light-dark(#b8742a, #e0a45a);
+  --c-id-yellow: light-dark(#a8801c, #e0c060);
+  --c-id-green: light-dark(#2f855a, #5cc98c);
+  --c-id-cyan: light-dark(#1f8f9e, #6fd3dd);
+  --c-id-blue: light-dark(#3b6fd4, #8aa9f0);
+  --c-id-purple: light-dark(#6b5bd2, #a394ff);
+  --c-id-pink: light-dark(#c25490, #f0a3cd);
+  --c-id-red-soft: light-dark(#c4544b26, #ef9d9930);
+  --c-id-orange-soft: light-dark(#b8742a26, #e0a45a30);
+  --c-id-yellow-soft: light-dark(#a8801c26, #e0c06030);
+  --c-id-green-soft: light-dark(#2f855a26, #5cc98c30);
+  --c-id-cyan-soft: light-dark(#1f8f9e26, #6fd3dd30);
+  --c-id-blue-soft: light-dark(#3b6fd426, #8aa9f030);
+  --c-id-purple-soft: light-dark(#6b5bd226, #a394ff30);
+  --c-id-pink-soft: light-dark(#c2549026, #f0a3cd30);
+
   /* ══════ ② 语义槽 --ui-*（★ 主题插件只填这一层） ══════ */
   /* 表面：三档底色 ＋ 窗口底 */
   --ui-surface: var(--c-n-0);
@@ -99,6 +120,23 @@
   --ui-bg-blue: var(--c-blue-soft);
   --ui-bg-violet: var(--c-violet-soft);
   --ui-bg-gray: var(--c-gray-soft);
+  /* 身份色：主题只填这一层；块标/chip 的染色通道只引用它（arch 19 同款纪律） */
+  --ui-identity-red: var(--c-id-red);
+  --ui-identity-orange: var(--c-id-orange);
+  --ui-identity-yellow: var(--c-id-yellow);
+  --ui-identity-green: var(--c-id-green);
+  --ui-identity-cyan: var(--c-id-cyan);
+  --ui-identity-blue: var(--c-id-blue);
+  --ui-identity-purple: var(--c-id-purple);
+  --ui-identity-pink: var(--c-id-pink);
+  --ui-identity-red-soft: var(--c-id-red-soft);
+  --ui-identity-orange-soft: var(--c-id-orange-soft);
+  --ui-identity-yellow-soft: var(--c-id-yellow-soft);
+  --ui-identity-green-soft: var(--c-id-green-soft);
+  --ui-identity-cyan-soft: var(--c-id-cyan-soft);
+  --ui-identity-blue-soft: var(--c-id-blue-soft);
+  --ui-identity-purple-soft: var(--c-id-purple-soft);
+  --ui-identity-pink-soft: var(--c-id-pink-soft);
   /* 全屏遮罩（lightbox）：压暗页面，让唯一该看的东西浮起来。
      比 `--c-n-900` 更暗一档 —— 遮罩要盖住内容，不是与它同色。 */
   --ui-scrim: light-dark(rgba(20, 22, 26, 0.72), rgba(0, 0, 0, 0.82));

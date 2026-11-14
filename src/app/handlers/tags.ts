@@ -33,6 +33,13 @@ export const TAGS_HANDLERS: Record<string, Handler> = {
     const id = S(a.blockId) || curBlock(app)
     return id ? app.removeBlockRole(id, 'tag') : false
   },
+  /** 设身份色：`color` 缺省/空串 ＝ 摘色（无颜色是合法态） */
+  'core.block/set-color': (a, app) => {
+    const id = S(a.blockId) || curBlock(app)
+    if (!id) return false
+    const color = a.color === undefined || a.color === null ? null : S(a.color)
+    return app.setBlockColor(id, color)
+  },
   /**
    * 删除标签块：与「取消标签」是两条轴。
    * 取消只摘露面位（块与内容都还在）；删除连块带子树一起软删，回收站可恢复。

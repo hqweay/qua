@@ -12,6 +12,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { colorOf, faceOf, iconOf, mkTagBlock, tagsById, type Block } from '../src/core/index.ts'
 import { IDENTITY_COLORS, isColorValue } from '../src/core/model/model.ts'
 
@@ -107,4 +108,12 @@ test('色板是封闭集：8 色，判据与 model.ts 的 isColorValue 同一份
   assert.deepEqual([...IDENTITY_COLORS].sort(), ['blue', 'cyan', 'green', 'orange', 'pink', 'purple', 'red', 'yellow'])
   for (const c of IDENTITY_COLORS) assert.ok(isColorValue(c))
   assert.ok(!isColorValue('mauve'))
+})
+
+test('色板每个 key 在 tokens.css 都有一对身份 token（solid＋soft）——漏一个就是悬空引用', () => {
+  const css = readFileSync(new URL('../src/styles/tokens.css', import.meta.url), 'utf8')
+  for (const c of IDENTITY_COLORS) {
+    assert.ok(css.includes(`--ui-identity-${c}:`), `缺 --ui-identity-${c}`)
+    assert.ok(css.includes(`--ui-identity-${c}-soft:`), `缺 --ui-identity-${c}-soft`)
+  }
 })

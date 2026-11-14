@@ -17,6 +17,7 @@ import {
   cardLayoutOf,
   clickModsOf,
   blockLabel,
+  COLOR_PROP,
   groupsByStructure,
   openActionOf,
   prop,
@@ -474,7 +475,9 @@ export class ViewCards {
     if (r.tags.length > 0) {
       const tags = document.createElement('div')
       tags.className = 'vcard-tags'
-      for (const tag of r.tags) tags.appendChild(makeTagChipEl(tag.id, blockLabel(tag, this.kbFind), prop<string>(tag, '_icon')))
+      for (const tag of r.tags) {
+        tags.appendChild(makeTagChipEl(tag.id, blockLabel(tag, this.kbFind), prop<string>(tag, '_icon'), prop<string>(tag, COLOR_PROP)))
+      }
       meta.appendChild(tags)
     }
     const below = this.below.get(r.block.id)

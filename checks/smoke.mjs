@@ -28810,6 +28810,85 @@ await check('T302 块标＝脸位：标签行块标画 hash 且行无第二枚�
   return '标签行块标单件画 hash、行无第二枚身份图标；显式图标后块标/chip/候选行全跟随；缺省 hash 不上 chip'
 })
 
+/**
+ * T303 身份色的三态与回落。
+ *
+ * 钉四件：① 恰一个有色标签 ⇒ 成员块标借到色（solid）；② ≥2 个有色标签 ⇒ 块标点上是
+ * 色环（conic，按归属顺序）；③ chip 染各染各的标签色（soft 底），未配色的维持 accent；
+ * ④ 摘色回落——无颜色是合法态，摘掉后回到中性/accent，不是错误态。
+ * 走真写路径（`core.block/set-color`），不是带外改动。
+ */
+await check('T303 身份色：单色借色／多色环／chip 各染各色；摘色回落中性', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+
+  // 一个成员块挂两个标签，标签各配一色（走真写路径）
+  const info = await page.evaluate(() => {
+    const root = window.__qua.__editor.doc.roots[0]
+    const b = window.__qua.blocks().find((x) => x.id !== root.id && !x.roles?.includes('journal') && x.text.length > 2)
+    window.__qua.focusBlock(b.id, b.text.length)
+    window.__qua.invoke('core.editor/insert-tag', { tag: '色环甲' })
+    window.__qua.invoke('core.editor/insert-tag', { tag: '色环乙' })
+    const after = window.__qua.blocks().find((x) => x.id === b.id)
+    const tagId = (name) => window.__qua.allBlocks().find((x) => x.aliases.includes(name))?.id ?? ''
+    return { blockId: b.id, tagA: tagId('色环甲'), tagB: tagId('色环乙') }
+  })
+  assert(info.tagA && info.tagB, `两个标签都应建出来：${JSON.stringify(info)}`)
+
+  const dotOf = (id) =>
+    page.evaluate((blockId) => {
+      const marker = document.querySelector(`.blk[data-block-id="${blockId}"] > .left .marker`)
+      const s = getComputedStyle(marker, '::before')
+      return { bg: s.backgroundColor, img: s.backgroundImage }
+    }, id)
+
+  // 基线（染色前）：chip 是 accent 现状；成员块标点是中性
+  const chipOf = () =>
+    page.evaluate((blockId) => {
+      const el = document.querySelector(`.blk[data-block-id="${blockId}"] .blk-tags .tag-chip`)
+      const s = getComputedStyle(el)
+      return { bg: s.backgroundColor, fg: s.color }
+    }, info.blockId)
+  const chipBase = await chipOf()
+
+  // ② 两个有色标签 ⇒ 块标点是色环；chip 各染各的标签色（soft 底＋solid 字）
+  await page.evaluate(({ tagA, tagB }) => {
+    window.__qua.invoke('core.block/set-color', { blockId: tagA, color: 'red' })
+    window.__qua.invoke('core.block/set-color', { blockId: tagB, color: 'blue' })
+  }, info)
+  await page.waitForTimeout(150)
+  const ring = await dotOf(info.blockId)
+  assert(ring.img.includes('conic-gradient'), `两个有色标签 ⇒ 块标应是色环：${JSON.stringify(ring)}`)
+  const chips = await page.evaluate((blockId) => {
+    const list = [...document.querySelectorAll(`.blk[data-block-id="${blockId}"] .blk-tags .tag-chip`)]
+    return list.map((el) => {
+      const s = getComputedStyle(el)
+      return { bg: s.backgroundColor, fg: s.color }
+    })
+  }, info.blockId)
+  assert(chips.length === 2, `应有两枚 chip：${JSON.stringify(chips)}`)
+  assert(chips[0].bg !== chipBase.bg && chips[0].fg !== chipBase.fg, `第一枚 chip 应染甲的红（soft 底＋solid 字）：${JSON.stringify({ chips, base: chipBase })}`)
+  assert(chips[1].fg !== chips[0].fg, `第二枚 chip 染乙的蓝——各染各的标签色：${JSON.stringify(chips)}`)
+
+  // ① 摘掉一个色 ⇒ 恰一个有色标签 ⇒ 借色（solid，不是环）
+  await page.evaluate((tagB) => window.__qua.invoke('core.block/set-color', { blockId: tagB, color: '' }), info.tagB)
+  await page.waitForTimeout(150)
+  const solid = await dotOf(info.blockId)
+  assert(solid.img === 'none' && solid.bg !== 'rgba(0, 0, 0, 0)', `单色应借成 solid：${JSON.stringify(solid)}`)
+
+  // ④ 全部摘色 ⇒ 回落中性（无色三态），chip 回 accent
+  await page.evaluate((tagA) => window.__qua.invoke('core.block/set-color', { blockId: tagA, color: '' }), info.tagA)
+  await page.evaluate((tagB) => window.__qua.invoke('core.block/set-color', { blockId: tagB, color: '' }), info.tagB)
+  await page.waitForTimeout(150)
+  const plain = await dotOf(info.blockId)
+  assert(plain.img === 'none' && plain.bg !== solid.bg, `全部摘色应回到中性：${JSON.stringify(plain)}`)
+  const chipPlain = await chipOf()
+  assert(chipPlain.bg === chipBase.bg && chipPlain.fg === chipBase.fg, `chip 应回落 accent 现状：${JSON.stringify({ plain: chipPlain, base: chipBase })}`)
+
+  await ctx.close()
+  return '两个有色标签出色环、摘一个回落 solid 借色、chip 染各染各的标签色、全摘回落中性'
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

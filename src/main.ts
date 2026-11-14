@@ -7,7 +7,7 @@
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
-import { addAlias, addList, blockLabel, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, cardLayoutOf, propKindOf, propLabel, choicesOf, choicesFor, childDisplayProps, enginePropDefs, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec, withBlockOwnerData, VIEW_KIND_ICON, type StoredViewKind, type UndoKind, type ColorAxis } from './core/index.ts'
+import { addAlias, addList, blockLabel, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, COLOR_PROP, isColorValue, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, cardLayoutOf, propKindOf, propLabel, choicesOf, choicesFor, childDisplayProps, enginePropDefs, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec, withBlockOwnerData, VIEW_KIND_ICON, type StoredViewKind, type UndoKind, type ColorAxis } from './core/index.ts'
 import { choiceDisplayLabel, cardinalityOf, queryFieldsOf, singleValueOf, valueListOf } from './core/index.ts'
 import { openChoicePicker } from './app/choice-picker.ts'
 import { plainText } from './core/model/runs.ts'
@@ -1279,6 +1279,26 @@ function addBlockRole(blockId: string, role: 'page' | 'tag'): boolean {
 }
 
 /**
+ * **设身份色**（`_color`，色板封闭集）：空串/`null` ＝ 摘色——「无颜色」是合法态，
+ * 摘色回落中性，不是错误。色板外的值不写（值域由判据登记表把守）。
+ */
+function setBlockColor(blockId: string, color: string | null): boolean {
+  const b = findInForest(ws.blocks, blockId)
+  if (!b) return false
+  const value = color?.trim() ?? ''
+  if (value !== '' && !isColorValue(value)) return false
+  writeProps(blockId, () => {
+    const props = { ...(b.props ?? {}) }
+    if (value === '') delete props[COLOR_PROP]
+    else props[COLOR_PROP] = value
+    // 属性袋不留空壳（与摘标签同一口径）
+    if (Object.keys(props).length === 0) delete b.props
+    else b.props = props
+  })
+  return true
+}
+
+/**
  * 把一个块从某个列表里摘掉。
  *
  * 摘 `tag` 时**提示不阻止**（与删标签同一套形状）：成员与声明会失效，但**值一个字节不动**
@@ -2311,6 +2331,7 @@ const app: App = {
 
   addBlockRole: (blockId, role) => addBlockRole(blockId, role),
   removeBlockRole: (blockId, role) => removeBlockRole(blockId, role),
+  setBlockColor: (blockId, color) => setBlockColor(blockId, color),
   /**
    * 删除标签块。与「取消标签」是**两条轴**：取消只摘 `tag` 露面位（块与内容都还在），
    * 删除连块带子树一起软删（回收站可恢复）。

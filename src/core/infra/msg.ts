@@ -94,6 +94,7 @@ export const MSG = {
   'cmd.block.extract-to-page': '提取为页',
   'cmd.block.as-tag': '标记为标签',
   'cmd.block.untag': '取消标签标记',
+  'cmd.block.set-color': '设置身份色',
   'cmd.tag.delete': '删除标签',
   'cmd.block.edit-aliases': '别名与露面…',
   'cmd.anno.toggle-bold': '加粗',
