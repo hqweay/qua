@@ -542,7 +542,7 @@ export function makeCellEditor(
       if (current !== '') {
         const change = document.createElement('button')
         change.type = 'button'
-        change.className = 'prop-ref-change ghost'
+        change.className = 'prop-ref-change'
         change.dataset.tip = t('ui.props.refChange')
         change.setAttribute('aria-label', t('ui.props.refChange'))
         renderIcon(change, 'lucide:pencil', 'pencil', 'sm')
