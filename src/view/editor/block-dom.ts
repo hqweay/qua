@@ -533,7 +533,7 @@ export function fillBlockText(
    * （竖线不画、按键前把光标挪走，退格会把整行可编辑根摘掉，见 `posAt` 的注）。
    * 在原子后补一个**空文本节点**给光标站位：它是真文本节点，竖线画得出、按键落得进，
    * 但长度为 0 ⇒ 读数（`readRuns` 的空段跳过／`nodeLen`／`offsetIn`）天然把它当不存在，
-   * 模型一个字节不多。思源在模型里塞零宽字符解决同一问题，这里把代价留在渲染层。
+   * 模型一个字节不多。把零宽字符塞进模型是把渲染层的代价转嫁给数据，这里不这么做。
    */
   if (b.content.length > 0 && b.content[b.content.length - 1]!.t !== 'text') {
     const anchor = document.createElement('span')

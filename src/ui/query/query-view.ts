@@ -1023,7 +1023,7 @@ export class ViewHost {
     if (!query || view !== null) this.els.topCount.hidden = true
     this.els.refresh.hidden = !query
     /**
-     * **四轴一个面**：筛选/排序/分组/显示都从这一颗进（Tana 的工具栏也默认隐藏）。
+     * **四轴一个面**：筛选/排序/分组/显示都从这一颗进——工具栏默认隐藏是刻意的：
      * 派生栏没有可写配置（看法/分组由设备状态回答，挂载区自己画）⇒ 不给这一颗。
      */
     this.els.optionsBtn.hidden = Boolean(derived)

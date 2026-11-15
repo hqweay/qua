@@ -645,7 +645,7 @@ export function hasTabsBody(b: Block | undefined): boolean {
  * 曾经只有页签（容器型）就地画、记录型「打开才渲染」——分界是「同一批子块
  * 画两遍」＋「大纲里还要直接编辑子块结构」。前者随子块行让位消失（与页签
  * 同一条机制），后者由看法切换承担（身体的 chrome 就有看法切换器，切回大纲
- * 即见子块行）。用户拍板：原地也能渲染成卡片、思维导图等——插入一个看法，
+ * 即见子块行）。原地也能渲染成卡片、思维导图等——插入一个看法，
  * 退出聚焦后它不该无声。
  */
 export function hasChildrenViewBody(b: Block | undefined): boolean {
