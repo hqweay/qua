@@ -81,7 +81,9 @@ export const TRIGGER_RULES: readonly TriggerRule[] = [
       // 前面是字母/数字 ⇒ 这是 email 里的 @（`a@b.c`），不是「提及」
       if (at > 0 && /[A-Za-z0-9]/.test(text[at - 1]!)) return null
       const rest = text.slice(at + 1)
-      if (rest.length > TRIGGER_QUERY_MAX || /\s/.test(rest)) return null
+      // 查询词允许空格：它不落进正文（选中即整段换成引用），多词收窄（`@项目 计`）
+      // 是真实用法；这里没有语法要终止，退出手势是 Esc，不是空格。
+      if (rest.length > TRIGGER_QUERY_MAX) return null
       return rest
     },
   },

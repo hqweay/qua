@@ -48,12 +48,13 @@ test('detectTrigger：`#` 后面落了分隔符 ⇒ 这段语法结束（浮层�
   assert.equal(detectTrigger('##'), null, '`#` 之后又一个 `#` ⇒ 不认')
 })
 
-test('detectTrigger：`@` 前面是字母/数字就不弹（挡掉 email）', () => {
+test('detectTrigger：`@` 查询词允许空格（多词收窄；退出手势是 Esc，不是空格）', () => {
   assert.deepEqual(detectTrigger('@'), { ch: '@', from: 0, query: '' })
   assert.deepEqual(detectTrigger('提到 @页面'), { ch: '@', from: 3, query: '页面' })
+  assert.deepEqual(detectTrigger('@项目 计划'), { ch: '@', from: 0, query: '项目 计划' }, '带空格的名字一路打进查询词')
+  assert.deepEqual(detectTrigger('@页面 后面'), { ch: '@', from: 0, query: '页面 后面' }, '空格不终止 @ 的查询词（与 `/`／`#` 不同：@ 的查询词不落进正文）')
   assert.equal(detectTrigger('a@b.c'), null, 'email 里的 @ 不是触发')
   assert.equal(detectTrigger('user1@'), null)
-  assert.equal(detectTrigger('@页面 后面'), null, '查询词遇空白 ⇒ 结束')
 })
 
 test('detectTrigger：**最近的触发字符**说了算（不会把后敲的符号并进前一段查询词）', () => {
