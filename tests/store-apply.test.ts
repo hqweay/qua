@@ -130,6 +130,35 @@ test('撤销条目：超出合并窗口 ⇒ 两笔各占一格', () => {
   assert.equal(store.undoStack.depth(), 2, '超出窗口就不合并，两笔各占一格')
 })
 
+/**
+ * **粘贴是一下，不是连续打字的一段**：它既不并进前一条，后一条打字也不并进它。
+ *
+ * 真踩过：打了两个字紧接着粘贴一枚块引用（同一个 1200ms 窗口），两笔被合并，
+ * 按一次 ⌘Z 把刚打的字和刚贴的引用一起撤掉——用户读到的是「粘贴的东西撤不掉／撤销乱撤」。
+ */
+test('粘贴条目独占一步：不并进前一条打字，后一条打字也不并进它', () => {
+  const blocks = [mkBlock('目标')]
+  const store = new BlockStore(blocks)
+  const kb = new MemoryKb(store)
+  const target = blocks[0]!
+  const t0 = 1_000_000
+  const write = (s: string) => kb.tx((tx) => tx.patch(target.id, (b) => writeBlockContent(b, textRuns(s))))
+
+  store.record(write('见').undo, null, 'insert', t0)
+  assert.equal(store.undoStack.depth(), 1, '前置：打字落一条')
+  store.record(write('见引').undo, null, 'insert', t0 + 10, { standalone: true })
+  assert.equal(store.undoStack.depth(), 2, '紧接打字的粘贴必须独占一条（不并进上面那条打字）')
+  store.record(write('见引句').undo, null, 'insert', t0 + 20)
+  assert.equal(store.undoStack.depth(), 3, '粘贴之后再打字也不许并进这条原子动作')
+
+  store.undo('me', null)
+  assert.equal(plainText(target.content), '见引', '第一次撤销只撤掉粘贴之后打的字')
+  store.undo('me', null)
+  assert.equal(plainText(target.content), '见', '第二次撤销只撤掉粘贴本身，刚打的字还在')
+  store.undo('me', null)
+  assert.equal(plainText(target.content), '目标', '第三次才回到这一行最初的状态')
+})
+
 /* ------------------------------------------------------------ 真实按键链路 */
 
 /**

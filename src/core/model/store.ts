@@ -201,8 +201,14 @@ export class BlockStore {
   }
 
   /** 记一笔撤销：捕获来自事务出口（`capture === null` ＝ 这次动作没写过）。 */
-  record(capture: UndoCapture | null, sel: Sel | null, kind: UndoKind, at: number): boolean {
-    return this.undoStack.record(capture, sel, kind, at)
+  record(
+    capture: UndoCapture | null,
+    sel: Sel | null,
+    kind: UndoKind,
+    at: number,
+    opts: { standalone?: boolean } = {},
+  ): boolean {
+    return this.undoStack.record(capture, sel, kind, at, opts)
   }
 
   /** 记一笔**设备步**（不碰块的配置改动，如日记宿主的挂载栏）：栈只存闭包，调用在 undo/redo。 */

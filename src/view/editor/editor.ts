@@ -832,13 +832,16 @@ export class BlockEditor {
    *
    * 配对规则：有 `begin` 就按深度退；**没有配对的 `finish`**（历史上有些行内编辑
    * 在调用方已经开袋的情况下只调 finish）按老行为直接落条目，不静默吞掉。
+   *
+   * `standalone` 见 `UndoEntry.standalone`：粘贴这类原子动作要独占一步，
+   * 否则「打了几个字紧接着粘贴」会退成同一步。
    */
-  finishUndoEntry(kind: UndoKind, at = Date.now()): void {
+  finishUndoEntry(kind: UndoKind, at = Date.now(), opts: { standalone?: boolean } = {}): void {
     if (this.entryDepth > 0) {
       this.entryDepth--
       if (this.entryDepth > 0) return
     }
-    this.undo.record(this.entryCap, this.entrySel, kind, at)
+    this.undo.record(this.entryCap, this.entrySel, kind, at, opts)
     this.entryCap = null
   }
 

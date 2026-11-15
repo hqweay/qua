@@ -43,6 +43,14 @@ export interface UndoEntry extends UndoCapture {
    * 旧实现把这个值存在 `future` 栈的那份整库快照里；现在它只是一格，跟条目一起走。
    */
   redoSel?: Sel | null
+  /**
+   * **原子动作**：粘贴这类「用户按了一下，做完就是一步」的条目。
+   *
+   * 两边都不合并：它不并进前一条（否则「打了几个字，紧接着粘贴」会退成一步，
+   * 撤销把刚打的字一起吃掉），后一条也不并进它（粘贴后再打字同理）。
+   * 合并窗口只服务「连续同类编辑」，而粘贴是离散动作，不是连续编辑的一段。
+   */
+  standalone?: boolean
   /** 设备步（只由 `recordDevice` 产生；`before/after` 为空，块侧无 op） */
   device?: DeviceUndoStep
 }
@@ -71,11 +79,21 @@ export class UndoStack {
    * 连续格式操作算一步——色盘拖动逐 tick 落一笔 `mark`，合并窗口把一次拖动收成一步）。
    * 合并时**不新建条目**：`before` 保留第一次（撤销要回到开始打字之前），
    * `after` 用最后一次（重做要回到停手那一刻）；`sel` 也保留第一次。
+   *
+   * `standalone` ＝ 这一条是原子动作（粘贴等）：它两边都不参与合并（见 `UndoEntry.standalone`）。
    */
-  record(capture: UndoCapture | null, sel: Sel | null, kind: UndoKind, at: number): boolean {
+  record(
+    capture: UndoCapture | null,
+    sel: Sel | null,
+    kind: UndoKind,
+    at: number,
+    opts: { standalone?: boolean } = {},
+  ): boolean {
     const last = this.past[this.past.length - 1]
     const mergeable =
+      opts.standalone !== true &&
       last !== undefined &&
+      last.standalone !== true &&
       last.kind === kind &&
       (kind === 'insert' || kind === 'delete' || kind === 'mark') &&
       at - last.at <= this.mergeWindowMs
@@ -88,7 +106,7 @@ export class UndoStack {
       last.at = at
       return false
     }
-    this.past.push({ ...capture, sel, kind, at })
+    this.past.push({ ...capture, sel, kind, at, ...(opts.standalone === true ? { standalone: true } : {}) })
     if (this.past.length > 500) this.past.shift()
     return true
   }

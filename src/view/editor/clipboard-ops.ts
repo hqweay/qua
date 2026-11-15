@@ -69,26 +69,30 @@ export class ClipboardOps {
     if (bare) {
       const anchor = cut ? plainText(sliceRuns(loc.block.content, at, cutTo)).trim() : ''
       this.ed.beginUndoEntry()
-      const next = spliceRuns(loc.block.content, at, cutTo, [linkRunOf(bare, anchor)])
+      const inserted = linkRunOf(bare, anchor)
+      const next = spliceRuns(loc.block.content, at, cutTo, [inserted])
       // 与单行粘贴同档（把内容落进这一行）；原子各占 1 格 ⇒ 光标落在原子后面
       this.ed.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)), undefined, { directEdit: true })
-      this.ed.finishUndoEntry('insert')
+      this.ed.finishUndoEntry('insert', Date.now(), { standalone: true })
       this.ed.renderAll()
-      this.ed.placeCaret(id, at + 1)
+      this.ed.placeCaret(id, at + plainLen([inserted]))
       this.ed.emitChange('text')
       return
     }
     const lines = text.split('\n')
+    /** 首行要落进去的那组 run：**光标落点按它的 plain 宽度算**（原子只占 1 格），
+     *  不能拿原始文本长度——`((id))` 记号进来会变成一枚 1 格宽的引用原子。 */
+    const firstLine = this.runsWithRefs(lines[0]!)
     this.ed.beginUndoEntry()
     if (lines.length === 1) {
-      const next = spliceRuns(loc.block.content, at, cutTo, this.runsWithRefs(lines[0]!))
+      const next = spliceRuns(loc.block.content, at, cutTo, firstLine)
       // 单行粘贴与打字同档（把字落进这一行）；多行分支含拆块，归结构路径（下面不标记）
       this.ed.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)), undefined, { directEdit: true })
     } else {
       // 光标处切两半：首行接在左半后面，余下各成新块，**原右半接到最后一块尾部**
       const base = cut ? spliceRuns(loc.block.content, at, cutTo, []) : loc.block.content
       const [head, tail] = splitRuns(base, at)
-      const first = joinRuns(head, textRuns(lines[0]!))
+      const first = joinRuns(head, firstLine)
       const created: Block[] = []
       for (let i = 1; i < lines.length; i++) created.push(mkBlock(lines[i]!))
       const last = created[created.length - 1]!
@@ -107,9 +111,10 @@ export class ClipboardOps {
         created.forEach((c, i) => tx.insert(c, parentId, baseIndex + i))
       })
     }
-    this.ed.finishUndoEntry('insert')
+    // 粘贴是**用户按的一下**，不是「连续打字的下一次按键」：独占一个撤销条目
+    this.ed.finishUndoEntry('insert', Date.now(), { standalone: true })
     this.ed.renderAll()
-    this.ed.placeCaret(id, at + (lines[0]?.length ?? 0))
+    this.ed.placeCaret(id, at + plainLen(firstLine))
     this.ed.emitChange('text')
   }
 
@@ -216,9 +221,11 @@ export class ClipboardOps {
     const next = spliceRuns(loc.block.content, at, cutTo, runs)
     // 与单行粘贴同档：把内容落进这一行（directEdit，过内容闸的同一道豁口）
     this.ed.write((tx) => tx.patch(target.blockId, (b) => writeBlockContent(b, next)), undefined, { directEdit: true })
-    this.ed.finishUndoEntry('insert')
+    // 粘贴独占一步（不并进前后打字）：否则「打了字紧接着贴引用」按一次 ⌘Z 会连刚打的字一起吃掉
+    this.ed.finishUndoEntry('insert', Date.now(), { standalone: true })
     this.ed.renderAll()
-    this.ed.placeCaret(target.blockId, at + plainText(runs).length)
+    // 光标落在**引用后面**：原子在 plain 偏移里各占 1 格（`plainText` 投影不含原子，不能拿它算）
+    this.ed.placeCaret(target.blockId, at + plainLen(runs))
     this.ed.emitChange('text')
     return 'pasted'
   }
