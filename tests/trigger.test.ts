@@ -40,11 +40,13 @@ test('detectTrigger：URL 的 `#fragment` 不是标签语法（前面是链接�
   assert.deepEqual(detectTrigger('看这个页面 '), null, '没有触发字符')
 })
 
-test('detectTrigger：`#` 后面落了分隔符 ⇒ 这段语法结束（浮层该关，字留着）', () => {
-  // 敲到分隔符就不再是「正在输入的查询词」：`#名` 从此是正文里的几个字（Esc 兜底的那一支）
-  assert.equal(detectTrigger('#设计 '), null)
-  assert.equal(detectTrigger('#设计，后面'), null)
-  assert.equal(detectTrigger('# 设计'), null, '`#` 之后先空格 ⇒ 不是标签语法')
+test('detectTrigger：`#` 后面落了标点 ⇒ 这段语法结束（浮层该关，字留着）；空白不是分隔符', () => {
+  // 标点宣告「名字敲完了」：`#名` 从此是正文里的几个字（Esc 兜底的那一支）。
+  // 空白不再是分隔符：名字带空格是合法数据，多词查询要能一路打（与 `@` 同一口径）。
+  assert.deepEqual(detectTrigger('#项目 计划'), { ch: '#', from: 0, query: '项目 计划' }, '带空格的名字一路打进查询词')
+  assert.deepEqual(detectTrigger('#设计 '), { ch: '#', from: 0, query: '设计 ' }, '行尾空格不终止（与 `@` 同）；查询词由源头 trim')
+  assert.equal(detectTrigger('#设计，后面'), null, '标点分隔符落下 ⇒ 结束')
+  assert.equal(detectTrigger('# 设计'), null, '`#` 之后紧跟空白 ⇒ 还没开始敲')
   assert.equal(detectTrigger('##'), null, '`#` 之后又一个 `#` ⇒ 不认')
 })
 
@@ -64,7 +66,7 @@ test('detectTrigger：**最近的触发字符**说了算（不会把后敲的符
   // `#` 紧贴字母也成立（触发不再要求空格）；最近的那个字符说了算，不回头看 `@`
   assert.deepEqual(detectTrigger('@a#'), { ch: '#', from: 2, query: '' })
   assert.deepEqual(detectTrigger('@a#b'), { ch: '#', from: 2, query: 'b' })
-  assert.equal(detectTrigger('@a#b '), null, '`#b ` 的分隔符已经落下：这段语法结束，也不回头启用更早的 @')
+  assert.deepEqual(detectTrigger('@a#b '), { ch: '#', from: 2, query: 'b ' }, '行尾空格不终止（`#` 与 `@` 同口径）；判的是 `#` 那一段，没有回头启用更早的 @')
 })
 
 test('detectTrigger：查询词上限 20 字（超了就当作这段已经结束）', () => {

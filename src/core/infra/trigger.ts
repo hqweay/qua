@@ -69,7 +69,8 @@ export const TRIGGER_RULES: readonly TriggerRule[] = [
       }
       const hit = trailingHashTag(text, { allowEnd: true })
       if (!hit || hit.from !== at) return null
-      // 分隔符已经落进正文 ⇒ `#名` 敲完了，这一段不再是「正在输入的查询词」
+      // 标点分隔符已经落进正文 ⇒ `#名` 敲完了（空白不算分隔符：名字带空格合法），
+      // 这一段不再是「正在输入的查询词」
       if (hit.to !== text.length) return null
       if (hit.name.length > TRIGGER_QUERY_MAX) return null
       return hit.name

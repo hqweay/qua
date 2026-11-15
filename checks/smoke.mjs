@@ -5189,7 +5189,7 @@ await check('T58 敲 `#名` + 空格**不再**静默成标签：字原样留着�
   await openFirstPage(page)
 
   /**
-   * 这一条钉的是「打字路径＝提及／实例化，不是归类」：`#名` 敲到分隔符时**不再转换**。
+   * 这一条钉的是「打字路径＝提及／实例化，不是归类」：`#名` 敲完名字再敲空格**不再转换**。
    *
    * 判据必须是三件事**同时**没有：块归属（`_tags`）、行内原子、以及建出来的标签块。
    * 只做了一半（例如字删了、归属没写）用户看到的仍然是「一敲 `#` 就出 chip」，
@@ -5225,10 +5225,11 @@ await check('T58 敲 `#名` + 空格**不再**静默成标签：字原样留着�
   assert(got.tags.length === 0, `这次输入不该写块归属：${JSON.stringify(got.tags)}`)
   assert(got.atoms === 0, `不该凭空长出一枚原子：${got.atoms}`)
   assert(!got.tagCreated, '不该顺手建出标签块')
-  assert(got.layerOpen === 0, `分隔符落下之后浮层该自己关掉：${got.layerOpen}`)
+  // 空白不再是分隔符（名字带空格合法）：空格落进查询词，浮层保持开着，由 Esc 关
+  assert(got.layerOpen > 0, `空格之后浮层仍开着（查询词含空格）：${got.layerOpen}`)
 
   await ctx.close()
-  return `敲「#${tagName}」＋空格 ⇒ 正文原样、0 归属、0 原子、0 新标签块；浮层随分隔符关掉`
+  return `敲「#${tagName}」＋空格 ⇒ 正文原样、0 归属、0 原子、0 新标签块；浮层不随空格关（Esc 关）`
 })
 
 await check('T58b 属性面板挂/摘块标签：只写归属，正文不动', async () => {

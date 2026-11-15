@@ -232,11 +232,16 @@ test('mkTagBlock：名字进 `_aliases`（不带 #），正文是描述，露面
  * ⚠️ 识别与「落成归属」是两件事：这个函数只回答「这段正文里有没有一个刚闭合的名字」，
  *    删字、插原子、写 `_tags` 由编辑器在同一笔撤销里做完。
  */
-test('trailingHashTag：`#名字` **后面跟了分隔符**才成边（行尾不算）', () => {
-  // 空格：区间**不含**那个空格
-  assert.deepEqual(trailingHashTag('#设计 后面'), { name: '设计', from: 0, to: 3 })
-  assert.deepEqual(trailingHashTag('前面 #设计 '), { name: '设计', from: 3, to: 6 })
-  assert.deepEqual(trailingHashTag('#设计，后面'), { name: '设计', from: 0, to: 3 }, '中文标点也是分隔符')
+test('trailingHashTag：`#名字` **后面跟了标点**才成边（空白不是分隔符；行尾不算）', () => {
+  // 空白不是分隔符：名字带空格是合法数据（`项目 计划`），「敲完了」由标点宣告
+  assert.equal(trailingHashTag('#设计 后面'), null, '空格不闭合 ⇒ 还在敲（不带 allowEnd）')
+  assert.equal(trailingHashTag('前面 #设计 '), null, '同上')
+  assert.deepEqual(
+    trailingHashTag('#项目 计划', { allowEnd: true }),
+    { name: '项目 计划', from: 0, to: 6 },
+    '多词名字在 allowEnd（还在敲）口径下整体是名字',
+  )
+  assert.deepEqual(trailingHashTag('#设计，后面'), { name: '设计', from: 0, to: 3 }, '中文标点是分隔符')
   assert.deepEqual(trailingHashTag('a #b,c'), { name: 'b', from: 2, to: 4 }, '英文逗号同样分隔')
 })
 
@@ -256,13 +261,13 @@ test('trailingHashTag：没闭合 / 空名字 / 没有 # ⇒ 不认', () => {
   assert.equal(trailingHashTag('没有井号'), null)
   assert.equal(trailingHashTag('#'), null, '光一个 # 不成边（否则打井号要先打空格）')
   assert.equal(trailingHashTag('# 设计'), null, '# 之后直接空白 ⇒ 没有名字')
-  // 数字也是合法的标签名：`价格 #1 `（后面有空格）就成边。
-  // 要不要允许由产品决定，但**识别层不该替它猜**——「是不是数字」是另一层的事。
-  assert.deepEqual(trailingHashTag('价格 #1 '), { name: '1', from: 3, to: 5 })
+  // 数字也是合法的标签名。要不要允许由产品决定，但**识别层不该替它猜**——
+  // 「是不是数字」是另一层的事。（空格不再闭合：`价格 #1 ` 现在还在敲。）
+  assert.equal(trailingHashTag('价格 #1 '), null, '空格不闭合')
 })
 
 test('trailingHashTag：只取**最后一个**（刚写完的那个）', () => {
-  const got = trailingHashTag('#甲 #乙 ')
+  const got = trailingHashTag('#甲 #乙', { allowEnd: true })
   assert.deepEqual(got, { name: '乙', from: 3, to: 5 }, '先写的那个不该被重复处理')
 })
 
@@ -273,8 +278,8 @@ test('trailingHashTag：只取**最后一个**（刚写完的那个）', () => {
  * 不靠边界猜用户想不想弹（`C#` 这类正文由 `Esc` 退出）。
  */
 test('trailingHashTag：`#` 紧跟字后面也算（触发不再要求空格）；URL fragment 仍不算', () => {
-  assert.deepEqual(trailingHashTag('a#b '), { name: 'b', from: 1, to: 3 })
-  assert.deepEqual(trailingHashTag('中文#设计 '), { name: '设计', from: 2, to: 5 })
+  assert.equal(trailingHashTag('a#b '), null, '空格不闭合 ⇒ 还在敲')
+  assert.equal(trailingHashTag('中文#设计 '), null, '同上')
   assert.equal(trailingHashTag('https://x.dev/#anchor '), null, 'URL 的 fragment 不是标签')
   assert.deepEqual(trailingHashTag('（#设计）').name, '设计', '标点之后算数：中文里不空一格也常见')
 })
