@@ -309,10 +309,9 @@ export function setupPanels(deps: PanelsDeps) {
       if (label.kind === 'blocks') {
         const names = refDomainNames(label, refLabelOf)
         if (names.length === 0) return t('ui.props.pickRefDangling')
-        // 三个以内念名字（能对上 chip）；再多就只报数量，别拿一串名字把抬头撑爆
-        return names.length <= 3
-          ? t('ui.props.pickRefScopedBlocks', { names: names.join('、') })
-          : t('ui.props.pickRefScopedBlocksCount', { n: String(names.length) })
+        // **不念块名**：清单就是眼前这几行，再抄一遍名字只把抬头撑长——块名可以是整段正文
+        // （实测一条清单就把抬头挤成三行），而对「为什么只有这几行」的答案，数量已经说完了。
+        return t('ui.props.pickRefScopedBlocksCount', { n: String(names.length) })
       }
       return kb.get(label.id)
         ? t('ui.props.pickRefScopedQuery', { name: refLabelOf(label.id) })

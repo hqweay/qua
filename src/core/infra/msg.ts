@@ -433,7 +433,6 @@ export const MSG = {
   // ref 的候选域（`_refDomain`）＝**默认范围**：只收窄空查询时的候选列表（找起来短），
   // 一输入查询词就搜全库；已引用的块在任何时候都不受它影响
   'ui.props.pickRefScoped': '选择一个块 · 默认在 {tags} 里',
-  'ui.props.pickRefScopedBlocks': '选择一个块 · 默认在 {names} 里',
   'ui.props.pickRefScopedBlocksCount': '选择一个块 · 默认在这 {n} 个块里',
   'ui.props.pickRefScopedQuery': '选择一个块 · 默认在查询「{name}」的结果里',
   'ui.props.pickRefDangling': '选择一个块 · 默认范围已失效（暂不限）',

@@ -29445,7 +29445,7 @@ await check('T306 自定义色：色盘选 hex 写入并进最近色；chip soft
  * ⚠️ 失败方式要能分辨：候选没被收窄（域写了没人读）、或存量值被过滤掉（软约束做成了硬校验）
  *    —— 一个是漏接，一个是越线，两者的现象都是「列表不对」，但结论相反。
  */
-await check('T309 ref 的候选域：四档切换；标签档过滤候选；手选块＝清单即候选（不列标签块、已选不再出现、抬头念名字、日记块显示日期）；新建并引用；存量值不受约束影响', async () => {
+await check('T309 ref 的候选域：四档切换；标签档过滤候选；手选块＝清单即候选（不列标签块、已选不再出现、抬头只报数量、日记块显示日期）；新建并引用；存量值不受约束影响', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
@@ -29622,7 +29622,7 @@ await check('T309 ref 的候选域：四档切换；标签档过滤候选；手�
   )
   assert(unchanged?.kind === 'tags', '取消选择不改存储（控件不许比存储先说）：' + JSON.stringify(unchanged))
 
-  // ⑦ 手选两个块 ⇒ 清单就是候选（不是子树）；已选的不再出现；抬头念名字、只有这两个
+  // ⑦ 手选两个块 ⇒ 清单就是候选（不是子树）；已选的不再出现；抬头只报数量、不念块名
   const pickBlock = async (name) => {
     await page.evaluate(() => {
       const sel = document.querySelector('.prop-ref-mode')
@@ -29678,7 +29678,10 @@ await check('T309 ref 的候选域：四档切换；标签档过滤候选；手�
     head: document.querySelector('.layer-head')?.textContent ?? '',
     labels: [...document.querySelectorAll('.layer-item .layer-label')].map((e) => e.textContent ?? ''),
   }))
-  assert(scoped.layer && scoped.head.includes('候选甲') && scoped.head.includes('候选乙'), '抬头应念出清单里的块名：' + JSON.stringify(scoped.head))
+  assert(
+    scoped.layer && scoped.head.includes('2 个块') && !scoped.head.includes('候选甲') && !scoped.head.includes('候选乙'),
+    '指定块的抬头只报数量、不念块名（块名能是整段正文，会把抬头撑爆）：' + JSON.stringify(scoped.head),
+  )
   assert(
     scoped.labels.some((x) => x.includes('候选甲')) &&
       scoped.labels.some((x) => x.includes('候选乙')) &&
@@ -29708,7 +29711,7 @@ await check('T309 ref 的候选域：四档切换；标签档过滤候选；手�
   assert(!dayChip[0].includes(journalId.slice(0, 4)), 'chip 里不许出现裸 id：' + JSON.stringify(dayChip[0]))
 
   await ctx.close()
-  return `定义页按 #演员 ⇒ 默认候选只剩成员（标题说「默认」）；输入查询词能搜到范围外的块；新建并引用；范围外的值仍显示；手选块＝清单即候选、已选的不再出现、抬头念名字；日记块 chip 显示日期不露 id`
+  return `定义页按 #演员 ⇒ 默认候选只剩成员（标题说「默认」）；输入查询词能搜到范围外的块；新建并引用；范围外的值仍显示；手选块＝清单即候选、已选的不再出现、抬头只报数量；日记块 chip 显示日期不露 id`
 })
 
 /**
