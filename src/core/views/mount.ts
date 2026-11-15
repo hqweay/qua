@@ -26,11 +26,11 @@
  *    tab 上的字：local 用它自己的 label，derived 由 UI 按 `source` 查字典。
  */
 import { uuidv7Hex } from '../model/ids.ts'
-import { isJournal, journalDate, todayISO } from '../identity/journal.ts'
+import { dayStartMs, isJournal, journalDate, shiftISO, todayISO } from '../identity/journal.ts'
 import { displayTextOf } from '../identity/alias.ts'
 import { hasList, primaryAliasOf, prop, type Block } from '../model/model.ts'
 import { tagIdsOf } from '../identity/tags.ts'
-import { isPropDef } from '../props/props.ts'
+import { ENGINE_CREATED, isPropDef } from '../props/props.ts'
 import { descendantTagIds } from '../identity/tag-tree.ts'
 import { plainText } from '../model/runs.ts'
 import { walkForest } from '../model/walk.ts'
@@ -43,6 +43,7 @@ import {
   canonicalViews,
   cloneViews,
   mkViewId,
+  CREATED_COLUMN,
   MATCHED_COLUMN,
   MODIFIED_COLUMN,
   PATH_COLUMN,
@@ -72,16 +73,17 @@ export const MOUNTS_PROP = '_mounts'
 export type MountHost = { kind: 'block'; blockId: string } | { kind: 'journal' }
 
 /**
- * 内置四栏的来源（**宿主现算**，没有配置）。
+ * 内置栏的来源（**宿主现算**，没有配置）。
  *
  * `refs`／`mentions` 是任何宿主都有的问题；`members` 只属于标签块（谁归我管），
- * `same` 只属于非日记块（谁和我同类）。后两者**不再合并**：
- * 「我的成员」与「和我同标签的块」是两个问题，合并会让标签页的「同类」名不副实。
+ * `same` 只属于非日记块（谁和我同类），`created` 只属于日记（那一天新开了什么）。
+ * 后三者**不再合并**：「我的成员」「和我同标签的块」「创建于我这一天」是三个问题，
+ * 合并会让其中一些名字不副实。
  *
  * **规范顺序**：这个数组同时是「没拖过时的默认序」。拖过的顺序住 `_mounts` 的数组位
  * （整条 tab 条一条顺序）；派生栏没有配置，落进去的只是位置标记。
  */
-export const DERIVED_SOURCES = ['usedBy', 'members', 'refs', 'notes', 'same', 'mentions'] as const
+export const DERIVED_SOURCES = ['usedBy', 'members', 'refs', 'created', 'notes', 'same', 'mentions'] as const
 export type DerivedSource = (typeof DERIVED_SOURCES)[number]
 
 /**
@@ -257,7 +259,8 @@ const SPEC_MENTIONS: QuerySpec = { where: { all: [{ text: '$self' }, { not: { re
  * 集合：
  *   · 标签块：成员 → 引用 → 备注 → 同类 → 提及；
  *   · 普通块：引用 → 备注 → 同类 → 提及；
- *   · 日记：引用 → 备注 → 提及（日期身份不参与标签归属，不挂一个永远空的「同类」）。
+ *   · 日记：引用 → 当日新建 → 备注 → 提及（日期身份不参与标签归属，不挂一个永远空的「同类」；
+ *     「当日新建」是复盘那个问题——「这一天我新开了什么」——的落点）。
  *
  * 这是**规范序**（没拖过时的默认）。拖过的顺序住 `_mounts`（宿主那一格 tab 列表）：
  * 派生栏也是那条列表里的项，见 `mountEntriesOf` 的合并规则。
@@ -268,6 +271,7 @@ export function derivedEntriesOf(host: Block): Extract<MountEntry, { kind: 'deri
   if (isPropDef(host)) out.push({ id: derivedTabId('usedBy'), kind: 'derived', source: 'usedBy' })
   if (hasList(host, 'tag')) out.push({ id: derivedTabId('members'), kind: 'derived', source: 'members' })
   out.push({ id: derivedTabId('refs'), kind: 'derived', source: 'refs' })
+  if (isJournal(host)) out.push({ id: derivedTabId('created'), kind: 'derived', source: 'created' })
   out.push({ id: derivedTabId('notes'), kind: 'derived', source: 'notes' })
   if (!isJournal(host)) out.push({ id: derivedTabId('same'), kind: 'derived', source: 'same' })
   out.push({ id: derivedTabId('mentions'), kind: 'derived', source: 'mentions' })
@@ -294,6 +298,7 @@ export function derivedSpecOf(host: Block, forest: readonly Block[], source: Der
    */
   if (source === 'usedBy') return { where: { prop: { id: host.id, exists: true } } }
   if (source === 'refs') return SPEC_REFS
+  if (source === 'created') return isJournal(host) ? createdSpecOf(host) : null
   if (source === 'mentions') return displayTextOf(host) === '' ? null : SPEC_MENTIONS
   if (source === 'members') return memberSpecOf(host, forest)
   return sameSpecOf(host)
@@ -319,6 +324,33 @@ function sameSpecOf(host: Block): QuerySpec | null {
 }
 
 /**
+ * 「当日新建」＝ 创建时间落在**宿主那一天**（`[当天零点, 次日零点)`，本地时区）且是页或标签。
+ *
+ * 一天是**时间坐标**，不是容器：块不是「放进」那一天的，是「创建于」那个坐标里的——
+ * 所以这道题只能以宿主的日期为参数对全库查询（`created` 是必填字段，事实已在库里），
+ * 不给块加「归属某天」的登记。集合限页与标签是**务实截断**（今天日常流真实产生的身份事件；
+ * 天壳没有页/标签露面，天然不混进来），新身份种类要进这一栏时在 `any` 里续支。
+ *
+ * ⚠️ 条件只用既有原子拼（role ＋ stamp 的 `all:[gte,lt)` 形态），物化后条件树可编辑。
+ */
+function createdSpecOf(host: Block): QuerySpec {
+  const date = journalDate(host)
+  return {
+    where: {
+      all: [
+        { any: [{ role: 'page' }, { role: 'tag' }] },
+        {
+          all: [
+            { prop: { id: ENGINE_CREATED, gte: dayStartMs(date) } },
+            { prop: { id: ENGINE_CREATED, lt: dayStartMs(shiftISO(date, 1)) } },
+          ],
+        },
+      ],
+    },
+  }
+}
+
+/**
  * 派生栏的**一行**：来源块 ＋ 这一栏特有的派生列。
  *
  * 三条口径：
@@ -335,6 +367,7 @@ export function derivedRecordsOf(host: Block, kb: KbClient, source: DerivedSourc
   const hits = kb.query(spec, { selfId: host.id, excludeIds: [host.id] })
   const rows = resolveRows(hits, kb)
   if (source === 'refs') return refRecords(host, kb, rows)
+  if (source === 'created') return rows
   if (source === 'members') return memberRecords(host, kb, rows)
   if (source === 'mentions') return mentionRecords(host, kb)
   const own = new Set(kb.tagsOf(host.id).map((t) => plainText(t.content)))
@@ -547,7 +580,9 @@ export function derivedDisplayProps(source: DerivedSource): string[] {
           ? [VIA_COLUMN]
           : source === 'mentions'
             ? [MATCHED_COLUMN]
-            : [SHARED_TAGS_COLUMN]
+            : source === 'created'
+              ? [CREATED_COLUMN]
+              : [SHARED_TAGS_COLUMN]
   return [PATH_COLUMN, ...special, MODIFIED_COLUMN]
 }
 

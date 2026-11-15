@@ -145,10 +145,10 @@ export type QueryNode =
    *    不再是 `{journal:日期}`，而是 `{up:{all:[{role:'journal'},{prop:{_date,eq}}]}}`：
    *    方向与条件正交之后，它可进 `any`／`not`，也不偷换候选集。
    * ⚠️ 逐值分发到**既有唯一判据**，不另设第二份答案：journal 的判据只有「`_date` 在不在」，
-   *    page 的判据只有「`_lists` 里有没有 `page`」——身份由数据推出，查询问的就是这份判据。
-   *    `tag` 留轴，有真消费者时在此续支。
+   *    page／tag 的判据只有「`_lists` 里有没有对应露面」——身份由数据推出，查询问的就是这份判据。
+   *    `tag` 的续支由日记的内置栏「当日新建」兑现（它要问「今天开的页或标签」）。
    */
-  | { role: 'journal' | 'page' }
+  | { role: 'journal' | 'page' | 'tag' }
   /**
    * **正文里存在一段带这组 marks 的内容**（run.marks ⊇ 给定键值，子集匹配）。
    *
@@ -805,9 +805,10 @@ export function createMatcher(forest: readonly Block[], env: QueryEnv): Matcher 
 }
 
 /** role 逐值分发到**既有唯一判据**，不另设第二份答案；进新值域时在此续支 */
-function roleMatches(role: 'journal' | 'page', b: Block): boolean {
+function roleMatches(role: 'journal' | 'page' | 'tag', b: Block): boolean {
   if (role === 'journal') return isJournalBlock(b)
   if (role === 'page') return hasList(b, 'page')
+  if (role === 'tag') return hasList(b, 'tag')
   return false
 }
 

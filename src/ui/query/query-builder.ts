@@ -134,7 +134,7 @@ function rowSentence(row: TreeRow, deps: ConditionTextDeps): string {
       return `${t('ui.query.prefix.is')} ${targetText(row.target, deps)}`
     case 'role':
       // 身份用名词直出（「日记」），不垫系动词——「是」是给模型看的区分
-      return t(row.role === 'page' ? 'ui.query.role.page' : 'ui.query.role.journal')
+      return t(row.role === 'page' ? 'ui.query.role.page' : row.role === 'tag' ? 'ui.query.role.tag' : 'ui.query.role.journal')
     case 'mark':
       return t('ui.query.chip.mark', { marks: markPhrase(row.value) })
     case 'link':

@@ -1367,11 +1367,13 @@ export function setupPanels(deps: PanelsDeps) {
           const explainKey =
             entry.source === 'refs'
               ? 'ui.mount.why.refs'
-              : entry.source === 'members'
-                ? 'ui.mount.why.members'
-                : entry.source === 'same'
-                  ? 'ui.mount.why.same'
-                  : 'ui.mount.why.mentions'
+              : entry.source === 'created'
+                ? 'ui.mount.why.created'
+                : entry.source === 'members'
+                  ? 'ui.mount.why.members'
+                  : entry.source === 'same'
+                    ? 'ui.mount.why.same'
+                    : 'ui.mount.why.mentions'
           return asBody(
             createView({ kind: 'block', blockId: mountHostBlock.id }, mountHostBlock, undefined, {
               // 哪个非大纲看法，烤进这份派生模式里（配置由视图宿主现造，不落盘）

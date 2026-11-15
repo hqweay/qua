@@ -581,10 +581,11 @@ export class QueryTree {
             [
               { value: 'journal', label: t('ui.query.role.journal') },
               { value: 'page', label: t('ui.query.role.page') },
+              { value: 'tag', label: t('ui.query.role.tag') },
             ],
             row.role,
             (next) => {
-              row.role = next === 'page' ? 'page' : 'journal'
+              row.role = next === 'page' ? 'page' : next === 'tag' ? 'tag' : 'journal'
               this.paint()
             },
             'qt-value',

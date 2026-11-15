@@ -37,7 +37,7 @@ export type TreeRow =
    */
   | { kind: 'ref'; target: string; kinds?: readonly RefKind[] }
   | { kind: 'is'; target: string }
-  | { kind: 'role'; role: 'journal' | 'page' }
+  | { kind: 'role'; role: 'journal' | 'page' | 'tag' }
   /**
    * **正文里有一段带这组 marks 的内容**（`{mark}` 原子，子集匹配）。
    *
@@ -290,7 +290,9 @@ export function treeRowOf(node: QueryNode): TreeRow | null {
   }
   if ('link' in node) return { kind: 'link', url: node.link.url ?? '' }
   if ('role' in node) {
-    return node.role === 'journal' || node.role === 'page' ? { kind: 'role', role: node.role } : null
+    return node.role === 'journal' || node.role === 'page' || node.role === 'tag'
+      ? { kind: 'role', role: node.role }
+      : null
   }
   if (!('prop' in node)) return null
 

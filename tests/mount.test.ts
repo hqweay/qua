@@ -17,6 +17,7 @@ import {
   canonicalMountEntries,
   cloneMountEntries,
   cloneSubtree,
+  dayStartMs,
   derivedEntriesOf,
   derivedRecordsOf,
   derivedSpecOf,
@@ -26,6 +27,7 @@ import {
   REF_COUNT_COLUMN,
   MATCHED_COLUMN,
   SHARED_TAGS_COLUMN,
+  CREATED_COLUMN,
   PATH_COLUMN,
   derivedTabId,
   isMountsValue,
@@ -197,14 +199,37 @@ test('U19 过去的日记天没有用户栏，但顺序跟着那条共享 tab �
     { id: 'mentions', kind: 'derived', source: 'mentions' },
     { id: 'refs', kind: 'derived', source: 'refs' },
   ]
-  // 用户栏只钉了两条位置标记；没标记的派生来源（备注）插在标记之后
-  assert.deepEqual(SOURCES(mountEntriesOf(old, { journalMounts: prefs, now: NOW })), ['mentions', 'refs', 'notes'])
-  assert.deepEqual(SOURCES(mountEntriesOf(journal, { journalMounts: prefs, now: NOW })), ['mentions', 'refs', 'notes'])
+  // 用户栏只钉了两条位置标记；没标记的派生来源（当日新建、备注）按规范序插在标记之后
+  assert.deepEqual(SOURCES(mountEntriesOf(old, { journalMounts: prefs, now: NOW })), ['mentions', 'refs', 'created', 'notes'])
+  assert.deepEqual(SOURCES(mountEntriesOf(journal, { journalMounts: prefs, now: NOW })), ['mentions', 'refs', 'created', 'notes'])
 })
 
-test('U11 日记的栏序列 ＝ 引用 ＋ 备注 ＋ 提及（它有日期投影、没有标签）', () => {
-  const { journal, blocks } = fixture()
-  assert.deepEqual(SOURCES(mountEntriesOf(journal, { now: NOW })), ['refs', 'notes', 'mentions'])
+test('U11 日记的栏序列 ＝ 引用 ＋ 当日新建 ＋ 备注 ＋ 提及（它有日期投影、没有标签）', () => {
+  const { journal } = fixture()
+  assert.deepEqual(SOURCES(mountEntriesOf(journal, { now: NOW })), ['refs', 'created', 'notes', 'mentions'])
+})
+
+test('当日新建：条件＝身份（页∨标签）∧ created 落在宿主那一天；非日记宿主没有这一维度', () => {
+  const { journal, host, blocks } = fixture()
+  const spec = derivedSpecOf(journal, blocks, 'created')
+  assert.notEqual(spec, null)
+  const where = (spec as { where: { all: unknown[] } }).where
+  assert.deepEqual(where.all![0], { any: [{ role: 'page' }, { role: 'tag' }] }, '身份轴：页或标签')
+  // 时间轴与条件树「时间行」同一形态：[当天零点, 次日零点) 两条毫秒条件
+  assert.deepEqual((where.all![1] as { all: unknown[] }).all, [
+    { prop: { id: 'core/created', gte: dayStartMs('2026-10-26') } },
+    { prop: { id: 'core/created', lt: dayStartMs('2026-10-27') } },
+  ])
+  assert.equal(derivedSpecOf(host, blocks, 'created'), null, '非日记宿主没有「那一天」可指')
+  // 物化：条件可编辑（条件树认 role 与 stamp 行），表格默认带创建时间列
+  const tpl = derivedTemplateOf(journal, blocks, 'created')
+  assert.deepEqual(tpl?.spec, spec)
+  assert.ok(tpl?.views[0]!.displayProps?.includes(CREATED_COLUMN), '当日新建模板带创建时间列')
+})
+
+test('日记宿主不挂「当日新建」之外的序列变化：普通块四栏不含它', () => {
+  const { host } = fixture()
+  assert.equal(SOURCES(derivedEntriesOf(host)).includes('created'), false, '「那一天」只对日记成立')
 })
 
 test('普通块：四栏常驻（有标签、有可读文本都不再决定 tab 出不出）', () => {
@@ -354,6 +379,25 @@ test('派生栏记录：提及填命中词、同类填共同标签；两者都�
 
   // 派生值不写回块：同一个 kb 再读，块上没有任何新属性
   assert.deepEqual(Object.keys(kb.get('m')!.props ?? {}), ['_tags'])
+})
+
+test('派生栏记录：当日新建＝那一天创建的页与标签；无身份的子弹与别天的页不进', async () => {
+  const day = '2026-10-26'
+  const at = dayStartMs(day) + 3_600_000
+  const journal = b('j', '', { props: { _date: day }, created: at, modified: at })
+  const page = b('p', '新页', { props: { _aliases: ['新页'], _lists: ['page'] }, created: at, modified: at })
+  const tag = mkTagBlock('新标签')
+  tag.created = at
+  tag.modified = at
+  const plain = b('plain', '普通子弹', { created: at, modified: at })
+  const oldPage = b('op', '旧页', { props: { _aliases: ['旧页'], _lists: ['page'] }, created: 1, modified: 1 })
+  const store = new BlockStore([journal, page, tag, plain, oldPage] as Block[])
+  const kb = new MemoryKb(store)
+
+  const hits = derivedRecordsOf(kb.get('j')!, kb, 'created').map((r) => r.block.id).sort()
+  assert.deepEqual(hits, [page.id, tag.id].sort(), '只收那一天创建的身份块（页∨标签）')
+  // 宿主自己（那天物化的天壳）不在列
+  assert.equal(hits.includes('j'), false)
 })
 
 /* ------------------------------------------------------------ 改名（`core.mount/rename`）*/

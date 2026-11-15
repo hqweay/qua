@@ -1131,6 +1131,19 @@ test('role 条件按值分发：page 问「露面里有没有 page」，未知�
   assert.deepEqual(runQuery(unknown, { blocks }), [], '未知 role 不命中（不抛，形状宽容、语义拒绝）')
 })
 
+test('role 条件按值分发：tag 问「露面里有没有 tag」——与 page 同一份判据（hasList）', () => {
+  const { blocks } = fixture()
+  const spec: QuerySpec = { where: { role: 'tag' } }
+  const direct = runQuery(spec, { blocks }).map((h) => h.blockId)
+  assert.deepEqual(queryByIndex(rebuild(blocks), blocks, spec, {}), runQuery(spec, { blocks }), '两条路径同解')
+  const viaAny = runQuery({ where: { any: [{ role: 'page' }, { role: 'tag' }] } }, { blocks }).map((h) => h.blockId)
+  assert.deepEqual(
+    [...new Set([...direct, ...viaAny])].length,
+    viaAny.length,
+    'any(page, tag) 的并集不重不漏',
+  )
+})
+
 test('相对时间窗：{rel:{days}} 对 env.today 现算（存表达式，隔天自然换窗）', () => {
   const at = Date.now()
   const mk = (id: string, modified: number) => ({

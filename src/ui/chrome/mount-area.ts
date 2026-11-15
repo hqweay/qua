@@ -187,6 +187,7 @@ interface MountRoots {
 export const BUILTIN_LABEL: Record<DerivedSource, MsgId> = {
   usedBy: 'ui.mount.usedBy',
   refs: 'ui.mount.refs',
+  created: 'ui.mount.created',
   notes: 'ui.mount.notes',
   members: 'ui.mount.members',
   same: 'ui.mount.same',
@@ -202,6 +203,7 @@ const EMPTY_TEXT: Record<MountEntry['kind'], MsgId> = {
 const DERIVED_EMPTY: Record<DerivedSource, MsgId> = {
   usedBy: 'ui.mount.empty.usedBy',
   refs: 'ui.mount.empty.refs',
+  created: 'ui.mount.empty.created',
   notes: 'ui.mount.empty.notes',
   members: 'ui.mount.empty.members',
   same: 'ui.mount.empty.same',
@@ -212,6 +214,7 @@ const DERIVED_EMPTY: Record<DerivedSource, MsgId> = {
 const DERIVED_WHY: Record<DerivedSource, MsgId> = {
   usedBy: 'ui.mount.why.usedBy',
   refs: 'ui.mount.why.refs',
+  created: 'ui.mount.why.created',
   notes: 'ui.mount.why.notes',
   members: 'ui.mount.why.members',
   same: 'ui.mount.why.same',
