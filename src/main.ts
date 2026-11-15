@@ -1744,8 +1744,12 @@ function openSpecPopover(opts: {
   spec: () => QuerySpec
   showOptions?: boolean
   onApply: (spec: QuerySpec) => void
-  /** 这批结果的覆盖率（字段下拉按它排序；不给＝全量平铺，现状） */
-  coverage?: () => FieldCoverage | undefined
+  /**
+   * 这批结果的覆盖率（字段下拉按它排序；不给／批次为空＝全量平铺，现状）。
+   * `batch` 是条件树草稿里**已圈出的那批块**（未完成行已摘掉）——覆盖率跟草稿走，
+   * 不跟已存储的 spec：弹层树点「应用」才落，跟存储值会让刚加的行参与不了收窄。
+   */
+  coverage?: (batch: QuerySpec) => FieldCoverage | undefined
 }): void {
   const hostId =
     opts.owner.kind === 'block'
@@ -1759,7 +1763,7 @@ function openSpecPopover(opts: {
       spec: opts.spec,
       // 条件树的字段候选只有一份（`core/query-fields.ts`）：属性定义 ＋ 有值控件的系统槽；
       // 有覆盖率时按「这批结果里真有值的栏」排前（与分组下拉同一条原则）
-      fields: () => queryFieldsOf(kb.roots(), opts.coverage?.()),
+      fields: (batch) => queryFieldsOf(kb.roots(), batch ? opts.coverage?.(batch) : undefined),
       /**
        * `select` 的选项：**定义块的直接子块，全量、排除软删**。
        * 不按某一块的可选范围收窄（`choicesForDef`）—— 查询是跨块的，
@@ -2367,8 +2371,12 @@ const app: App = {
             ? (owners.read(owner)?.defaultFilter ?? { any: [] })
             : (owners.read(owner)?.views.find((v) => v.id === viewId)?.filter ?? { any: [] }),
       }),
-      /** 覆盖率分母＝这个拥有者显示的那批块（children 现读；query 现算） */
-      coverage: () => {
+      /**
+       * 覆盖率分母＝这个拥有者显示的那批块（children 现读；query 现算）。
+       * ⚠️ **不收草稿批次**：切片编辑的是筛选，批次按 187 D4 同款口径——筛选生效后不缩，
+       * 否则摘掉一颗条件、字段下拉的覆盖率跟着变。
+       */
+      coverage: (_batch) => {
         const d = owners.read(owner)
         if (!d) return undefined
         const src = sourceOfOwner(owner, d, owner.kind === 'block' ? (blocks.find(owner.blockId) ?? undefined) : undefined)
@@ -2406,11 +2414,8 @@ const app: App = {
       owner,
       anchor,
       spec: () => owners.read(owner)?.query ?? { where: { any: [] } },
-      /** 覆盖率分母＝查询自己的结果集（条件还没圈出块时 ⇒ 空 ⇒ 下拉回落全量） */
-      coverage: () => {
-        const q = owners.read(owner)?.query
-        return q ? fieldCoverageOf(resolveRows(evaluateQuerySpec(q, kb, {}), kb)) : undefined
-      },
+      /** 覆盖率分母＝草稿已圈出的那批块（树递过来；一条完整的都没有 ⇒ undefined ⇒ 全量） */
+      coverage: (batch) => fieldCoverageOf(resolveRows(evaluateQuerySpec(batch, kb, {}), kb)),
       onApply: (spec) => {
         void registry.invoke('core.query/set-spec', { owner, spec }, 'builder')
         layers.closePopover()

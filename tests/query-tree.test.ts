@@ -252,6 +252,30 @@ test('相对时间窗：「最近 N 天」存表达式（{rel:{days}}），往�
 
 import { batchSpecOfDraft } from '../src/core/index.ts'
 
+test('batchSpecOfDraft：没填完的行摘掉，不把已钉住的条件抹掉', () => {
+  const draft = treeOfSpec({ where: { tag: 't1' } })!
+  // 用户在标签行下面又加了一条属性行，值还没填——草稿含未完成行
+  draft.synthesizedRoot = false
+  draft.root = {
+    kind: 'group',
+    mode: 'all',
+    not: false,
+    items: [
+      { kind: 'leaf', not: false, row: { kind: 'tag', value: 't1' } },
+      { kind: 'leaf', not: false, row: { kind: 'prop', field: 'p1', op: 'eq', value: '   ' } },
+    ],
+  }
+  const spec = batchSpecOfDraft(draft)
+  assert.deepEqual(
+    spec?.where,
+    { all: [{ tag: 't1' }] },
+    '未完成的行摘掉：批次＝已钉住的标签那批块（覆盖率的分母）',
+  )
+  assert.equal(treeIncomplete(draft.root), true, '草稿本身仍是未完成（「应用」照旧禁用——批次只是候选分母）')
+  // 一条完整的都没有 ⇒ undefined（下拉回落全量，不假装知道答案）
+  draft.root = { ...draft.root, items: [draft.root.items[1]!] }
+  assert.equal(batchSpecOfDraft(draft), undefined)
+})
 
 test('存在量化行往返：tag 空→_tags exists、text 空→{nonempty}、children 行，全部逐字节', () => {
   roundTrip({ where: { prop: { id: '_tags', exists: true } } }, )

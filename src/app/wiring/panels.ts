@@ -59,6 +59,7 @@ import {
   type MountEntry,
   type PropKind,
   type QueryContext,
+  type QuerySpec,
   type QuickFilterState,
   type ViewBindingRef,
   type ViewOwnerRef,
@@ -1106,10 +1107,14 @@ export function setupPanels(deps: PanelsDeps) {
         : owner.kind === 'tab'
           ? tabContextFor(host, ownerBlock?.id)
           : contextFor(ownerBlock?.id ?? hostId)
-    /** 这台宿主查询源的结果集（条件树字段覆盖率的分母；children 源没有查询条件 ⇒ 空 ⇒ 全量） */
-    const queryRecords = () => {
-      const q = owners.read(owner)?.query
-      return q ? resolveRows(evaluateQuerySpec(q, kb, evalContext), kb) : []
+    /**
+     * 条件树字段覆盖率的分母：**树递来的草稿批次**（未完成行已摘掉）按本宿主的求值上下文
+     * 现算。`batch === undefined` ＝ 没有可数的批次（一条完整的条件都没有／children 源）
+     * ⇒ 全量平铺。`owners` 里没有 query ⇒ 这台宿主不是查询视图，批次无从谈起。
+     */
+    const fieldsFor = (batch: QuerySpec | undefined) => {
+      if (!batch || owners.read(owner)?.query === undefined) return queryFieldsOf(kb.roots())
+      return queryFieldsOf(kb.roots(), fieldCoverageOf(resolveRows(evaluateQuerySpec(batch, kb, evalContext), kb)))
     }
     const vh = new ViewHost(createViewHostEls(), {
       store: blocks,
@@ -1157,7 +1162,7 @@ export function setupPanels(deps: PanelsDeps) {
        * 有覆盖率时按「这批结果里真有值的栏」排前（与分组下拉同一条原则）。
        * 引擎属性与没有值控件的系统槽不进下拉（它们仍可由 JSON 写成）。
        */
-      fields: () => queryFieldsOf(kb.roots(), fieldCoverageOf(queryRecords())),
+      fields: (batch) => fieldsFor(batch),
       /**
        * 分组列头／条件 chip 的**选项域**：`select` 的选项是定义块上的记录
        * （数组序＝选项序，含墓碑——值指向已删选项时名字仍要读得出，与 `choiceById`

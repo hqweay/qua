@@ -24,6 +24,7 @@ import {
   TREE_ROW_KINDS,
   isQueryableSystemProp,
   systemQueryFieldLabel,
+  batchSpecOfDraft,
   TYPE_DECLS,
   ENGINE_CREATED,
   ENGINE_MODIFIED,
@@ -47,7 +48,7 @@ import { markPicker } from './mark-picker.ts'
 export interface QueryTreeDeps {
   /** 当前条件（现读：可能被命令／撤销改过） */
   spec: () => QuerySpec
-  fields: () => readonly { id: string; label: string; kind?: PropKind; count?: number; total?: number }[]
+  fields: (batch: QuerySpec | undefined) => readonly { id: string; label: string; kind?: PropKind; count?: number; total?: number }[]
   /** `select` 属性的选项（值是选项块 id） */
   choices?: (propId: string) => readonly { id: string; label: string }[]
   /** 写条件（一次事务／一轮撤销） */
@@ -185,6 +186,14 @@ export class QueryTree {
     this.box = box
     this.deps = deps
     this.box.classList.add('qt')
+  }
+
+  /**
+   * 草稿里**已经圈出的那批块**（没填完的行摘掉；一条完整的都没有 ⇒ `undefined`）。
+   * 字段下拉的覆盖率分母从这儿来——跟草稿走，不跟已存储的 spec（弹层树点「应用」才落）。
+   */
+  private batchSpec(): QuerySpec | undefined {
+    return this.draft ? batchSpecOfDraft(this.draft) : undefined
   }
 
   /**
@@ -476,7 +485,7 @@ export class QueryTree {
             group.items.push({
               kind: 'leaf',
               not: false,
-              row: defaultRow(kind, this.deps.fields()[0]?.id ?? ''),
+              row: defaultRow(kind, this.deps.fields(this.batchSpec())[0]?.id ?? ''),
             })
             this.focusNew = true
           }
@@ -558,7 +567,7 @@ export class QueryTree {
       TREE_ROW_KINDS.map((k) => ({ value: k, label: t(ROW_KIND_TEXT[k]) })),
       row.kind,
       (next) => {
-        leaf.row = defaultRow(next as TreeRowKind, this.deps.fields()[0]?.id ?? '')
+        leaf.row = defaultRow(next as TreeRowKind, this.deps.fields(this.batchSpec())[0]?.id ?? '')
         this.paint()
       },
       'qt-kind',
@@ -686,7 +695,7 @@ export class QueryTree {
   }
 
   private fieldKind(id: string): PropKind | undefined {
-    return this.deps.fields().find((f) => f.id === id)?.kind
+    return this.deps.fields(this.batchSpec()).find((f) => f.id === id)?.kind
   }
 
   private propControls(leaf: TreeLeaf): HTMLElement[] {

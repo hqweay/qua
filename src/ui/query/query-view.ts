@@ -236,8 +236,12 @@ export interface ViewHostDeps {
   openUrl: (url: string) => void
   /** 标签名解析（`select` 选项显示名里的 `#名`） */
   tagName?: (id: string) => string
-  /** 可选的属性定义（条件树的字段下拉；按显示名排好，`ui` 不扫森林） */
-  fields: () => readonly { id: string; label: string; kind?: PropKind; cardinality?: 'one' | 'many' }[]
+  /**
+   * 可选的属性定义（条件树的字段下拉；按显示名排好，`ui` 不扫森林）。
+   * `batch` ＝ 字段覆盖率的分母（草稿里已圈出的那批块，条件树自己算好递过来）；
+   * `undefined` ＝ 没有可数的结果 ⇒ 下拉回落全量。chip 与基数只认 label，给谁都一样。
+   */
+  fields: (batch: QuerySpec | undefined) => readonly { id: string; label: string; kind?: PropKind; cardinality?: 'one' | 'many'; count?: number; total?: number }[]
   /** 某一列的**选项**（`select` 的看板分组列；其余属性给空表） */
   choices?: (propId: string) => readonly { id: string; label: string }[]
   /** 今天（本地日）：日历的「今天描边」要钉得住 */
@@ -1106,7 +1110,7 @@ export class ViewHost {
       // 收起态要读得出「这一屏按什么选的」：拆得动就只给条件本身——
       // 「条件 · N 条」是在数数，条数抬头已有，重复一遍只是辅助文字。
       // 拆不动的形状 queryChips 会整块给「复合条件」，那时才退回到条数摘要。
-      const labels = queryChips(spec, this.deps.fields(), this.deps.choices, this.deps.refLabel, this.deps.tagLabel)
+      const labels = queryChips(spec, this.deps.fields(this.source.kind === 'query' ? this.source.spec : undefined), this.deps.choices, this.deps.refLabel, this.deps.tagLabel)
       summary.textContent = labels.length > 0 ? labels.join(' · ') : treeSummary(spec)
       // 抬头窄时省略几何走 ui-ellipsis 原语；title 给全文，不让「读得出内容」变成「读不全」
       summary.dataset.tip = summary.textContent
@@ -1116,7 +1120,7 @@ export class ViewHost {
       return
     }
     // 没有内联树的面（投影／窄窗）：只列条件 chip；编辑入口在行首的「＋」
-    for (const label of queryChips(spec, this.deps.fields(), this.deps.choices, this.deps.refLabel, this.deps.tagLabel)) {
+    for (const label of queryChips(spec, this.deps.fields(this.source.kind === 'query' ? this.source.spec : undefined), this.deps.choices, this.deps.refLabel, this.deps.tagLabel)) {
       const chip = document.createElement('span')
       // 单行省略是**原语**（`primitives.css`），组件里不再抄一份几何
       chip.className = 'queryview-chip ui-ellipsis'
@@ -1211,7 +1215,7 @@ export class ViewHost {
           filter: this.activeFilter,
           display: this.view ? this.view.displayProps : this.deps.owners.read(this.writeOwner)?.defaultDisplayProps,
         }),
-        fields: () => this.deps.fields(),
+        fields: () => this.deps.fields(this.source.kind === 'query' ? this.source.spec : undefined),
         records: () => this.records(),
         filterCandidates: () => this.filterCandidates(),
         atomLabel: (atom) => this.atomLabel(atom),
@@ -1321,7 +1325,7 @@ export class ViewHost {
     if (!this.treeUi) {
       this.treeUi = new QueryTree(box, {
         spec: () => (this.source.kind === 'query' ? this.source.spec : { where: { any: [] } }),
-        fields: () => this.deps.fields(),
+        fields: (batch) => this.deps.fields(batch),
         choices: (propId) => this.deps.choices?.(propId) ?? [],
         ...(this.ownerBlock() ? { owner: this.ownerBlock() } : {}),
         ...(this.deps.pickRef ? { pickRef: this.deps.pickRef } : {}),
@@ -1730,7 +1734,7 @@ export class ViewHost {
   /** 行（派生）：query＝命中（不折叠祖先）；children＝直接子块；items＝`_items` 解析到的活块 */
   /** 字段基数（多值键的唯一口径：卡片列排除、表格 fan-out） */
   private cardinalityOf(propId: string): 'one' | 'many' {
-    return this.deps.fields().find((f) => f.id === propId)?.cardinality ?? 'one'
+    return this.deps.fields(this.source.kind === 'query' ? this.source.spec : undefined).find((f) => f.id === propId)?.cardinality ?? 'one'
   }
 
   /**

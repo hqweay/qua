@@ -16,7 +16,7 @@
  */
 import { literalOf, type DraftOp } from './query-draft.ts'
 import { normMarks, type Marks } from '../model/runs.ts'
-import { SELF, type QueryNode, type QuerySpec, type SortKey } from './query.ts'
+import { SELF, isEmptyWhere, type QueryNode, type QuerySpec, type SortKey } from './query.ts'
 import type { RefKind } from '../relations/relations.ts'
 import { canonicalSpec } from './query-view.ts'
 import { ENGINE_CREATED, ENGINE_MODIFIED } from '../props/props.ts'
@@ -530,4 +530,34 @@ export function specOfTree(draft: TreeDraft): QuerySpec {
 export function treeLeafCount(node: TreeNode): number {
   if (node.kind === 'leaf') return 1
   return node.items.reduce((n, child) => n + treeLeafCount(child), 0)
+}
+
+/**
+ * 草稿里**已经圈出的那批块**：把没填完的行摘掉后拼回 spec；一条完整的都没有 ⇒ `undefined`。
+ *
+ * 覆盖率候选（字段下拉按这批结果排序）的分子分母从这儿来——跟着**草稿**走，不跟已存储的
+ * spec：弹层树是草稿制，改动点「应用」才落，跟随存储值会让「刚加的标签行」参与不了收窄。
+ * 摘行而不是整树作废：一条没填完的属性行不该把「已钉住的标签」那批块也抹掉——
+ * 未完成的行还不是问题的一部分，沉默地等它填完就是了。
+ *
+ * ⚠️ 摘行是**放宽**：`all` 组少一条约束、批次变大——这是候选排序的启发式分母，
+ * 不是求值语义（「应用」仍走 `specOfTree`，未完成照旧禁用）。
+ */
+export function batchSpecOfDraft(draft: TreeDraft): QuerySpec | undefined {
+  const root = pruneIncomplete(draft.root)
+  if (root === null || root.kind !== 'group') return undefined
+  const spec = specOfTree({ ...draft, root: root as TreeGroup })
+  return isEmptyWhere(spec.where) ? undefined : spec
+}
+
+/** 摘掉没填完的行；组被摘空 ⇒ 整组摘掉（`all`/`any` 一样：空组不承载约束） */
+function pruneIncomplete(node: TreeNode): TreeNode | null {
+  if (node.kind === 'leaf') return treeNodeOfRow(node.row) === null ? null : node
+  const items: TreeNode[] = []
+  for (const child of node.items) {
+    const kept = pruneIncomplete(child)
+    if (kept) items.push(kept)
+  }
+  if (items.length === 0) return null
+  return { ...node, items }
 }
