@@ -706,7 +706,7 @@ export function setupPanels(deps: PanelsDeps) {
             defId,
             on: spec?.on ?? '',
             off: spec?.off ?? '',
-            status: spec?.status ?? false,
+            closure: spec?.closure ?? false,
           }),
         setCardinality: (defId, cardinality) =>
           propWrite('core.props/set-choice-cardinality', { defId, cardinality }),

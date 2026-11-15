@@ -29,12 +29,12 @@ import {
   TASK_STATUS_DOING_ID,
   TASK_STATUS_PROP_ID,
   TASK_STATUS_TODO_ID,
-  todoOf,
+  closureOf,
   uiPositionOf,
   fieldTableOf,
 } from '../src/core/index.ts'
 
-/** 修好待办值的空库：一块打了待办值的可写行（`toggleTodo` 落值之后的样子） */
+/** 修好待办值的空库：一块打了待办值的可写行（`toggleClosure` 落值之后的样子） */
 function blankWithTodo() {
   const ws = blankWorkspace()
   const line = ws.blocks[0]!.children[0]!
@@ -74,7 +74,7 @@ test('按需物化：空库里落了待办值 ⇒ 定义块补进顶层，行不
     TASK_STATUS_DONE_ID,
     TASK_STATUS_ABANDONED_ID,
   ])
-  assert.equal(todoOf(line, fieldTableOf(store.blocks)), 'todo', '值按选项 id 读出「待办」')
+  assert.equal(closureOf(line, fieldTableOf(store.blocks)), 'open', '值按选项 id 读出「待办」')
 })
 
 test('按需物化：幂等 —— 已在（含软删）就一条 op 都不发，不造第二个同 id', () => {
@@ -181,12 +181,12 @@ test('清空值停在「待填」：给了缺省的定义，清空留栏不摘�
   const row = rows()[0]!
   assert.ok(row.def, '行还在 ⇒ 不是「未知属性」')
   assert.equal(row.filled, false, '值空了 ⇒ 显示「待填」')
-  assert.equal(todoOf(line, fieldTableOf(store.blocks)), 'todo', '读缺省：仍是没做完的任务')
+  assert.equal(closureOf(line, fieldTableOf(store.blocks)), 'open', '读缺省：仍是没做完的任务')
 
   // 「取消待办」（默认清空）：值连自有槽一起走，整栏消失
   kb.tx((tx) => tx.patch(line.id, (b) => clearValue(b, TASK_STATUS_PROP_ID)))
   assert.deepEqual(rows(), [], '摘栏后不再有这一行')
-  assert.equal(todoOf(line, fieldTableOf(store.blocks)), undefined, '块不再是一个任务')
+  assert.equal(closureOf(line, fieldTableOf(store.blocks)), undefined, '块不再是一个任务')
 
   // 值先于槽写入的旧块（没有登记过槽）：清空（keepField）也把槽补上，行不消失
   const legacy = mkBlock('旧数据')

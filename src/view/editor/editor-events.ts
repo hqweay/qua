@@ -397,7 +397,7 @@ export interface EditorBridge {
   onShellActivate: (date: string, place: OpenAction) => void
   /** 勾选 / 取消待办（点方框）*/
   /** `propId` 由 gutter 上那一枚图标带过来；命令/快捷键不带 ⇒ 唯一的任务状态字段 */
-  toggleTodo: (blockId: string, propId?: string) => void
+  toggleClosure: (blockId: string, propId?: string) => void
   /** 普通勾选框（`_check` 无 `_use`）：只翻 on/off */
   toggleCheck: (blockId: string, propId: string) => void
   /** 点普通 select 的 gutter 图标：装配层开取值菜单 */
@@ -995,12 +995,13 @@ export function bindEditorEvents(br: EditorBridge): () => void {
      * ⌥+点状态标记同一条路）。勾选框的值只有 on/off，左键就是换值，
      * 右键不另开菜单（落回块菜单）。
      *
-     * 判据：图标带 `data-prop-id`；select 类的行 id 住在 `data-status-for`／
-     * `data-prop-for` 上——只带 `data-check-for`／`data-todo-for` 的是勾选框，不接。
+     * 判据：图标带 `data-prop-id`；select 类的行 id 住在 `data-prop-for` 上——
+     * 只带 `data-check-for`（普通勾选框）或 `data-closure-for` 且没有 `data-prop-for`
+     * 的（布尔开关）不接：它们的值只有 on/off，左键就是换值。
      */
     const propMark = target.closest<HTMLElement>('[data-prop-id]')
     if (propMark?.dataset.propId) {
-      const rowId = propMark.dataset.statusFor ?? propMark.dataset.propFor
+      const rowId = propMark.dataset.propFor
       if (rowId) {
         br.pickGutterValue(rowId, propMark.dataset.propId, rect)
         return
@@ -1145,37 +1146,30 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     }
 
     /**
-     * ③ 待办方框：**一块独立的命中区**，挂在块标的身份后缀上（不是块标本身）。
+     * ③ 关闭态／开关方框：**一块独立的命中区**，挂在块标的身份后缀上（不是块标本身）。
      *    它也走 preventDefault —— 勾选不该顺便把光标挪走。
      *    ⚠️ 它和上面「点块标＝聚焦」互不遮挡：块标上只有 `data-focus-for`，
-     *       方框上只有 `data-todo-for`，一次点击只可能命中其中一个。
+     *       方框上只有 `data-closure-for`，一次点击只可能命中其中一个。
      */
     /**
-     * **任务状态标记**：普通点击＝完成/取消（快路径），右键（或 ⌥+点击）＝状态菜单。
-     * 状态标记不是 checkbox：它可以显示 Doing/Canceled，主点击只翻 on/off，
-     * 其余状态从菜单里显式选；两种手势分工，互不误触。
+     * **关闭态开关／标记**：普通点击＝翻开/关（快路径）。
+     *
+     * 带 `data-prop-for` 的（关闭态标记）额外接 ⌥+点击＝状态菜单：它可能显示
+     * Doing/Canceled，主点击只翻 on/off，其余状态从菜单里显式选；两种手势分工，互不误触。
+     * 不带 `data-prop-for` 的（布尔开关）只有两个值，左键就是全部动作。
      */
-    const status = target.closest<HTMLElement>('[data-status-for]')
-    if (status?.dataset.statusFor) {
+    const closure = target.closest<HTMLElement>('[data-closure-for]')
+    if (closure?.dataset.closureFor) {
       e.preventDefault()
-      if (e.altKey && status.dataset.propId) {
-        br.pickGutterValue(status.dataset.statusFor, status.dataset.propId, status.getBoundingClientRect())
+      if (e.altKey && closure.dataset.propFor && closure.dataset.propId) {
+        br.pickGutterValue(closure.dataset.propFor, closure.dataset.propId, closure.getBoundingClientRect())
       } else {
-        br.toggleTodo(status.dataset.statusFor, status.dataset.propId)
+        br.toggleClosure(closure.dataset.closureFor, closure.dataset.propId)
       }
       return
     }
 
-    const todo = target.closest<HTMLElement>('[data-todo-for]')
-    if (todo?.dataset.todoFor) {
-      e.preventDefault()
-      // 只有 checkbox 字段走到这里（状态标记在上面已接住）：
-      // `prop-id` 让一行上的多个 toggle 不串台。
-      br.toggleTodo(todo.dataset.todoFor, todo.dataset.propId)
-      return
-    }
-
-    /** 普通勾选框（`_check` 无 `_use`）：只翻 on/off，不碰 `todoOf`/划线 */
+    /** 普通勾选框（`_check` 无 `_use`）：只翻 on/off，不碰 `closureOf`/划线 */
     const check = target.closest<HTMLElement>('[data-check-for]')
     if (check?.dataset.checkFor && check.dataset.propId) {
       e.preventDefault()
@@ -1185,7 +1179,7 @@ export function bindEditorEvents(br: EditorBridge): () => void {
 
     /**
      * ④ **普通 select 的 gutter 图标**：点开选项菜单（不是翻转）。
-     *    与待办方框互斥：任务/勾选框各自带 `data-todo-for`/`data-check-for`，上面两支先接住。
+     *    与开关互斥：关闭态/开关/勾选框各自带 `data-closure-for`/`data-check-for`，上面两支先接住。
      */
     const gutterProp = target.closest<HTMLElement>('[data-prop-for]')
     if (gutterProp?.dataset.propFor && gutterProp.dataset.propId) {

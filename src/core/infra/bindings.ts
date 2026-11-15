@@ -64,7 +64,7 @@ export const BINDINGS: Binding[] = [
   // 删除块只有 ⌘⇧D 一键（复制块不占键位，走块菜单/斜杠）：块选区态的同键绑定在下面盖过它
   { command: 'core.editor/delete-block', kind: 'keymap', key: 'mod+shift+d', when: 'editorTextFocus && blockCanDelete', layer: 'core' },
   { command: 'core.editor/toggle-collapse', kind: 'keymap', key: 'mod+.', when: 'editorTextFocus', layer: 'core' },
-  { command: 'core.editor/toggle-todo', kind: 'keymap', key: 'mod+enter', when: 'editorTextFocus', layer: 'core' },
+  { command: 'core.editor/toggle-closure', kind: 'keymap', key: 'mod+enter', when: 'editorTextFocus', layer: 'core' },
   { command: 'core.editor/insert-page-ref', kind: 'keymap', key: 'mod+shift+k', when: 'editorTextFocus', layer: 'core' },
   { command: 'core.anno/toggle-bold', kind: 'keymap', key: 'mod+b', when: 'editorTextFocus && !selectionEmpty', layer: 'core' },
   { command: 'core.anno/toggle-italic', kind: 'keymap', key: 'mod+i', when: 'editorTextFocus && !selectionEmpty', layer: 'core' },
@@ -105,7 +105,7 @@ export const BINDINGS: Binding[] = [
   { command: 'core.editor/delete-selected-blocks', kind: 'keymap', key: 'mod+shift+d', when: 'blockSelection', layer: 'core' },
   { command: 'core.editor/indent-selected-blocks', kind: 'keymap', key: 'tab', when: 'blockSelection', layer: 'core' },
   { command: 'core.editor/outdent-selected-blocks', kind: 'keymap', key: 'shift+tab', when: 'blockSelection', layer: 'core' },
-  { command: 'core.editor/toggle-todo-selected-blocks', kind: 'keymap', key: 'mod+enter', when: 'blockSelection', layer: 'core' },
+  { command: 'core.editor/toggle-closure-selected-blocks', kind: 'keymap', key: 'mod+enter', when: 'blockSelection', layer: 'core' },
   { command: 'core.selection/select-all-blocks', kind: 'keymap', key: 'mod+shift+a', when: 'editorTextFocus || blockSelection', layer: 'core' },
   { command: 'core.selection/extend-up', kind: 'keymap', key: 'shift+up', when: 'editorTextFocus || blockSelection', layer: 'core', args: { dir: -1 } },
   { command: 'core.selection/extend-down', kind: 'keymap', key: 'shift+down', when: 'editorTextFocus || blockSelection', layer: 'core', args: { dir: 1 } },
@@ -167,15 +167,15 @@ export const BINDINGS: Binding[] = [
   { command: 'core.editor/insert-link', kind: 'menu', when: 'blockFocused', group: 'blockInsert/1', order: 40, layer: 'core' },
 
   /* ---- 结构：把这一块摆成什么样（顺序/深度/状态） ---- */
-  { command: 'core.editor/toggle-todo', kind: 'menu', when: 'blockFocused', group: 'block/2-structure', order: 10, layer: 'core' },
+  { command: 'core.editor/toggle-closure', kind: 'menu', when: 'blockFocused', group: 'block/2-structure', order: 10, layer: 'core' },
   /**
-   * 与上面那条**成对**出现：`toggle-todo` 在「是任务」时只翻值，翻不出「不是任务」这一态
-   * （见 `editor.clearTodo`），所以「变回去」必须是独立一条。
+   * 与上面那条**成对**出现：`toggle-closure` 在「有这一栏」时只翻值，翻不出「没有这一栏」这一态
+   * （见 `editor.clearClosure`），所以「变回去」必须是独立一条。
    *
-   * 判据用 `blockType`（`core/view/editor.ts` 的 `ctxKeys`，只取 `todo`／`paragraph` 两值）：
+   * 判据用 `blockType`（`core/view/editor.ts` 的 `ctxKeys`，只取 `closure`／`paragraph` 两值）：
    * 不是任务的块上不显示 —— 一条「点了什么都不会发生」的菜单项比没有更糟。
    */
-  { command: 'core.editor/clear-todo', kind: 'menu', when: 'blockFocused && blockType == "todo"', group: 'block/2-structure', order: 15, layer: 'core' },
+  { command: 'core.editor/clear-closure', kind: 'menu', when: 'blockFocused && blockType == "closure"', group: 'block/2-structure', order: 15, layer: 'core' },
   { command: 'core.editor/toggle-collapse', kind: 'menu', when: 'blockFocused && blockFoldable', group: 'block/2-structure', order: 20, layer: 'core', label: t('menu.label.toggleCollapse') },
   { command: 'core.editor/move-block-up', kind: 'menu', when: 'blockFocused', group: 'block/2-structure', order: 30, layer: 'core' },
   { command: 'core.editor/move-block-down', kind: 'menu', when: 'blockFocused', group: 'block/2-structure', order: 40, layer: 'core' },
@@ -266,7 +266,7 @@ export const BINDINGS: Binding[] = [
      无害的「取消选择」始终在删除上方。 */
   { command: 'core.editor/indent-selected-blocks', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 15, layer: 'core', keywords: ['tab', t('menu.kw.indent')] },
   { command: 'core.editor/outdent-selected-blocks', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 16, layer: 'core', keywords: ['shift tab', t('menu.kw.outdent')] },
-  { command: 'core.editor/toggle-todo-selected-blocks', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 17, layer: 'core', keywords: ['todo', 'task'] },
+  { command: 'core.editor/toggle-closure-selected-blocks', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 17, layer: 'core', keywords: ['todo', 'task'] },
   // 跨块备注：块选区整段锚，一条备注带走全部（空块锚不出来，自动跳过）
   { command: 'core.notes/create', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 25, layer: 'core', icon: 'lucide:message-circle', label: t('menu.label.writeNote') },
   { command: 'core.editor/copy-selected-blocks', kind: 'menu', when: 'blockSelection', group: 'blockSel/1-basic', order: 20, layer: 'core' },
@@ -283,13 +283,13 @@ export const BINDINGS: Binding[] = [
      没有「正文块」：插一个普通块就是按 ↵，斜杠里再列一遍等于把同一个动作说两遍。
      折叠与删除不在斜杠：它们回答的是「对这块做什么」，不回答「这里有什么」——
      折叠是视图状态（⌘. 在），删除是块骨架操作（⌘⇧D／⌫ 在）。 */
-  { command: 'core.editor/insert-block', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-structure', order: 10, layer: 'core', label: t('menu.label.todo'), args: { type: 'todo' }, keywords: ['todo', 'task'], icon: 'lucide:square' },
+  { command: 'core.editor/insert-block', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-structure', order: 10, layer: 'core', label: t('menu.label.todo'), args: { type: 'closure' }, keywords: ['todo', 'task'], icon: 'lucide:square' },
   /**
    * 「取消待办」：`/待办` 把这一行变成任务之后，同一个入口能把它变回去 ——
    * 只在这一块真是任务时出现（同菜单那条判据），否则斜杠列表里永远挂着一个空动作。
    * 图标复用「虚线方框」：它是「这个方框可以被拿掉」的现成说法，不新增图标数据。
    */
-  { command: 'core.editor/clear-todo', kind: 'slash', when: 'editorTextFocus && blockType == "todo"', group: 'slash/1-structure', order: 15, layer: 'core', icon: 'lucide:square-dashed' },
+  { command: 'core.editor/clear-closure', kind: 'slash', when: 'editorTextFocus && blockType == "closure"', group: 'slash/1-structure', order: 15, layer: 'core', icon: 'lucide:square-dashed' },
   // 分割线：没有正文的块，插完光标要落到它下面那一行（见 insertDividerAfter）
   { command: 'core.editor/insert-block', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-structure', order: 20, layer: 'core', label: t('menu.label.divider'), args: { type: 'divider' }, keywords: ['divider', 'hr', 'line', t('menu.kw.divider')], icon: 'lucide:minus' },
   { command: 'core.query/insert', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-structure', order: 30, layer: 'core', label: t('cmd.query.insert'), keywords: ['query', 'filter', 'where'], icon: 'lucide:list-filter' },

@@ -675,7 +675,7 @@ export const ALLOWED_ROW_CHILDREN: ReadonlySet<string> = new Set([
  * 一个可见行 → `.blk` 元素。
  *
  * **DOM 契约就在这里**：`data-block-id`／`data-depth`／`data-has-children`／
- * `data-collapsed`／`data-todo`／`--depth`，以及 `.left` 里的 `.marker`／`.fold`／`.identity`／`.todo-box`。
+ * `data-collapsed`／`data-closure`／`--depth`，以及 `.left` 里的 `.marker`／`.fold`／`.identity`／`.closure-box`。
  * 主题与插件都按这些选择器选，**改名等于破坏契约**。
  *
  * gutter 的形状：
@@ -777,32 +777,32 @@ export function makeBlockEl(
   /** 这一行下面是否要画**行内**的身体（按源分派：有结果身体就画，段根同此） */
   const inlineBody = Boolean(opts.viewBody) && rowHasInlineViewBody(r)
   /**
-   * gutter 上那个**任务开关**：只认 `_use: 'status'` 的字段。
+   * gutter 上那个**关闭态开关**：只认扮演 `closure` 角色的字段（`_use: 'closure'`＋`_check`）。
    *
-   * ⚠️ 判据是定义的 status 用途 + `_check`，不是固定 propId：自定义的「任务」属性
-   *    和内置任务状态走同一套。status 库级唯一，没有「多个完成型字段取第一条」的裁决。
+   * ⚠️ 判据是**角色**，不是固定 propId、也不是「叫任务的那个属性」：自定义的关闭态属性
+   *    与内置的那条走同一套。角色库级唯一，没有「多个完成型字段取第一条」的裁决。
    * ⚠️ **布尔开关（`checkbox` kind）不参与**：它是「值没有名字」的两态，谁也不知道
-   *    `true` 是不是「完成」；让它借任务方框（`data-todo`／划线）＝ 同一枚方框两种意思。
+   *    `true` 是不是「关闭」；让它借关闭态方框（`data-closure`／划线）＝ 同一枚方框两种意思。
    *    它自己在 gutter 上画自己的方框，只由那一下点击切（与 `⌘↵` 无关）。
    */
-  const statusField = opts.gutter?.find((f) => f.use === 'status' && f.check !== undefined)
+  const closureField = opts.gutter?.find((f) => f.use === 'closure' && f.check !== undefined)
   /**
-   * 待办三态：任务状态字段的值＝`_check.on` ⇒ 做完了；其余已声明形态（待办／进行中／未填）
-   * ⇒ 是任务但没做完；没有 status 字段 ⇒ 不是任务。
+   * 关闭态（开／关）：角色字段的值＝`_check.on` ⇒ 关闭；其余已声明形态（未填、进行中…）
+   * ⇒ 未关闭；没有角色字段 ⇒ 这一行没有关闭态（不是「未关闭」）。
    *
-   * ⚠️ **未填要算「未完成」，不能算「不是任务」**：这个槽的准入判据是「这块有这条属性」
+   * ⚠️ **未填要算「未关闭」，不能算「没有关闭态」**：这个槽的准入判据是「这块有这条属性」
    *    而不是「这条属性有值」（见 `gutterFieldsOf`）—— 刚给它加上、还没点过的那一下，
-   *    正是这个入口存在的理由。若未填落进「不是任务」，块左边会画出一个空心方框，
-   *    却同时被当成普通块（没有 `data-todo`）⇒ 方框与状态各说一套。
+   *    正是这个入口存在的理由。若未填落进「没有关闭态」，块左边会画出一个空心方框，
+   *    却同时被当成普通块（没有 `data-closure`）⇒ 方框与状态各说一套。
    *
-   * ⚠️ `data-todo` 是 **CSS 与冒烟的契约**（删除线按它选），所以这里不换成属性名。
+   * ⚠️ `data-closure` 是 **CSS 与冒烟的契约**（删除线按它选），值只有 `open`／`closed`。
    */
-  const todo: 'todo' | 'done' | undefined =
-    statusField === undefined || statusField.check === undefined
+  const closure: 'open' | 'closed' | undefined =
+    closureField === undefined || closureField.check === undefined
       ? undefined
-      : statusField.value === statusField.check.on
-        ? 'done'
-        : 'todo'
+      : closureField.value === closureField.check.on
+        ? 'closed'
+        : 'open'
   const el = document.createElement('div')
   el.className = 'blk'
   el.dataset.blockId = b.id
@@ -815,7 +815,7 @@ export function makeBlockEl(
   const typeId = blockTypeOf(b)
   if (typeId !== DEFAULT_BLOCK_TYPE) el.dataset.type = typeId
   if (folded && foldable) el.dataset.collapsed = '1'
-  if (todo) el.dataset.todo = todo
+  if (closure) el.dataset.closure = closure
   if (r.hasChildren) el.dataset.hasChildren = '1'
   // 角色进 DOM：页 / 日记作为**正文第一行**时靠它取样式。
   // 兼位块把**全部角色**写进同一个属性（空格分隔，选择器用 `~=`）——
@@ -1132,12 +1132,12 @@ export function makeBlockEl(
    * `gutterFieldsOf`：标签声明在前、自有属性在后）。
    *
    * 三种画法，区别在**点下去做什么**：
-   *   · `_use: 'status'`：任务开关（点一下翻完成）——保留 `.todo-box` 与 `data-todo-for`，
+   *   · `_use: 'closure'`：关闭态开关（点一下翻开/关）——`.closure-box` ＋ `data-closure-for`，
    *     这两个名字是 CSS 与冒烟的契约；
-   *   · `_check`（无 status）：普通勾选框（翻 on/off，不划线）——`.check-box` ＋ `data-check-for`；
+   *   · `_check`（无 role）：普通勾选框（翻 on/off，不划线）——`.check-box` ＋ `data-check-for`；
    *   · 其余 select：普通值（点开选项菜单）——`.prop-mark` ＋ `data-prop-for`；
-   *   · `checkbox`（布尔开关）：翻它自己的布尔值（`.check-box` ＋ `data-todo-for`）；
-   *     **不是任务**（没有 `data-todo`／划线，`⌘↵` 也不切它）。带 `data-prop-id`，
+   *   · `checkbox`（布尔开关）：翻它自己的布尔值（`.check-box` ＋ `data-closure-for`）；
+   *     **没有关闭态**（没有 `data-closure`／划线，`⌘↵` 也不切它）。带 `data-prop-id`，
    *     所以一行多个开关不会互相串台。
    *
    * **右键任何 select 类图标都开取值菜单**（状态标记也如此）：换到哪个值是显式意图，
@@ -1185,20 +1185,21 @@ export function makeBlockEl(
       continue
     }
     if (field.kind === 'select') {
-      // 任务状态：勾选框 + 划线/⌘↵（`_use: 'status'` + `_check`）
-      if (field.use === 'status' && field.check) {
+      // 关闭态：勾选框 + 划线/⌘↵（`_use: 'closure'` + `_check`）
+      if (field.use === 'closure' && field.check) {
         const mark = document.createElement('span')
-        mark.className = 'identity todo-box todo-mark'
+        mark.className = 'identity closure-box closure-mark'
         mark.dataset.propId = field.propId
-        mark.dataset.todoFor = b.id
-        // 状态标记：当前值的图标；非方框的 fallback（任务状态不是 checkbox）
-        mark.dataset.statusFor = b.id
-        renderIcon(mark, field.icon, todo === 'done' ? 'circle-check' : 'circle', 'sm')
-        mark.dataset.tip = t('ui.todo.toggle')
+        // 关闭态标记：**一个命中区两件事**。左键＝翻转（`data-closure-for`），
+        // 右键／⌥+点＝取值菜单（`data-prop-for`）——两个属性同一处，事件按顺序分派。
+        mark.dataset.closureFor = b.id
+        mark.dataset.propFor = b.id
+        renderIcon(mark, field.icon, closure === 'closed' ? 'circle-check' : 'circle', 'sm')
+        mark.dataset.tip = t('ui.closure.toggle')
         left?.appendChild(mark)
         continue
       }
-      // 普通勾选框：只翻 on/off，不影响 todoOf/划线
+      // 普通勾选框：只翻 on/off，不影响 closureOf/划线
       if (field.check) {
         const mark = document.createElement('span')
         mark.className = 'identity check-box'
@@ -1228,11 +1229,11 @@ export function makeBlockEl(
     }
     if (field.kind === 'checkbox') {
       const mark = document.createElement('span')
-      // **开关**：值是布尔、没有名字 ⇒ 不是任务（不拿 `data-todo`、不划线）。
-      // 走 `data-todo-for` 只是复用「点一下切自己那一格」的既有通道（带 propId 不串台），
-      // 视觉用普通勾选框那一档：同一个方框图形，但没有完成任务的含义。
+      // **开关**：值是布尔、没有名字 ⇒ 不是关闭态（不拿 `data-closure`、不划线）。
+      // 走 `data-closure-for` 只是复用「点一下切自己那一格」的既有通道（带 propId 不串台），
+      // 视觉用普通勾选框那一档：同一个方框图形，但没有「关闭」的含义。
       mark.className = 'identity check-box check-mark'
-      mark.dataset.todoFor = b.id
+      mark.dataset.closureFor = b.id
       mark.dataset.propId = field.propId
       mark.appendChild(createIcon(field.value === true ? 'square-check' : 'square', 'sm'))
       mark.dataset.tip = t('ui.props.gutterToggle', { prop: blockLabel(field.def) })
@@ -1243,7 +1244,7 @@ export function makeBlockEl(
   }
   const tx = document.createElement('span')
   tx.className = 'tx'
-  if (todo === 'done') tx.classList.add('done')
+  if (closure === 'closed') tx.classList.add('closed')
   /**
    * **没有正文的块**（分割线）：线放在 `.tx` **里面**，不另换一个元素替代 `.tx`。
    * 编辑器里有一批路径按 `.tx` 认块（取文本、落光标、标 caret），换掉 `.tx`

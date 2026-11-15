@@ -26,7 +26,7 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.editor/toggle-children-collapse', title: t('cmd.editor.toggle-children-collapse'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { blockId: { type: 'string' } }, keywords: ['fold', 'collapse', 'children'] },
   { name: 'core.editor/duplicate-block', title: t('cmd.editor.duplicate-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['duplicate', 'clone'] },
   { name: 'core.editor/delete-block', title: t('cmd.editor.delete-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['delete', 'remove'] },
-  { name: 'core.editor/toggle-todo', title: t('cmd.editor.toggle-todo'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['todo', 'check', 'checkbox'] },
+  { name: 'core.editor/toggle-closure', title: t('cmd.editor.toggle-closure'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['todo', 'check', 'checkbox'] },
   /**
    * 「切换待办」的**反向**：那个只在 `true`／`false` 之间翻，永远摘不掉这一栏。
    *
@@ -37,8 +37,8 @@ export const COMMANDS: CommandDecl[] = [
    * ⚠️ 打了「声明这一栏」的标签的块，摘完仍会显示成未完成 —— 那是标签给的，不是这一块的。
    *    调用方（handler）据此给一句解释，而不是静默。
    */
-  { name: 'core.editor/clear-todo', title: t('cmd.editor.clear-todo'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['todo', 'untodo', t('menu.kw.untodo')] },
-  { name: 'core.editor/insert-block', title: t('cmd.editor.insert-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { type: { type: 'string', enum: ['paragraph', 'todo', 'divider'] }, text: { type: 'string' } }, keywords: ['insert', 'new block'] },
+  { name: 'core.editor/clear-closure', title: t('cmd.editor.clear-closure'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['todo', 'untodo', t('menu.kw.untodo')] },
+  { name: 'core.editor/insert-block', title: t('cmd.editor.insert-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { type: { type: 'string', enum: ['paragraph', 'closure', 'divider'] }, text: { type: 'string' } }, keywords: ['insert', 'new block'] },
   // 只建空正文块、不接类型变体：上方插入目前只有键盘一条入口，斜杠菜单走的是下方语义；
   // 等出现第二个入口（斜杠/菜单项）再决定变体怎么共享
   { name: 'core.editor/insert-block-before', title: t('cmd.editor.insert-block-before'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['insert', 'above', 'before', 'new block'] },
@@ -54,7 +54,7 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.editor/delete-selected-blocks', title: t('cmd.editor.delete-selected-blocks'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), hidden: true },
   { name: 'core.editor/indent-selected-blocks', title: t('cmd.editor.indent-selected-blocks'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), hidden: true },
   { name: 'core.editor/outdent-selected-blocks', title: t('cmd.editor.outdent-selected-blocks'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), hidden: true },
-  { name: 'core.editor/toggle-todo-selected-blocks', title: t('cmd.editor.toggle-todo-selected-blocks'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), hidden: true },
+  { name: 'core.editor/toggle-closure-selected-blocks', title: t('cmd.editor.toggle-closure-selected-blocks'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), hidden: true },
   { name: 'core.editor/copy-selected-blocks', title: t('cmd.editor.copy-selected-blocks'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.editor'), hidden: true },
   { name: 'core.editor/copy-selected-block-refs', title: t('cmd.editor.copy-selected-block-refs'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.editor'), hidden: true },
   { name: 'core.editor/copy-block', title: t('cmd.editor.copy-block'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.editor'), hidden: true, keywords: ['copy', 'ref'] },

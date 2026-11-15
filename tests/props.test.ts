@@ -45,7 +45,7 @@ import {
   TASK_STATUS_DOING_ID,
   TASK_STATUS_PROP_ID,
   TASK_STATUS_TODO_ID,
-  todoOf,
+  closureOf,
   undeclareField,
   UI_POSITION_PROP,
   uiPositionOf,
@@ -270,7 +270,7 @@ test('种子库自带核心词汇：任务状态定义（顶层、归 gutter、s
   assert.equal(def!.children.length, 0, '选项不是块：定义块没有子块')
   assert.equal(def!.props?._default, TASK_STATUS_TODO_ID, '缺省读出「待办」：刚挂上的任务不用先点一格')
   // 语义（use）与显示（check）分开：任务状态唯一，勾选=完成、取消=待办
-  assert.equal(def!.props?._use, 'status')
+  assert.equal(def!.props?._use, 'closure')
   assert.deepEqual(def!.props?._check, { on: TASK_STATUS_DONE_ID, off: TASK_STATUS_TODO_ID })
   const done = choicesOf(def!).find((c) => c.id === TASK_STATUS_DONE_ID)
   assert.equal(done?.icon, 'lucide:circle-check', '每个值有自己的图标（非方框，读作状态）')
@@ -290,16 +290,16 @@ test('种子库自带核心词汇：任务状态定义（顶层、归 gutter、s
     assert.equal(hasTag(b, task!.id), true, `样本块应带 #任务 归属：${plainText(b.content)}`)
   }
   const fields = fieldTableOf(ws.blocks)
-  assert.equal(withValue.filter((b) => todoOf(b, fields) === 'done').length, 2, '完成与未完成各两条')
+  assert.equal(withValue.filter((b) => closureOf(b, fields) === 'closed').length, 2, '完成与未完成各两条')
 })
 
-test('todoOf：完成 ⇒ done；待办／进行中／有槽没填／**靠标签声明** ⇒ todo；没有这一栏 ⇒ undefined', () => {
+test('closureOf：完成 ⇒ done；待办／进行中／有槽没填／**靠标签声明** ⇒ todo；没有这一栏 ⇒ undefined', () => {
   const def = mkPropDef(
     '任务状态',
     'select',
     {
       [DEFAULT_PROP]: TASK_STATUS_TODO_ID,
-      [USE_PROP]: 'status',
+      [USE_PROP]: 'closure',
       [CHECK_PROP]: { on: TASK_STATUS_DONE_ID, off: TASK_STATUS_TODO_ID },
     },
     TASK_STATUS_PROP_ID,
@@ -321,24 +321,24 @@ test('todoOf：完成 ⇒ done；待办／进行中／有槽没填／**靠标签
   const tagged: Block = { id: 't', text: '', children: [], props: { _tags: [tag.id] } }
   const none: Block = { id: 'n', text: '', children: [] }
   const fields = fieldTableOf([def, tag, done, open, doing, fresh, tagged, none])
-  assert.equal(todoOf(done, fields), 'done')
-  assert.equal(todoOf(open, fields), 'todo', '「是任务、没做完」是**有值**的，不能并进缺失')
-  assert.equal(todoOf(doing, fields), 'todo', '进行中也是「没做完」——派生读法只有两态，状态机不进这里')
+  assert.equal(closureOf(done, fields), 'closed')
+  assert.equal(closureOf(open, fields), 'open', '「是任务、没做完」是**有值**的，不能并进缺失')
+  assert.equal(closureOf(doing, fields), 'open', '进行中也是「没做完」——派生读法只有两态，状态机不进这里')
   /**
    * ⚠️ 这一条是判据本身：**看「有没有这一栏」，不看值**。
    *    漏了它，屏幕上会画空心方框（渲染看声明），这里却当成不是任务 ——
    *    同一个块两种答案，而且不报错。
    */
-  assert.equal(todoOf(fresh, fields), 'todo', '有槽但没填 ＝ 刚挂上的任务（缺省读出「待办」），也是 todo')
-  assert.equal(todoOf(tagged, fields), 'todo', '标签声明了这一栏、一次没点过 ＝ 未完成（不是「不是任务」）')
-  assert.equal(todoOf(none, fields), undefined)
+  assert.equal(closureOf(fresh, fields), 'open', '有槽但没填 ＝ 刚挂上的任务（缺省读出「待办」），也是 todo')
+  assert.equal(closureOf(tagged, fields), 'open', '标签声明了这一栏、一次没点过 ＝ 未完成（不是「不是任务」）')
+  assert.equal(closureOf(none, fields), undefined)
 })
 
-test('完成是定义的 `_use: status` + `_check.on`：自定义任务也走 todoOf；没有 status 的 select 不算任务', () => {
+test('完成是定义的 `_use: status` + `_check.on`：自定义任务也走 closureOf；没有 status 的 select 不算任务', () => {
   const custom = mkPropDef(
     '我的任务',
     'select',
-    { [USE_PROP]: 'status', [CHECK_PROP]: { on: 'c-done', off: 'c-open' } },
+    { [USE_PROP]: 'closure', [CHECK_PROP]: { on: 'c-done', off: 'c-open' } },
     'p-custom',
   )
   custom.children = [
@@ -346,12 +346,12 @@ test('完成是定义的 `_use: status` + `_check.on`：自定义任务也走 to
     { ...mkBlock('搞定'), id: 'c-done' },
   ]
   const host: Block = { id: 'h', text: '', children: [], props: { 'p-custom': 'c-done' } }
-  assert.equal(todoOf(host, fieldTableOf([custom, host])), 'done', '自定义任务属性与内置任务同一条判据')
+  assert.equal(closureOf(host, fieldTableOf([custom, host])), 'closed', '自定义的关闭态属性与内置那条同一条判据')
 
   const plain = mkPropDef('优先级', 'select', {}, 'p-plain')
   plain.children = [{ ...mkBlock('高'), id: 'p1' }]
   const h2: Block = { id: 'h2', text: '', children: [], props: { 'p-plain': 'p1' } }
-  assert.equal(todoOf(h2, fieldTableOf([plain, h2])), undefined, '没有 status ⇒ 只是普通属性')
+  assert.equal(closureOf(h2, fieldTableOf([plain, h2])), undefined, '没有 closure 角色 ⇒ 只是普通属性')
 })
 
 test('gutter 派生：select 带当前选项的图标与完成档；未填退回定义图标', () => {
@@ -382,7 +382,7 @@ test('多值 select：值读成数组、名字按兄弟序、被作用域隐藏�
   const def = mkPropDef(
     '标签集',
     'select',
-    { _cardinality: 'many', [USE_PROP]: 'status', [CHECK_PROP]: { on: 'c1', off: 'c2' } },
+    { _cardinality: 'many', [USE_PROP]: 'closure', [CHECK_PROP]: { on: 'c1', off: 'c2' } },
     'p-multi',
   )
   setChoices(def, [
@@ -404,7 +404,7 @@ test('多值 select：值读成数组、名字按兄弟序、被作用域隐藏�
   assert.deepEqual(row.currentChoiceLabels, ['甲', '丙'], '顺序＝选项序，不是勾选序')
   assert.deepEqual(row.currentChoices?.map((c) => c.id), ['c1', 'c3'], '被作用域隐藏的值照常显示')
   assert.equal(checkOf(def), undefined, '多值不能有勾选框映射（读侧直接忽略）')
-  assert.equal(todoOf(host, fieldTableOf([def, host])), undefined, '多值不是任务：status 映射在 many 上不生效')
+  assert.equal(closureOf(host, fieldTableOf([def, host])), undefined, '多值没有关闭态：closure 映射在 many 上不生效')
 })
 
 test('标签声明的字段：屏幕画方框与「模型里是任务」同一个判据（不许一处认、一处不认）', () => {
@@ -419,7 +419,7 @@ test('标签声明的字段：屏幕画方框与「模型里是任务」同一�
     {
       [UI_POSITION_PROP]: 'block-left',
       [DEFAULT_PROP]: TASK_STATUS_TODO_ID,
-      [USE_PROP]: 'status',
+      [USE_PROP]: 'closure',
       [CHECK_PROP]: { on: TASK_STATUS_DONE_ID, off: TASK_STATUS_TODO_ID },
     },
     TASK_STATUS_PROP_ID,
@@ -436,7 +436,7 @@ test('标签声明的字段：屏幕画方框与「模型里是任务」同一�
   const box = gutterFieldsFor([host], forest).get(host.id)?.find((f) => f.propId === TASK_STATUS_PROP_ID)
   assert.ok(box, '屏幕上应画出方框（成员自动获得这一栏）')
   assert.equal(box!.filled, false, '一次没点过 ⇒ 空方框')
-  assert.equal(todoOf(host, fieldTableOf(forest)), 'todo', '同一个判据：它是未完成，不是「不是任务」')
+  assert.equal(closureOf(host, fieldTableOf(forest)), 'open', '同一个判据：它是未完成，不是「不是任务」')
 })
 
 test('readField 的 `_default`：只对写了自己的缺省的定义生效；声明未填读缺省，别家未填仍是未填', () => {
@@ -450,7 +450,7 @@ test('readField 的 `_default`：只对写了自己的缺省的定义生效；�
 
   const withRead = readField(member, 'p-with', fields)
   assert.equal(withRead.declared, true)
-  assert.equal(withRead.value, 'choice-x', '声明了、没填 ⇒ 读缺省（查询／分组／todoOf 同一答案）')
+  assert.equal(withRead.value, 'choice-x', '声明了、没填 ⇒ 读缺省（查询／分组／closureOf 同一答案）')
   const noRead = readField(member, 'p-no', fields)
   assert.equal(noRead.declared, true)
   assert.equal(noRead.value, undefined, '没有 `_default` 的定义：未填仍是未填（看板落「未设置」列）')

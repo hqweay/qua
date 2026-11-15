@@ -188,7 +188,7 @@ test('runQuery：**有槽未填**的块按「未完成」命中（与渲染同�
    *
    * 它必须是「未完成」—— 屏幕上画着空心方框（渲染看的是「有没有这一栏」），
    * 查询若查不到它，同一个块就有两种答案。判据只有一处：`core/props.ts` 的 `readField`
-   * （布尔属性声明了就等于 `false`）。这条与 `tests/props.test.ts` 的 `todoOf` 那条配成一对。
+   * （布尔属性声明了就等于 `false`）。这条与 `tests/props.test.ts` 的 `closureOf` 那条配成一对。
    */
   const fresh: Block = {
     id: 'fresh',

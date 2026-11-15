@@ -120,7 +120,7 @@ export const PROPS_HANDLERS: Record<string, Handler> = {
       return true
     }
     if (!on || !off) return false
-    app.setChoiceCheck(defId, { on, off, status: a.status === true })
+    app.setChoiceCheck(defId, { on, off, closure: a.closure === true })
     return true
   },
   'core.props/set-choice-cardinality': (a, app) => {

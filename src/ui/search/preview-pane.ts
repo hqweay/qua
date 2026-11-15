@@ -290,12 +290,12 @@ export class PreviewPane {
       },
       { capture: true, signal },
     )
-    // 待办勾选会写模型（`[data-todo-for]` 的 click 在编辑器容器上）
+    // 待办勾选会写模型（`[data-closure-for]` 的 click 在编辑器容器上）
     this.root.addEventListener(
       'click',
       (e) => {
         if (!this.readOnly || !inside(e.target)) return
-        if ((e.target as HTMLElement).closest?.('[data-todo-for]')) {
+        if ((e.target as HTMLElement).closest?.('[data-closure-for]')) {
           e.preventDefault()
           e.stopPropagation()
         }

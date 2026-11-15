@@ -37,7 +37,7 @@ import {
   resolveRef,
   tagIdsOf,
   tagMemberIds,
-  todoOf,
+  closureOf,
   type Block,
   type CtxKeys,
 } from '../../core/index.ts'
@@ -666,12 +666,12 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
       mainEd.removeRun(runId)
     },
     blocks() {
-      // 判「是不是任务」要看标签声明 ⇒ 整批共一张表，别逐块扫森林
+      // 判「有没有关闭态」要看标签声明 ⇒ 整批共一张表，别逐块扫森林
       const fields = fieldTableOf(deps.getWs().blocks)
       return flatten(mainEd.doc).map((b) => ({
         id: b.id,
         text: plainText(b.content),
-        todo: todoOf(b, fields) ?? null,
+        closure: closureOf(b, fields) ?? null,
         /**
          * 诊断面的字段名保持 `collapsed`（冒烟按它断言）；值来自**这一屏生效的**折叠表
          * （`foldStateOf`：聚焦根自己不折 —— 断言要看「屏幕上的样子」而不是落盘的那份）。

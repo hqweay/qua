@@ -66,11 +66,11 @@ export function ensureTaskStatusInTx(forest: readonly Block[], tx: Tx): void {
    * 定义块在、但语义/显示映射缺了（旧版本物化的那一份）：同一笔事务补上。
    * 这不是迁移数据——只补两个系统键，值一个字节不动。
    */
-  if (useOf(def) !== 'status' || checkOf(def) === undefined) {
+  if (useOf(def) !== 'closure' || checkOf(def) === undefined) {
     tx.patch(def.id, (b) => {
       b.props = {
         ...(b.props ?? {}),
-        [USE_PROP]: 'status',
+        [USE_PROP]: 'closure',
         [CHECK_PROP]: { on: TASK_STATUS_DONE_ID, off: TASK_STATUS_TODO_ID },
       }
     })

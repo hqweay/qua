@@ -10,10 +10,10 @@ import { mapAnnos } from './annos.ts'
 /**
  * 「任务做完了没有」的**读法**（不是落盘形状）。
  *
- * 落盘的是一个真实的属性槽（见 `core/props.ts` 的 `todoOf`），这里只是它的
+ * 落盘的是一个真实的属性槽（见 `core/props.ts` 的 `closureOf`），这里只是它的
  * 三态投影：查询条件、诊断面、菜单上下文键都按这三个值说话。
  */
-export type TodoState = 'todo' | 'done'
+export type ClosureState = 'open' | 'closed'
 
 /**
  * **列表**：这一块以哪个身份**露面**（页列表 / 标签列表），与「有什么数据」是两套语义。
@@ -222,7 +222,7 @@ export type SystemPropId =
    * 属性定义的**勾选框映射**（见 `core/props.ts` 的 `checkOf`）：`{ on, off }`。
    *
    * 「勾选写哪个选项、取消写哪个选项」是显示/编辑映射，本身不等于任务语义；
-   * `_use: 'status'` 时才同时驱动 `todoOf`/删除线/⌘↵。多值属性不能有它。
+   * `_use: 'closure'` 时才同时驱动 `closureOf`/删除线/⌘↵。多值属性不能有它。
    */
   | '_check'
   /**

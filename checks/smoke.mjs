@@ -4825,7 +4825,7 @@ await check('T257 块选区批量操作：Tab 整段缩进 / Shift+Tab 反缩进
       const r = document.querySelector(`.blk[data-block-id="${id}"] .tx`).getBoundingClientRect()
       return { x: r.left + 2, y: r.top + r.height / 2 }
     }, id)
-  /** 父关系走编辑器 store（`blocks()` 投影没有父位）；待办走 `blocks().todo` 三态 */
+  /** 父关系走编辑器 store（`blocks()` 投影没有父位）；待办走 `blocks().closure` 三态 */
   const shape = () =>
     page.evaluate(({ a, b, c }) => {
       const parentOf = (id) => {
@@ -4839,15 +4839,15 @@ await check('T257 块选区批量操作：Tab 整段缩进 / Shift+Tab 反缩进
         }
         return null
       }
-      const todoOf = (id) => window.__qua.blocks().find((x) => x.id === id)?.todo ?? null
+      const closureOf = (id) => window.__qua.blocks().find((x) => x.id === id)?.closure ?? null
       return {
         count: window.__qua.snapshot().blockSelectionCount,
         a: parentOf(a),
         b: parentOf(b),
         c: parentOf(c),
-        aTodo: todoOf(a),
-        bTodo: todoOf(b),
-        cTodo: todoOf(c),
+        aTodo: closureOf(a),
+        bTodo: closureOf(b),
+        cTodo: closureOf(c),
       }
     }, ids)
   const drag = async (from, to) => {
@@ -4887,7 +4887,7 @@ await check('T257 块选区批量操作：Tab 整段缩进 / Shift+Tab 反缩进
   await page.keyboard.press(`${MOD}+Enter`)
   await page.waitForTimeout(150)
   const todo = await shape()
-  assert(todo.aTodo === 'todo' && todo.bTodo === 'todo' && todo.cTodo === 'todo', `三块应都成任务：${JSON.stringify(todo)}`)
+  assert(todo.aTodo === 'open' && todo.bTodo === 'open' && todo.cTodo === 'open', `三块应都成任务：${JSON.stringify(todo)}`)
   await page.keyboard.press(kbd('mod+z'))
   await page.waitForTimeout(150)
   const noTodo = await shape()
@@ -5944,7 +5944,7 @@ await check('T43 待办是块标之后的身份图标：块标仍是圆点、仍
     const row = document.querySelector(`#editor > .sec > .blk[data-block-id="${b.id}"]`)
     const leftBefore = row?.querySelector(':scope > .tx')?.getBoundingClientRect().left ?? -1
     window.__qua.focusBlock(b.id, 0)
-    window.__qua.invoke('core.editor/toggle-todo')
+    window.__qua.invoke('core.editor/toggle-closure')
     return { id: b.id, leftBefore }
   })
   const deep = added.id
@@ -5954,10 +5954,10 @@ await check('T43 待办是块标之后的身份图标：块标仍是圆点、仍
       // 只认**正文自己的行**：同一块也可能出现在正文内联的查询结果里（第二处露面）
       const row = document.querySelector(`#editor > .sec > .blk[data-block-id="${blockId}"]`)
       const m = row?.querySelector(':scope > .left > .marker')
-      const box = row?.querySelector(':scope > .left > .todo-box')
+      const box = row?.querySelector(':scope > .left > .closure-box')
       const before = m ? getComputedStyle(m, '::before') : null
       return {
-        todo: row?.dataset.todo ?? '',
+        closure: row?.dataset.closure ?? '',
         depth: Number(row?.dataset.depth ?? -1),
         classes: m ? [...m.classList].sort().join(' ') : '',
         focusFor: m?.dataset.focusFor ?? '',
@@ -5969,7 +5969,7 @@ await check('T43 待办是块标之后的身份图标：块标仍是圆点、仍
     }, id)
 
   const deepRow = await readRow(deep)
-  assert(deepRow.todo !== '' && deepRow.depth >= 2, `深缩进待办没建成：${JSON.stringify(deepRow)}`)
+  assert(deepRow.closure !== '' && deepRow.depth >= 2, `深缩进待办没建成：${JSON.stringify(deepRow)}`)
   // 块标对任何身份都一样：圆点 ＋ 聚焦入口（身份只是挂在它后面的后缀）
   assert(
     deepRow.classes === 'bullet handle marker' || deepRow.classes === 'bullet handle marker marker-face',
@@ -5977,7 +5977,7 @@ await check('T43 待办是块标之后的身份图标：块标仍是圆点、仍
   )
   assert(deepRow.focusFor === deep, `待办行的块标仍要点＝聚焦：${deepRow.focusFor}`)
   assert(deepRow.before !== 'none', `待办行的块标仍应画圆点（::before content=${deepRow.before}）`)
-  assert(deepRow.boxClasses.includes('todo-box'), `方框应在身份图标上：${deepRow.boxClasses}`)
+  assert(deepRow.boxClasses.includes('closure-box'), `方框应在身份图标上：${deepRow.boxClasses}`)
   assert(deepRow.boxW === '12px', `方框应正常画出来：${deepRow.boxW}`)
 
   /**
@@ -5993,7 +5993,7 @@ await check('T43 待办是块标之后的身份图标：块标仍是圆点、仍
   const colAfter = await page.evaluate((id) => {
     const row = document.querySelector(`#editor > .sec > .blk[data-block-id="${id}"]`)
     return {
-      box: row?.querySelector(':scope > .left > .todo-box')?.getBoundingClientRect().left ?? -1,
+      box: row?.querySelector(':scope > .left > .closure-box')?.getBoundingClientRect().left ?? -1,
       text: row?.querySelector(':scope > .tx')?.getBoundingClientRect().left ?? -1,
     }
   }, deep)
@@ -6005,25 +6005,25 @@ await check('T43 待办是块标之后的身份图标：块标仍是圆点、仍
 
   // 假数据里已有的 todo / done 两态都带身份图标，且块标不因此换形状
   const all = await page.evaluate(() =>
-    [...document.querySelectorAll('#editor .blk[data-todo]')].map((row) => {
+    [...document.querySelectorAll('#editor .blk[data-closure]')].map((row) => {
       const m = row.querySelector(':scope > .left > .marker')
-      const box = row.querySelector(':scope > .left > .todo-box')
+      const box = row.querySelector(':scope > .left > .closure-box')
       return {
-        todo: row.dataset.todo,
+        closure: row.dataset.closure,
         classes: m ? [...m.classList].sort().join(' ') : '',
         boxClasses: box ? [...box.classList].sort().join(' ') : '',
         boxW: box?.querySelector('.ico') ? getComputedStyle(box.querySelector('.ico')).width : '',
       }
     }),
   )
-  assert(all.some((r) => r.todo === 'todo') && all.some((r) => r.todo === 'done'), `应同时看到 todo 与 done：${JSON.stringify(all)}`)
+  assert(all.some((r) => r.closure === 'open') && all.some((r) => r.closure === 'closed'), `应同时看到 open 与 closed：${JSON.stringify(all)}`)
   for (const r of all) {
-    // 块标＝脸位：任务块会借「任务」标签的图标（marker-face）；身份图标（todo-box）另立一格，两件事
+    // 块标＝脸位：任务块会借「任务」标签的图标（marker-face）；身份图标（closure-box）另立一格，两件事
     assert(
       ['bullet', 'handle', 'marker'].every((c) => r.classes.split(' ').includes(c)),
-      `待办（${r.todo}）的块标不该换形状：${JSON.stringify(r)}`,
+      `待办（${r.closure}）的块标不该换形状：${JSON.stringify(r)}`,
     )
-    assert(r.boxClasses.includes('todo-box') && r.boxW === '12px', `待办（${r.todo}）的方框应在：${JSON.stringify(r)}`)
+    assert(r.boxClasses.includes('closure-box') && r.boxW === '12px', `待办（${r.closure}）的方框应在：${JSON.stringify(r)}`)
   }
 
   // hover 只改块标的可见度（点换 grip），身份图标不该跟着动
@@ -6037,7 +6037,7 @@ await check('T43 待办是块标之后的身份图标：块标仍是圆点、仍
   // 状态标记：普通点击翻完成/取消；⌥+点击开状态菜单，选「进行中」
   await page.evaluate((id) => {
     document
-      .querySelector(`#editor > .sec > .blk[data-block-id="${id}"] > .left > .todo-box`)
+      .querySelector(`#editor > .sec > .blk[data-block-id="${id}"] > .left > .closure-box`)
       ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, altKey: true }))
   }, deep)
   await page.waitForFunction(() => document.querySelectorAll('.layer-item').length > 0)
@@ -6052,12 +6052,12 @@ await check('T43 待办是块标之后的身份图标：块标仍是圆点、仍
   await page.waitForFunction(
     (id) =>
       document
-        .querySelector(`#editor > .sec > .blk[data-block-id="${id}"] > .left > .todo-box`)
+        .querySelector(`#editor > .sec > .blk[data-block-id="${id}"] > .left > .closure-box`)
         ?.getAttribute('data-icon') === 'lucide:loader-circle',
     deep,
   )
   const doing = await readRow(deep)
-  assert(doing.todo === 'todo', '进行中仍是未完成（不划线）')
+  assert(doing.closure === 'open', '进行中仍是未完成（不划线）')
   assert(!doing.boxClasses.includes('check-box'), '任务状态仍是状态标记，不是普通 checkbox')
 
   await ctx.close()
@@ -6079,8 +6079,8 @@ await check('T205 取消待办：摘掉这一栏就真的不是任务了（`/待
         const b = window.__qua.__editor.store.find(id)
         const props = b?.props ?? {}
         return {
-          todo: row?.dataset.todo ?? null,
-          box: Boolean(row?.querySelector(':scope > .left > .todo-box')),
+          closure: row?.dataset.closure ?? null,
+          box: Boolean(row?.querySelector(':scope > .left > .closure-box')),
           hasValue: Object.prototype.hasOwnProperty.call(props, pid),
           slot: Array.isArray(props._ownProps) && props._ownProps.includes(pid),
         }
@@ -6091,32 +6091,32 @@ await check('T205 取消待办：摘掉这一栏就真的不是任务了（`/待
   // 前置：一行普通文本块（不是任务）
   const target = await page.evaluate(() => {
     const row = [...document.querySelectorAll('#editor .sec > .blk')].find(
-      (el) => !el.hasAttribute('data-todo') && (el.querySelector(':scope > .tx')?.textContent ?? '').trim().length > 4,
+      (el) => !el.hasAttribute('data-closure') && (el.querySelector(':scope > .tx')?.textContent ?? '').trim().length > 4,
     )
     return row?.dataset.blockId ?? ''
   })
   assert(target !== '', '前置：应有一行普通文本块')
 
   const before = await read(target)
-  assert(before.todo === null && before.hasValue === false && before.slot === false, `前置：这块本来不是任务：${JSON.stringify(before)}`)
+  assert(before.closure === null && before.hasValue === false && before.slot === false, `前置：这块本来不是任务：${JSON.stringify(before)}`)
 
   // 变成任务（与斜杠菜单同一条写路径：只落这一栏，不动块的种类）
   await page.evaluate((id) => {
     window.__qua.focusBlock(id, 0)
-    window.__qua.invoke('core.editor/toggle-todo')
+    window.__qua.invoke('core.editor/toggle-closure')
   }, target)
   await page.waitForTimeout(150)
   const made = await read(target)
-  assert(made.todo === 'todo' && made.box && made.hasValue, `切换待办之后应成为任务：${JSON.stringify(made)}`)
+  assert(made.closure === 'open' && made.box && made.hasValue, `切换待办之后应成为任务：${JSON.stringify(made)}`)
 
   /**
-   * **核心判据**：`clear-todo` 摘的是**这一栏**，不是把值翻成 `false`。
+   * **核心判据**：`clear-closure` 摘的是**这一栏**，不是把值翻成 `false`。
    * 反过来说，若它只是 `setValue(false)`，`hasValue` 仍为真、方框照旧 —— 这就是本条要抓的错解。
    */
-  await page.evaluate(() => window.__qua.invoke('core.editor/clear-todo'))
+  await page.evaluate(() => window.__qua.invoke('core.editor/clear-closure'))
   await page.waitForTimeout(150)
   const cleared = await read(target)
-  assert(cleared.todo === null, `取消待办之后不该再是任务：${JSON.stringify(cleared)}`)
+  assert(cleared.closure === null, `取消待办之后不该再是任务：${JSON.stringify(cleared)}`)
   assert(cleared.box === false, `取消待办之后方框应消失：${JSON.stringify(cleared)}`)
   assert(cleared.hasValue === false && cleared.slot === false, `这一栏应整条摘掉（值与自有槽都不留）：${JSON.stringify(cleared)}`)
 
@@ -6124,26 +6124,26 @@ await check('T205 取消待办：摘掉这一栏就真的不是任务了（`/待
   await page.evaluate(() => window.__qua.invoke('core.history/undo'))
   await page.waitForTimeout(150)
   const undone = await read(target)
-  assert(undone.todo === 'todo' && undone.box, `撤销一步就该回到任务态：${JSON.stringify(undone)}`)
+  assert(undone.closure === 'open' && undone.box, `撤销一步就该回到任务态：${JSON.stringify(undone)}`)
 
   /**
    * **标签声明那一支**：种子里的待办都打了 `#任务`，那个标签 `declareField` 了「任务状态」。
-   * ⇒ 摘掉这一块自己的值与槽之后，`todoOf` 仍判它是任务（判据是「有没有这一栏」，不是「有没有值」）。
+   * ⇒ 摘掉这一块自己的值与槽之后，`closureOf` 仍判它是任务（判据是「有没有这一栏」，不是「有没有值」）。
    * 这不是 bug，是模型：状态来自标签。要钉住的是「它不会崩、也不假装摘干净了」。
    */
   const tagged = await page.evaluate((id) => {
-    const row = [...document.querySelectorAll('#editor .sec > .blk[data-todo]')].find(
+    const row = [...document.querySelectorAll('#editor .sec > .blk[data-closure]')].find(
       (el) => el.dataset.blockId !== id,
     )
     return row?.dataset.blockId ?? ''
   }, target)
   assert(tagged !== '', '前置：种子里应还有一条带任务状态的行（来自 #任务 的声明）')
   await page.evaluate((id) => window.__qua.focusBlock(id, 0), tagged)
-  await page.evaluate(() => window.__qua.invoke('core.editor/clear-todo'))
+  await page.evaluate(() => window.__qua.invoke('core.editor/clear-closure'))
   await page.waitForTimeout(150)
   const byTag = await read(tagged)
   assert(byTag.hasValue === false, `标签声明的行：自己的值仍应被清掉：${JSON.stringify(byTag)}`)
-  assert(byTag.todo === 'todo' && byTag.box, `标签声明的行：摘完仍应显示为任务（状态来自标签）：${JSON.stringify(byTag)}`)
+  assert(byTag.closure === 'open' && byTag.box, `标签声明的行：摘完仍应显示为任务（状态来自标签）：${JSON.stringify(byTag)}`)
 
   await ctx.close()
   return `普通块：切换待办 → 取消待办（栏整条摘掉、可一步撤销）；#任务 成员：值清掉、状态仍来自标签`
@@ -6745,7 +6745,7 @@ await check('T45 Shift+点块标 ⇒ 右槽打开并定位；不换中心/不入
     nav: window.__qua.snapshot().nav,
   }))
   const picked = await page.evaluate(() => {
-    const b = window.__qua.blocks().find((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)
+    const b = window.__qua.blocks().find((x) => !(x.roles?.length) && !x.closure && x.text.length > 2)
     return b?.id ?? ''
   })
   assert(picked, '假数据里应有一个普通内容块')
@@ -6778,13 +6778,13 @@ await check('T45 Shift+点块标 ⇒ 右槽打开并定位；不换中心/不入
 
   // 待办行的方框：动作是「切换完成」，Shift 不改变它，也不打开窗口
   const todo = await page.evaluate(() => {
-    const b = window.__qua.blocks().find((x) => x.todo)
-    return b ? { id: b.id, todo: b.todo } : null
+    const b = window.__qua.blocks().find((x) => x.closure)
+    return b ? { id: b.id, closure: b.closure } : null
   })
   assert(todo, '假数据里应有待办块')
   // 方框不是块标：它的动作是切换完成。Shift 不改变它，也不打开窗口。
   await page.evaluate((id) => {
-    const box = document.querySelector(`.blk[data-block-id="${id}"] [data-todo-for]`)
+    const box = document.querySelector(`.blk[data-block-id="${id}"] [data-closure-for]`)
     if (!box) return false
     for (const type of ['mousedown', 'click']) {
       box.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, shiftKey: true }))
@@ -6793,10 +6793,10 @@ await check('T45 Shift+点块标 ⇒ 右槽打开并定位；不换中心/不入
   }, todo.id)
   await page.waitForTimeout(120)
   const afterTodo = await page.evaluate((id) => ({
-    todo: window.__qua.blocks().find((b) => b.id === id)?.todo ?? null,
+    closure: window.__qua.blocks().find((b) => b.id === id)?.closure ?? null,
     dock: window.__qua.snapshot().dock,
   }), todo.id)
-  assert(afterTodo.todo !== todo.todo, `Shift+点方框仍应切换待办：${todo.todo} → ${afterTodo.todo}`)
+  assert(afterTodo.closure !== todo.closure, `Shift+点方框仍应切换待办：${todo.closure} → ${afterTodo.closure}`)
   assert(!afterTodo.dock.right.cards.includes(todo.id), `方框不该打开窗口：${JSON.stringify(afterTodo.dock.right.cards)}`)
   await ctx.close()
   return `关闭态被叫回；不换中心/不入历史；再点不关闭、× 关闭；待办方框仍只勾选`
@@ -6806,7 +6806,7 @@ await check('T46 从正文块标拖进左槽 ⇒ 钉住并渲染；在槽里编�
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
-  const id = await page.evaluate(() => window.__qua.blocks().find((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)?.id ?? '')
+  const id = await page.evaluate(() => window.__qua.blocks().find((x) => !(x.roles?.length) && !x.closure && x.text.length > 2)?.id ?? '')
   assert(id, '应有一个可拖的普通块')
 
   const drag = await dragBlockToDock(page, id, 'left')
@@ -6851,7 +6851,7 @@ await check('T217 从正文拖块到卡片堆栈的空隙 ⇒ 窗口卡插到那
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
   const ids = await page.evaluate(() => {
-    const bs = window.__qua.blocks().filter((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)
+    const bs = window.__qua.blocks().filter((x) => !(x.roles?.length) && !x.closure && x.text.length > 2)
     return { a: bs[0].id, b: bs[1].id, c: bs[2].id }
   })
   // 先钉两张进右槽：清单里它们按拖入顺序相邻
@@ -6904,7 +6904,7 @@ await check('T218 从正文拖块到某张窗口卡的正文区 ⇒ 移进那张
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
   const ids = await page.evaluate(() => {
-    const bs = window.__qua.blocks().filter((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)
+    const bs = window.__qua.blocks().filter((x) => !(x.roles?.length) && !x.closure && x.text.length > 2)
     const root = bs.find((x) => x.children > 0)?.id ?? ''
     // 源块不能已经在卡根的子树里（那会是自环，落点该拒收）
     const src = bs
@@ -6985,7 +6985,7 @@ await check('T47 槽内连续输入不被整槽重画打断；⌘Z 在槽里回�
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
-  const id = await page.evaluate(() => window.__qua.blocks().find((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)?.id ?? '')
+  const id = await page.evaluate(() => window.__qua.blocks().find((x) => !(x.roles?.length) && !x.closure && x.text.length > 2)?.id ?? '')
   const drag = await dragBlockToDock(page, id, 'left')
   assert(drag?.hot, '拖进左槽应给出高亮')
   await page.waitForTimeout(140)
@@ -7053,7 +7053,7 @@ await check('T48 祖先和后代都打开 ⇒ 两张窗口都显示（窗口是�
           x.id !== n.child &&
           !right.includes(x.id) &&
           !(x.roles?.length) &&
-          !x.todo &&
+          !x.closure &&
           x.text.length > 2,
       )
     return b?.id ?? ''
@@ -7094,7 +7094,7 @@ await check('T49 窗口有 ×：关闭窗口但不删块；左槽清单与 DOM �
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
   const picked = await page.evaluate(() => {
-    const b = window.__qua.blocks().find((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)
+    const b = window.__qua.blocks().find((x) => !(x.roles?.length) && !x.closure && x.text.length > 2)
     return b ? { id: b.id, text: b.text } : null
   })
   assert(picked, '应有一个可拖的块')
@@ -7764,12 +7764,12 @@ await check(
       const model = window.__qua.__editor.store.find(id)
       return {
         value: model?.props?.[propId],
-        todo: blk?.dataset.todo ?? null,
+        closure: blk?.dataset.closure ?? null,
         cardValue: document.querySelector(`.prop-row[data-prop-id="${propId}"] select.prop-input`)?.value ?? null,
       }
     }, { id: target.blockId, propId: target.defId })
     assert(afterTick.value === doneId, `卡里选择要写进模型：${JSON.stringify(afterTick)}`)
-    assert(afterTick.todo === 'done', `卡里选完「完成」，左侧方框也要跟着变成已完成：${JSON.stringify(afterTick)}`)
+    assert(afterTick.closure === 'closed', `卡里选完「完成」，左侧方框也要跟着变成已完成：${JSON.stringify(afterTick)}`)
 
     await page.click('#properties-add')
     await page.waitForSelector('.props-form--own')
@@ -8081,7 +8081,7 @@ await check(
         if (!host) return { skipped: true }
       }
       window.__qua.focusBlock(host.id, 0)
-      window.__qua.invoke('core.editor/insert-block', { type: 'todo' })
+      window.__qua.invoke('core.editor/insert-block', { type: 'closure' })
       const ops = window.__qua.lastOps()
       // 属性读数走 store 的活块（诊断面的 `blocks()` 只给当前视图那一段）
       const live = ed.store.find(host.id)
@@ -9555,7 +9555,7 @@ await check(
     const target = await pickLeaf(page)
     assert(target, '第一页里应有可编辑的内容块')
 
-    await page.evaluate((id) => window.__qua.__editor.toggleTodo(id), target.id)
+    await page.evaluate((id) => window.__qua.__editor.toggleClosure(id), target.id)
     await page.waitForTimeout(120)
     const ops = await opShape(page)
     /**
@@ -9593,7 +9593,7 @@ await check(
     )
 
     await ctx.close()
-    return `toggleTodo ⇒ upsert{modified} ＋ prop.set×2（自有槽＋${propName}:待办选项）；⌘Z 回无槽`
+    return `toggleClosure ⇒ upsert{modified} ＋ prop.set×2（自有槽＋${propName}:待办选项）；⌘Z 回无槽`
   },
 )
 
@@ -10505,9 +10505,9 @@ await check(
      */
     const before = await page.evaluate((id) => {
       const blk = document.querySelector(`.blk[data-block-id="${id}"]`)
-      return { todo: blk?.dataset.todo ?? null, box: !!blk?.querySelector('.todo-box') }
+      return { closure: blk?.dataset.closure ?? null, box: !!blk?.querySelector('.closure-box') }
     }, target.id)
-    assert(before.todo === null && before.box === false, `前置：这块一开始不该有任务标记：${JSON.stringify(before)}`)
+    assert(before.closure === null && before.box === false, `前置：这块一开始不该有任务标记：${JSON.stringify(before)}`)
 
     // 走**菜单那条路径**（面板里的「添加块属性」调的就是这个命令）
     const statusId = await page.evaluate(() => window.__qua.propDefs().find((d) => d.label === '任务状态')?.id ?? '')
@@ -10524,12 +10524,12 @@ await check(
       return {
         // 模型：这块有了任务状态槽（未填 ⇒ false 那一档由渲染器画空心）
         hasSlot: Array.isArray(model?.props?._ownProps) && model.props._ownProps.includes(window.__qua.propDefs().find((d) => d.label === '任务状态')?.id),
-        todo: blk?.dataset.todo ?? null,
-        box: !!blk?.querySelector('.todo-box'),
+        closure: blk?.dataset.closure ?? null,
+        box: !!blk?.querySelector('.closure-box'),
       }
     }, target.id)
     assert(after.hasSlot, `前置：模型里应已有这个属性槽：${JSON.stringify(after)}`)
-    assert(after.todo === 'todo', `加完属性，那一行应当场变成「未完成任务」（data-todo=todo）：${JSON.stringify(after)}`)
+    assert(after.closure === 'open', `加完属性，那一行应当场变成「未完成任务」（data-closure=open）：${JSON.stringify(after)}`)
     assert(after.box === true, `加完属性，块左侧应当场出现待办方框：${JSON.stringify(after)}`)
 
     /**
@@ -10540,13 +10540,13 @@ await check(
      *    （gutter 是 `contenteditable=false` 的兄弟节点，click 之前浏览器会先移光标）。
      */
     await page.evaluate((id) => {
-      document.querySelector(`.blk[data-block-id="${id}"] .todo-box`)?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+      document.querySelector(`.blk[data-block-id="${id}"] .closure-box`)?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
     }, target.id)
     await page.waitForTimeout(200)
     const done = await page.evaluate((id) => ({
-      todo: document.querySelector(`.blk[data-block-id="${id}"]`)?.dataset.todo ?? null,
+      closure: document.querySelector(`.blk[data-block-id="${id}"]`)?.dataset.closure ?? null,
     }), target.id)
-    assert(done.todo === 'done', `点一下方框应当场变已完成：${JSON.stringify(done)}`)
+    assert(done.closure === 'closed', `点一下方框应当场变已完成：${JSON.stringify(done)}`)
 
     /**
      * 清空值停在「待填」：任务状态的定义给了缺省 ⇒ `clear-value` 只清值、行与方框都在
@@ -10565,29 +10565,29 @@ await check(
       return {
         slot: Array.isArray(model?.props?._ownProps) ? model.props._ownProps.length : 0,
         value: model?.props?.[window.__qua.propDefs().find((d) => d.label === '任务状态')?.id],
-        todo: blk?.dataset.todo ?? null,
-        box: !!blk?.querySelector('.todo-box'),
+        closure: blk?.dataset.closure ?? null,
+        box: !!blk?.querySelector('.closure-box'),
       }
     }, target.id)
     assert(cleared.slot === 1 && cleared.value === undefined, `清空后值没了、槽还在：${JSON.stringify(cleared)}`)
-    assert(cleared.todo === 'todo' && cleared.box === true, `清空后停在「待填」（读缺省待办，方框仍在）：${JSON.stringify(cleared)}`)
+    assert(cleared.closure === 'open' && cleared.box === true, `清空后停在「待填」（读缺省待办，方框仍在）：${JSON.stringify(cleared)}`)
 
     /**
      * 「取消待办」才是摘栏：值连自有槽一起走 ⇒ 标记当场消失。
      */
-    await page.evaluate((id) => window.__qua.__editor.clearTodo(id), target.id)
+    await page.evaluate((id) => window.__qua.__editor.clearClosure(id), target.id)
     await page.waitForTimeout(200)
     const removed = await page.evaluate((id) => {
       const blk = document.querySelector(`.blk[data-block-id="${id}"]`)
       const model = window.__qua.__editor.store.find(id)
       return {
         slot: Array.isArray(model?.props?._ownProps) ? model.props._ownProps.length : 0,
-        todo: blk?.dataset.todo ?? null,
-        box: !!blk?.querySelector('.todo-box'),
+        closure: blk?.dataset.closure ?? null,
+        box: !!blk?.querySelector('.closure-box'),
       }
     }, target.id)
     assert(removed.slot === 0, `取消待办后模型里不该留着槽位：${JSON.stringify(removed)}`)
-    assert(removed.todo === null && removed.box === false, `取消待办后方框与状态应一起消失：${JSON.stringify(removed)}`)
+    assert(removed.closure === null && removed.box === false, `取消待办后方框与状态应一起消失：${JSON.stringify(removed)}`)
 
     await ctx.close()
     return `add-field(任务状态) ⇒ 当场 todo ＋ 方框；点一下 ⇒ done；clear-value ⇒ 停在待填（槽在）；取消待办 ⇒ 两者一起消失`
@@ -10997,7 +10997,7 @@ await check(
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
     await openFirstPage(page)
-    const id = await page.evaluate(() => window.__qua.blocks().find((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)?.id ?? '')
+    const id = await page.evaluate(() => window.__qua.blocks().find((x) => !(x.roles?.length) && !x.closure && x.text.length > 2)?.id ?? '')
     assert(id, '应有一个可拖的普通块')
     const drag = await dragBlockToDock(page, id, 'left')
     assert(drag?.hot, '拖进左槽应给出高亮')
@@ -11373,7 +11373,7 @@ await check(
 
 
     const id = await page.evaluate(() => {
-      const b = window.__qua.blocks().find((x) => !(x.roles?.length) && !x.todo)
+      const b = window.__qua.blocks().find((x) => !(x.roles?.length) && !x.closure)
       if (!b) return ''
       window.__qua.focusBlock(b.id, 0)
       return b.id
@@ -12622,7 +12622,7 @@ await check('T118 卡片收起：只隐藏 body、不销毁窗口编辑器；刷
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
-  const id = await page.evaluate(() => window.__qua.blocks().find((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)?.id ?? '')
+  const id = await page.evaluate(() => window.__qua.blocks().find((x) => !(x.roles?.length) && !x.closure && x.text.length > 2)?.id ?? '')
   assert(id, '应有一个可开的块')
   await shiftClickMarker(page, id)
   await page.waitForTimeout(120)
@@ -12688,7 +12688,7 @@ await check('T119 单卡：只留这一张；目标不可见时自动失效；�
   assert(fallback.backrefs !== 'none', `其它卡应照常显示：${JSON.stringify(fallback)}`)
 
   // 打开一张窗口 ⇒ 退出右槽单卡（单卡是「只看一张」，加一张与它矛盾）
-  const id = await page.evaluate(() => window.__qua.blocks().find((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)?.id ?? '')
+  const id = await page.evaluate(() => window.__qua.blocks().find((x) => !(x.roles?.length) && !x.closure && x.text.length > 2)?.id ?? '')
   assert(id, '当前屏应有一个可开的块')
   await shiftClickMarker(page, id)
   await page.waitForTimeout(120)
@@ -12708,7 +12708,7 @@ await check('T120 卡片拖拽：槽内排序、跨槽移动、一个块只留�
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
   const ids = await page.evaluate(() => {
-    const bs = window.__qua.blocks().filter((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)
+    const bs = window.__qua.blocks().filter((x) => !(x.roles?.length) && !x.closure && x.text.length > 2)
     return { a: bs[0]?.id ?? '', b: bs[1]?.id ?? '' }
   })
   assert(ids.a && ids.b && ids.a !== ids.b, '应有至少两个不同的可开块')
@@ -16132,7 +16132,7 @@ await check('T163 大纲表格：改格子⇒写回那一块（表头格写直�
    * **完成态在阅读态就看得见**，不是聚焦/编辑才长出删除线。
    *
    * 两件事一起断言：
-   *   · 投影盒子带 `data-todo='done'` 且真的算出 `line-through`；
+   *   · 投影盒子带 `data-closure='closed'` 且真的算出 `line-through`；
    *   · 此时**没有** `.inline-editor`（证明读到的是投影，不是「点进去之后那台编辑器」）。
    * 然后切到平表看同一块：两个渲染器共用装配层那一个投影入口，判据只该有一份。
    */
@@ -16166,7 +16166,7 @@ await check('T163 大纲表格：改格子⇒写回那一块（表头格写直�
     page.evaluate((sel) => {
       const slot = document.querySelector(sel)
       return {
-        todo: slot?.dataset.todo ?? '',
+        closure: slot?.dataset.closure ?? '',
         decoration: slot ? getComputedStyle(slot).textDecorationLine : '',
         editors: document.querySelectorAll('.inline-editor').length,
       }
@@ -16174,7 +16174,7 @@ await check('T163 大纲表格：改格子⇒写回那一块（表头格写直�
 
   const ltDone = await readDone(`.lt-cell[data-block-id="${fx.rows[0]}"] .surface-text`)
   assert(
-    ltDone.todo === 'done' && ltDone.decoration.includes('line-through') && ltDone.editors === 0,
+    ltDone.closure === 'closed' && ltDone.decoration.includes('line-through') && ltDone.editors === 0,
     `大纲表格：完成态在阅读态就有删除线（${JSON.stringify(ltDone)}）`,
   )
 
@@ -16199,7 +16199,7 @@ await check('T163 大纲表格：改格子⇒写回那一块（表头格写直�
   await page.waitForTimeout(450)
   const tvDone = await readDone(`.tv-row[data-block-id="${fx.rows[0]}"] .surface-text`)
   assert(
-    tvDone.todo === 'done' && tvDone.decoration.includes('line-through') && tvDone.editors === 0,
+    tvDone.closure === 'closed' && tvDone.decoration.includes('line-through') && tvDone.editors === 0,
     `平表：同一块同一套投影（${JSON.stringify(tvDone)}）`,
   )
   await page.evaluate(
@@ -17361,10 +17361,10 @@ await check(
     await openFirstPage(page)
 
     const setup = await page.evaluate(() => {
-      // 不能挑一个已经是任务的行：下面要断言「普通勾选框不产生 data-todo/划线」
+      // 不能挑一个已经是任务的行：下面要断言「普通勾选框不产生 data-closure/划线」
       const host = window.__qua
         .blocks()
-        .find((b) => b.roles.length === 0 && b.todo === null && b.text.trim().length > 1)
+        .find((b) => b.roles.length === 0 && b.closure === null && b.text.trim().length > 1)
       if (!host) return { defId: '', hostId: '' }
       window.__qua.invoke('core.props/create-def', {
         blockId: host.id,
@@ -17423,7 +17423,7 @@ await check(
     )
     assert(gutterChecked === true, '勾选快捷入口后重画仍应是勾上的（写进了 `_uiPosition`）')
 
-    // 普通勾选框：值在 off（乙）时点一下 → on（甲）；不产生 data-todo/划线
+    // 普通勾选框：值在 off（乙）时点一下 → on（甲）；不产生 data-closure/划线
     await page.evaluate(
       ({ hostId, defId, off }) => {
         window.__qua.invoke('core.props/set-value', { blockId: hostId, propId: defId, value: off })
@@ -17438,9 +17438,9 @@ await check(
     )
     const plainBefore = await page.evaluate((id) => {
       const row = document.querySelector(`.blk[data-block-id="${id}"]`)
-      return { todo: row?.getAttribute('data-todo') ?? null, box: Boolean(row?.querySelector('.check-box')) }
+      return { closure: row?.getAttribute('data-closure') ?? null, box: Boolean(row?.querySelector('.check-box')) }
     }, setup.hostId)
-    assert(plainBefore.box === true && plainBefore.todo === null, `普通勾选框不该是任务：${JSON.stringify(plainBefore)}`)
+    assert(plainBefore.box === true && plainBefore.closure === null, `普通勾选框不该是任务：${JSON.stringify(plainBefore)}`)
 
     await page.evaluate((id) => {
       document
@@ -17451,12 +17451,12 @@ await check(
     const plainAfter = await page.evaluate(
       ({ hostId, defId }) => ({
         value: window.__qua.fields(hostId).find((f) => f.propId === defId)?.value ?? null,
-        todo: document.querySelector(`.blk[data-block-id="${hostId}"]`)?.getAttribute('data-todo') ?? null,
+        closure: document.querySelector(`.blk[data-block-id="${hostId}"]`)?.getAttribute('data-closure') ?? null,
       }),
       setup,
     )
     assert(plainAfter.value === checkState.on, `点一下应写 on（甲）：${JSON.stringify(plainAfter)}`)
-    assert(plainAfter.todo === null, '普通勾选框翻值后仍不是任务')
+    assert(plainAfter.closure === null, '普通勾选框翻值后仍不是任务')
 
     await ctx.close()
     return `图标写回 flag；勾选框映射出 on/off；快捷入口已勾选`
@@ -20749,7 +20749,7 @@ await check('T206 右键块标开菜单：菜单项打在**块标绑定的那一
   assert(ids.A !== '' && ids.B !== '', `前置：应有两行正文块：${JSON.stringify(ids)}`)
 
   const bTodo = () =>
-    page.evaluate((b) => document.querySelector(`.blk[data-block-id="${b}"]`)?.dataset.todo ?? null, ids.B)
+    page.evaluate((b) => document.querySelector(`.blk[data-block-id="${b}"]`)?.dataset.closure ?? null, ids.B)
   assert((await bTodo()) === null, '前置：B 本来不是任务')
 
   // ① 光标真实落进 A 的正文（不是走命令，是点进去——光标在这块就是这次要防的干扰源）
@@ -20785,11 +20785,11 @@ await check('T206 右键块标开菜单：菜单项打在**块标绑定的那一
     item.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
   })
   await page.waitForTimeout(200)
-  assert((await bTodo()) === 'todo', `菜单项应打在块标绑定的块（B）上，B 应变成任务`)
+  assert((await bTodo()) === 'open', `菜单项应打在块标绑定的块（B）上，B 应变成任务`)
   assert(
     await page.evaluate((a) => {
       const row = document.querySelector(`.blk[data-block-id="${a}"]`)
-      return row?.dataset.todo ?? null
+      return row?.dataset.closure ?? null
     }, ids.A) === null,
     'A 不该被顺带改到',
   )
@@ -20799,7 +20799,7 @@ await check('T206 右键块标开菜单：菜单项打在**块标绑定的那一
   )
 
   // 还原：B 摘回普通（同一条写路径的逆），不给别的用例留脏状态
-  await page.evaluate(() => window.__qua.invoke('core.editor/clear-todo'))
+  await page.evaluate(() => window.__qua.invoke('core.editor/clear-closure'))
   await page.waitForTimeout(150)
   assert((await bTodo()) === null, '收尾：B 应回到普通块')
 
@@ -22270,7 +22270,7 @@ await check('T225 嵌入的查询大纲里：组合期不换承载行；提交�
   assert(mid.composing, `前置：组合期真的开始了：${JSON.stringify(mid)}`)
 
   // 组合期让同一块再写一笔（待办状态）：外层/视图都不能因此换掉承载行
-  await page.evaluate(() => window.__qua.invoke('core.editor/toggle-todo'))
+  await page.evaluate(() => window.__qua.invoke('core.editor/toggle-closure'))
   await page.waitForTimeout(250)
   const mid2 = await page.evaluate((id) => {
     const el = document.querySelector(`.blk[data-embed="1"] .queryview-editor .blk[data-block-id="${id}"]`)
@@ -25994,11 +25994,11 @@ await check(
 
     // 先点一下正文（编辑态焦点落在编辑器容器上——真机出事的形状），再把状态图标挪到视口 40% 处
     await page.locator(`.blk[data-block-id="${fx.host}"] > .tx`).click()
-    const icon = page.locator(`.blk[data-block-id="${fx.host}"] .todo-mark`)
+    const icon = page.locator(`.blk[data-block-id="${fx.host}"] .closure-mark`)
     await icon.scrollIntoViewIfNeeded()
     await page.evaluate(({ host }) => {
       const s = document.getElementById('scroll')
-      const mark = document.querySelector(`.blk[data-block-id="${host}"] .todo-mark`)
+      const mark = document.querySelector(`.blk[data-block-id="${host}"] .closure-mark`)
       // 图标挪到视口 40% 处；至少滚过 120px（图标本来可能就贴着 40% 线，负增量会停在 0）
       s.scrollTop = Math.max(120, s.scrollTop + mark.getBoundingClientRect().top - window.innerHeight * 0.4)
     }, fx)
@@ -27953,9 +27953,9 @@ await check('T292 完成态任务块：点块下属性行空白，正文槽不�
   await page.keyboard.type(TEXT)
   await page.waitForTimeout(250)
   // 勾成任务 ⇒ 再翻一次成「完成」：只有完成态才给 `.tx` 加 `done` 类
-  await page.evaluate((id) => window.__qua.__editor.toggleTodo(id), fx.target)
+  await page.evaluate((id) => window.__qua.__editor.toggleClosure(id), fx.target)
   await page.waitForTimeout(150)
-  await page.evaluate((id) => window.__qua.__editor.toggleTodo(id), fx.target)
+  await page.evaluate((id) => window.__qua.__editor.toggleClosure(id), fx.target)
   await page.waitForTimeout(300)
 
   const read = (id) =>
@@ -27965,7 +27965,7 @@ await check('T292 完成态任务块：点块下属性行空白，正文槽不�
       const tx = row?.querySelector(':scope > .tx')
       return {
         model: b?.text ?? null,
-        todo: row?.dataset.todo ?? '',
+        closure: row?.dataset.closure ?? '',
         txClass: (tx?.className ?? '').toString(),
         hasTx: Boolean(tx),
         txText: tx?.textContent ?? '',
@@ -27976,8 +27976,8 @@ await check('T292 完成态任务块：点块下属性行空白，正文槽不�
     }, id)
 
   const before = await read(fx.target)
-  assert(before.todo === 'done', `前置：这块该是完成态：${JSON.stringify(before)}`)
-  assert(before.txClass.includes('done'), `前置：完成态正文槽该带 done 类：${JSON.stringify(before)}`)
+  assert(before.closure === 'closed', `前置：这块该是完成态：${JSON.stringify(before)}`)
+  assert(before.txClass.includes('closed'), `前置：完成态正文槽该带 done 类：${JSON.stringify(before)}`)
   assert(before.linePresent, '前置：块下属性行该在（父块声明了创建时间）')
   assert(before.txText.includes(TEXT.slice(0, 8)), `前置：正文该写进去了：${JSON.stringify(before)}`)
 

@@ -547,10 +547,10 @@
   inline-size: var(--ui-icon-sm);
   block-size: var(--ui-icon-sm);
 }
-.blk .identity.todo-box {
+.blk .identity.closure-box {
   cursor: pointer;
 }
-.blk .identity.todo-box:hover {
+.blk .identity.closure-box:hover {
   color: var(--ui-text-secondary);
 }
 /* 普通 select 的 gutter 入口：点开取值菜单（不是翻转） */
@@ -581,7 +581,7 @@
   color: var(--ui-text-tertiary);
   white-space: nowrap;
 }
-.blk[data-todo='done'] .tx {
+.blk[data-closure='closed'] .tx {
   color: var(--ui-text-tertiary);
   text-decoration: line-through;
   text-decoration-color: var(--ui-text-tertiary);

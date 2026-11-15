@@ -503,15 +503,15 @@ test('图标/勾选框映射/快捷入口：图标写记录、状态唯一、空
   cmds.setChoiceIcon(c1, 'lucide:square')
   assert.equal(rec(c1)?.icon, 'lucide:square', '图标写在记录上')
 
-  cmds.setChoiceCheck(defId, { on: c2, off: c1, status: true })
+  cmds.setChoiceCheck(defId, { on: c2, off: c1, closure: true })
   assert.deepEqual(kb.get(defId)?.props?._check, { on: c2, off: c1 })
-  assert.equal(kb.get(defId)?.props?._use, 'status')
+  assert.equal(kb.get(defId)?.props?._use, 'closure')
 
   // 任务状态库级唯一：第二个定义再标 status ⇒ 拒绝，不静默换主
   const def2 = cmds.createPropDef('', '另一个状态', 'select', 'own', 'new')
   const d1 = cmds.addChoice(def2, '未完成')
   const d2 = cmds.addChoice(def2, '完成')
-  cmds.setChoiceCheck(def2, { on: d2, off: d1, status: true })
+  cmds.setChoiceCheck(def2, { on: d2, off: d1, closure: true })
   assert.equal(kb.get(def2)?.props?._use, undefined, '第二条 status 被拒绝')
   assert.ok(toasts.some((x) => x.includes('任务状态')), `应有提示：${JSON.stringify(toasts)}`)
 
@@ -521,7 +521,7 @@ test('图标/勾选框映射/快捷入口：图标写记录、状态唯一、空
   assert.equal('_use' in (kb.get(defId)?.props ?? {}), false)
 
   // 普通勾选框：有 `_check`、没有 `_use`
-  cmds.setChoiceCheck(defId, { on: c2, off: c1, status: false })
+  cmds.setChoiceCheck(defId, { on: c2, off: c1, closure: false })
   assert.deepEqual(kb.get(defId)?.props?._check, { on: c2, off: c1 })
   assert.equal(kb.get(defId)?.props?._use, undefined)
 
