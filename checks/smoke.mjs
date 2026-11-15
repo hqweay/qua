@@ -16148,8 +16148,8 @@ await check('T163 大纲表格：改格子⇒写回那一块（表头格写直�
       }
       return null
     }
-    // 库里唯一的任务状态定义（`_use: 'status'` ＋ `_check`）：值写它的 `on` 选项记录 id
-    const status = walk(forest, (b) => (b.props?._use === 'status' && b.props?._check ? b : null))
+    // 库里唯一的关闭态角色（`_use: 'closure'` ＋ `_check`）：值写它的 `on` 选项记录 id
+    const status = walk(forest, (b) => (b.props?._use === 'closure' && b.props?._check ? b : null))
     if (!status) return { error: 'fixture 里没有任务状态定义' }
     // 先确认这一格此刻**不是**完成态，免得下面断言的是种子自带的样子
     const before = walk(forest, (b) => (b.id === cell ? b : null))
