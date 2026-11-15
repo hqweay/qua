@@ -30295,6 +30295,44 @@ await check('T317 asset 值控件：预览独立成带、地址在下一行，�
   return `检视卡窄槽：预览 ${geom.thumbW}×${geom.thumbH}px 单独成带（距地址 ${geom.addrTop - geom.thumbsBottom}px）、地址 ${geom.inputW}px；选文件退图标键`
 })
 
+await check('T318 检视卡段序：类型专属段紧跟属性值，块配置在后', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+  const ids = await page.evaluate(() => {
+    const host = window.__qua.blocks().find((b) => b.roles.length === 0 && b.text.length > 2)
+    window.__qua.invoke('core.tags/add', { blockId: host.id, name: '段序标签' })
+    window.__qua.invoke('core.props/create-def', { blockId: host.id, label: '段序定义', kind: 'text', target: 'own' })
+    const def = window.__qua.propDefs().find((d) => d.label === '段序定义')
+    const tag = window.__qua.allBlocks().find((b) => b.aliases.includes('段序标签'))
+    return { def: def.id, tag: tag.id }
+  })
+  const read = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll('#properties-body > .props-section')].map(
+        (s) => s.querySelector('.props-section-title')?.textContent ?? '',
+      ),
+    )
+
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), ids.def)
+  await page.waitForTimeout(200)
+  const defOrder = await read()
+  assert(
+    defOrder.join('|') === '属性|这条属性的值|块配置',
+    `定义块段序应是「属性 → 这条属性的值 → 块配置」：${JSON.stringify(defOrder)}`,
+  )
+
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), ids.tag)
+  await page.waitForTimeout(200)
+  const tagOrder = await read()
+  assert(
+    tagOrder.join('|') === '属性|标签属性|块配置',
+    `标签段序应是「属性 → 标签属性 → 块配置」：${JSON.stringify(tagOrder)}`,
+  )
+
+  await ctx.close()
+  return `定义块 ${defOrder.join(' → ')}；标签 ${tagOrder.join(' → ')}`
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 
