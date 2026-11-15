@@ -760,22 +760,42 @@ export function setupPanels(deps: PanelsDeps) {
        *
        * **不列标签块**：锚在 `#项目` 上得到的是「标签块自己的子块」，不是成员 ——
        * 读起来像「选同一样东西，意思换了」。标签场景归标签档。
+       *
+       * 第一行是**「这一块（引用处）」**：相对域（每处引用都按自己所在块算）。
+       * 它是虚拟行、不进候选目录——目录只列森林里的块（与条件树的「根块」同一处理）。
        */
       pickRefAnchor: (onPick, anchor) => {
         const notTags = new Set<string>()
         for (const b of flatten({ roots: [...kb.roots()] })) if (!hasList(b, 'tag')) notTags.add(b.id)
-        openNameChoice({
-          layers,
-          forest: kb.roots(),
+        const choice = createNameChoice(kb.roots(), {
           kind: 'ref',
           allowCreate: false,
-          anchor,
           onlyIds: notTags,
-          title: t('ui.props.refDomain.pickBlock'),
-          emptyText: t('ui.props.refEmpty'),
           idPrefix: 'refanchor',
-          onPick: (pick) => {
-            if (pick.kind === 'block') onPick(pick.id)
+        })
+        const selfRow = (): Row[] => [
+          {
+            id: 'refanchor/self',
+            label: t('ui.props.refDomain.self'),
+            hint: t('ui.props.refDomain.hint.block'),
+            icon: 'lucide:square',
+          },
+        ]
+        layers.openMenu({
+          rows: [...selfRow(), ...choice.rows('')],
+          anchor,
+          title: t('ui.props.refDomain.pickBlock'),
+          searchable: true,
+          focusSearch: true,
+          emptyText: t('ui.props.refEmpty'),
+          onQuery: (q) => layers.setRows([...selfRow(), ...choice.rows(q)]),
+          onPick: (row) => {
+            if (row.id === 'refanchor/self') {
+              onPick(SELF)
+              return
+            }
+            const pick = row.pick
+            if (pick?.kind === 'block') onPick(pick.id)
           },
         })
       },

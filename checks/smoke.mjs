@@ -29444,7 +29444,7 @@ await check('T306 自定义色：色盘选 hex 写入并进最近色；chip soft
  * ⚠️ 失败方式要能分辨：候选没被收窄（域写了没人读）、或存量值被过滤掉（软约束做成了硬校验）
  *    —— 一个是漏接，一个是越线，两者的现象都是「列表不对」，但结论相反。
  */
-await check('T309 ref 的候选域：切档到「限定标签」过滤候选、标题带约束；新建并引用；存量值不受约束影响', async () => {
+await check('T309 ref 的候选域：四档切换；标签档过滤候选、标题带约束；锚块档不列标签块且有「这一块」；新建并引用；存量值不受约束影响', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
@@ -29586,7 +29586,7 @@ await check('T309 ref 的候选域：切档到「限定标签」过滤候选、�
   )
   assert(soft.shown === '新人', '约束之外的存量值必须照常显示（软约束，不做硬校验）：' + JSON.stringify(soft))
 
-  // ⑥ 换档不写库：切到「限定范围」只弹选择器；标签块不进候选；Esc 取消 ⇒ 域一个字节不动
+  // ⑥ 换档不写库：切到「限定范围」只弹选择器；标签块不进候选；第一行是「这一块」；Esc 取消 ⇒ 域一个字节不动
   await page.evaluate((defId) => window.__qua.invoke('core.block/focus-block', { blockId: defId }), setup.defId)
   await page.waitForTimeout(280)
   await page.evaluate(() => {
@@ -29604,6 +29604,10 @@ await check('T309 ref 的候选域：切档到「限定标签」过滤候选、�
     !anchorPick.labels.some((x) => x.includes('演员') || x.includes('人物')),
     '标签块不进锚块候选（选了拿到的是「标签块自己的子块」，不是成员）：' + JSON.stringify(anchorPick.labels),
   )
+  assert(
+    anchorPick.labels.some((x) => x.includes('这一块')),
+    '第一行应是「这一块（引用处）」这个相对域入口：' + JSON.stringify(anchorPick.labels),
+  )
   await page.keyboard.press('Escape')
   await page.waitForTimeout(220)
   const unchanged = await page.evaluate(
@@ -29612,8 +29616,53 @@ await check('T309 ref 的候选域：切档到「限定标签」过滤候选、�
   )
   assert(unchanged?.kind === 'tags', '取消选择不改存储（控件不许比存储先说）：' + JSON.stringify(unchanged))
 
+  // ⑦ 真选「这一块」⇒ 存相对域（`$self`）；值选择器按每一行的宿主算，抬头说「这一块下面」
+  await page.evaluate(() => {
+    const sel = document.querySelector('.prop-ref-mode')
+    sel.value = 'block'
+    sel.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await page.waitForSelector('.layer .layer-input', { timeout: 4000 })
+  await page.evaluate(() => {
+    const item = [...document.querySelectorAll('.layer-item')].find((el) => el.textContent?.includes('这一块'))
+    item?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+  })
+  await page.waitForTimeout(300)
+  const selfDomain = await page.evaluate(
+    (defId) => ({
+      domain: window.__qua.__editor.store.find(defId)?.props?._refDomain ?? null,
+      chips: [...document.querySelectorAll('.prop-ref-domain-row .props-tag')].map((e) => e.textContent ?? ''),
+    }),
+    setup.defId,
+  )
+  assert(
+    selfDomain.domain?.kind === 'block' && selfDomain.domain.id === '$self',
+    '「这一块」应存相对域（`$self`）：' + JSON.stringify(selfDomain),
+  )
+  assert(selfDomain.chips.some((s) => s.includes('这一块')), 'chip 应写「这一块（引用处）」：' + JSON.stringify(selfDomain.chips))
+
+  await page.evaluate((host) => window.__qua.invoke('core.block/focus-block', { blockId: host }), setup.host)
+  await page.waitForTimeout(400)
+  /**
+   * ⚠️ 有值时**点名字是「打开目标」**，换目标要用尾键（`.prop-ref-change`）。
+   * 这一条与 T310 同一条判据：看它和改它是两件事。
+   */
+  await page.evaluate((pid) => {
+    document.querySelector('.prop-row[data-prop-id="' + pid + '"] .prop-ref-change')?.click()
+  }, setup.defId)
+  await page.waitForTimeout(300)
+  const selfTitle = await page.evaluate(() => ({
+    layer: Boolean(document.querySelector('.layer')),
+    head: document.querySelector('.layer-head')?.textContent ?? '',
+  }))
+  assert(
+    selfTitle.layer && selfTitle.head.includes('这一块'),
+    '值选择器抬头应说「这一块下面」：' + JSON.stringify(selfTitle),
+  )
+  await page.keyboard.press('Escape')
+
   await ctx.close()
-  return `定义页限 #演员 ⇒ 候选只剩成员（标题带「限」）；新建并引用；约束外的值仍显示；锚块档不列标签块、取消不改存储`
+  return `定义页限 #演员 ⇒ 候选只剩成员（标题带「限」）；新建并引用；约束外的值仍显示；锚块档不列标签块、第一行是「这一块」、取消不改存储、选中后抬头说「这一块下面」`
 })
 
 /**
