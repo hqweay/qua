@@ -33,6 +33,7 @@ import {
   isQueryBlock,
   listTableOf,
   propKindOf,
+  propValueText,
   resolveRows,
   resolveFrozen,
   resolveBoundView,
@@ -231,7 +232,7 @@ export interface ViewHostDeps {
   ) => void
   /** `asset` 值选本地文件（与属性卡共用；省略 ⇒ 表格里的 asset 格只渲染、不给选文件按钮） */
   pickAsset?: (onPick: (hash: string) => void) => void
-  refLabel?: (targetId: string) => string
+  refLabel: (targetId: string) => string
   /** 把外态地址交给系统浏览器（卡上的块下属性行里，链接与外态资产要能开） */
   openUrl: (url: string) => void
   /** 标签名解析（`select` 选项显示名里的 `#名`） */
@@ -1332,7 +1333,7 @@ export class ViewHost {
         ...(this.deps.pickTag ? { pickTag: this.deps.pickTag } : {}),
         ...(this.deps.tagLabel ? { tagLabel: this.deps.tagLabel } : {}),
         ...(this.deps.pickChoice ? { pickChoice: this.deps.pickChoice } : {}),
-        ...(this.deps.refLabel ? { refLabel: this.deps.refLabel } : {}),
+        refLabel: this.deps.refLabel,
         apply: (next) => this.deps.invoke('core.query/set-spec', { owner: this.writeOwner, spec: next }),
         afterApply: () => this.refocusBody(),
         close: () => this.closeTree(),
@@ -1541,7 +1542,7 @@ export class ViewHost {
           view: () => this.view ?? view,
           inspect: (blockId, propId) =>
             this.deps.invoke('core.block/inspect', { blockId, ...(propId ? { propId } : {}) }),
-          ...(this.deps.refLabel ? { refLabel: (id: string) => this.deps.refLabel!(id) } : {}),
+          refLabel: (id: string) => this.deps.refLabel(id),
           openUrl: (u) => this.deps.openUrl(u),
           choices: (id) => (id === '_tags' ? this.tagChoices() : this.deps.choices?.(id) ?? []),
           cardinalityOf: (id) => this.cardinalityOf(id),
@@ -1717,7 +1718,7 @@ export class ViewHost {
       cell: this.cell,
       ...(this.deps.pickRef ? { pickRef: this.deps.pickRef } : {}),
       ...(this.deps.pickAsset ? { pickAsset: this.deps.pickAsset } : {}),
-      ...(this.deps.refLabel ? { refLabel: this.deps.refLabel } : {}),
+      refLabel: this.deps.refLabel,
       ...(this.deps.tagName ? { tagName: this.deps.tagName } : {}),
     })
   }
@@ -1738,17 +1739,16 @@ export class ViewHost {
   }
 
   /**
-   * **分组头/列头的值名解析**：只对 `ref` 字段生效（值是块 id，得翻成名字——
-   * 裸 id 不许露）；其它 kind 的值本身就是名字，不认识就是原样回落。
-   * kind 按 kb 现读判（不依赖 `fields()` 的覆盖面）；目标没了走 `refLabel`
-   * 的「已删除」兜底，那条链与检视卡同源。
+   * **分组头/列头的值名解析**：问 core 的唯一判据（`propValueText`）——`ref` 的值
+   * 是块 id，走 `refLabel`（目标没了兜「已删除」，那条链与检视卡同源）；其它 kind
+   * 的值是字面量，翻不动原样回落。kind 按 kb 现读判（不依赖 `fields()` 的覆盖面）。
    */
   private groupValueLabel(propId: string, raw: unknown): string | undefined {
     const def = this.deps.kb.get(propId)
-    if (!def || propKindOf(def) !== 'ref') return undefined
-    const id = raw === undefined || raw === null ? '' : String(raw)
-    if (id === '') return undefined
-    return this.deps.refLabel?.(id)
+    return propValueText({ id: propId, ...(def ? { kind: propKindOf(def) } : {}) }, raw, {
+      ...(this.deps.choices ? { choices: this.deps.choices } : {}),
+      ...(this.deps.refLabel ? { refLabel: this.deps.refLabel } : {}),
+    })
   }
 
   private records(): ViewRecord[] {

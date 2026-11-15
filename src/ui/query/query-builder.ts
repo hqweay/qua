@@ -25,6 +25,7 @@ import {
   type QuerySpec,
   type TreeRow,
   type TreeNode,
+  propValueText,
 } from '../../core/index.ts'
 import { t, type MsgId } from '../../core/infra/msg.ts'
 import { NOTE_TYPE } from '../../core/relations/annotates.ts'
@@ -230,13 +231,11 @@ function propText(row: Extract<TreeRow, { kind: 'prop' }>, deps: ConditionTextDe
   const name = field?.label ?? systemQueryFieldLabel(row.field) ?? t('ui.query.fieldMissing')
   if (row.op === 'exists') return t(row.value === 'false' ? 'ui.query.label.notExists' : 'ui.query.label.exists', { name })
   if (row.op === 'empty') return t(row.value === 'false' ? 'ui.query.label.notEmpty' : 'ui.query.label.empty', { name })
-  const choice = deps.choices?.(row.field)?.find((c) => c.id === row.value)
   /**
-   * **值是块 id 的字段一律翻名字**（`ref`）——与分组列头、卡片、属性行同一条口径，
-   * 都走 `refLabel`（目标没了由它兜「已删除」），裸 id 不许露给用户。
-   * 判据按字段的 kind，不猜值的形状：`select` 的值也是 id，但它走上面的选项表。
+   * 值位的人话问**唯一判据**（core `propValueText`）：`select` 查选项表、`ref` 走
+   * `refLabel`（目标没了兜「已删除」）、翻不动原样。`_type` 是系统槽，值域是封闭
+   * 注册表，由本面的 `typeValueLabel` 先答。
    */
-  const refShown = field?.kind === 'ref' ? deps.refLabel?.(row.value) : undefined
   const shown =
     row.value === SELF
       ? t('ui.query.selfProp')
@@ -244,6 +243,6 @@ function propText(row: Extract<TreeRow, { kind: 'prop' }>, deps: ConditionTextDe
         ? t('ui.query.builder.noValue')
         : row.field === '_type'
           ? typeValueLabel(row.value)
-          : (choice?.label ?? refShown ?? row.value)
+          : (propValueText(field ?? { id: row.field }, row.value, deps) ?? row.value)
   return t('ui.query.label.cmp', { name, op: t(OP_TEXT[row.op]), value: shown })
 }

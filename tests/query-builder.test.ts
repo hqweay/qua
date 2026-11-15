@@ -31,10 +31,10 @@ test('属性：定义不在了说「属性已删除」；系统槽用它的显�
   assert.deepEqual(chips({ prop: { id: '_date', eq: '2026-10-20' } }), ['日记日期 ＝ 2026-10-20'])
 })
 
-test('`select` 的值是选项 id：chip 要显示选项名', () => {
+test('`select` 的值是选项 id：chip 要显示选项名（判据按字段 kind）', () => {
   const withChoices = queryChips(
     { where: { prop: { id: 'p', eq: 'c1' } } },
-    fields,
+    [{ id: 'p', label: '状态', kind: 'select' }],
     (propId) => (propId === 'p' ? [{ id: 'c1', label: '已完成' }] : []),
   )
   assert.deepEqual(withChoices, ['状态 ＝ 已完成'])

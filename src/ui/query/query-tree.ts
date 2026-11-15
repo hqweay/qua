@@ -73,7 +73,7 @@ export interface QueryTreeDeps {
     trigger?: HTMLElement,
     opts?: { rootBlock?: boolean },
   ) => void
-  refLabel?: (targetId: string) => string
+  refLabel: (targetId: string) => string
   /** 块选择器的宿主（排除自己）；没有也能开 —— 见 `pickRef` */
   owner?: Block
   /** 标签值选择器：候选是库里已有的标签，可搜索；查询是读操作，不许顺手新建 */

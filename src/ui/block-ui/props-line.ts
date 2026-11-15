@@ -20,7 +20,7 @@
  *    归属要编辑时才用得上，点行进面板再看。装饰点还会与块标的身份点撞形。
  */
 import { t } from '../../core/infra/msg.ts'
-import { assetRefsOf, enginePropText, isEngineProp, valueItemsOf, valueListOf } from '../../core/index.ts'
+import { assetRefsOf, enginePropText, isEngineProp, propValueText, valueItemsOf, valueListOf } from '../../core/index.ts'
 import type { BelowFields, FieldRow, PropsLineDensity } from '../../core/index.ts'
 import { activateAssetRef, makeAssetThumb } from './asset-value.ts'
 
@@ -69,19 +69,15 @@ export function fieldRowText(row: FieldRow, refLabel: (id: string) => string): s
    * **多值在这里也只有一个读法：读成列表再逐项格式化。**
    * 直接 `String(value)` 会把数组压成 `a,b` —— 显示面看起来像「一个名叫 a,b 的值」，
    * 读者与下一次写入都会把它当单值（List 就这么被抹掉了）。
+   * 逐项都问 core 的唯一判据（`propValueText`）：id 值的 kind 翻名字，翻不动原样。
    */
   if (row.cardinality === 'many') {
-    if (row.kind === 'ref') return valueListOf(row.value).map((id) => refLabel(id)).join('、')
     return valueItemsOf(row.value)
-      .map((v) => String(v))
+      .map((v) => propValueText({ id: row.propId, kind: row.kind }, v, { refLabel }) ?? String(v))
       .join('、')
   }
-  if (row.kind === 'ref') {
-    return row.value === undefined || row.value === null || row.value === ''
-      ? ''
-      : refLabel(String(row.value))
-  }
-  return row.value === undefined || row.value === null ? '' : String(row.value)
+  if (row.value === undefined || row.value === null || row.value === '') return ''
+  return propValueText({ id: row.propId, kind: row.kind }, row.value, { refLabel }) ?? String(row.value)
 }
 
 /**
@@ -113,7 +109,10 @@ export interface ValueChipItem {
  */
 export function valueChipItemsOf(row: FieldRow, refLabel: (id: string) => string): ValueChipItem[] {
   if (row.kind === 'select') return (row.currentChoiceLabels ?? []).map((text) => ({ text }))
-  if (row.kind === 'ref') return valueListOf(row.value).map((id) => ({ text: refLabel(id), refId: id }))
+  if (row.kind === 'ref') {
+    // 名字问 core 的唯一判据；`refId` 留原值——每一枚 chip 各带自己的 `data-ref-to`
+    return valueListOf(row.value).map((id) => ({ text: propValueText({ id: row.propId, kind: row.kind }, id, { refLabel }) ?? id, refId: id }))
+  }
   const asUrl = row.kind === 'text' && row.format === 'url'
   return valueItemsOf(row.value).map((v) => ({
     text: String(v),
