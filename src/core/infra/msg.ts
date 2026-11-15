@@ -859,6 +859,8 @@ export const MSG = {
   'ui.view.label': '视图',
   'ui.view.switchHint': '切换视图',
   'ui.view.count': '{count} 项',
+  'ui.view.hidden': '已隐藏 {count} 项',
+  'ui.view.hiddenClear': '这些行被这张视图的筛选挡住了（没有删除）。点击清除筛选',
   'ui.view.newRow': '新建一行',
   'ui.view.empty': '还没有子块',
   'ui.view.emptyHint': '新建一行，或切回大纲写第一条',

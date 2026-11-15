@@ -59,7 +59,9 @@ import {
   readViewSet,
   todayISO,
   slicedSpec,
+  maskIdsOf,
   structureGroupsOf,
+  type StructureGroup,
   type Block,
   type ClickMods,
   type FoldState,
@@ -307,6 +309,8 @@ export interface ViewHostEls {
   filters: HTMLElement
   /** 条件树（就地展开；与抬头同属这一段，不是浮层） */
   tree: HTMLElement
+  /** 「已隐藏 N 项」（children 记录视图的掩码语义）：筛掉 ≠ 删除，点击清除 */
+  hiddenNote: HTMLButtonElement
   refresh: HTMLButtonElement
   /**
    * 「全部展开／全部收起」：**一个**按钮，文案随状态变。
@@ -387,7 +391,11 @@ export function createViewHostEls(): ViewHostEls {
   newRow.type = 'button'
   newRow.className = 'queryview-newrow'
   newRow.hidden = true
-  head.append(title, count, topCount, stale, filters, views, group, sort, filterBtn, columnsBtn, refresh, foldAll, newRow)
+  const hiddenNote = document.createElement('button')
+  hiddenNote.type = 'button'
+  hiddenNote.className = 'queryview-hidden'
+  hiddenNote.hidden = true
+  head.append(title, count, topCount, stale, filters, views, group, sort, filterBtn, columnsBtn, hiddenNote, refresh, foldAll, newRow)
 
   const tree = document.createElement('div')
   tree.className = 'queryview-tree'
@@ -432,6 +440,7 @@ export function createViewHostEls(): ViewHostEls {
     foldAll,
     newRow,
     stale,
+    hiddenNote,
     editor,
     table,
   }
@@ -451,6 +460,8 @@ export class ViewHost {
   private cards: ViewCards | null = null
   /** 页签分支（一次只看一个子块；激活页是渲染器自己的实例状态） */
   private tabs: ViewTabs | null = null
+  /** children 记录视图当前的显示掩码（命中 id 集；`null` ＝ 无掩码）。`paintChrome` 每次重画现算 */
+  private maskIds: Set<string> | null = null
   private calendar: ViewCalendar | null = null
   private mindmap: ViewMindmap | null = null
   /** 分组包装（表格带 `groupBy` 时）：段头归它、段身仍是表格 */
@@ -545,6 +556,10 @@ export class ViewHost {
     this.els.newRow.textContent = t('ui.view.newRow')
     this.els.newRow.dataset.tip = t('ui.view.newRowTitle')
     this.els.newRow.addEventListener('click', () => this.deps.invoke('core.view/new-row', { owner: this.writeOwner }))
+    // 「已隐藏 N 项」点击＝清掉这张视图的显示掩码（筛掉 ≠ 删除，退路要一眼可及）
+    this.els.hiddenNote.addEventListener('click', () => {
+      this.deps.invoke('core.view/set-filter', { owner: this.writeOwner, viewId: this.view?.id ?? '', filter: null })
+    })
     this.els.foldAll.addEventListener('click', () => this.toggleFoldAll())
     /**
      * **一台就地编辑器**：一次只编辑一处，装进被点的那一格（不是浮层）。
@@ -1038,8 +1053,20 @@ export class ViewHost {
      * 名字为空时由那台编辑器的占位句说明，不另挂 `data-empty-text`。
      */
     if (!embed) this.els.title.textContent = query ? (name === '' ? t('ui.query.untitled') : name) : ''
+    // children 记录视图的**显示掩码**：一次求值，记录／组内记录／页签三处共用（`null` ＝ 无掩码）
+    this.maskIds = !derived && src.kind === 'children' && view !== null ? maskIdsOf(view.filter, this.deps.kb) : null
     const n = this.rowCount()
     this.els.count.textContent = query ? t('ui.query.count', { count: n }) : t('ui.view.count', { count: n })
+    // 「已隐藏 N 项」：筛掉 ≠ 删除，给一句实话；点击＝清除掩码（退路一眼可及）
+    if (this.maskIds && src.kind === 'children') {
+      const raw = childrenRecords(src.blockId, this.deps.kb).length
+      const hidden = raw - this.records().length
+      this.els.hiddenNote.hidden = hidden <= 0
+      this.els.hiddenNote.textContent = t('ui.view.hidden', { count: String(hidden) })
+      this.els.hiddenNote.dataset.tip = t('ui.view.hiddenClear')
+    } else {
+      this.els.hiddenNote.hidden = true
+    }
     // 大纲折叠的次要文案由 `render()` 现算（它才知道这一屏画了几行）；其余分支没有折叠
     if (!query || view !== null) this.els.topCount.hidden = true
     this.els.refresh.hidden = !query
@@ -1839,10 +1866,7 @@ export class ViewHost {
           setValue: (blockId, propId, value) => this.deps.invoke('core.props/set-value', { blockId, propId, value }),
           clearValue: (blockId, propId) => this.deps.invoke('core.props/clear-value', { blockId, propId }),
           // 结构分组只接 children 源：组＝直接子块、记录＝它的孩子（query 命中是平的，没有一级）
-          structureGroups: () => {
-            const src = this.source
-            return src.kind === 'children' ? structureGroupsOf(src.blockId, this.deps.kb) : []
-          },
+          structureGroups: () => this.maskedGroups(),
           // 拖卡＝换父（结构与撤销都归命令层），不是写某个字段的值
           moveInto: (blockId, groupBlockId) =>
             this.deps.invoke('core.block/move-to', { blockId, targetId: groupBlockId }),
@@ -1863,10 +1887,7 @@ export class ViewHost {
           store: this.deps.store,
           write: this.deps.write,
           // 页签＝直接子块（复用结构派生的那一遍遍历；查询源命中是平的，建不了页签视图）
-          tabs: () => {
-            const src = this.source
-            return src.kind === 'children' ? structureGroupsOf(src.blockId, this.deps.kb) : []
-          },
+          tabs: () => this.maskedTabs(),
           view: () => this.view ?? view,
           wire: (editor, change) => this.deps.wire(editor, change),
           onChange: () => this.deps.onChange(),
@@ -2005,7 +2026,26 @@ export class ViewHost {
     if (this.deps.derived) return this.deps.derived.records()
     const src = this.source
     if (src.kind === 'query') return resolveRows(this.frozen?.hits ?? [], this.deps.kb)
-    return childrenRecords(src.blockId, this.deps.kb)
+    // children 记录视图的**显示掩码**（`paintChrome` 现算的命中集）：不匹配的行消失，
+    // `children` 顺序一个字节不动；没有掩码时零开销
+    const rows = childrenRecords(src.blockId, this.deps.kb)
+    return this.maskIds ? rows.filter((r) => this.maskIds!.has(r.block.id)) : rows
+  }
+
+  /** 结构分组的组内记录过掩码（组是真实块，保留——空组还能拖卡进去） */
+  private maskedGroups(): StructureGroup[] {
+    const src = this.source
+    const groups = src.kind === 'children' ? structureGroupsOf(src.blockId, this.deps.kb) : []
+    if (!this.maskIds) return groups
+    return groups.map((g): StructureGroup => ({ block: g.block, records: g.records.filter((r) => this.maskIds!.has(r.block.id)) }))
+  }
+
+  /** 页签过掩码：筛的是 **tab 自己**（那一个直接子块匹不匹配） */
+  private maskedTabs(): StructureGroup[] {
+    const src = this.source
+    const groups = src.kind === 'children' ? structureGroupsOf(src.blockId, this.deps.kb) : []
+    if (!this.maskIds) return groups
+    return groups.filter((g) => this.maskIds!.has(g.block.id))
   }
 
   /**

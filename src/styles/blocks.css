@@ -1592,6 +1592,7 @@
 }
 .queryview-count,
 .queryview-stale,
+.queryview-hidden,
 .queryview-views,
 .queryview-group,
 .queryview-sort,
@@ -1652,6 +1653,18 @@
   font-size: var(--ui-fs-xs);
 }
 .queryview-stale[hidden] {
+  display: none;
+}
+/* 「已隐藏 N 项」：掩码的实话与退路（点击清除）。只是提示件，不拦编辑、不改变排版 */
+.queryview-hidden {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+  cursor: pointer;
+}
+.queryview-hidden[hidden] {
   display: none;
 }
 .queryview-refresh {

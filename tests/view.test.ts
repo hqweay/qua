@@ -43,6 +43,7 @@ import {
   removeView,
   renameView,
   resolveRows,
+  maskIdsOf,
   slicedSpec,
   sortListRows,
   sortRecords,
@@ -676,6 +677,31 @@ test('canonicalViews：filter 双语义——query 源是切片、children 记�
   )
   const invalid = canonicalViews([{ id: 'v', kind: 'table', filter: 'nope' }], sourceOf(q))
   assert.equal(invalid[0]!.filter, undefined, '不是 QueryNode ⇒ 丢掉，不猜')
+})
+
+test('maskIdsOf：children 记录视图的显示掩码——命中集取交集，不重排、不改成员集合本身', () => {
+  const { root, defs } = pageWith5()
+  const { kb } = kbOf([root, ...defs])
+  const rows = childrenRecords('root', kb)
+  const before = rows.map((r) => r.block.id)
+
+  // 没有掩码：null（调用方零开销直通）
+  assert.equal(maskIdsOf(null, kb), null)
+  assert.equal(maskIdsOf(undefined, kb), null)
+  assert.equal(maskIdsOf({ any: [] }, kb), null, '空条件树＝没有掩码，不是「全部隐藏」')
+
+  // 有掩码：命中集是 id 集合；调用方拿它过滤行——顺序与 children 一个字节不动
+  const propCond = { prop: { id: defs[1]!.id, gt: 3 } }
+  const ids = maskIdsOf(propCond, kb)
+  assert.ok(ids && ids.size > 0 && ids.size < rows.length, `掩码命中一部分：${ids?.size}`)
+  const masked = rows.filter((r) => ids!.has(r.block.id))
+  assert.ok(masked.length > 0 && masked.length < rows.length, '掩码真的筛掉了一部分')
+  assert.deepEqual(
+    masked.map((r) => r.block.id),
+    rows.filter((r) => ids!.has(r.block.id)).map((r) => r.block.id),
+    '过滤只做集合成员判断：顺序＝children 顺序',
+  )
+  assert.deepEqual(rows.map((r) => r.block.id), before, '掩码不改入参（记录派生原样）')
 })
 
 test('withFilter：写一格／清掉删键；不改原视图', () => {

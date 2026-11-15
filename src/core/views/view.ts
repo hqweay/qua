@@ -23,7 +23,7 @@ import { uuidv7Hex } from '../model/ids.ts'
 import type { KbClient } from '../kb/types.ts'
 import { declaredFieldIds, ownFieldIds } from '../props/props.ts'
 import { plainText } from '../model/runs.ts'
-import { canonicalNode, isQueryNode, type QueryNode, type QuerySpec, type SortKey } from '../query/query.ts'
+import { canonicalNode, isEmptyWhere, isQueryNode, type QueryNode, type QuerySpec, type SortKey } from '../query/query.ts'
 
 /* ------------------------------------------------------------ 类型 */
 
@@ -1338,6 +1338,25 @@ export function withFilter(view: ViewConfig, filter: QueryNode | null | undefine
   }
   next.filter = canonicalNode(filter)
   return next
+}
+
+/**
+ * children 记录视图的**显示掩码**（`filter` 轴在 children 源的语义）。
+ *
+ * filter 在这里**不是切片**：记录成员由 children 顺序决定，掩码只回答「这一行要不要画」——
+ * 不匹配的记录连同它在屏幕上的那一行消失，`children` 顺序一个字节不动。**筛掉 ≠ 删除**：
+ * 调用方要给隐藏计数与清除入口，否则「行怎么少了」没有线索。
+ *
+ * 求值复用整库查询（与 query 源的切片同一台求值器）：命中集与记录集取交集。
+ * 返回**匹配的 id 集合**——记录、结构分组的组内记录、页签三处共用一次求值；
+ * `null` ＝ 没有掩码（filter 缺失或空条件树）。
+ */
+export function maskIdsOf(
+  filter: QueryNode | null | undefined,
+  kb: Pick<KbClient, 'query'>,
+): Set<string> | null {
+  if (!filter || isEmptyWhere(filter)) return null
+  return new Set(kb.query({ where: filter }, {}).map((h) => h.blockId))
 }
 
 /** 把一份条件与切片叠成**生效条件**：基础 ∩ 切片（AND，不替换；无切片 = 原样） */
