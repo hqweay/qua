@@ -254,7 +254,7 @@ export interface PropertiesDeps {
   /** 定义格式的写入口（同值形状内的约束与画法；`plain` ＝ 摘键） */
   setFormat: (defId: string, format: string) => void
   /**
-   * **`ref` 定义的候选域**（`_refDomain` 软约束）的三个入口：标签、锚块、查询。
+   * **`ref` 定义的候选域**（`_refDomain` 软约束）的三个入口：标签、指定块、查询。
    *
    * 选择器必须经装配层开（浮层不归组件）；标签这一档收已有清单当排除项 ——
    * 第二次为同一个标签点「＋」不该再多给一条同样的 chip。
@@ -1774,14 +1774,14 @@ export class PropertiesPanel {
   /**
    * **`ref` 定义的候选域**（`_refDomain`）：候选从哪儿来。
    *
-   * 四档同一根轴：**不限**（键缺席）／标签成员（含下级标签闭包）／锚块子树／查询块结果。
+   * 四档同一根轴：**不限**（键缺席）／标签成员（含下级标签闭包）／手选块清单／查询块结果。
    * 它在定义页，不在值行上：域是**这条属性**的性质（谁可以被引用），不是某一格值的性质；
    * 值行只画「现在指向谁」——一个字节都不动。
    *
    * 两个判据：
    *   · **控件不许比存储先说**：切到某一档时先还原 `<select>` 的显示值，等「选中目标」
    *     那一步真的写进库、面板重画，档位才变。取消选择 ⇒ 一切照旧（不丢原有配置）。
-   *   · **悬空不静默**：锚块/查询被删了仍画出来并标「已删除」，摘掉它就是回到不限。
+   *   · **悬空不静默**：手选的块/查询被删了仍画出来并标「已删除」，摘掉它就是回到不限。
    */
   private buildRefDomain(def: Block): HTMLElement | null {
     if (propKindOf(def) !== 'ref') return null
@@ -1880,7 +1880,7 @@ export class PropertiesPanel {
       chip.append(name, chipDel(t('ui.props.refDomain.remove'), onRemove))
       return chip
     }
-    /** 「＋」：切换/补一个目标（标签是追加，锚块与查询是换一个） */
+    /** 「＋」：往清单里补一个（标签与指定块是追加；查询是换一个） */
     const addButton = (tip: string, onclick: (rect: DOMRect) => void): HTMLElement => {
       const add = document.createElement('button')
       add.type = 'button'
