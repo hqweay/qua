@@ -89,6 +89,32 @@ function defCatalogLabel(def: Block): string {
   return t(`ui.props.kind.${kind}`)
 }
 
+/**
+ * **段头**：图标 ＋ 名字 ＋ 可选计数。
+ *
+ * 段头是「分组」的唯一视觉锚点：一列表单里没有段头，读者只看到一串行；
+ * 有了图标与计数，主段与次段在同一视野里各有身份（图标是形状，计数是规模）。
+ */
+function sectionHead(icon: string, title: string, count?: number): HTMLElement {
+  const head = document.createElement('div')
+  head.className = 'props-section-head'
+  const ico = document.createElement('span')
+  ico.className = 'props-section-ico'
+  ico.setAttribute('aria-hidden', 'true')
+  renderIcon(ico, icon, 'list', 'sm')
+  const label = document.createElement('span')
+  label.className = 'props-section-title'
+  label.textContent = title
+  head.append(ico, label)
+  if (count !== undefined && count > 0) {
+    const badge = document.createElement('span')
+    badge.className = 'props-section-count'
+    badge.textContent = String(count)
+    head.appendChild(badge)
+  }
+  return head
+}
+
 export interface PropertiesDeps {
   /**
    * 属性区画在哪个块上 —— **这一屏唯一的主体**（中心槽的当前对象）。
@@ -116,6 +142,10 @@ export interface PropertiesDeps {
    * 每一次都要重新猜一遍哪个能点。
    */
   openRef: (to: string, mods: ClickMods) => void
+  /** 值里的资产点一下：默认动作按指向分派（图→lightbox／外链→浏览器／其余→详情） */
+  activateAsset: (ref: string, label: string) => void
+  /** 引用目标的图标（页/标签的脸）；没有就不画 */
+  refIcon: (id: string) => string | undefined
   /** 森林里全部定义（「添加已有属性」用） */
   defs: () => Block[]
   /** 短 id（未知属性的显示） */
@@ -234,6 +264,10 @@ export type FieldRowDeps = Pick<PropertiesDeps, 'shortId' | 'setValue' | 'clearV
   tagName?: (id: string) => string
   /** 打开属性定义块（普通块的属性名可点：改选项去定义页，不在块上再开一个编辑面） */
   openRef?: PropertiesDeps['openRef']
+  /** 值里的资产点一下：lightbox／外链／一句详情（判据与块下属性行同一份，执行归装配层） */
+  activateAsset?: (ref: string, label: string) => void
+  /** 引用目标的图标（页/标签的脸）；没有就不画 */
+  refIcon?: (id: string) => string | undefined
 }
 
 /**
@@ -242,7 +276,12 @@ export type FieldRowDeps = Pick<PropertiesDeps, 'shortId' | 'setValue' | 'clearV
  * 全都可以缺省：表格格子里没有属性区那套依赖时，控件退化成只读/短 id 显示，
  * 而不是「点了报错」。
  */
-export type CellEditorDeps = Partial<Pick<FieldRowDeps, 'pickRef' | 'pickChoice' | 'pickAsset' | 'refLabel' | 'tagName' | 'openRef'>>
+export type CellEditorDeps = Partial<
+  Pick<
+    FieldRowDeps,
+    'pickRef' | 'pickChoice' | 'pickAsset' | 'refLabel' | 'tagName' | 'openRef' | 'activateAsset' | 'refIcon'
+  >
+>
 
 export interface PropertiesEls {
   /** 卡片本身：`hidden` 与否表达「有没有主体」 */
@@ -265,8 +304,9 @@ export interface PropertiesEls {
  * **绝不 `String(value)`**（那会把 `a,b` 写回去，List 就退化成单值了）。
  */
 function valueChips(
-  items: readonly { text: string; refId?: string }[],
+  items: readonly { text: string; refId?: string; icon?: string }[],
   onRemove: (index: number) => void,
+  opts: { onOpen?: (index: number, e: MouseEvent) => void } = {},
 ): HTMLElement {
   const box = document.createElement('div')
   box.className = 'prop-chips'
@@ -277,15 +317,33 @@ function valueChips(
     chip.dataset.chip = '1'
     const body = document.createElement('span')
     body.className = 'prop-chip-text ui-ellipsis'
-    body.textContent = item.text
+    if (item.icon !== undefined && item.icon !== '') {
+      const ico = document.createElement('span')
+      ico.className = 'prop-chip-ico'
+      ico.setAttribute('aria-hidden', 'true')
+      renderIcon(ico, item.icon, 'circle', 'sm')
+      body.appendChild(ico)
+    }
+    const text = document.createElement('span')
+    text.className = 'prop-chip-label ui-ellipsis'
+    text.textContent = item.text
+    body.appendChild(text)
     /**
-     * 引用类的值本身是一枚**露面**：`data-ref-to` 是应用里唯一的判据，跳转由事件层
-     * 那一条分支接管（与正文引用、块下属性行同一份）。这里不挂点击——
-     * 第二份跳转实现＝第二套语义。
+     * 引用类的值本身是一枚**露面**：点名字＝打开目标（与正文引用、块下属性行同一条语义）。
+     * 面板不在编辑器事件宿主里，所以这里显式调 `onOpen`；`data-ref-to` 仍留着，
+     * 它是「指向某块」的语义标记，不是第二套跳转实现。
      */
     if (item.refId !== undefined && item.refId !== '') {
       body.dataset.refTo = item.refId
       body.classList.add('prop-chip-ref')
+    }
+    if (opts.onOpen) {
+      body.classList.add('prop-chip-open')
+      body.dataset.tip = t('ui.props.openRef')
+      body.addEventListener('click', (e) => {
+        e.stopPropagation()
+        opts.onOpen!(i, e)
+      })
     }
     const x = document.createElement('button')
     x.type = 'button'
@@ -426,11 +484,12 @@ export function makeCellEditor(
       box.dataset.propMulti = '1'
       box.appendChild(
         valueChips(
-          ids.map((id) => ({ text: deps?.refLabel?.(id) ?? id, refId: id })),
+          ids.map((id) => ({ text: deps?.refLabel?.(id) ?? id, refId: id, icon: deps?.refIcon?.(id) })),
           (i) => {
             const next = ids.filter((_, j) => j !== i)
             send(next.length === 0 ? undefined : next)
           },
+          deps?.openRef ? { onOpen: (i, e) => deps.openRef!(ids[i]!, clickModsOf(e)) } : {},
         ),
       )
       if (deps?.pickRef && owner) {
@@ -449,21 +508,58 @@ export function makeCellEditor(
     if (deps?.pickRef && owner) {
       const pick = deps.pickRef
       const current = row.value === undefined || row.value === null ? '' : String(row.value)
+      const wrap = document.createElement('span')
+      wrap.className = 'prop-ref-value'
+      /**
+       * **值本身是阅读面**：点名字＝打开目标（带修饰键走同一份 `openRef` 路由）。
+       * 换目标退成一枚尾键——「看它」与「改它」是两件事，不能挤在同一个点击上。
+       */
       const btn = document.createElement('button')
       btn.type = 'button'
       btn.className = 'prop-input prop-ref'
       btn.dataset.refId = current
       btn.dataset.tip = current === '' ? t('ui.props.pickRef') : t('ui.props.refOpenHint')
-      btn.textContent = current === '' ? t('ui.props.pending') : (deps.refLabel?.(current) ?? current)
+      const icon = current === '' ? undefined : deps.refIcon?.(current)
+      if (icon !== undefined && icon !== '') {
+        const ico = document.createElement('span')
+        ico.className = 'prop-ref-ico'
+        ico.setAttribute('aria-hidden', 'true')
+        renderIcon(ico, icon, 'circle', 'sm')
+        btn.appendChild(ico)
+      }
+      const name = document.createElement('span')
+      name.className = 'prop-ref-name ui-ellipsis'
+      name.textContent = current === '' ? t('ui.props.pending') : (deps.refLabel?.(current) ?? current)
+      btn.appendChild(name)
       btn.addEventListener('click', (e) => {
-        const mods = clickModsOf(e)
-        if (current !== '' && deps.openRef && (mods.altKey || mods.metaKey || mods.shiftKey || mods.ctrlKey)) {
-          deps.openRef(current, mods)
+        if (current !== '' && deps.openRef) {
+          deps.openRef(current, clickModsOf(e))
           return
         }
         pick(owner, row.propId, current, (targetId) => send(targetId === '' ? undefined : targetId), btn.getBoundingClientRect(), btn)
       })
-      return btn
+      wrap.appendChild(btn)
+      if (current !== '') {
+        const change = document.createElement('button')
+        change.type = 'button'
+        change.className = 'prop-ref-change ghost'
+        change.dataset.tip = t('ui.props.refChange')
+        change.setAttribute('aria-label', t('ui.props.refChange'))
+        renderIcon(change, 'lucide:pencil', 'pencil', 'sm')
+        change.addEventListener('click', (e) => {
+          e.stopPropagation()
+          pick(
+            owner,
+            row.propId,
+            current,
+            (targetId) => send(targetId === '' ? undefined : targetId),
+            change.getBoundingClientRect(),
+            change,
+          )
+        })
+        wrap.appendChild(change)
+      }
+      return wrap
     }
   }
   if (kind === 'select' && many) {
@@ -479,12 +575,13 @@ export function makeCellEditor(
      */
     const ids = row.currentChoiceIds ?? valueListOf(row.value)
     const labels = row.currentChoiceLabels ?? []
+    const iconOf = new Map((row.choices ?? []).map((c) => [c.id, c.icon]))
     const box = document.createElement('div')
     box.className = 'prop-multi-value'
     box.dataset.propMulti = '1'
     box.appendChild(
       valueChips(
-        ids.map((_, i) => ({ text: labels[i] ?? t('ui.props.choice.deleted') })),
+        ids.map((id, i) => ({ text: labels[i] ?? t('ui.props.choice.deleted'), icon: iconOf.get(id) })),
         (i) => {
           const next = ids.filter((_, j) => j !== i)
           send(next.length === 0 ? undefined : next)
@@ -557,16 +654,15 @@ export function makeCellEditor(
     return wrap
   }
   /**
-   * `asset`：**一枚控件框里住三件**——缩略图（前导 adornment）／地址（可编辑文本）／选文件键。
+   * `asset`：**预览在上、地址在下**（表格格仍收成一行）。
    *
-   * 为什么不是三个平级的框（真机反馈：检视卡窄槽里缩略图压在地址输入框上）：
-   * 值是**一份**，图与地址只是它的两种投影。三个兄弟在同一行抢宽度时，
-   * flex 会把「装着不可缩内容的盒子」压到比内容还窄，内容溢出盒子画到下一个兄弟上
-   * ⇒ 不是间距问题，是收缩量没有指定去处（视觉纪律 5）。收成**一个框**之后：
-   *   · 框自己就是那个输入控件（边框／底／焦点环只此一份）；
-   *   · 图与选文件键是框内固定件（`flex: none`，值不参与压缩）；
-   *   · 地址是**唯一**吸收收缩量的格（`min-width: 0` ＋ 省略），截断后点进输入框
-   *     还能拿回全文 —— 这正是「可省略的格」该有的性质。
+   * 值只有一份，图与地址是它的两种投影：图是「它是什么」，地址是「它从哪来」。
+   * 两件事放在同一条带上，读者分不出哪部分可点、哪部分可改；分开之后：
+   *   · 预览带是值的舞台（点图＝默认动作：lightbox／外链／详情）；
+   *   · 地址带是唯一的编辑入口（手填链接／选文件），也是唯一吸收收缩量的格。
+   *
+   * 多值预览横向滚动，但滚动本身要**看得出来**：计数徽标 ＋ 细滚动条 ＋
+   * 右缘渐隐（只在真的溢出时出现，`data-overflow` 现算），容器可聚焦用方向键滚。
    *
    * 两态值（hash／http(s)）在 `asset-value.ts` 现算成地址，这里只管读写：
    *   · 已有值画成露面（内态缺失／外链腐烂时自己退化成一句实话，值不动）；
@@ -582,32 +678,54 @@ export function makeCellEditor(
     const box = document.createElement('div')
     box.className = 'prop-asset'
     box.dataset.assetEditor = '1'
-    // 单值的图是固定前导件；多值是一列可横向滚的缩略图，允许它先让出宽度给地址
     box.dataset.assetMany = many ? '1' : '0'
     box.dataset.assetSurface = surface
 
-    /**
-     * **预览与地址是两份投影，各占一条带**（同一个框里图贴着输入框时，
-     * 读不出哪部分是「值」、哪部分是可改的地址）。
-     *
-     * 面板里预览整宽在上、地址在下；表格格定高，仍收成一行（`data-asset-surface`）。
-     * 没有值时不留一条空预览带 —— 空态只有地址带，选文件入口就在它尾上。
-     */
     if (refs.length > 0) {
+      const preview = document.createElement('div')
+      preview.className = 'prop-asset-preview'
+      if (refs.length > 1) {
+        preview.dataset.tip = t('ui.props.assetScrollHint', { n: refs.length })
+        const count = document.createElement('span')
+        count.className = 'prop-asset-count'
+        count.textContent = t('ui.props.assetCount', { n: refs.length })
+        count.dataset.tip = t('ui.props.assetScrollHint', { n: refs.length })
+        preview.appendChild(count)
+      }
       const thumbs = document.createElement('div')
       thumbs.className = 'prop-asset-thumbs'
-      for (const ref of refs) {
-        thumbs.appendChild(
-          makeAssetThumb(ref, {
-            onRemove: () => {
-              // 多值摘一项仍写数组；摘空了就是「没有这一格」（与 chips 一条口径）
-              const next = refs.filter((x) => x !== ref)
-              send(many ? (next.length === 0 ? undefined : next) : undefined)
-            },
-          }),
-        )
+      if (refs.length > 1) {
+        // 多值才需要滚：容器可聚焦，方向键能滚；计数徽标在右上角说明「还有」
+        thumbs.tabIndex = 0
+        thumbs.setAttribute('aria-label', t('ui.props.assetScrollHint', { n: refs.length }))
       }
-      box.appendChild(thumbs)
+      for (const ref of refs) {
+        const thumb = makeAssetThumb(ref, {
+          onRemove: () => {
+            // 多值摘一项仍写数组；摘空了就是「没有这一格」（与 chips 一条口径）
+            const next = refs.filter((x) => x !== ref)
+            send(many ? (next.length === 0 ? undefined : next) : undefined)
+          },
+        })
+        if (deps?.activateAsset) {
+          thumb.dataset.assetOpen = '1'
+          thumb.addEventListener('click', (e) => {
+            e.stopPropagation()
+            deps.activateAsset!(ref, row.label)
+          })
+        }
+        thumbs.appendChild(thumb)
+      }
+      preview.appendChild(thumbs)
+      box.appendChild(preview)
+
+      // 溢出是「此刻的几何」，不是值的性质：首帧、图片解码后各量一次
+      const syncOverflow = (): void => {
+        preview.dataset.overflow = thumbs.scrollWidth > thumbs.clientWidth + 1 ? '1' : '0'
+      }
+      requestAnimationFrame(syncOverflow)
+      thumbs.addEventListener('scroll', syncOverflow, { passive: true })
+      for (const img of thumbs.querySelectorAll('img')) img.addEventListener('load', syncOverflow, { once: true })
     }
 
     const address = document.createElement('div')
@@ -825,6 +943,15 @@ export function makeFieldRow(
         const nm = document.createElement('span')
         nm.textContent = `#${displayNameOf(tag)}`
         item.append(dot, nm)
+        if (deps.openRef) {
+          // 来源也是「指向标签的一处露面」：点它打开标签（与正文 chip 同一语义）
+          item.classList.add('prop-source-tag--link')
+          item.dataset.tip = t('ui.props.openTag')
+          item.addEventListener('click', (e) => {
+            e.stopPropagation()
+            deps.openRef!(tag.id, clickModsOf(e))
+          })
+        }
         src.appendChild(item)
       }
     } else {
@@ -1021,12 +1148,7 @@ export class PropertiesPanel {
     if (isPropDef(target)) {
       const config = document.createElement('section')
       config.className = 'props-section prop-def-config'
-      const head = document.createElement('div')
-      head.className = 'props-section-head'
-      const title = document.createElement('span')
-      title.className = 'props-section-title'
-      title.textContent = t('ui.props.defValuesTitle')
-      head.appendChild(title)
+      const head = sectionHead('lucide:sliders-horizontal', t('ui.props.defValuesTitle'))
       const hint = document.createElement('span')
       hint.className = 'props-section-hint'
       hint.textContent = t('ui.props.defValuesHint')
@@ -1064,13 +1186,8 @@ export class PropertiesPanel {
    */
   private buildFields(target: Block, rows: readonly FieldRow[], labels: ReadonlyMap<string, string>): HTMLElement {
     const fields = document.createElement('section')
-    fields.className = 'props-section prop-fields'
-    const fieldsHead = document.createElement('div')
-    fieldsHead.className = 'props-section-head'
-    const fieldsTitle = document.createElement('span')
-    fieldsTitle.className = 'props-section-title'
-    fieldsTitle.textContent = t('ui.block.properties')
-    fieldsHead.appendChild(fieldsTitle)
+    fields.className = 'props-section prop-fields props-section--primary'
+    const fieldsHead = sectionHead('lucide:list', t('ui.block.properties'), rows.length)
     fieldsHead.appendChild(this.els.add)
     fields.appendChild(fieldsHead)
 
@@ -1101,13 +1218,7 @@ export class PropertiesPanel {
   private buildConfig(target: Block): HTMLElement {
     const section = document.createElement('section')
     section.className = 'props-section prop-config'
-    const head = document.createElement('div')
-    head.className = 'props-section-head'
-    const title = document.createElement('span')
-    title.className = 'props-section-title'
-    title.textContent = t('ui.blockConfig.title')
-    head.appendChild(title)
-    section.appendChild(head)
+    section.appendChild(sectionHead('lucide:sliders-horizontal', t('ui.blockConfig.title')))
 
     // 脸：一枚入口开块配置弹窗（弹窗里脸面板直接展开）——任意块都有脸，入口不按露面位限流
     if (this.deps.pickFace) section.appendChild(this.buildFace(target))
@@ -1199,18 +1310,13 @@ export class PropertiesPanel {
    * 点了没反应。判据是「可见但只读」由**通道**提供 —— 这一段就没有输入控件。
    */
   private buildSystem(target: Block): HTMLElement {
-    const box = document.createElement('div')
-    box.className = 'prop-row prop-system ui-row'
-    box.dataset.stack = '1'
-    const label = document.createElement('label')
-    label.className = 'prop-label'
-    const name = document.createElement('span')
-    name.className = 'prop-name'
-    name.textContent = t('ui.props.systemTitle')
-    label.append(name)
+    const box = document.createElement('section')
+    box.className = 'props-section prop-system'
+    box.dataset.systemSection = '1'
+    box.appendChild(sectionHead('lucide:clock', t('ui.props.systemTitle')))
 
-    const value = document.createElement('span')
-    value.className = 'prop-value prop-system-value'
+    const value = document.createElement('div')
+    value.className = 'prop-system-value'
     for (const [key, at] of [
       ['created', target.created],
       ['modified', target.modified],
@@ -1221,7 +1327,7 @@ export class PropertiesPanel {
       line.textContent = `${t(key === 'created' ? 'ui.props.createdAt' : 'ui.props.modifiedAt')} ${clockLabel(at) || t('ui.props.timeUnknown')}`
       value.appendChild(line)
     }
-    box.append(label, value)
+    box.appendChild(value)
     return box
   }
 
@@ -1247,12 +1353,8 @@ export class PropertiesPanel {
     section.className = 'prop-declared props-declared props-section'
     section.dataset.declaredSection = 'tag'
 
-    const head = document.createElement('div')
-    head.className = 'props-section-head'
-    const title = document.createElement('span')
-    title.className = 'props-section-title'
-    title.textContent = t('ui.props.tagPropsTitle')
-    head.appendChild(title)
+    const defs = this.deps.declaredFields(target)
+    const head = sectionHead('lucide:tag', t('ui.props.tagPropsTitle'), defs.length)
 
     /**
      * 这一段的添加入口住进段头：它是这一段的动作，不是清单下面的又一行字。
@@ -1279,7 +1381,6 @@ export class PropertiesPanel {
 
     const list = document.createElement('div')
     list.className = 'props-declared-list'
-    const defs = this.deps.declaredFields(target)
     if (defs.length === 0) {
       const empty = document.createElement('span')
       empty.className = 'props-empty'

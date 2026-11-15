@@ -802,6 +802,12 @@
   align-items: center;
   gap: var(--ui-gap-1);
 }
+.prop-source-tag--link {
+  cursor: pointer;
+}
+.prop-source-tag--link:hover {
+  color: var(--ui-text);
+}
 .prop-source-dot {
   display: inline-block;
   flex: none;
@@ -815,8 +821,10 @@
 }
 /* 系统信息只读段：两行时刻竖排在值槽里，用次要色 —— 它是记录，不是待填的数据 */
 .prop-system-value {
+  display: flex;
   flex-direction: column;
   gap: var(--ui-gap-1);
+  padding-inline: var(--ui-gap-1);
   font-size: var(--ui-fs-2xs);
   color: var(--ui-text-tertiary);
 }
@@ -875,6 +883,44 @@
   outline: none;
   border-color: var(--ui-accent);
 }
+/* 引用值：名字是可点开的露面，换目标是一枚独立的尾键（看它/改它是两件事） */
+.prop-ref-value {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.prop-ref-value .prop-ref {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  text-align: left;
+}
+.prop-ref-ico {
+  display: inline-flex;
+  flex: none;
+  color: var(--ui-text-tertiary);
+}
+.prop-ref-change {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 24px;
+  block-size: 24px;
+  padding: 0;
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-sunken);
+  color: var(--ui-text-tertiary);
+}
+.prop-ref-change:hover {
+  color: var(--ui-text);
+  background: var(--ui-accent-soft);
+}
 /*
   **asset 属性值**：值本身是预览，地址是它的第二种投影。
   面板/抽屉里两条带：预览整宽在上、地址在下 —— 缩略图贴着输入框时，
@@ -910,6 +956,36 @@
   flex: 0 0 auto;
   color: var(--ui-text-tertiary);
 }
+.prop-asset-preview {
+  position: relative;
+  min-width: 0;
+}
+/* 多值一眼看出「不止一张」：计数贴右上，滚动条与右缘渐隐说明「还有」 */
+.prop-asset-count {
+  position: absolute;
+  inset-block-start: var(--ui-gap-1);
+  inset-inline-end: var(--ui-gap-1);
+  z-index: var(--ui-z-rail);
+  padding: 0 var(--ui-gap-1);
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-surface);
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-fs-2xs);
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.prop-asset-preview[data-overflow='1']::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  width: 24px;
+  border-radius: 0 var(--ui-radius-sm) var(--ui-radius-sm) 0;
+  background: linear-gradient(to right, transparent, var(--ui-surface-sunken));
+  pointer-events: none;
+}
+.prop-asset-thumb[data-asset-open='1'] { cursor: pointer; }
 .prop-asset-thumbs {
   display: flex;
   align-items: center;
@@ -918,20 +994,31 @@
   flex: 0 0 auto;
   min-width: 0;
   overflow-x: auto;
-  scrollbar-width: none;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ui-border) transparent;
+  scroll-snap-type: x proximity;
   white-space: nowrap;
   padding: var(--ui-gap-1);
   background: var(--ui-surface-sunken);
   border: 1px solid var(--ui-border-subtle);
   border-radius: var(--ui-radius-sm);
 }
-.prop-asset-thumbs::-webkit-scrollbar { display: none; }
+.prop-asset-thumbs:focus-visible {
+  outline: none;
+  border-color: var(--ui-accent);
+}
+.prop-asset-thumbs::-webkit-scrollbar { height: 6px; }
+.prop-asset-thumbs::-webkit-scrollbar-thumb {
+  background: var(--ui-border);
+  border-radius: var(--ui-radius-pill);
+}
 .prop-asset-thumb {
   position: relative;
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
   max-width: 100%;
+  scroll-snap-align: start;
 }
 /* 值预览：图上到 120px 高，宽度跟着比例走，不裁掉内容 */
 .prop-asset-thumb--panel { max-height: 120px; }
@@ -1018,6 +1105,19 @@
   background: none;
   border: 0;
   border-radius: 0;
+  scrollbar-width: none;
+  scroll-snap-type: none;
+}
+.prop-asset[data-asset-surface='cell'] .prop-asset-thumbs::-webkit-scrollbar { display: none; }
+/* 表格格定高：预览让出宽度，但不画计数/渐隐（格子自己已经够窄） */
+.prop-asset[data-asset-surface='cell'] .prop-asset-preview {
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.prop-asset[data-asset-surface='cell'] .prop-asset-count,
+.prop-asset[data-asset-surface='cell'] .prop-asset-preview[data-overflow='1']::after {
+  display: none;
 }
 /* 多值时这一列可以让出宽度（自己横向滚），地址才有地方落 */
 .prop-asset[data-asset-surface='cell'][data-asset-many='1'] .prop-asset-thumbs {
@@ -1209,6 +1309,23 @@
 .prop-chip-add:hover {
   color: var(--ui-text);
 }
+.prop-chip-text {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  min-width: 0;
+}
+.prop-chip-ico {
+  display: inline-flex;
+  flex: none;
+  color: var(--ui-text-tertiary);
+}
+.prop-chip-open {
+  cursor: pointer;
+}
+.prop-chip-open:hover {
+  color: var(--ui-accent);
+}
 .prop-multi-add {
   flex: 1 1 6ch;
   min-width: 6ch;
@@ -1281,25 +1398,70 @@
 .props-section {
   display: flex;
   flex-direction: column;
-  gap: var(--ui-gap-2);
-  margin-top: var(--ui-gap-1);
+  gap: var(--ui-gap-3);
+  margin-top: var(--ui-gap-3);
   padding-top: var(--ui-gap-3);
   border-top: var(--ui-sep) solid var(--ui-border-subtle);
 }
+/*
+ * **段头是分组的锚点**：图标（形状）＋ 名字（角色）＋ 计数（规模）。
+ * 头本身有一条浅底，主段再换成 accent-soft —— 主次不靠字号猜，靠「这一条带」。
+ */
 .props-section-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   flex-wrap: wrap;
   gap: var(--ui-gap-2);
+  min-height: 24px;
+  padding: var(--ui-gap-1) var(--ui-gap-2);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-sunken);
+}
+.props-section-ico {
+  display: inline-flex;
+  flex: none;
+  color: var(--ui-text-tertiary);
 }
 .props-section-title {
   font-size: var(--ui-fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.01em;
   color: var(--ui-text-secondary);
+}
+.props-section-count {
+  min-width: 1.6em;
+  padding: 0 var(--ui-gap-1);
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-surface);
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-2xs);
+  line-height: 1.6;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.props-section--primary > .props-section-head {
+  background: var(--ui-accent-soft);
+}
+.props-section--primary .props-section-ico {
+  color: var(--ui-accent);
+}
+.props-section--primary .props-section-title {
+  color: var(--ui-text);
+}
+.props-section--primary .props-section-count {
+  color: var(--ui-accent);
 }
 .props-section-hint {
   font-size: var(--ui-fs-2xs);
   line-height: 1.4;
   color: var(--ui-text-tertiary);
+}
+/* 字段行之间画分隔线：一列「标签＋值」靠线扫，不靠留白猜 */
+.prop-fields .prop-row[data-prop-id] {
+  padding-block: var(--ui-gap-2);
+}
+.prop-fields .prop-row[data-prop-id] + .prop-row[data-prop-id] {
+  border-top: 1px solid var(--ui-border-subtle);
 }
 .props-declared-list {
   display: flex;
@@ -1339,8 +1501,9 @@
 .props-section-head .props-section-hint {
   flex: 1 1 100%;
 }
-/* 系统信息：记录不是待填的数据，标签也降为三级（与值同一档灰度） */
-.prop-system .prop-name {
+/* 系统信息：记录不是待填的数据，段头与值同处三级灰（不抢属性段的注意力） */
+.prop-system .props-section-title,
+.prop-system .props-section-ico {
   color: var(--ui-text-tertiary);
 }
 /* 声明段的添加入口：与「＋ 添加属性」同形，贴着它自己的清单 */

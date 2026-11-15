@@ -3438,6 +3438,7 @@ const {
   getMainEd: () => mainEd,
   getRegistry: () => registry,
   writeBlock: writeProps,
+  repaintBlock,
   getChrome: () => chrome,
   openBlock: (blockId, place) => app.openBlock(blockId, place),
 })

@@ -503,6 +503,18 @@ await check('T1b 属性区跟「当前对象」走：聚焦换主体、光标移
     order.titles[0] === '属性' && order.titles[1] === '块配置',
     `段序应是「属性 → 块配置」：${JSON.stringify(order)}`,
   )
+  const chrome = await page.evaluate(() => {
+    const primary = document.querySelector('#properties-body .prop-fields')
+    const head = primary?.querySelector('.props-section-head')
+    return {
+      primary: primary?.classList.contains('props-section--primary') ?? false,
+      icons: document.querySelectorAll('#properties-body .props-section-ico .ico').length,
+      headBg: head ? getComputedStyle(head).backgroundColor : '',
+    }
+  })
+  assert(chrome.primary, `属性段应是主段（props-section--primary）：${JSON.stringify(chrome)}`)
+  assert(chrome.icons >= 3, `每个段头都该有图标（属性/块配置/系统信息）：${JSON.stringify(chrome)}`)
+  assert(chrome.headBg !== 'rgba(0, 0, 0, 0)', `主段段头应有一条可见的底色：${JSON.stringify(chrome)}`)
 
   /**
    * 给块 A 单加一条属性槽 —— 这样「面板画谁」就有了可测的高度差：
@@ -5311,10 +5323,10 @@ await check('T59 `ref` 类型的值走选择器：显示目标**名字**、能�
   // ① 值是选择器按钮（.prop-ref），不是裸 input
   const cell = await page.evaluate((pid) => {
     const row = document.querySelector('.prop-row[data-prop-id="' + pid + '"]')
-    const ctl = row?.querySelector('.prop-value > *')
+    const ctl = row?.querySelector('.prop-value .prop-ref')
     return { tag: ctl?.tagName ?? '', isRef: ctl?.classList.contains('prop-ref') ?? false, text: ctl?.textContent ?? '' }
   }, defId)
-  assert(cell.isRef === true, 'ref 值应渲染成选择器按钮（.prop-ref），不是普通输入框：' + JSON.stringify(cell))
+  assert(cell.isRef === true, 'ref 值应渲染成可打开目标的按钮（.prop-ref），不是普通输入框：' + JSON.stringify(cell))
   assert(cell.tag === 'BUTTON', '应是一个按钮：' + JSON.stringify(cell))
 
   // ② 点开 ⇒ 弹出选择器，列出可指向的块
@@ -30317,20 +30329,172 @@ await check('T318 检视卡段序：类型专属段紧跟属性值，块配置�
   await page.waitForTimeout(200)
   const defOrder = await read()
   assert(
-    defOrder.join('|') === '属性|这条属性的值|块配置',
-    `定义块段序应是「属性 → 这条属性的值 → 块配置」：${JSON.stringify(defOrder)}`,
+    defOrder.join('|') === '属性|这条属性的值|块配置|系统信息',
+    `定义块段序应是「属性 → 这条属性的值 → 块配置 → 系统信息」：${JSON.stringify(defOrder)}`,
   )
 
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), ids.tag)
   await page.waitForTimeout(200)
   const tagOrder = await read()
   assert(
-    tagOrder.join('|') === '属性|标签属性|块配置',
-    `标签段序应是「属性 → 标签属性 → 块配置」：${JSON.stringify(tagOrder)}`,
+    tagOrder.join('|') === '属性|标签属性|块配置|系统信息',
+    `标签段序应是「属性 → 标签属性 → 块配置 → 系统信息」：${JSON.stringify(tagOrder)}`,
   )
 
   await ctx.close()
   return `定义块 ${defOrder.join(' → ')}；标签 ${tagOrder.join(' → ')}`
+})
+
+await check('T319 检视卡里选本地图：块下属性行当场换成新图（不等下一次交互）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  const b64 =
+    'iVBORw0KGgoAAAANSUhEUgAAACgAAAAoCAIAAAADnC86AAAAMElEQVR4nO3NQQkAAAgEsItjHGMbyxKCn8H+y3S9iFgsFovFYrFYLBaLxWKxWHxnAY8m0GozORegAAAAAElFTkSuQmCC'
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  const ids = await page.evaluate(() => {
+    const host = window.__qua.blocks().find((b) => b.roles.length === 0 && b.text.length > 2)
+    window.__qua.invoke('core.props/create-def', { blockId: host.id, label: '即时封面', kind: 'asset', target: 'own' })
+    const def = window.__qua.propDefs().find((d) => d.label === '即时封面')
+    return { host: host.id, propId: def.id }
+  })
+  await page.evaluate((host) => window.__qua.invoke('core.block/focus-block', { blockId: host }), ids.host)
+  await page.waitForSelector(`#inspect-card .prop-row[data-prop-id="${ids.propId}"] [data-asset-pick]`, { timeout: 5000 })
+
+  const [chooser] = await Promise.all([
+    page.waitForEvent('filechooser', { timeout: 5000 }),
+    page.click(`#inspect-card .prop-row[data-prop-id="${ids.propId}"] [data-asset-pick]`),
+  ])
+  await chooser.setFiles({ name: '即时封面.png', mimeType: 'image/png', buffer: Buffer.from(b64, 'base64') })
+  const hash = await page.waitForFunction(
+    ({ host, propId }) => {
+      const v = window.__qua.__editor.store.find(host)?.props?.[propId]
+      return typeof v === 'string' && /^[0-9a-f]{64}$/.test(v) ? v : ''
+    },
+    { host: ids.host, propId: ids.propId },
+    { timeout: 8000 },
+  ).then((h) => h.jsonValue())
+
+  /**
+   * 判据：**写值那条路径自己负责重画那一行**，不等用户下一次点别处。
+   * 块下行是投影面，不是缓存；检视卡改了值，它必须当场跟上。
+   */
+  await page.waitForFunction(
+    ({ host, hash }) => {
+      const line = document.querySelector(`.blk[data-block-id="${host}"] > .blk-props-line`)
+      const img = line?.querySelector(`[data-asset-ref="${hash}"] img`)
+      return Boolean(img && img.naturalWidth > 0)
+    },
+    { host: ids.host, hash },
+    { timeout: 5000 },
+  )
+  const line = await page.evaluate((host) => {
+    const el = document.querySelector(`.blk[data-block-id="${host}"] > .blk-props-line`)
+    const img = el?.querySelector('img')
+    return {
+      ref: el?.querySelector('[data-asset-ref]')?.getAttribute('data-asset-ref') ?? '',
+      img: Boolean(img && img.naturalWidth > 0),
+    }
+  }, ids.host)
+  assert(line.ref.length === 64, `块下行应换成新资产的 hash：${JSON.stringify(line)}`)
+  assert(line.img, `块下行应画真图（不是停在旧链接/占位）：${JSON.stringify(line)}`)
+
+  // 预览是值的舞台：点图＝默认动作（内态图开 lightbox）
+  await page.click(`#inspect-card .prop-row[data-prop-id="${ids.propId}"] .prop-asset-thumb`)
+  await page.waitForSelector('.lightbox', { timeout: 3000 })
+  const lightbox = await page.evaluate(() => ({
+    open: Boolean(document.querySelector('.lightbox')),
+    decoded: (document.querySelector('.lightbox-img')?.naturalWidth ?? 0) > 0,
+    title: document.querySelector('.lightbox-title')?.textContent ?? '',
+  }))
+  assert(lightbox.open && lightbox.decoded, `点检视卡里的预览应开 lightbox 并解码：${JSON.stringify(lightbox)}`)
+  assert(lightbox.title.includes('即时封面'), `lightbox 标题应是这一栏的名字：${JSON.stringify(lightbox)}`)
+  await page.keyboard.press('Escape')
+  await page.waitForSelector('.lightbox', { state: 'detached', timeout: 3000 })
+
+  await ctx.close()
+  return `检视卡选图后块下行当场换成 ${line.ref.slice(0, 8)}… 并画真图；点预览开 lightbox`
+})
+
+await check('T320 asset 多值：计数徽标＋溢出渐隐＋可聚焦横向滚', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160"><rect width="240" height="160" fill="#eee"/><path d="M0 0h240v2H0z" fill="#4c9a6a"/></svg>'
+  await page.route('**/qua-multi-*.png', (r) =>
+    r.fulfill({ status: 200, contentType: 'image/svg+xml', body: svg }),
+  )
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  const urls = [1, 2, 3, 4].map((n) => `https://example.com/qua-multi-${n}.png`)
+  const ids = await page.evaluate((links) => {
+    const host = window.__qua.blocks().find((b) => b.roles.length === 0 && b.text.length > 2)
+    window.__qua.invoke('core.props/create-def', { blockId: host.id, label: '图集滚', kind: 'asset', target: 'own' })
+    const def = window.__qua.propDefs().find((d) => d.label === '图集滚')
+    window.__qua.invoke('core.props/set-choice-cardinality', { defId: def.id, cardinality: 'many' })
+    window.__qua.invoke('core.props/set-value', { blockId: host.id, propId: def.id, value: links })
+    return { host: host.id, propId: def.id }
+  }, urls)
+  await page.evaluate((host) => window.__qua.invoke('core.block/focus-block', { blockId: host }), ids.host)
+  await page.waitForFunction(
+    (propId) => Boolean(document.querySelector(`#inspect-card .prop-row[data-prop-id="${propId}"] .prop-asset-count`)),
+    ids.propId,
+    { timeout: 5000 },
+  )
+  const affordance = await page.evaluate((propId) => {
+    const row = document.querySelector(`#inspect-card .prop-row[data-prop-id="${propId}"]`)
+    const preview = row?.querySelector('.prop-asset-preview')
+    const thumbs = row?.querySelector('.prop-asset-thumbs')
+    const scroll = thumbs
+    if (scroll) scroll.scrollLeft = 120
+    return {
+      count: row?.querySelector('.prop-asset-count')?.textContent ?? '',
+      overflow: preview?.getAttribute('data-overflow') ?? '',
+      scrollable: Boolean(thumbs && thumbs.scrollWidth > thumbs.clientWidth),
+      tabIndex: thumbs?.tabIndex ?? -1,
+      scrolled: (thumbs?.scrollLeft ?? 0) > 0,
+      bar: thumbs ? getComputedStyle(thumbs).scrollbarWidth : '',
+    }
+  }, ids.propId)
+  assert(affordance.count.includes('4'), `多值应露出计数徽标：${JSON.stringify(affordance)}`)
+  assert(affordance.overflow === '1', `真的溢出时才画渐隐：${JSON.stringify(affordance)}`)
+  assert(affordance.scrollable, `内容应真的横向溢出：${JSON.stringify(affordance)}`)
+  assert(affordance.tabIndex === 0, `滚动容器应可聚焦（方向键能滚）：${JSON.stringify(affordance)}`)
+  assert(affordance.scrolled, `滚得动（不是画了一条假的滚动条）：${JSON.stringify(affordance)}`)
+  assert(affordance.bar !== 'none', `面板里保留一条细滚动条：${JSON.stringify(affordance)}`)
+
+  await ctx.close()
+  return `4 张：徽标「${affordance.count}」、右缘渐隐、容器可聚焦且横向滚得动`
+})
+
+await check('T321 检视卡的引用值：点名字跳目标，尾键换目标', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  const ids = await page.evaluate(() => {
+    const host = window.__qua.blocks().find((b) => b.roles.length === 0 && b.text.length > 2)
+    window.__qua.invoke('core.props/create-def', { blockId: host.id, label: '跳转测试', kind: 'ref', target: 'own' })
+    const def = window.__qua.propDefs().find((d) => d.label === '跳转测试')
+    window.__qua.invoke('core.props/create-ref-target', { blockId: host.id, propId: def.id, name: '跳转目标页' })
+    const target = window.__qua.allBlocks().find((x) => x.lists?.includes('page') && (x.aliases ?? []).includes('跳转目标页'))
+    window.__qua.invoke('core.block/focus-block', { blockId: host.id })
+    return { host: host.id, propId: def.id, target: target?.id ?? '' }
+  })
+  assert(ids.target !== '', '前置：应建出引用目标页')
+  await page.waitForSelector(`#inspect-card .prop-row[data-prop-id="${ids.propId}"] .prop-ref`, { timeout: 5000 })
+  await page.click(`#inspect-card .prop-row[data-prop-id="${ids.propId}"] .prop-ref`)
+  await page.waitForFunction((tid) => window.__qua.snapshot().activeId === tid, ids.target, { timeout: 4000 })
+  const jumped = await page.evaluate(() => window.__qua.snapshot().activeId)
+  assert(jumped === ids.target, `点引用名字应跳到目标：${JSON.stringify({ jumped, target: ids.target })}`)
+
+  await page.evaluate((host) => window.__qua.invoke('core.block/focus-block', { blockId: host }), ids.host)
+  await page.waitForTimeout(200)
+  await page.click(`#inspect-card .prop-row[data-prop-id="${ids.propId}"] .prop-ref-change`)
+  await page.waitForSelector('.layer', { timeout: 4000 })
+  const picker = await page.evaluate(() => document.querySelector('.layer-head')?.textContent ?? '')
+  assert(picker.includes('选择'), `尾键应重新打开选择器：${JSON.stringify(picker)}`)
+
+  await ctx.close()
+  return '点名字跳目标页；笔键重新开选择器'
 })
 
 const known = results.filter((r) => !r.ok && r.known)

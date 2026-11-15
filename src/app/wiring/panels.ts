@@ -23,6 +23,7 @@ import {
   hasQueryBody,
   hasChildrenViewBody,
   findInForest,
+  iconOf,
   isHexColor,
   ICON_PROP,
   COLOR_PROP,
@@ -69,6 +70,7 @@ import { openChoicePicker } from '../choice-picker.ts'
 import { createNameChoice, openNameChoice, openTagChoice } from '../retrieval/name-choice.ts'
 import { BUILTIN_LABEL, MountArea, type ViewBodyHost } from '../../ui/chrome/mount-area.ts'
 import { PropertiesPanel, type PropertiesDeps } from '../../ui/block-ui/properties.ts'
+import { activateAssetRef } from '../../ui/block-ui/asset-value.ts'
 import { renderBlockConfig, type BlockConfigDeps } from '../../ui/block-ui/block-config.ts'
 import type { ConfigSectionsCtx } from '../../ui/block-ui/config-sections.ts'
 import type { DerivedMode } from '../../ui/query/query-view.ts'
@@ -118,6 +120,8 @@ export type PanelsDeps = {
   getRegistry: () => Registry
   /** 一次直写（名字/露面/显示的段写路径）：撤销条目、索引修补、重画与落盘都在装配层那条路上 */
   writeBlock: (blockId: string, mutate: () => void) => void
+  /** 重画一个块所在的行（属性写入后让块下投影当场跟上；命令层不经 `writeBlock` 时用） */
+  repaintBlock: (blockId: string) => void
   getChrome: () => Chrome
   /** 打开一个块：落点由装配层的唯一路由分流（中心／右槽／新 tab） */
   openBlock: (blockId: string, place?: import('../../core/index.ts').OpenAction) => void
@@ -448,6 +452,11 @@ export function setupPanels(deps: PanelsDeps) {
     void deps
       .getRegistry()
       .invoke('core.props/create-def', { blockId: b.id, label, kind, target, ...(mode ? { mode } : {}), ...(format ? { format } : {}) }, 'ui')
+    /**
+     * **新建定义也改了这一行**：块下属性投影读的是 `fieldsOf`，而命令层的新定义路径
+     * 走的是 `run`（不经 `writeProps`）。漏这一下，行不会挂上空值/新值，用户要等下一次交互。
+     */
+    deps.repaintBlock(b.id)
     if (kind !== 'select') return
     if (mode !== 'new' && existed) return
     const defs = kb.propDefs()
@@ -600,7 +609,20 @@ export function setupPanels(deps: PanelsDeps) {
    * 宿主之间只差两件事：`target`（画哪一块）与 `repaint`（写入后刷哪一个实例）。
    * 身份/归属段不再各持回调：统一走 `blockConfigOps`（与弹窗同一份）。
    */
-  const makePropertiesDeps = (target: () => Block | null | undefined): PropertiesDeps => ({
+  const makePropertiesDeps = (target: () => Block | null | undefined): PropertiesDeps => {
+    /**
+     * 命令层里有些写路径走 `run`（不经 `writeProps`）：它们也改了这一行的投影。
+     * 每次写完重画一次当前主体，块下属性行才能当场跟上（不等下一次交互）。
+     */
+    const repaintTarget = (): void => {
+      const b = target()
+      if (b) deps.repaintBlock(b.id)
+    }
+    const propWrite = (command: string, args: Record<string, unknown>): void => {
+      void deps.getRegistry().invoke(command, args, 'ui')
+      repaintTarget()
+    }
+    return {
     target,
     rows: (b) => [...kb.fieldsOf(b.id)],
     // 字段行的来源分组用（只读）：标签（分类归属）与标签属性（字段声明）是两件事
@@ -608,6 +630,18 @@ export function setupPanels(deps: PanelsDeps) {
     configOps: blockConfigOps,
       // 属性区里的标签名也是「指向标签块的一处露面」，与正文 chip 同一条口径
       openRef: (to, mods) => refClick({ to }, { ...mods, altKey: false }),
+      /** 值里的资产：默认动作按指向分派（图→lightbox／外链→浏览器／其余→一句详情） */
+      activateAsset: (ref, label) =>
+        activateAssetRef(ref, {
+          label,
+          openUrl: (url) => app.openExternal(url),
+          onDetails: () => app.toast(t('ui.props.assetNoPreview'), 'info'),
+        }),
+      /** 引用值的脸：显式 `_icon` 优先，缺省回落角色图标（页/标签/定义各有自己的形） */
+      refIcon: (id) => {
+        const b = kb.get(id)
+        return b ? iconOf(b) : undefined
+      },
       defs: () => [...kb.propDefs()],
       shortId: (id) => shortId(id),
       setValue: (b, propId, value) => void deps.getRegistry().invoke('core.props/set-value', { blockId: b.id, propId, value }, 'ui'),
@@ -662,32 +696,25 @@ export function setupPanels(deps: PanelsDeps) {
         return map
       },
       choices: {
-        add: (defId, label, scope) => void deps.getRegistry().invoke('core.props/add-choice', { defId, label, scope }, 'ui'),
-        setLabel: (choiceId, label) =>
-          void deps.getRegistry().invoke('core.props/set-choice-label', { choiceId, label }, 'ui'),
-        move: (defId, choiceId, beforeId) =>
-          void deps.getRegistry().invoke('core.props/move-choice', { defId, choiceId, beforeId }, 'ui'),
-        setScope: (choiceId, scope) =>
-          void deps.getRegistry().invoke('core.props/set-choice-scope', { choiceId, scope }, 'ui'),
-        setIcon: (choiceId, icon) =>
-          void deps.getRegistry().invoke('core.props/set-choice-icon', { choiceId, icon }, 'ui'),
+        add: (defId, label, scope) => propWrite('core.props/add-choice', { defId, label, scope }),
+        setLabel: (choiceId, label) => propWrite('core.props/set-choice-label', { choiceId, label }),
+        move: (defId, choiceId, beforeId) => propWrite('core.props/move-choice', { defId, choiceId, beforeId }),
+        setScope: (choiceId, scope) => propWrite('core.props/set-choice-scope', { choiceId, scope }),
+        setIcon: (choiceId, icon) => propWrite('core.props/set-choice-icon', { choiceId, icon }),
         setCheck: (defId, spec) =>
-          void deps
-            .getRegistry()
-            .invoke(
-              'core.props/set-choice-check',
-              { defId, on: spec?.on ?? '', off: spec?.off ?? '', status: spec?.status ?? false },
-              'ui',
-            ),
+          propWrite('core.props/set-choice-check', {
+            defId,
+            on: spec?.on ?? '',
+            off: spec?.off ?? '',
+            status: spec?.status ?? false,
+          }),
         setCardinality: (defId, cardinality) =>
-          void deps.getRegistry().invoke('core.props/set-choice-cardinality', { defId, cardinality }, 'ui'),
-        setUiPosition: (defId, position) =>
-          void deps.getRegistry().invoke('core.props/set-ui-position', { defId, position }, 'ui'),
-        remove: (choiceId) => void deps.getRegistry().invoke('core.props/delete-choice', { choiceId }, 'ui'),
-        restore: (choiceId) => void deps.getRegistry().invoke('core.props/restore-choice', { choiceId }, 'ui'),
+          propWrite('core.props/set-choice-cardinality', { defId, cardinality }),
+        setUiPosition: (defId, position) => propWrite('core.props/set-ui-position', { defId, position }),
+        remove: (choiceId) => propWrite('core.props/delete-choice', { choiceId }),
+        restore: (choiceId) => propWrite('core.props/restore-choice', { choiceId }),
       },
-      setFormat: (defId, format) =>
-        void deps.getRegistry().invoke('core.props/set-format', { defId, format }, 'ui'),
+      setFormat: (defId, format) => propWrite('core.props/set-format', { defId, format }),
       /**
        * **`ref` 定义的候选标签**：浮层归这一层（与 `pickTagValue` 同一个选择器，
        * `allowCreate:false` —— 配约束是读操作的同伴，不该顺手往库里建标签）。
@@ -709,8 +736,9 @@ export function setupPanels(deps: PanelsDeps) {
         })
       },
       setRefTags: (defId, tagIds) =>
-        void deps.getRegistry().invoke('core.props/set-ref-tags', { defId, tagIds: [...tagIds] }, 'ui'),
-  })
+        propWrite('core.props/set-ref-tags', { defId, tagIds: [...tagIds] }),
+    }
+  }
 
   const propertiesPanel = new PropertiesPanel(
     {
