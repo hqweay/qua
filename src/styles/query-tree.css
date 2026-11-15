@@ -182,6 +182,9 @@
 .qt-op,
 .qt-dir,
 .qt-day-mode,
+.qt-refkind,
+.qt-stamp-field,
+.qt-stamp-op,
 .qt-limit {
   max-width: 16rem;
   height: 24px;
@@ -192,12 +195,36 @@
   color: var(--ui-text);
   font-size: var(--ui-fs-sm);
 }
+/* 词的宽度由它当前说的话决定，不由整个词汇表决定：原生 select 的固有宽度
+   ＝最宽 option 的宽度，「—」会占着「链上有…」的宽、「＝」占着「早于这一天」的宽，
+   词与词之间被从未选中的长词撑开，值位被挤到第二行——句子读不成句子。
+   field-sizing: content 让每个词收缩到当前值；不支持时退回原样（宽但完整）。 */
+.qt-kind,
+.qt-field,
+.qt-op,
+.qt-dir,
+.qt-day-mode,
+.qt-refkind,
+.qt-stamp-field,
+.qt-stamp-op,
+select.qt-value {
+  field-sizing: content;
+  /* 原生箭头是表单 chrome：句子里的词不带它。可点性由 hover 底色与 focus 描边示意 */
+  appearance: none;
+}
+/* 谓词与主语之间换一口气：比较词起的是后半句 */
+.qt-op {
+  margin-inline-start: var(--ui-gap-2);
+}
 .qt-value:hover,
 .qt-kind:hover,
 .qt-field:hover,
 .qt-op:hover,
 .qt-dir:hover,
 .qt-day-mode:hover,
+.qt-refkind:hover,
+.qt-stamp-field:hover,
+.qt-stamp-op:hover,
 .qt-limit:hover {
   background: var(--ui-bg-hover);
   border-color: var(--ui-border-subtle);
@@ -208,6 +235,9 @@
 .qt-op:focus-visible,
 .qt-dir:focus-visible,
 .qt-day-mode:focus-visible,
+.qt-refkind:focus-visible,
+.qt-stamp-field:focus-visible,
+.qt-stamp-op:focus-visible,
 .qt-limit:focus-visible {
   border-color: var(--ui-accent);
   background: var(--ui-surface);
@@ -220,7 +250,10 @@
 .qt-field,
 .qt-op,
 .qt-dir,
-.qt-day-mode {
+.qt-day-mode,
+.qt-refkind,
+.qt-stamp-field,
+.qt-stamp-op {
   color: var(--ui-text-secondary);
 }
 .qt-ref,
@@ -273,7 +306,10 @@
   font-size: var(--ui-fs-xs);
 }
 
+/* 删行是 chrome 不是内容：一列常驻的 × 是噪声。hover／行内聚焦才显形；
+   键盘 Tab 到它自己时 focus-within 也会让它出现 */
 .qt-del {
+  opacity: 0;
   padding: 0 var(--ui-gap-1);
   border: 0;
   background: transparent;
@@ -282,6 +318,12 @@
 }
 .qt-del:hover {
   color: var(--ui-danger);
+}
+.qt-row:hover .qt-del,
+.qt-row:focus-within .qt-del,
+.qt-group-head:hover .qt-del,
+.qt-group-head:focus-within .qt-del {
+  opacity: 1;
 }
 
 .qt-add {
