@@ -21174,9 +21174,12 @@ await check(
     )
     await page.locator('.layer-item', { hasText: '删除标签' }).first().click()
     await page.waitForTimeout(120)
-    const confirm = await page.locator('.layer').innerText()
-    assert(confirm.includes('还被 1 个块打着'), `有人用时删除要先说清影响：${JSON.stringify(confirm)}`)
-    await page.locator('.layer-item', { hasText: '继续删除' }).first().click()
+    const confirm = await page.locator('.confirm').innerText()
+    assert(
+      confirm.includes('删除标签') && confirm.includes('1 个块'),
+      `有人用时删除要先说清影响（确认框）：${JSON.stringify(confirm)}`,
+    )
+    await page.locator('.confirm-ok').click()
     await page.waitForTimeout(200)
     const afterTag = await page.evaluate(
       (t) => {

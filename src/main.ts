@@ -2436,24 +2436,21 @@ const app: App = {
       app.toast(t('ui.toast.tagDeleted'))
       return true
     }
+    // B 档条件确认（决策 273）：只有它还连着成员/声明才问——叶子标签没有任何连带，直接删。
+    // 与删页/删天同一个会话确认框（danger 红钮），不再用「菜单里嵌一行继续」的形状。
     if (members === 0 && declarations === 0) return drop()
-    layers.openMenu({
-      title: t('ui.role.deleteTagTitle', { tag: blockName(b), members }),
-      rows: [
-        {
-          id: 'role/delete',
-          label: t('ui.role.deleteTagContinue'),
-          hint: declarations > 0 ? t('ui.role.declarations', { count: declarations }) : '',
-          group: 'role/1',
-        },
-        { id: 'role/cancel', label: t('ui.role.cancel'), group: 'role/2' },
-      ],
-      anchor: ed.caretRect(),
-      searchable: false,
-      focusSearch: false,
-      onPick: (row) => {
-        if (row.id === 'role/delete') drop()
-      },
+    const body =
+      members > 0 && declarations > 0
+        ? t('ui.confirm.deleteTagBoth', { members: String(members), decls: String(declarations) })
+        : members > 0
+          ? t('ui.confirm.deleteTagMembers', { count: String(members) })
+          : t('ui.confirm.deleteTagDecls', { decls: String(declarations) })
+    layers.confirm({
+      title: t('ui.confirm.deleteTagTitle', { tag: blockName(b) }),
+      body,
+      confirmLabel: t('ui.confirm.delete'),
+      danger: true,
+      onConfirm: () => drop(),
     })
     return true
   },
