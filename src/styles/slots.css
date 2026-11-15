@@ -96,6 +96,14 @@
   gap: var(--ui-gap-3);
   padding: var(--ui-gap-3);
 }
+/*
+ * **右下角让给常驻角标**：`#badge` 是 fixed 贴右下的诊断 chrome（横跨右槽整宽、贴着窗口底边）。
+ * 右槽底边让出它那一档，滚动区就不会伸到它底下——否则槽滚到尽头时最后一张卡的下沿
+ * 永远压在角标底下，那一行既读不到也点不到。左槽离那个角很远，不需要。
+ */
+#dock-right {
+  padding-bottom: var(--ui-corner-inset);
+}
 
 .dock-card {
   background: var(--ui-surface-raised);

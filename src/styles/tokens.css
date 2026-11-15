@@ -223,6 +223,12 @@
   --ui-topbar-h: 42px;
   --ui-pane-pad: 16px;
   --ui-doc-pad: 40px;
+  /*
+   * 右下角**常驻角标**占掉的那一档（高度＋它自己的下边距）。右槽的滚动区要让出它：
+   * 角标是 fixed 贴在窗口右下、横跨右槽整宽的诊断 chrome ⇒ 不让开时，槽滚到尽头
+   * 那一段内容永远压在他底下，既读不到也点不到。
+   */
+  --ui-corner-inset: 44px;
   --ui-doc-measure: 660px;
   --ui-gutter: 22px;
   /* 三槽宽度 */
