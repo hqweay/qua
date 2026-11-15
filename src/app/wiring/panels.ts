@@ -45,7 +45,7 @@ import {
   queryFieldsOf,
   readMountView,
   refDomainIds,
-  refDomainTagNames,
+  refDomainNames,
   todayISO,
   type Block,
   type ClickMods,
