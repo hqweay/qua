@@ -916,44 +916,11 @@ button.queryview-chip:hover {
   white-space: normal;
   overflow: hidden;
 }
-/**
- * **打开这一块**：卡片阅读态唯一的打开入口（卡身点击＝进编辑），悬停才显形——
- * 卡片静止态与没有它时一模一样。
- *
- * 为什么不是左侧块标：卡上原本没有 gutter，塞一颗块标要占 20px 首列、正文跟着右移；
- * 而块标在这一面也只够得着一件行为（查询结果面没有块菜单）。⇒ 一颗明确的打开键，
- * 与右上角的拖拽手柄同一族（同一档底色与显隐）。
- */
-.vcard-open {
-  position: absolute;
-  top: var(--ui-gap-2);
-  right: var(--ui-gap-2);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 var(--ui-gap-1);
-  border: 0;
-  border-radius: var(--ui-radius-sm);
-  background: var(--ui-surface);
-  color: var(--ui-text-tertiary);
-  opacity: 0;
-  transition: opacity var(--ui-dur-1) var(--ui-ease-out), color var(--ui-dur-1) var(--ui-ease-out);
-  cursor: pointer;
-}
-.vcard:hover .vcard-open,
-.vcard:focus-within .vcard-open {
-  opacity: 1;
-}
-.vcard-open:hover {
-  color: var(--ui-text);
-}
-
-/* 拖卡的手柄：卡身是编辑器，拖它等于选字 ⇒ 拖拽只能从这里发起。
-   位置让给打开键（两者都在右上角，手柄在左） */
+/* 拖卡的手柄：卡身是编辑器，拖它等于选字 ⇒ 拖拽只能从这里发起 */
 .vcard-grip {
   position: absolute;
   top: var(--ui-gap-2);
-  right: calc(var(--ui-gap-2) + 1.6rem);
+  right: var(--ui-gap-2);
   padding: 0 var(--ui-gap-2);
   border-radius: var(--ui-radius-sm);
   /* 有封面时手柄压在图上：给一层底，别让图标和照片纹理糊在一起 */

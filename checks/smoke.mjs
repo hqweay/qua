@@ -30745,11 +30745,11 @@ await check('T321 检视卡的引用值：点名字跳目标，尾键换目标',
 })
 
 /**
- * **卡片的打开入口**：卡身点击＝进入编辑，所以「打开这一块」不能只有修饰键。
- * 形状是卡片角上一颗 hover 显形的打开键（**不是左侧块标**）：卡上没有 gutter，
- * 常驻块标会让正文右移 20px 且在这面只够得着一件行为（查询结果面没有块菜单）。
+ * **卡片不造第二套打开入口**：卡身点击＝进入编辑（与正文同一语义），
+ * 「去这一块」靠修饰键——⇧ 开右槽、⌘ 开页签、⌥ 开属性。卡片不加块标、不加打开键：
+ * 那块面积的主任务是写字，把「查看」抬成一颗常驻/悬停按钮，比修饰键更抢注意力。
  */
-await check('T325 卡片的打开键：悬停显形、点它打开这一块；静止态不占位、进编辑不位移', async () => {
+await check('T325 卡片不造打开入口：点正文进编辑，⇧+点开右槽（中心不动）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const qid = await page.evaluate(() => {
@@ -30774,46 +30774,34 @@ await check('T325 卡片的打开键：悬停显形、点它打开这一块；�
   )
   await page.waitForTimeout(450)
 
-  // ① 静止态：没有块标、没有多出来的列；打开键在但透明
+  // ① 卡片只有「这一块」本身：没有块标、没有打开键、没有 gutter 行
   const idle = await page.evaluate(() => {
     const card = document.querySelector('.vcard[data-block-id]')
     if (!card) return null
-    const open = card.querySelector('.vcard-open')
     const text = card.querySelector('.surface-text')
     return {
       id: card.dataset.blockId ?? '',
       markers: card.querySelectorAll('.marker').length,
+      openButtons: card.querySelectorAll('.vcard-open').length,
       row: Boolean(card.querySelector('.vcard-row')),
-      open: Boolean(open),
-      openOpacity: open ? getComputedStyle(open).opacity : '',
       textLeft: text?.getBoundingClientRect().left ?? -1,
       cardLeft: card.getBoundingClientRect().left,
     }
   })
   assert(idle && idle.id !== '', `前置：画廊应画出卡：${JSON.stringify(idle)}`)
-  assert(idle.markers === 0, `卡片上没有块标（左侧不多一颗点）：${JSON.stringify(idle)}`)
-  assert(!idle.row, `卡片不套 gutter 行（正文从卡片内边距起）：${JSON.stringify(idle)}`)
-  assert(idle.open, `卡片右上角应有打开键：${JSON.stringify(idle)}`)
-  assert(idle.openOpacity === '0', `打开键静止态不占视线（hover 才显形）：${JSON.stringify(idle)}`)
+  assert(idle.markers === 0, `卡片上没有块标：${JSON.stringify(idle)}`)
+  assert(idle.openButtons === 0, `卡片上没有打开键（打开靠修饰键）：${JSON.stringify(idle)}`)
+  assert(!idle.row, `卡片不套 gutter 行：${JSON.stringify(idle)}`)
   const bodyPad = await page.evaluate(() => {
     const body = document.querySelector('.vcard .vcard-body')
     return body ? parseFloat(getComputedStyle(body).paddingLeft) : -1
   })
   assert(
     bodyPad > 0 && Math.abs(idle.textLeft - (idle.cardLeft + 1 + bodyPad)) <= 2,
-    `正文左缘＝卡片内边距（没有块标占首列）：${JSON.stringify({ ...idle, bodyPad })}`,
+    `正文左缘＝卡片内边距（没有东西占首列）：${JSON.stringify({ ...idle, bodyPad })}`,
   )
 
-  // 悬停整卡 ⇒ 打开键显形
-  await page.locator(`.vcard[data-block-id="${idle.id}"]`).hover()
-  await page.waitForTimeout(200)
-  const hovered = await page.evaluate(
-    (id) => getComputedStyle(document.querySelector(`.vcard[data-block-id="${id}"] .vcard-open`)).opacity,
-    idle.id,
-  )
-  assert(hovered === '1', `悬停卡片时打开键显形：opacity=${hovered}`)
-
-  // ② 点正文仍是进编辑；正文左缘不位移（阅读态与编辑态同一个 x）
+  // ② 点正文 ⇒ 进编辑；正文左缘不位移
   const textBox = await page.locator(`.vcard[data-block-id="${idle.id}"] .surface-text`).first().boundingBox()
   assert(textBox, '前置：正文要有盒子')
   await page.mouse.click(textBox.x + 6, textBox.y + 6)
@@ -30824,35 +30812,46 @@ await check('T325 卡片的打开键：悬停显形、点它打开这一块；�
     return {
       editor: Boolean(card?.querySelector('.inline-editor')),
       textLeft: tx?.getBoundingClientRect().left ?? -1,
-      open: Boolean(card?.querySelector('.vcard-open')),
     }
   }, idle.id)
   assert(editing.editor, `点正文仍是「进入编辑」：${JSON.stringify(editing)}`)
-  assert(editing.open, `编辑态打开键仍在（只是同一颗按钮）：${JSON.stringify(editing)}`)
   assert(
     Math.abs(editing.textLeft - idle.textLeft) <= 1,
     `阅读态与编辑态的正文左缘一致（进编辑不位移）：${idle.textLeft} → ${editing.textLeft}`,
   )
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(250)
 
-  // ③ 编辑中点打开键：先把改动落在这张卡上，再打开这一块
-  await page.keyboard.type('卡片打开前')
-  await page.locator(`.vcard[data-block-id="${idle.id}"]`).hover()
-  await page.locator(`.vcard[data-block-id="${idle.id}"] .vcard-open`).click()
-  await page.waitForTimeout(450)
-  const opened = await page.evaluate(
-    (id) => ({
-      active: window.__qua.snapshot().activeId,
-      text: window.__qua.allBlocks().find((b) => b.id === id)?.text ?? '',
-      queryGone: !document.querySelector('.vcards'),
-    }),
-    idle.id,
+  // ③ ⇧+点卡片 ＝ 右槽开这一块；中心不动（列表还在）
+  const before = await page.evaluate(() => ({
+    active: window.__qua.snapshot().activeId,
+    nav: window.__qua.snapshot().nav,
+    cards: window.__qua.snapshot().dock.right.cards,
+  }))
+  await page.locator(`.vcard[data-block-id="${idle.id}"] .vcard-body`).first().click({ modifiers: ['Shift'] })
+  await page.waitForTimeout(350)
+  const after = await page.evaluate((id) => ({
+    active: window.__qua.snapshot().activeId,
+    nav: window.__qua.snapshot().nav,
+    cards: window.__qua.snapshot().dock.right.cards,
+    rendered: Boolean(
+      document.querySelector(`#dock-right .dock-card[data-card-id="${id}"]`),
+    ),
+    cardsView: Boolean(document.querySelector('.vcards')),
+  }), idle.id)
+  assert(
+    after.cards.length > before.cards.length && after.cards.includes(idle.id),
+    `⇧+点卡片应在右槽开这一块：${JSON.stringify({ before: before.cards, after: after.cards })}`,
   )
-  assert(opened.active === idle.id, `点打开键应打开这一块（中心聚焦）：${JSON.stringify(opened)}`)
-  assert(opened.text.includes('卡片打开前'), `打开前先提交这一格的改动（字不丢）：${JSON.stringify(opened)}`)
-  assert(opened.queryGone, `打开后中心换成那一块（不是停在卡片视图）：${JSON.stringify(opened)}`)
+  assert(after.rendered, `右槽窗口要真渲染出来：${JSON.stringify(after)}`)
+  assert(
+    after.active === before.active && JSON.stringify(after.nav) === JSON.stringify(before.nav),
+    `⇧+点不换中心：${JSON.stringify({ before, after })}`,
+  )
+  assert(after.cardsView, `卡片视图仍在（没被挤走）：${JSON.stringify(after)}`)
 
   await ctx.close()
-  return '卡片静止态无块标/无 gutter；打开键 hover 显形、点它中心打开这一块；进编辑不位移；编辑中打开先提交'
+  return '卡片无块标/无打开键/无 gutter；点正文进编辑不位移；⇧+点开右槽且中心与列表都不动'
 })
 
 await check('T322 ref 的 inline 看法机器保留、入口未开：抽屉里 `_refView:inline` 仍画引用 chip', async () => {

@@ -823,7 +823,6 @@ export const MSG = {
   /* 卡片：默认网格（画廊），选一个分组列就是列（看板） */
   'ui.cards.empty': '这一份源还没有记录',
   'ui.cards.drag': '拖动这张卡',
-  'ui.cards.open': '打开这一块',
   /* 卡片按一级子块分组：组＝容器的直接子块（有身份） */
   'ui.cards.noGroups': '这个块还没有子块；每个一级子块就是一列',
   'ui.cards.openGroup': '打开这一组',
