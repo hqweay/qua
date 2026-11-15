@@ -649,6 +649,12 @@ export interface App {
   renameActiveView(owner: ViewOwnerRef, name: string): boolean
   /** 新建一行＝在容器末尾插一个子块（查询源没有这一行：它的行是命中） */
   viewInsertRow(owner: ViewOwnerRef, blockId?: string): boolean
+  /**
+   * 看板列尾「新建」＝插一块**并写上这一列的值**（一笔事务，一轮撤销）。
+   * 落点跟源语义走：children/items 源插容器末尾；查询源的命中没有天然父块 ⇒ 住顶层
+   * （与记录、备注同一条「没有宿主的内容住顶层」的口径）。
+   */
+  viewNewCard(owner: ViewOwnerRef, propId: string, value: unknown): boolean
   /** 删除一行＝软删那个子块（可恢复） */
   viewDeleteRow(rowId: string): boolean
   /**

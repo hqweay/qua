@@ -6,7 +6,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkBlock, mkPropDef, readViews, type Block } from '../src/core/index.ts'
+import { mkBlock, mkPropDef, mkQueryBlock, readViews, type Block } from '../src/core/index.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
 import { BlockStore } from '../src/core/model/store.ts'
 import { viewConfigCommands } from '../src/app/commands/views.ts'
@@ -536,4 +536,47 @@ test('viewSetWidth：写 table.widths（含标题列）；null 回缺省；非�
   assert.equal(app.viewSetWidth(owner, 't', 'title', null), true)
   assert.equal(writes.at(-1)!.patch.views?.find((v) => v.id === 't')?.table?.widths, undefined, 'null ＝ 删键')
   assert.equal(app.viewSetWidth(owner, 'c', 'p1', 200), false, '卡片没有列宽：拒绝')
+})
+
+test('viewNewCard：children 源 ⇒ 插容器末尾，出生就带着这一列的值', () => {
+  const root = mkBlock('')
+  root.id = 'root'
+  const def = mkPropDef('状态', 'text')
+  const { d } = depsOf([root, def])
+  const app = viewConfigCommands(d)
+
+  assert.equal(app.viewNewCard({ kind: 'block', blockId: 'root' }, def.id, '待办'), true)
+  const kids = d.kb.children('root')
+  assert.equal(kids.length, 1, '家是真的：新卡就是这个容器的直接子块')
+  assert.equal(d.kb.get(kids[0]!.id)?.props?.[def.id], '待办', '插块与写值同一笔事务：新卡带值出生')
+})
+
+test('viewNewCard：查询源 ⇒ 新卡住顶层（与记录同口径），不猜落点塞进谁的子树', () => {
+  const host = mkQueryBlock({ name: '待办栏', spec: { where: { any: [] } } })
+  const def = mkPropDef('状态', 'text')
+  const { d } = depsOf([host, def])
+  const app = viewConfigCommands(d)
+
+  assert.equal(app.viewNewCard({ kind: 'block', blockId: host.id }, def.id, '进行中'), true)
+  assert.equal(d.kb.children(host.id).length, 0, '命中不是家：查询块不长出子块')
+  const roots = d.kb.roots()
+  const card = roots[roots.length - 1]!
+  assert.equal(card.props?.[def.id], '进行中', '值照写；进不进这一列由查询自己回答')
+})
+
+test('viewNewCard：「未设置」列（不传值）⇒ 只建块不写值；坏值拒绝且不建', () => {
+  const root = mkBlock('')
+  root.id = 'root'
+  const def = mkPropDef('状态', 'text')
+  const { d, toasts } = depsOf([root, def])
+  const app = viewConfigCommands(d)
+
+  assert.equal(app.viewNewCard({ kind: 'block', blockId: 'root' }, def.id, undefined), true)
+  const kids = d.kb.children('root')
+  assert.equal(kids.length, 1)
+  assert.equal(d.kb.get(kids[0]!.id)?.props?.[def.id], undefined, '不写值：卡落进「未设置」')
+
+  assert.equal(app.viewNewCard({ kind: 'block', blockId: 'root' }, def.id, 42), false, 'number 进 text 列：闸拒绝')
+  assert.equal(toasts.length, 1, '拒了要说一句')
+  assert.equal(d.kb.children('root').length, 1, '拒绝时不留半成品块')
 })

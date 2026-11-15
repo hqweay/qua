@@ -1542,6 +1542,25 @@ export class ViewHost {
           valueLabel: (propId, raw) => this.groupValueLabel(propId, raw),
           setValue: (blockId, propId, value) => this.deps.invoke('core.props/set-value', { blockId, propId, value }),
           clearValue: (blockId, propId) => this.deps.invoke('core.props/clear-value', { blockId, propId }),
+          // 列尾「新建」：children 源直接建；查询源建完按当前生效条件重算一次——
+          // 新卡没进结果就直说（卡在库里，不在这一列），不让「点了没出现」变成悬案
+          insertValueCard: (propId, raw) => {
+            const args = { owner: this.writeOwner, propId, ...(raw !== undefined && raw !== null ? { value: raw } : {}) }
+            if (this.source.kind !== 'query') {
+              this.deps.invoke('core.view/new-card', args)
+              return
+            }
+            const before = new Set(this.frozen?.hits.map((h) => h.blockId) ?? [])
+            this.deps.invoke('core.view/new-card', args)
+            const spec = this.effective
+            if (spec) {
+              const fresh = freezeResult(spec, this.deps.kb, this.evalContext(spec), this.viewKey)
+              this.frozen = fresh
+              if (!fresh.hits.some((h) => !before.has(h.blockId))) {
+                this.deps.toast?.(t('ui.cards.createdOutsideQuery'), 'info')
+              }
+            }
+          },
           // 结构分组只接 children 源：组＝直接子块、记录＝它的孩子（query 命中是平的，没有一级）
           structureGroups: () => this.maskedGroups(),
           // 拖卡＝换父（结构与撤销都归命令层），不是写某个字段的值

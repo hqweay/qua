@@ -828,6 +828,9 @@ export const MSG = {
   'ui.cards.openGroup': '打开这一组',
   'ui.cards.addCard': '加一张卡',
   'ui.cards.addCardTitle': '在这一组末尾加一张卡',
+  'ui.cards.newCard': '新建',
+  'ui.cards.newCardTitle': '在这一列新建一张卡片（值＝这一列）',
+  'ui.cards.createdOutsideQuery': '卡已建在顶层；没命中这条查询的其它条件，所以不在这一列',
   'ui.cards.openGroupHint': '双击打开这一组',
   /* 卡片（看板）：按某一列的单值分组；拖卡＝写属性（不是 re-parent） */
   'ui.board.unset': '未设置',
@@ -987,6 +990,7 @@ export const MSG = {
   'cmd.view.set-cover': '设置封面',
   'cmd.view.set-filter': '设置视图切片',
   'cmd.view.new-row': '新建一行',
+  'cmd.view.new-card': '新建卡片',
   'cmd.view.delete-row': '删除这一行',
   'cmd.view.menu': '视图…',
   'cmd.view.insert': '插入看法…',

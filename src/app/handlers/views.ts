@@ -107,6 +107,12 @@ export const VIEW_CONFIG_HANDLERS: Record<string, Handler> = {
     if (!owner) return false
     return app.viewInsertRow(owner, S(a.blockId) || undefined)
   },
+  'core.view/new-card': (a, app) => {
+    const owner = ownerOrCur(a, app)
+    const propId = S(a.propId)
+    if (!owner || !propId) return false
+    return app.viewNewCard(owner, propId, a.value)
+  },
   'core.view/delete-row': (a, app) => {
     const rowId = S(a.rowId)
     if (!rowId) return false

@@ -35,6 +35,7 @@ import {
   withTabsDirection,
   withListSort,
   axesFor,
+  setValue,
   sortKeysOfRaw,
   withSort,
   withDisplay,
@@ -51,6 +52,7 @@ import {
 import { t } from '../../core/infra/msg.ts'
 import type { App } from '../../core/infra/ports.ts'
 import type { KbClient } from '../../core/kb/types.ts'
+import { propValueIssue } from './props.ts'
 import type { ViewConfigDeps } from './types.ts'
 
 /** 一个拥有者这一刻的源（写配置前先问：能不能建这种 kind，看的是源） */
@@ -104,6 +106,7 @@ export function viewConfigCommands(
   | 'removeView'
   | 'renameActiveView'
   | 'viewInsertRow'
+  | 'viewNewCard'
   | 'viewDeleteRow'
   | 'viewSetSort'
   | 'viewSetDisplay'
@@ -262,6 +265,41 @@ export function viewConfigCommands(
       if (!container || isQueryBlock(container)) return false
       const row = mkBlock('')
       d.run((tx) => tx.insert(row, containerId, container.children.length))
+      after()
+      return true
+    },
+
+    /**
+     * 看板列尾「新建」：新卡**出生时就带着这一列的值**（拖卡写值是同一格的搬运，
+     * 这是它的出生版）——插块与写值在同一笔事务里，一轮撤销整体回退。
+     * 落点跟源语义走：children/items 源的记录本来就是容器的直接子块 ⇒ 插容器末尾；
+     * 查询源的命中没有天然父块 ⇒ 住顶层（与记录、备注同一条「没有宿主的内容住顶层」
+     * 的口径），视图自己负责把「没进结果」说明白。
+     */
+    viewNewCard: (owner, propId, value) => {
+      const source = sourceOfRef(d, owner)
+      if (!source) return false
+      // 值校验与 set-value 同一道闸（坏值不写；值来自既有记录，这一般只是兜底）
+      const issue = propValueIssue(d.kb.propDefs().find((x) => x.id === propId), value)
+      if (issue) {
+        d.toast(issue, 'warn')
+        return false
+      }
+      let parentId: string | null = null
+      let index = d.kb.roots().length
+      if (source.kind !== 'query') {
+        const container: Block | undefined = d.kb.get(source.blockId)
+        if (!container || isQueryBlock(container)) return false
+        parentId = source.blockId
+        index = container.children.length
+      }
+      const row = mkBlock('')
+      // 值在插进事务**之前**写上（同一笔 tx 里 patch 新插的块会被拒）：
+      // 新卡出生时就带着这一列的值，插块与写值仍是一笔事务、一轮撤销
+      if (value !== undefined && value !== null) setValue(row, propId, value)
+      d.run((tx) => {
+        tx.insert(row, parentId, index)
+      })
       after()
       return true
     },

@@ -767,6 +767,22 @@ button.queryview-chip:hover {
   flex-direction: column;
   gap: var(--ui-gap-2);
 }
+/* 列尾「新建」：ghost 行——常显但压低，悬停才升到正文色（与列头 ＋ 同一档） */
+.vcol-new {
+  border: 0;
+  background: none;
+  padding: var(--ui-gap-1) var(--ui-gap-2);
+  font: inherit;
+  text-align: left;
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+  opacity: 0.55;
+  border-radius: var(--ui-radius-sm);
+}
+.vcol-new:hover {
+  opacity: 1;
+  color: var(--ui-text);
+}
 /* 页签视图：一次只看一个子块；横／纵只差切换条方向。
    身体是一台可编辑大纲（普通块的行），不是卡片——页签是独立看法，不是卡片的摆法。 */
 .vtabs-view[data-direction='horizontal'] {

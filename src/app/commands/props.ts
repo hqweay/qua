@@ -66,6 +66,30 @@ function textFormatLabel(format: string | undefined): string {
   return t('ui.props.format.plain')
 }
 
+/**
+ * 一格值的**形状校验**（写侧唯一的闸）：合法给 `null`，不合法给**直接可 toast** 的那句话。
+ *
+ * 为什么校验放在命令这一侧、而不是控件里：值的形状是**模型**的事
+ * （查询算子全靠它正确），控件只是入口之一；只在校验控件里做，
+ * 换一个入口（表格、命令面、将来的同步）就能落进坏值。
+ */
+export function propValueIssue(def: Block | undefined, value: unknown): string | null {
+  if (!def || value === undefined || value === null) return null
+  const kind = propKindOf(def)
+  if (!valuesOk(kind, value)) {
+    return t('ui.props.valueShapeInvalid', { kind: t(`ui.props.kind.${kind}`) })
+  }
+  const list = Array.isArray(value) ? value : [value]
+  if (kind === 'text') {
+    const fmt = formatOf(def)
+    if (!list.every((v) => typeof v === 'string' && textFormatOk(fmt, v))) {
+      return t('ui.props.formatInvalid', { format: textFormatLabel(fmt) })
+    }
+  }
+  if (kind === 'asset' && !list.every((v) => isAssetRef(v))) return t('ui.props.assetInvalid')
+  return null
+}
+
 export function propsCommands(
   d: PropsDeps,
 ): Pick<
@@ -142,24 +166,11 @@ export function propsCommands(
       const b = find(blockId)
       if (!b) return
       const def = d.kb.propDefs().find((x) => x.id === propId)
-      if (def && value !== undefined && value !== null) {
-        const kind = propKindOf(def)
-        if (!valuesOk(kind, value)) {
-          d.toast(t('ui.props.valueShapeInvalid', { kind: t(`ui.props.kind.${kind}`) }), 'warn')
-          return
-        }
-        const list = Array.isArray(value) ? value : [value]
-        if (kind === 'text') {
-          const fmt = formatOf(def)
-          if (!list.every((v) => typeof v === 'string' && textFormatOk(fmt, v))) {
-            d.toast(t('ui.props.formatInvalid', { format: textFormatLabel(fmt) }), 'warn')
-            return
-          }
-        }
-        if (kind === 'asset' && !list.every((v) => isAssetRef(v))) {
-          d.toast(t('ui.props.assetInvalid'), 'warn')
-          return
-        }
+      // 拒写时不静默：给一句提示，用户知道刚才那次没生效
+      const issue = propValueIssue(def, value)
+      if (issue) {
+        d.toast(issue, 'warn')
+        return
       }
       d.write(blockId, () => setValue(b, propId, value))
     },

@@ -66,6 +66,11 @@ export interface ViewCardsDeps {
   moveInto: (blockId: string, groupBlockId: string) => void
   /** 给一组加一张卡＝在组块末尾插一个子块（与大纲里 ↵＋Tab 同一条写路径） */
   insertCard: (groupBlockId: string) => void
+  /**
+   * 值分组列尾的「新建」：插一块**并写上这一列的值**（落点跟源语义走，
+   * 见 `core.view/new-card`）；「未设置」列不写值。结构分组不用它（组头有「＋」）。
+   */
+  insertValueCard: (propId: string, raw: unknown) => void
   openBlock: (blockId: string, place?: OpenAction) => void
   /** 点卡上的属性行 ⇒ 打开属性面板并聚焦那一栏 */
   inspect: (blockId: string, propId?: string) => void
@@ -323,6 +328,26 @@ export class ViewCards {
     list.className = 'vcol-cards'
     for (const r of b.records) list.appendChild(this.card(r, { ...card, draggable: !this.multi }))
     col.appendChild(list)
+
+    /**
+     * 列尾「新建」（看板软件的标准动作）：新卡**带着这一列的值**出生。
+     * 与结构分组的「＋」对称——组＝块 ⇒ ＋ 在表头（插子块）；组＝值 ⇒ 新建在列尾
+     * （插块＋写值，一笔事务）。「未设置」列不写值，新卡就落进「未设置」。
+     */
+    const add = document.createElement('button')
+    add.type = 'button'
+    add.className = 'vcol-new'
+    add.textContent = t('ui.cards.newCard')
+    add.dataset.tip = t('ui.cards.newCardTitle')
+    add.setAttribute('aria-label', t('ui.cards.newCardTitle'))
+    add.addEventListener('click', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      // 先结束正在进行的编辑：改动时刻不该落在马上重排的列上
+      this.deps.cell.commit()
+      this.deps.insertValueCard(propId, b.unset ? undefined : b.raw)
+    })
+    col.appendChild(add)
 
     /**
      * 落点：整列接卡。`dragover` 必须 `preventDefault` 才有 `drop` ——
