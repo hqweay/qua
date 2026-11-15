@@ -1007,6 +1007,8 @@ export function setupPanels(deps: PanelsDeps) {
       pickTag: pickTagValue,
       tagLabel,
       refLabel: refLabelOf,
+      // 卡上块下属性行里的链接／外态资产：与正文外链同一个落点（白名单在那一层）
+      openUrl: (url) => app.openExternal(url),
       // 选项显示名里 `· #名` 的解析（`select` 单元格与属性区同一份口径）
       tagName: (id) => {
         const b = kb.get(id)

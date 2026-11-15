@@ -13,7 +13,8 @@
  */
 import { assetRefKindOf } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
-import { assetRefView, markAssetMissing } from '../../view/asset-views.ts'
+import { assetClickActionOf, assetRefView, markAssetMissing } from '../../view/asset-views.ts'
+import { openImageLightbox } from '../overlay/lightbox.ts'
 import { renderIcon } from '../../view/icons.ts'
 
 /** 两种尺寸：块下属性行贴着文字走（不改行高），面板与表格格子给一枚可缩略图 */
@@ -28,6 +29,24 @@ function failedChip(state: 'missing' | 'unavailable'): HTMLElement {
   const text = document.createElement('span')
   text.className = 'prop-asset-chip-text'
   text.textContent = t(state === 'missing' ? 'ui.props.assetMissing' : 'ui.props.assetUnavailable')
+  chip.append(icon, text)
+  return chip
+}
+
+/**
+ * **文件 chip**：内态但索引说不是图片（pdf／音视频…）。画 `<img>` 只会 error，
+ * 然后「图片不可用」——字节明明在库里，这句就是谎话。
+ * 文本给 mime 的子类型（`image/png` → PNG），是数据不是文案，不占翻译表。
+ */
+function fileChip(mime: string): HTMLElement {
+  const chip = document.createElement('span')
+  chip.className = 'prop-asset-chip prop-asset-chip--file'
+  const icon = document.createElement('span')
+  icon.className = 'prop-asset-chip-ico'
+  renderIcon(icon, undefined, 'file-text', 'sm')
+  const text = document.createElement('span')
+  text.className = 'prop-asset-chip-text'
+  text.textContent = (mime.split('/')[1] ?? '').toUpperCase()
   chip.append(icon, text)
   return chip
 }
@@ -65,6 +84,13 @@ export function makeAssetThumb(ref: string, opts: AssetThumbOptions = {}): HTMLE
   wrap.dataset.tip = ref
   const view = assetRefView(ref)
   if (view.state === 'ready' && view.url) {
+    // 内态非图（文件）画不出图：给文件 chip，不画一个注定 error 的假 <img>
+    const internal = assetRefKindOf(ref) === 'internal'
+    if (internal && view.mime !== undefined && !view.mime.startsWith('image/')) {
+      wrap.appendChild(fileChip(view.mime))
+      if (opts.onRemove) wrap.appendChild(removeButton(opts.onRemove))
+      return wrap
+    }
     const img = document.createElement('img')
     img.className = 'prop-asset-img'
     img.src = view.url
@@ -87,4 +113,26 @@ export function makeAssetThumb(ref: string, opts: AssetThumbOptions = {}): HTMLE
   }
   if (opts.onRemove) wrap.appendChild(removeButton(opts.onRemove))
   return wrap
+}
+
+export interface AssetActivateDeps {
+  /** lightbox 标题（块下行用栏名；正文原子用 run 上的文件名） */
+  label: string
+  /** 外态链接交给系统浏览器（`App.openExternal` 的注入点；被拒时的文案由那一层给） */
+  openUrl: (url: string) => void
+  /** 其余情形的详情落点（面板那一栏／原子详情浮层由调用方给） */
+  onDetails: () => void
+}
+
+/**
+ * **点一枚资产露面**的默认动作（判据在 `assetClickActionOf`，这里只执行）。
+ *
+ * 块下行、面板值控件、正文原子共用这一份——分两处写就会出现
+ * 「正文里点图能放大、块下点图没反应」这种只在某处复现的差别。
+ */
+export function activateAssetRef(ref: string, deps: AssetActivateDeps): void {
+  const action = assetClickActionOf(ref)
+  if (action.t === 'external') deps.openUrl(action.url)
+  else if (action.t === 'lightbox') openImageLightbox({ url: action.url, label: deps.label, subtitle: action.subtitle })
+  else deps.onDetails()
 }

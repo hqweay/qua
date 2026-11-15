@@ -155,3 +155,41 @@ export function onAssetChange(fn: (hash: string) => void): () => void {
   listeners.add(fn)
   return () => listeners.delete(fn)
 }
+
+/* ------------------------------------------------------------ 点一枚露面会发生什么 */
+
+/** 字节数的人话形式（详情浮层与 lightbox 共用一份，免得两处各算一套） */
+export function formatBytesOf(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/** 点一枚资产引用的**默认动作**：它指向链接／图／文件，动作跟着指向走。 */
+export type AssetClickAction =
+  /** 外态 http(s)：这是一条链接，交给系统浏览器 */
+  | { t: 'external'; url: string }
+  /** 内态且索引说是图片：开 lightbox（副标题＝尺寸 · 字节 · hash 短码，帮人确认是哪张图） */
+  | { t: 'lightbox'; url: string; subtitle: string }
+  /** 其余（内态非图／缺失／库打不开）：给详情，那里说清「这是什么、为什么看不了」 */
+  | { t: 'details' }
+
+/**
+ * 「点一枚资产引用，默认动作是什么」的**唯一答案**（纯判据；执行归调用方）。
+ *
+ * 为什么按指向分派而不按声明格式：格式（image/file/any）是写入端的意图，
+ * 读侧只信索引里的 mime 与值的 scheme——「声明成 image 的外链」仍是一条链接，
+ * 浏览器比我们更知道怎么打开它。内态非图（文件）今天没有打开通道，落详情不假装能开。
+ */
+export function assetClickActionOf(ref: string): AssetClickAction {
+  if (assetRefKindOf(ref) === 'external') return { t: 'external', url: ref }
+  const view = assetViewOf(ref)
+  if (view.state === 'ready' && view.url && (view.mime ?? '').startsWith('image/')) {
+    const meta = assetMetaOf(ref)
+    const dims = view.w && view.h ? `${view.w}×${view.h}` : ''
+    const size = meta ? formatBytesOf(meta.size) : ''
+    const subtitle = [dims, size, ref.slice(0, 8)].filter((x) => x !== '').join(' · ')
+    return { t: 'lightbox', url: view.url, subtitle }
+  }
+  return { t: 'details' }
+}

@@ -21,8 +21,7 @@ import {
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import type { Workspace } from '../../core/infra/workspace.ts'
-import { assetMetaOf, assetViewOf } from '../../view/asset-views.ts'
-import type { AssetView } from '../../core/infra/assets.ts'
+import { assetClickActionOf } from '../../view/asset-views.ts'
 import type { BlockEditor } from '../../view/editor/editor.ts'
 import type { AtomMenuHit, RefClickHit, RefClickMods } from '../../view/editor/editor-events.ts'
 import type { RunWithId } from '../../core/model/runs.ts'
@@ -148,24 +147,13 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
   }
 
   /**
-   * 打开 lightbox。副标题是「尺寸 · 字节 · hash 短码」——
-   * 三样都能帮人确认「这是我以为的那张图」。
+   * 打开 lightbox。副标题由判据给（尺寸 · 字节 · hash 短码，三样都能帮人确认
+   * 「这是我以为的那张图」）；标题用 run 上的文件名快照。
    */
-  const openLightbox = (hash: string, view: AssetView, el: HTMLElement): void => {
+  const openLightbox = (action: { url: string; subtitle: string }, el: HTMLElement): void => {
     const run = findRunOrNull(el.dataset.atomId ?? '')
-    const meta = assetMetaOf(hash)
     const label = (run?.t === 'asset' ? run.label : undefined) ?? t('ui.asset.unnamed')
-    const dims = view.w && view.h ? `${view.w}×${view.h}` : meta?.w && meta.h ? `${meta.w}×${meta.h}` : ''
-    const size = meta ? formatBytes(meta.size) : ''
-    const parts = [dims, size, hash.slice(0, 8)].filter((x) => x !== '')
-    openImageLightbox({ url: view.url ?? '', label, subtitle: parts.join(' · ') })
-  }
-
-  /** 字节数的人话形式（详情浮层与 lightbox 共用一份，免得两处各算一套） */
-  const formatBytes = (n: number): string => {
-    if (n < 1024) return `${n} B`
-    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-    return `${(n / (1024 * 1024)).toFixed(1)} MB`
+    openImageLightbox({ url: action.url, label, subtitle: action.subtitle })
   }
 
   /**
@@ -173,6 +161,8 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
    *
    * 正文、挂载区、查询结果、表格标题格**共用这一份**：分开写就会出现
    * 「正文里点图能开、表里点图没反应」这种只在某处复现的差别。
+   * 判据是 `assetClickActionOf`（与块下属性行同一份）；行内外态链接的默认动作
+   * 仍是看详情——这一枚是谁、怎么删，浮层里都有，打开归浮层里的按钮。
    */
   const handleAtomClick = (
     atom: { runId: string; kind: string; hash?: string },
@@ -199,9 +189,9 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
         })
       return
     }
-    const view = assetViewOf(atom.hash)
-    if (!mods.altKey && view.state === 'ready' && (view.mime ?? '').startsWith('image/')) {
-      openLightbox(atom.hash, view, el)
+    const action = assetClickActionOf(atom.hash)
+    if (!mods.altKey && action.t === 'lightbox') {
+      openLightbox(action, el)
       return
     }
     showAssetDetails(atom.runId, atom.hash, el)

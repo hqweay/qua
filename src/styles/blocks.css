@@ -904,6 +904,10 @@
   align-items: center;
   gap: var(--ui-gap-1);
 }
+/* 缩略图在这行里可点（lightbox／浏览器／详情，判据在 activateAssetRef） */
+.blk-props-line .prop-asset-thumb {
+  cursor: pointer;
+}
 /*
   块下行的多值：**一行 chips，不换行**。这一行的高度是虚拟化估高的输入
   （268：行数 × 行高），折行会多出一行没人算 ⇒ 滚动条系统性偏小。
@@ -1487,11 +1491,13 @@
   color: var(--ui-text);
   max-width: 24ch;
 }
-/* 值是引用：点得动才像引用（跳转由事件层接，这里只给可点的观感） */
-.blk-props-line .blk-prop-ref {
+/* 值是引用或链接：点得动才像能跳的东西（跳转各归各的落点，这里只给可点的观感） */
+.blk-props-line .blk-prop-ref,
+.blk-props-line .blk-prop-url {
   cursor: pointer;
 }
-.blk-props-line .blk-prop-ref:hover {
+.blk-props-line .blk-prop-ref:hover,
+.blk-props-line .blk-prop-url:hover {
   text-decoration: underline;
   text-underline-offset: 2px;
 }

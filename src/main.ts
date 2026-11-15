@@ -3138,6 +3138,9 @@ function viewEvents(
       renderPropsLine(block.id, data, into, {
         inspect: (id, propId) => app.openPropertiesDrawer(id, propId),
         refLabel: refLabelOf,
+        openUrl: (url) => {
+          openExternalUrl(url)
+        },
         density: mode.effective,
         onSetMode: (id, next) => app.setPropsLineMode(id, next),
         onMenu: (id, anchor) => openPropsLineMenu(id, anchor),

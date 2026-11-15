@@ -22,13 +22,15 @@
 import { t } from '../../core/infra/msg.ts'
 import { assetRefsOf, enginePropText, isEngineProp, valueItemsOf, valueListOf } from '../../core/index.ts'
 import type { BelowFields, FieldRow, PropsLineDensity } from '../../core/index.ts'
-import { makeAssetThumb } from './asset-value.ts'
+import { activateAssetRef, makeAssetThumb } from './asset-value.ts'
 
 export interface PropsLineDeps {
   /** 点一项（或 `+N`）⇒ 打开属性面板；给了 `propId` 就聚焦那一栏 */
   inspect: (blockId: string, propId?: string) => void
   /** `ref` 值的显示名（目标可能已删，交给调用方兜底） */
   refLabel: (targetId: string) => string
+  /** 把一个外态地址交给系统浏览器（与正文外链同一个落点；被拒的文案归那一层） */
+  openUrl: (url: string) => void
   /**
    * **这一块此刻用哪一档**（`summary` 一行／`list` 一栏一行）。
    * 由调用方按「默认档 ＋ 这一块的显式覆盖」算好——渲染不认识偏好。
@@ -90,13 +92,16 @@ export function fieldRowText(row: FieldRow, refLabel: (id: string) => string): s
  */
 function appendValueChips(value: HTMLElement, row: FieldRow, deps: PropsLineDeps): void {
   value.classList.add('blk-prop-chips')
-  const push = (text: string, refId?: string): void => {
+  const push = (text: string, refId?: string, url?: string): void => {
     const chip = document.createElement('span')
     chip.className = 'blk-prop-chip'
     chip.textContent = text
     if (refId !== undefined && refId !== '') {
       chip.dataset.refTo = refId
       chip.classList.add('blk-prop-ref')
+    } else if (url !== undefined && url !== '') {
+      chip.dataset.openUrl = url
+      chip.classList.add('blk-prop-url')
     }
     value.appendChild(chip)
   }
@@ -108,7 +113,9 @@ function appendValueChips(value: HTMLElement, row: FieldRow, deps: PropsLineDeps
     for (const id of valueListOf(row.value)) push(deps.refLabel(id), id)
     return
   }
-  for (const v of valueItemsOf(row.value)) push(String(v))
+  // `text` 的 url 格式（多链接＝text+url+many）：每一枚 chip 各自可点（`data-open-url`）
+  const asUrl = row.kind === 'text' && row.format === 'url'
+  for (const v of valueItemsOf(row.value)) push(String(v), undefined, asUrl ? String(v) : undefined)
 }
 
 export function renderPropsLine(
@@ -246,7 +253,26 @@ function pairOf(blockId: string, row: FieldRow, deps: PropsLineDeps, pendingText
     const refs = assetRefsOf(row.value)
     if (refs.length > 0) {
       value.classList.add('blk-prop-assets')
-      for (const ref of refs.slice(0, 3)) value.appendChild(makeAssetThumb(ref, { size: 'line' }))
+      for (const ref of refs.slice(0, 3)) {
+        const thumb = makeAssetThumb(ref, { size: 'line' })
+        /**
+         * **点缩略图＝这枚资产自己的默认动作**（lightbox／交系统浏览器／详情），
+         * 不是开面板：值指向什么，动作就跟着指向走（判据与正文原子同一份）。
+         * `⌥` ＝ 详情，与行内原子的「默认动作／详情」同款分工。
+         */
+        thumb.addEventListener('click', (e) => {
+          e.stopPropagation()
+          const focusColumn = () => deps.inspect(blockId, row.propId)
+          if (e.altKey) focusColumn()
+          else
+            activateAssetRef(ref, {
+              label: row.label,
+              openUrl: deps.openUrl,
+              onDetails: focusColumn,
+            })
+        })
+        value.appendChild(thumb)
+      }
       value.dataset.tip = refs.join('、')
     } else value.textContent = fieldRowText(row, deps.refLabel)
   } else if (manyChips) {
@@ -268,10 +294,36 @@ function pairOf(blockId: string, row: FieldRow, deps: PropsLineDeps, pendingText
     value.dataset.refTo = String(row.value)
     value.classList.add('blk-prop-ref')
   }
+  /**
+   * **值是 `text` 的 url 格式 ⇒ 值本身是一条链接**（单值；多值在 chips 里逐枚挂）。
+   *
+   * 与 ref 同构但不共用判据：ref 的 `data-ref-to` 说「zoom 到某个块」，
+   * 这里的 `data-open-url` 说「把这个地址交给系统浏览器」——挂错了判据，
+   * 点一个链接会跳进某块，或者反过来。
+   */
+  if (
+    !manyChips &&
+    row.kind === 'text' &&
+    row.format === 'url' &&
+    pendingText === undefined &&
+    row.value !== undefined &&
+    row.value !== null &&
+    row.value !== ''
+  ) {
+    value.dataset.openUrl = String(row.value)
+    value.classList.add('blk-prop-url')
+  }
   pair.append(name, value)
   pair.addEventListener('click', (e) => {
+    const hit = e.target as HTMLElement | null
     // 值那一段是引用：点击归事件层（去目标块），整对按钮不抢这一下
-    if ((e.target as HTMLElement | null)?.closest('[data-ref-to]')) return
+    if (hit?.closest('[data-ref-to]')) return
+    // 值那一段是链接：交给系统浏览器（白名单与被拒文案都在那一层）
+    const urlEl = hit?.closest<HTMLElement>('[data-open-url]')
+    if (urlEl?.dataset.openUrl) {
+      deps.openUrl(urlEl.dataset.openUrl)
+      return
+    }
     deps.inspect(blockId, row.propId)
   })
   return pair

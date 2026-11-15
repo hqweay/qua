@@ -239,6 +239,8 @@ export interface ViewHostDeps {
   /** `asset` 值选本地文件（与属性卡共用；省略 ⇒ 表格里的 asset 格只渲染、不给选文件按钮） */
   pickAsset?: (onPick: (hash: string) => void) => void
   refLabel?: (targetId: string) => string
+  /** 把外态地址交给系统浏览器（卡上的块下属性行里，链接与外态资产要能开） */
+  openUrl: (url: string) => void
   /** 标签名解析（`select` 选项显示名里的 `#名`） */
   tagName?: (id: string) => string
   /** 可选的属性定义（条件树的字段下拉；按显示名排好，`ui` 不扫森林） */
@@ -1830,6 +1832,7 @@ export class ViewHost {
           inspect: (blockId, propId) =>
             this.deps.invoke('core.block/inspect', { blockId, ...(propId ? { propId } : {}) }),
           ...(this.deps.refLabel ? { refLabel: (id: string) => this.deps.refLabel!(id) } : {}),
+          openUrl: (u) => this.deps.openUrl(u),
           choices: (id) => (id === '_tags' ? this.tagChoices() : this.deps.choices?.(id) ?? []),
           cardinalityOf: (id) => this.cardinalityOf(id),
           valueLabel: (propId, raw) => this.groupValueLabel(propId, raw),

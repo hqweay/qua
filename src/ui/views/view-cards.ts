@@ -71,6 +71,8 @@ export interface ViewCardsDeps {
   inspect: (blockId: string, propId?: string) => void
   /** `ref` 值的显示名（块下属性行用） */
   refLabel?: (targetId: string) => string
+  /** 把外态地址交给系统浏览器（块下属性行里的链接／外态资产） */
+  openUrl: (url: string) => void
   /** **列头的值名解析**（ref 等值是块 id 的字段）：列头不露裸 id（判据见 grouping.ts） */
   valueLabel?: (propId: string, raw: unknown) => string | undefined
 }
@@ -491,6 +493,7 @@ export class ViewCards {
       renderPropsLine(r.block.id, below, line, {
         inspect: (id, propId) => this.deps.inspect(id, propId),
         refLabel: (id) => this.deps.refLabel?.(id) ?? id.slice(-6),
+        openUrl: (u) => this.deps.openUrl(u),
       })
       meta.appendChild(line)
     }
