@@ -707,6 +707,7 @@ export class QueryTree {
     const fieldOptions = fields.map((f) => ({
       value: f.id,
       label: f.count !== undefined ? `${f.label}（${f.count}／${f.total}）` : f.label,
+      system: isQueryableSystemProp(f.id),
     }))
     if (row.field !== '' && !fields.some((f) => f.id === row.field)) {
       /**
@@ -719,20 +720,15 @@ export class QueryTree {
       fieldOptions.push({
         value: row.field,
         label: sys ? (systemQueryFieldLabel(row.field) ?? row.field) : t('ui.query.fieldMissing'),
+        system: sys,
       })
     }
     out.push(
-      selectEl(
-        fieldOptions,
-        row.field,
-        (next) => {
-          row.field = next
-          row.value = ''
-          this.paint()
-        },
-        'qt-field',
-        'field',
-      ),
+      this.fieldSelect(fieldOptions, row.field, (next) => {
+        row.field = next
+        row.value = ''
+        this.paint()
+      }),
     )
     out.push(
       selectEl(
@@ -750,6 +746,34 @@ export class QueryTree {
     )
     out.push(this.valueControl(row))
     return out
+  }
+
+  /**
+   * 字段下拉分两节：**属性**（用户自己配的定义块，按覆盖率排）／**系统**（块类型、
+   * 别名、日记日期这些块自带的槽，固定殿后）。排序判据（系统槽不参与覆盖率排序）
+   * 已经是这么划的，这里只是把边界**画出来**——「属性」这个词留给用户配的东西，
+   * 系统问法不借它的名字。节空了就不画标头。
+   */
+  private fieldSelect(
+    options: readonly { value: string; label: string; system: boolean }[],
+    current: string,
+    onChange: (next: string) => void,
+  ): HTMLSelectElement {
+    const sel = document.createElement('select')
+    sel.className = 'qt-field'
+    sel.dataset.qt = 'field'
+    const addGroup = (label: MsgId, opts: typeof options): void => {
+      if (opts.length === 0) return
+      const g = document.createElement('optgroup')
+      g.label = t(label)
+      for (const o of opts) g.appendChild(option(o.value, o.label))
+      sel.appendChild(g)
+    }
+    addGroup('ui.query.fieldGroup.props', options.filter((o) => !o.system))
+    addGroup('ui.query.fieldGroup.system', options.filter((o) => o.system))
+    sel.value = current
+    sel.addEventListener('change', () => onChange(sel.value))
+    return sel
   }
 
   private valueControl(row: Extract<TreeRow, { kind: 'prop' }>): HTMLElement {
