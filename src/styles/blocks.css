@@ -425,7 +425,8 @@
  *   箭头是悬停件——常驻箭头是反例，占位又会与块标抢空间。
  *   环只在**静止态**占位，悬停时让位给 grip（见本节末尾：两者塞不进同一块像素）。
  */
-.blk .marker {
+.blk .marker,
+.vcard-row .marker {
   position: relative;
   flex: 0 0 auto;
   width: var(--ui-marker-slot);
@@ -439,7 +440,8 @@
   user-select: none;
   -webkit-user-select: none;
 }
-.blk .marker::before {
+.blk .marker::before,
+.vcard-row .marker::before {
   content: '';
   display: block;
   position: relative;
@@ -456,6 +458,19 @@
 /* 悬停：抓手替换点（`.grip` 默认隐藏，见下） */
 .blk .marker:hover::before {
   opacity: 0;
+}
+/*
+ * **卡片上的块标常驻**（它是阅读态唯一的打开入口），所以两处不同：
+ *   · 静止更淡（常驻件不该抢正文的注意力），悬停整张卡就到全强度；
+ *   · 悬停**不换成抓手**——卡片上拖动另有手势（拖卡＝写值/搬组），块标这里只打开。
+ */
+.vcard-row .marker::before {
+  opacity: 0.45;
+}
+.vcard-row .marker:hover::before,
+.vcard:hover .vcard-row .marker::before,
+.vcard:focus-within .vcard-row .marker::before {
+  opacity: 1;
 }
 .blk .marker .grip {
   position: absolute;
@@ -474,7 +489,9 @@
 @media (prefers-reduced-motion: reduce) {
   .blk .marker::before,
   .blk .marker .grip,
-  .blk .marker::after {
+  .blk .marker::after,
+  .vcard-row .marker::before,
+  .vcard-row .marker::after {
     transition: none;
   }
 }
@@ -491,7 +508,8 @@
  *    伪元素 `::after` 天然排在最后，不给它压层级的话，那层半透明底色会盖在点和握手上
  *    （下发灰、抓手变暗）。
  */
-.blk .marker::after {
+.blk .marker::after,
+.vcard-row .marker::after {
   content: '';
   position: absolute;
   z-index: var(--ui-z-plate);
@@ -503,7 +521,8 @@
   transition: opacity 120ms ease;
 }
 .blk[data-collapsed='1'] .marker::after,
-.blk .marker:hover::after {
+.blk .marker:hover::after,
+.vcard-row .marker:hover::after {
   opacity: 1;
 }
 /* 拖动中：整行变淡（`editor.ts` 加 `.drag-src`） */
@@ -2558,7 +2577,8 @@
  * **特殊身份的块标**：查询＝漏斗，属性定义＝滑杆。类型进形状（形状优先——暗色主题靠深浅区分不可靠）。
  * 图标与点互斥；悬停时照旧让位给抓手——「任何块标悬停＝把手」这一条不变。
  */
-.blk .marker .marker-ico {
+.blk .marker .marker-ico,
+.vcard-row .marker .marker-ico {
   position: absolute;
   display: inline-flex;
   align-items: center;
@@ -2573,7 +2593,8 @@
  * 内点取第一色（主标签的身份可读），环说「不止一个」。它**常驻**（不是悬停件），
  * 但只是一层淡色：薄到不与折叠底盘抢戏（底盘悬停才浮起，见 `.marker::after`）。
  */
-.blk .marker .marker-ring {
+.blk .marker .marker-ring,
+.vcard-row .marker .marker-ring {
   position: absolute;
   z-index: var(--ui-z-plate);
   width: var(--ui-marker-halo-size);

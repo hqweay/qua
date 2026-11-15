@@ -23,10 +23,6 @@ import {
   blockTypeOf,
   displayNameOf,
   embedBodyOf,
-  faceOfByFind,
-  colorOfByFind,
-  identityDotColor,
-  identityRingGradient,
   identityColorCss,
   hasChildrenViewBody,
   hasQueryBody,
@@ -35,7 +31,6 @@ import {
   isJournal,
   isEmbedBlock,
   isPropDefBlock,
-  isQueryBlock,
   propKindOf,
   journalDate,
   journalDateLabel,
@@ -58,6 +53,7 @@ import type { AssetView } from '../../core/infra/assets.ts'
 import { t } from '../../core/infra/msg.ts'
 import { blockLabel, danglingView, resolveRefs } from '../../core/relations/ref.ts'
 import { createIcon, renderIcon } from '../icons.ts'
+import { buildMarker } from './marker.ts'
 import type { RefSummary } from '../../core/views/ref-sources.ts'
 
 /** 行高：与 CSS 的 `--ui-line-h` 必须一致（虚拟化算占位高度要用） */
@@ -1056,11 +1052,8 @@ export function makeBlockEl(
   }
 
   /**
-   * **块标 ＝ 把手**（D4）。同一个元素挂两个契约 class：
-   *   · `.marker` —— 新名字，样式与断言都认它；
-   *   · `.bullet` ＋ `.handle` —— 旧契约选择器，主题/插件继续有效。
-   * 于是块标槽从 40px（fold 12 + bullet 14 + handle 12 + gap）收到 **20px**，
-   * 正文左缘的缩进问题一并解决。
+   * **块标 ＝ 把手**：画法住在 `marker.ts`（卡片这类非编辑态的投影也要挂同一颗），
+   * 这一层只回答「这一行有没有 gutter、块标绑哪一块」。
    *
    * 行为：**左键 ＝ 聚焦/zoom**、右键 ＝ 块菜单、拖动 ＝ 移动。
    *
@@ -1071,62 +1064,7 @@ export function makeBlockEl(
    * ⚠️ 绑定与形状分离：`data-focus-for`／`data-drag-for` 指到 `markerTargetId`
    *    （普通行＝自己，投影行＝源）——行为对「这一块」不变，只是「这一块」是谁由行决定。
    */
-  const marker = left ? document.createElement('span') : null
-  if (left && marker) {
-    marker.className = 'marker bullet handle'
-    marker.dataset.focusFor = markerTargetId
-    // 抓手图标：**悬停才现**（块标 hover 时把点换成 grip）
-    const grip = document.createElement('span')
-    grip.className = 'grip'
-    grip.appendChild(createIcon('grip-vertical', 'sm'))
-    marker.appendChild(grip)
-    marker.dataset.tip = t('ui.block.focusHint')
-    marker.draggable = true
-    marker.dataset.dragFor = markerTargetId
-    /**
-     * **块标＝脸位**：`faceOf` 的结果画在这里——用户配的 `_icon`（脸）优先，
-     * 缺省回落结构旗（标签=hash／查询=漏斗／定义=滑杆），再缺省借主标签的形
-     * （归属序第一个带显式 `_icon` 的标签——与借色同一资格）；都没有就是圆点（无脸默认）。
-     * 信号回答「这是哪类东西」，脸回答「这是哪一个东西」，同一个槽承载两者。
-     *
-     * ⚠️ 三条行为锚（左键 zoom／右键菜单／拖动）与脸无关：被动图像不吃行为，
-     *    块标上的脸**不挂任何事件**——点它还是聚焦/缩进，`dragstart` 还是抓手的事。
-     * ⚠️ 图标与点互斥（CSS），悬停时都让位给抓手——「任何块标悬停＝把手」这一条不变。
-     */
-    const face = faceOfByFind(b, opts.find)
-    if (face !== undefined) {
-      marker.classList.add(isPropDefBlock(b) ? 'marker-schema' : isQueryBlock(b) ? 'marker-query' : 'marker-face')
-      const ico = document.createElement('span')
-      ico.className = 'marker-ico'
-      renderIcon(ico, face, 'circle-help', 'sm')
-      marker.appendChild(ico)
-      // 属性定义的正文是定义名，行内改不了；悬停块标时把「它是什么」说清
-      if (isPropDefBlock(b)) marker.dataset.tip = t('ui.block.schemaHint')
-    }
-    /**
-     * **自位色＝涂料，不是形状**：色只染「当前的形状」，不与形状竞争。
-     * 自己的显式 `_color`／恰一个有色标签的借色 → 染点或染脸（`.marker-ico` 的描边
-     * 吃 `--identity-c`，emoji 自带色免疫——它是字面文本）；
-     * ≥2 个有色标签在**圆点形态**＝内点＋外环：内点取第一个有色标签
-     * （`_tags` 序，主标签可读），外环是按序全色的 conic——环说「不止一个」。
-     *
-     * **环是圆点专属的**：槽里已经有脸时环撤销——脸已经在说「主标签是谁」，
-     * 再叠环是两个声音抢一个槽（小面积上 icon＋环互相糊）；此时色降级为染脸
-     * （ring 档的 `--identity-c` 取主标签色）。多归属的表达还在 chip 行（各染各色）。
-     * 值的形状归 CSS：这里只把色值写进行上的局部槽，交互件（grip/折叠 halo）照旧中性。
-     */
-    const idc = colorOfByFind(b, opts.find)
-    const dot = identityDotColor(idc)
-    if (dot !== undefined) marker.style.setProperty('--identity-c', dot)
-    const ring = identityRingGradient(idc)
-    if (ring !== undefined && face === undefined) {
-      marker.style.setProperty('--identity-ring', ring)
-      const ringEl = document.createElement('span')
-      ringEl.className = 'marker-ring'
-      marker.appendChild(ringEl)
-    }
-    left.appendChild(marker)
-  }
+  if (left) left.appendChild(buildMarker(b, { find: opts.find, targetId: markerTargetId, handle: true }))
 
   /**
    * **gutter 上的快捷入口＝一列图标**，一条归 gutter 的属性一枚（顺序沿用

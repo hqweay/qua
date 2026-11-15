@@ -19401,7 +19401,8 @@ await check('T190 卡片两副面孔（看板／画廊）：就地编辑；换�
    */
   const editedId = await page.evaluate(() => document.querySelector('.vcard[data-block-id]')?.dataset.blockId ?? '')
   assert(editedId !== '', '前置：应有一张卡')
-  const titleBox = await page.locator(`.vcard[data-block-id="${editedId}"] .vcard-body`).first().boundingBox()
+  // 点的必须是**正文槽**（`.vcard-slot`），不是整张卡身：卡身首列现在是块标（点它＝打开）
+  const titleBox = await page.locator(`.vcard[data-block-id="${editedId}"] .vcard-slot`).first().boundingBox()
   assert(titleBox, '前置：卡片标题要有可点的盒子')
   await page.mouse.click(titleBox.x + 6, titleBox.y + titleBox.height / 2)
   await page.waitForTimeout(250)
@@ -19447,7 +19448,7 @@ await check('T190 卡片两副面孔（看板／画廊）：就地编辑；换�
   assert(committed.editorGone, `Enter 提交后要还原成投影：${JSON.stringify(committed)}`)
 
   // Esc：把打开那一刻的内容写回去（编辑器是边打边写模型的）
-  const titleBox2 = await page.locator(`.vcard[data-block-id="${editedId}"] .vcard-body`).first().boundingBox()
+  const titleBox2 = await page.locator(`.vcard[data-block-id="${editedId}"] .vcard-slot`).first().boundingBox()
   await page.mouse.click(titleBox2.x + 6, titleBox2.y + titleBox2.height / 2)
   await page.waitForTimeout(200)
   await page.keyboard.type('不该留下')
@@ -30742,6 +30743,96 @@ await check('T321 检视卡的引用值：点名字跳目标，尾键换目标',
 
   await ctx.close()
   return '点名字跳目标页；笔键重新开选择器'
+})
+
+/**
+ * **卡片的块标是阅读态唯一的打开入口**：卡身点击＝进入编辑，所以「打开这一块」
+ * 不能只有修饰键。块标复用全库同一语义（左键聚焦/打开、修饰键分流），
+ * 且**不是拖拽把手**（卡片的拖动另有手势：拖卡＝写值/搬组，两颗拖源语义不同会让人猜）。
+ */
+await check('T325 卡片的块标：阅读态常驻一颗、点它打开这一块；进编辑不位移也不再画第二颗', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const qid = await page.evaluate(() => {
+    const p = window.__qua.pages().find((x) => x.title.includes('欢迎使用相'))
+    window.__qua.invoke('core.page/open', { pageId: p.id })
+    let found = ''
+    const walk = (list) => {
+      for (const b of list) {
+        if (!found && b.props?._query?.where) found = b.id
+        walk(b.children)
+      }
+    }
+    walk(window.__qua.__editor.store.blocks)
+    return found
+  })
+  assert(qid !== '', '前置：种子里应有一个查询块')
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), qid)
+  await page.waitForTimeout(400)
+  await page.evaluate(
+    (id) => window.__qua.invoke('core.view/add', { owner: { kind: 'block', blockId: id }, kind: 'cards' }),
+    qid,
+  )
+  await page.waitForTimeout(450)
+
+  const read = await page.evaluate(() => {
+    const card = document.querySelector('.vcard[data-block-id]')
+    if (!card) return null
+    // 只数**画出来的**块标：岛里的 `.left` 被藏起来但仍建节点，按 DOM 数会算成两颗
+    const markers = [...card.querySelectorAll('.marker')].filter((m) => m.getBoundingClientRect().width > 0)
+    const text = card.querySelector('.vcard-slot .surface-text')
+    return {
+      id: card.dataset.blockId ?? '',
+      markers: markers.length,
+      inRow: Boolean(card.querySelector('.vcard-row > .left > .marker')),
+      draggable: markers[0]?.draggable === true,
+      textLeft: text?.getBoundingClientRect().left ?? -1,
+    }
+  })
+  assert(read && read.id !== '', `前置：画廊应画出卡：${JSON.stringify(read)}`)
+  assert(read.markers === 1, `一张卡只有一颗块标：${JSON.stringify(read)}`)
+  assert(read.inRow, `块标在自己的 gutter 槽里（不在正文里）：${JSON.stringify(read)}`)
+  assert(read.draggable === false, `卡片上的块标不是拖拽把手（拖卡另有手柄）：${JSON.stringify(read)}`)
+  assert(read.textLeft > 0, `前置：正文要有可量的左缘：${JSON.stringify(read)}`)
+
+  // ① 点正文 ⇒ 进编辑：块标不消失、也不冒出第二颗；正文左缘不位移
+  const slotBox = await page.locator(`.vcard[data-block-id="${read.id}"] .vcard-slot`).first().boundingBox()
+  assert(slotBox, '前置：正文槽要有盒子')
+  await page.mouse.click(slotBox.x + 8, slotBox.y + 8)
+  await page.waitForTimeout(250)
+  const editing = await page.evaluate((id) => {
+    const card = document.querySelector(`.vcard[data-block-id="${id}"]`)
+    const tx = card?.querySelector('.inline-editor .tx')
+    return {
+      editor: Boolean(card?.querySelector('.inline-editor')),
+      markers: [...(card?.querySelectorAll('.marker') ?? [])].filter((m) => m.getBoundingClientRect().width > 0)
+        .length,
+      textLeft: tx?.getBoundingClientRect().left ?? -1,
+    }
+  }, read.id)
+  assert(editing.editor, `点正文仍是「进入编辑」（没被块标抢走）：${JSON.stringify(editing)}`)
+  assert(editing.markers === 1, `编辑态也只有一颗块标（岛把 .left 藏了）：${JSON.stringify(editing)}`)
+  assert(
+    Math.abs(editing.textLeft - read.textLeft) <= 1,
+    `阅读态与编辑态的正文左缘一致（进编辑不位移）：${read.textLeft} → ${editing.textLeft}`,
+  )
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(250)
+
+  // ② 点块标 ＝ 打开这一块（中心聚焦，与大纲里的块标同一条路由）
+  const markerBox = await page.locator(`.vcard[data-block-id="${read.id}"] .marker`).first().boundingBox()
+  assert(markerBox, '前置：块标要有命中盒')
+  await page.mouse.click(markerBox.x + markerBox.width / 2, markerBox.y + markerBox.height / 2)
+  await page.waitForTimeout(400)
+  const opened = await page.evaluate(
+    (id) => ({ active: window.__qua.snapshot().activeId, queryGone: !document.querySelector('.vcards') }),
+    read.id,
+  )
+  assert(opened.active === read.id, `点块标应打开这一块（中心聚焦）：${JSON.stringify(opened)}`)
+  assert(opened.queryGone, `打开后中心换成那一块（不是停在卡片视图）：${JSON.stringify(opened)}`)
+
+  await ctx.close()
+  return '卡片块标常驻一颗、非拖拽件；点它打开这一块；进编辑不位移也不添第二颗'
 })
 
 await check('T322 ref 的 inline 看法机器保留、入口未开：抽屉里 `_refView:inline` 仍画引用 chip', async () => {

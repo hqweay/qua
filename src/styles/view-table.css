@@ -882,6 +882,29 @@ button.queryview-chip:hover {
   padding: var(--ui-gap-4);
   cursor: text;
 }
+/**
+ * **卡片的一行**：块标 ＋ 正文投影（或编辑器）排成一行。
+ *
+ * 几何与正文行同源（`.left` 高＝首行行盒、左缘＝块标槽 ＋ gap）：卡片自己画块标，
+ * 岛把 `.left` 藏起来，于是**阅读态与编辑态的正文左缘是同一个 x**——进入编辑不位移。
+ */
+.vcard-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ui-gap-4);
+  min-width: 0;
+}
+.vcard-row > .left {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  height: 1lh;
+  user-select: none;
+}
+.vcard-row > .vcard-slot {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 /* 卡片里的正文是「读一段」：最多三行、超出省略；不是表格那一行的省略号 */
 .vcard-body .surface-text {
   display: -webkit-box;
@@ -893,13 +916,14 @@ button.queryview-chip:hover {
   font-weight: var(--ui-fw-medium);
   color: var(--ui-text);
 }
-/* 属性行在卡里占满整宽：正文那一份的左边距是给块标留的，卡片里没有块标 */
-/* 卡片的元信息（标签 ＋ 属性）：贴在卡底；标题与它之间的留白是刻意的 */
+/* 卡片的元信息（标签 ＋ 属性）：贴在卡底；标题与它之间的留白是刻意的。
+   左边距跟正文同一条缘——块标占了首列，元信息不该从块标底下开始 */
 .vcard-meta {
   display: flex;
   flex-direction: column;
   gap: var(--ui-gap-2);
   margin-top: auto;
+  margin-left: calc(var(--ui-marker-slot) + var(--ui-gap-4));
   min-width: 0;
 }
 .vcard-tags {

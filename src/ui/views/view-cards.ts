@@ -34,6 +34,7 @@ import {
 import type { SurfaceEditor } from '../block-ui/surface-editor.ts'
 import { renderPropsLine } from '../block-ui/props-line.ts'
 import { makeTagChipEl } from '../../view/editor/block-dom.ts'
+import { buildMarker } from '../../view/editor/marker.ts'
 import { t } from '../../core/infra/msg.ts'
 import { assetViewOf } from '../../view/asset-views.ts'
 import { bucketize, bucketLabel, orderBuckets, recordsForGrouping, GROUP_UNSET, type BucketizeOptions, type GroupBucket } from './grouping.ts'
@@ -469,7 +470,27 @@ export class ViewCards {
      */
     const body = document.createElement('div')
     body.className = 'vcard-body'
-    this.deps.cell.render(r.block, body)
+    /**
+     * **卡片的块标**：这一块的身份件，也是它的**打开入口**——点它＝聚焦/打开，
+     * 修饰键与大纲里的块标同一张表（⇧ 右槽、⌘ 页签、⌥ 属性）。
+     *
+     * 常驻不藏：卡身点击是「进入编辑」，阅读态没有别的打开入口；另画一颗按钮式的
+     * 「打开」就成了第二套词表（表格、列表也得各来一颗）。块标本来就是这个语义。
+     *
+     * ⚠️ 它**不经编辑器**（岛把 `.left` 藏起来了）：阅读态与编辑态由同一个元素承担，
+     *    几何一致、没有「进入编辑时正文右移」的位移。
+     */
+    const row = document.createElement('div')
+    row.className = 'vcard-row'
+    const left = document.createElement('span')
+    left.className = 'left'
+    left.contentEditable = 'false'
+    left.appendChild(buildMarker(r.block, { find: this.kbFind, targetId: r.block.id }))
+    const slot = document.createElement('div')
+    slot.className = 'vcard-slot'
+    row.append(left, slot)
+    body.appendChild(row)
+    this.deps.cell.render(r.block, slot)
     /**
      * 卡片的**元信息**贴在卡底：标签 chips ＋ 属性行。
      *
@@ -498,6 +519,20 @@ export class ViewCards {
       meta.appendChild(line)
     }
     if (meta.childNodes.length > 0) body.appendChild(meta)
+    /**
+     * **块标点击＝打开这一块**（与大纲行、表格行同一条路由）：中心＝聚焦/zoom，
+     * ⇧＝右槽、⌘＝页签、⌥＝属性。
+     *
+     * ⚠️ 先 `commit()` 再导航：正在编辑这一张时，写回的改动时刻要落在这张卡上，
+     *    而不是落在一块马上离开屏幕的格子上（与列头「加一张卡」同一条纪律）。
+     */
+    left.addEventListener('click', (e) => {
+      const target = e.target as HTMLElement | null
+      if (!target?.closest('.marker')) return
+      e.stopPropagation()
+      this.deps.cell.commit()
+      this.deps.openBlock(r.block.id, openActionOf(e))
+    })
     body.addEventListener('click', (e) => {
       const target = e.target as HTMLElement | null
       if (!target) return
@@ -515,7 +550,7 @@ export class ViewCards {
       // 修饰键仍是「打开」（Shift＝右槽、⌘＝新页签）：不因为正文可编辑就吞掉
       if (e.shiftKey || e.altKey || e.metaKey || e.ctrlKey) return
       e.stopPropagation()
-      this.deps.cell.handleClick(r.block.id, target, clickModsOf(e), { x: e.clientX, y: e.clientY }, body)
+      this.deps.cell.handleClick(r.block.id, target, clickModsOf(e), { x: e.clientX, y: e.clientY }, slot)
     })
     card.appendChild(body)
 
