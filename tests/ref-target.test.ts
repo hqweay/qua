@@ -1,31 +1,30 @@
 /**
- * **`ref` 的候选域（`_refTags`）**：值层不变，候选面按标签成员收窄。
+ * **`ref` 的候选域（`_refDomain`）**：值层不变，候选面按域收窄。
  *
  * 验收口径（为什么这些断言长这样）：
- *   · **软约束** —— 只过滤候选，不校验存量值。约束改了／标签删了／块换了标签，
- *     已引用的块照常显示；写路径一条都不许拿 `_refTags` 拒写。
- *   · **闭包** —— 「`#演员` 也是 `#人物`」只有 `membersOf` 一份实现，候选跟着它走。
+ *   · **软约束** —— 只过滤候选，不校验存量值。域改了／标签删了／查询变了，
+ *     已引用的块照常显示；写路径一条都不许拿域拒写。
+ *   · **一根轴四档** —— 不限（键缺席）／标签成员（含下级标签闭包）／锚块子树／查询结果。
  *   · **三种答案分开** —— 无约束（`null`）／有候选（非空集）／有约束但没人（空集）。
- *     把前两者合成一个布尔真值判断，会在「约束存在但没成员」时静默退回全部候选。
- *   · **新建并引用** —— 建页与写值**同一笔**（拆开就有「页建了、值没写」的半批），
- *     同名地址复用而不是建第二个。
+ *   · **悬空退回不限**，并且**说出来**（`dangling`）——同一格换个档位不该变成另一种失败态。
+ *   · **锚块档是查询的预设，不是第二份语义**：`{up:{is}}` 由一个求值器算，用相等断言钉住。
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import type { Block } from '../src/core/index.ts'
+import type { Block, QuerySpec } from '../src/core/index.ts'
 import {
   appendEdge,
   cardinalityOf,
   fieldRows,
-  isRefTagIds,
+  isRefDomainValue,
   isRefViewValue,
   mkPropDef,
   mkTagBlock,
   prop,
   propKindOf,
+  refDomainIds,
+  refDomainOf,
   refTagIds,
-  refTagNames,
-  refTargetScope,
   refViewOf,
   valueOf,
 } from '../src/core/index.ts'
@@ -53,6 +52,13 @@ function wear(block: Block, tagId: string): void {
   block.props = { ...(block.props ?? {}), _tags: [tagId] }
 }
 
+/** 一个查询块：`_query` 是合法条件就是查询块（判据与视图读侧同一份） */
+function queryBlock(id: string, name: string, spec: QuerySpec): Block {
+  const b = plain(id, name)
+  b.props = { ...(b.props ?? {}), _query: spec }
+  return b
+}
+
 function commandHarness(): { cmds: ReturnType<typeof propsCommands>; kb: MemoryKb; toasts: string[] } {
   const store = new BlockStore([])
   const kb = new MemoryKb(store)
@@ -72,7 +78,7 @@ function commandHarness(): { cmds: ReturnType<typeof propsCommands>; kb: MemoryK
 
 /**
  * 森林：`#人物`（people）下挂 `#演员`（actor）；成员甲打 `#演员`、乙直接打 `#人物`、
- * 丙谁都没打。定义块 `def`（引用）在顶层。
+ * 丙谁都没打。定义块 `def`（引用）在顶层。页 `p1` 下有子块 `p1a`。
  */
 function scene(): {
   forest: Block[]
@@ -82,6 +88,8 @@ function scene(): {
   a: Block
   b: Block
   c: Block
+  p1: Block
+  p1a: Block
 } {
   const people = tag('people', '人物')
   const actor = tag('actor', '演员')
@@ -93,92 +101,188 @@ function scene(): {
   wear(a, 'actor')
   wear(b, 'people')
   appendEdge(actor, people)
-  return { forest: [def, people, actor, a, b, c], def, people, actor, a, b, c }
+  const p1 = page('p1', '项目 A')
+  const p1a = plain('p1a', '项目 A 的子块')
+  p1.children = [p1a]
+  return { forest: [def, people, actor, a, b, c, p1], def, people, actor, a, b, c, p1, p1a }
 }
 
-const withTags = (def: Block, ids: string[]): Block => {
-  def.props = { ...(def.props ?? {}), _refTags: ids }
+/** 一台库（读面：get／roots／query），与装配层交给求解器的那个形状一致 */
+const kbOf = (forest: readonly Block[]): MemoryKb => new MemoryKb(new BlockStore([...forest]))
+
+const withDomain = (def: Block, domain: unknown): Block => {
+  def.props = { ...(def.props ?? {}), _refDomain: domain }
   return def
 }
 
 /* ------------------------------------------------------------ 1. 形状判据 */
 
-test('_refTags 形状：缺席＝无约束、坏形状读成空、合法是 id 数组', () => {
+test('_refDomain 形状：三成员合法、空 tags 非法、坏形状读成不限', () => {
+  assert.equal(isRefDomainValue({ kind: 'tags', ids: ['t'] }), true)
+  assert.equal(isRefDomainValue({ kind: 'block', id: 'b1' }), true)
+  assert.equal(isRefDomainValue({ kind: 'query', id: 'q1' }), true)
+  assert.equal(isRefDomainValue({ kind: 'tags', ids: [] }), false, '空数组≠「限定标签」：写侧摘键表达不限')
+  assert.equal(isRefDomainValue({ kind: 'block', id: '' }), false)
+  assert.equal(isRefDomainValue({ kind: 'nope', id: 'x' }), false)
+  assert.equal(isRefDomainValue(null), false)
+  assert.equal(isRefDomainValue(['a']), false)
+
   const { def } = scene()
-  assert.deepEqual(refTagIds(def), [], '没写过这一格')
-  assert.deepEqual(refTagIds(undefined), [], '定义都没有')
-
-  def.props = { ...(def.props ?? {}), _refTags: 'nope' }
-  assert.deepEqual(refTagIds(def), [], '标量不是合法形状 ⇒ 读成无约束（不崩、不猜）')
-
-  def.props = { ...(def.props ?? {}), _refTags: [''] }
-  assert.deepEqual(refTagIds(def), [], '空串 id 不算')
-
-  withTags(def, ['people', 'actor'])
-  assert.deepEqual(refTagIds(def), ['people', 'actor'], '合法形状原样读出（不清洗、不去重）')
-  assert.equal(isRefTagIds(['x']), true)
-  assert.equal(isRefTagIds([1]), false)
+  assert.equal(refDomainOf(def), undefined, '没写过这一格')
+  withDomain(def, 'oops')
+  assert.equal(refDomainOf(def), undefined, '坏形状 ⇒ 不限（不崩、不猜）')
+  withDomain(def, { kind: 'block', id: 'p1' })
+  assert.deepEqual(refDomainOf(def), { kind: 'block', id: 'p1' })
 })
 
-test('_refTags 是登记过的系统键：写坏形状在 op 产出点就被拒（不进内存、不进日志）', () => {
-  const { kb, cmds } = (() => {
-    const h = commandHarness()
-    return { kb: h.kb, cmds: h.cmds }
-  })()
-  const defId = cmds.createPropDef('', '作者', 'ref', 'own')
-  assert.throws(() => kb.tx((tx) => tx.setProp(defId, '_refTags', 'oops')), '标量不是合法形状')
-  kb.tx((tx) => tx.setProp(defId, '_refTags', ['t1']))
-  assert.deepEqual(refTagIds(kb.get(defId)), ['t1'], '合法形状照写')
+test('旧形状兼容：_refTags 非空数组当标签档；与 _refDomain 同时在场时前者让位', () => {
+  const { def } = scene()
+  def.props = { ...(def.props ?? {}), _refTags: ['people'] }
+  assert.deepEqual(refDomainOf(def), { kind: 'tags', ids: ['people'] }, '旧库读侧翻译成标签档')
+
+  withDomain(def, { kind: 'block', id: 'p1' })
+  assert.deepEqual(refDomainOf(def), { kind: 'block', id: 'p1' }, '两个键都在场：_refDomain 赢')
+
+  def.props = { ...(def.props ?? {}), _refTags: [] }
+  delete def.props._refDomain
+  assert.equal(refDomainOf(def), undefined, '空数组＝没有约束')
 })
 
-/* ------------------------------------------------------------ 2. 候选集 */
+test('_refDomain 是登记过的系统键：坏形状在 op 产出点就被拒（不进内存、不进日志）', () => {
+  const h = commandHarness()
+  const defId = h.cmds.createPropDef('', '作者', 'ref', 'own')
+  assert.throws(() => h.kb.tx((tx) => tx.setProp(defId, '_refDomain', { kind: 'tags', ids: [] })), '空 tags 非法')
+  assert.throws(() => h.kb.tx((tx) => tx.setProp(defId, '_refDomain', 'oops')), '标量非法')
+  h.kb.tx((tx) => tx.setProp(defId, '_refDomain', { kind: 'query', id: 'q1' }))
+  assert.deepEqual(refDomainOf(h.kb.get(defId)), { kind: 'query', id: 'q1' }, '合法形状照写')
+})
 
-test('候选集：直接成员 ＋ 下级标签闭包（#人物 的候选含只打 #演员 的块）', () => {
+/* ------------------------------------------------------------ 2. 标签档 */
+
+test('标签档：直接成员 ＋ 下级标签闭包（#人物 的候选含只打 #演员 的块）', () => {
   const { forest, def, a, b, c } = scene()
-  withTags(def, ['people'])
-  const scope = refTargetScope(def, forest)
-  assert.ok(scope !== null)
-  assert.ok(scope.has(a.id), '闭包：只打了下级标签 #演员 的块也是候选')
-  assert.ok(scope.has(b.id), '直接打 #人物 的块是候选')
-  assert.ok(!scope.has(c.id), '没打标签的块不是候选')
-  assert.ok(!scope.has('people'), '标签块自己不是「打了这个标签的块」')
+  withDomain(def, { kind: 'tags', ids: ['people'] })
+  const r = refDomainIds(def, kbOf(forest))
+  assert.equal(r.mode, 'tags')
+  assert.ok(r.ids !== null)
+  assert.ok(r.ids.has(a.id), '闭包：只打了下级标签 #演员 的块也是候选')
+  assert.ok(r.ids.has(b.id), '直接打 #人物 的块是候选')
+  assert.ok(!r.ids.has(c.id), '没打标签的块不是候选')
+  assert.ok(!r.ids.has('people'), '标签块自己不是「打了这个标签的块」')
+  assert.equal(r.dangling, null)
 })
 
-test('候选集：多个标签取并集；约束里部分悬空时只算在世的那几个', () => {
+test('标签档：多个标签取并集；约束里部分悬空时只算在世的那几个', () => {
   const { forest, def, a, b } = scene()
-  withTags(def, ['actor', 'gone'])
-  const onlyActor = refTargetScope(def, forest)
-  assert.deepEqual([...(onlyActor ?? [])].sort(), [a.id], '演员甲在，#人物 的成员不因 actor 混进来')
+  withDomain(def, { kind: 'tags', ids: ['actor', 'gone'] })
+  const onlyActor = refDomainIds(def, kbOf(forest))
+  assert.deepEqual([...(onlyActor.ids ?? [])].sort(), [a.id])
 
-  withTags(def, ['actor', 'people'])
-  const both = refTargetScope(def, forest)
-  assert.deepEqual([...(both ?? [])].sort(), [a.id, b.id].sort(), '两个标签并集')
+  withDomain(def, { kind: 'tags', ids: ['actor', 'people'] })
+  const both = refDomainIds(def, kbOf(forest))
+  assert.deepEqual([...(both.ids ?? [])].sort(), [a.id, b.id].sort(), '两个标签并集')
 })
 
-test('候选集三态：无约束=null、有候选=非空、有约束但没人=空集（不是 null）', () => {
+test('标签档三态：无约束=null、有候选=非空、有约束但没人=空集（不是 null）', () => {
   const { forest, def } = scene()
-  assert.equal(refTargetScope(def, forest), null, '没写 _refTags ⇒ 不限制')
+  assert.equal(refDomainIds(def, kbOf(forest)).ids, null, '没写域 ⇒ 不限制')
 
-  const empty = tag('empty', '空标签')
-  forest.push(empty)
-  withTags(def, ['empty'])
-  const scope = refTargetScope(def, forest)
-  assert.ok(scope !== null && scope.size === 0, '在世标签但没有成员 ⇒ 空集（诚实的「没有候选」）')
+  forest.push(tag('empty', '空标签'))
+  withDomain(def, { kind: 'tags', ids: ['empty'] })
+  const empty = refDomainIds(def, kbOf(forest))
+  assert.ok(empty.ids !== null && empty.ids.size === 0, '在世标签但没有成员 ⇒ 空集（诚实的「没有候选」）')
 
-  withTags(def, ['gone'])
-  assert.equal(refTargetScope(def, forest), null, '标签全没了 ⇒ 退回无约束（软约束：别让旧定义把值控件变死按钮）')
+  withDomain(def, { kind: 'tags', ids: ['gone'] })
+  assert.equal(refDomainIds(def, kbOf(forest)).ids, null, '标签全没了 ⇒ 退回不限（别让旧定义把值控件变死按钮）')
 
-  withTags(def, ['page1'])
   forest.push(page('page1', '一个页'))
-  assert.equal(refTargetScope(def, forest), null, '_refTags 指向的不是标签块 ⇒ 不构成约束')
+  withDomain(def, { kind: 'tags', ids: ['page1'] })
+  assert.equal(refDomainIds(def, kbOf(forest)).ids, null, '域里的 id 不是标签块 ⇒ 不构成约束')
 })
 
-test('候选集只读不写：算一遍候选不改任何块（约束是配置，不是派生缓存）', () => {
+/* ------------------------------------------------------------ 3. 锚块档 */
+
+test('锚块档：候选＝这个块下面的块（不含锚块自己）', () => {
+  const { forest, def, p1, p1a } = scene()
+  withDomain(def, { kind: 'block', id: p1.id })
+  const r = refDomainIds(def, kbOf(forest))
+  assert.equal(r.mode, 'block')
+  assert.deepEqual([...(r.ids ?? [])], [p1a.id], '子树里的块是候选；锚块自己不是')
+  assert.equal(r.dangling, null)
+})
+
+test('锚块档 $self：每一处引用按自己的宿主算；没有宿主时是空集（不退回全库）', () => {
+  const { forest, def, p1, p1a } = scene()
+  withDomain(def, { kind: 'block', id: '$self' })
+
+  const atP1 = refDomainIds(def, kbOf(forest), p1.id)
+  assert.deepEqual([...(atP1.ids ?? [])], [p1a.id], '$self＝值所在块：项目 A 下只有 p1a')
+  assert.equal(atP1.label?.kind === 'block' && atP1.label.self, true, '抬头要能说「这一块」')
+
+  const noHost = refDomainIds(def, kbOf(forest))
+  assert.ok(noHost.ids !== null && noHost.ids.size === 0, '没有宿主 ⇒ 空集（同 runQuery 对 $self 的口径）')
+})
+
+test('锚块档悬空：锚块不在世 ⇒ 退回不限，并把失效说出来', () => {
   const { forest, def } = scene()
-  withTags(def, ['people'])
-  const before = JSON.stringify(forest)
-  refTargetScope(def, forest)
-  assert.equal(JSON.stringify(forest), before)
+  withDomain(def, { kind: 'block', id: 'gone' })
+  const r = refDomainIds(def, kbOf(forest))
+  assert.equal(r.ids, null, '退回不限')
+  assert.equal(r.dangling, 'block', '失效必须能被界面念出来')
+})
+
+test('锚块档 ≡ 查询档的 {up:{is}}（相等断言：锚块是预设，不是第二份语义）', () => {
+  const { forest, def, p1, p1a } = scene()
+  const qb = queryBlock('q1', '项目 A 下', { where: { up: { is: p1.id } } })
+  const world = [...forest, qb]
+  const src = kbOf(world)
+
+  withDomain(def, { kind: 'block', id: p1.id })
+  const byAnchor = refDomainIds(def, src)
+  withDomain(def, { kind: 'query', id: qb.id })
+  const byQuery = refDomainIds(def, src)
+  assert.deepEqual([...(byAnchor.ids ?? [])].sort(), [...(byQuery.ids ?? [])].sort(), '两条写法同解')
+  assert.deepEqual([...(byAnchor.ids ?? [])], [p1a.id])
+})
+
+/* ------------------------------------------------------------ 4. 查询档 */
+
+test('查询档：候选＝查询块此刻的结果；$self 按宿主解析、宿主自己不在结果里', () => {
+  const { forest, def, p1, p1a } = scene()
+  const qb = queryBlock('q1', '本块下的块', { where: { up: { is: '$self' } } })
+  const src = kbOf([...forest, qb])
+
+  withDomain(def, { kind: 'query', id: qb.id })
+  const r = refDomainIds(def, src, p1.id)
+  assert.equal(r.mode, 'query')
+  assert.deepEqual([...(r.ids ?? [])], [p1a.id], '$self＝值所在块')
+
+  const noHost = refDomainIds(def, src)
+  assert.ok(noHost.ids !== null && noHost.ids.size === 0, '没有宿主 ⇒ 空集（条件解析不了，不退回全库）')
+})
+
+test('查询档悬空：查询块删了 / 那个块不是查询块 ⇒ 退回不限并说出来', () => {
+  const { forest, def, a } = scene()
+  withDomain(def, { kind: 'query', id: 'gone' })
+  const gone = refDomainIds(def, kbOf(forest))
+  assert.equal(gone.ids, null)
+  assert.equal(gone.dangling, 'query')
+
+  withDomain(def, { kind: 'query', id: a.id })
+  const notQuery = refDomainIds(def, kbOf(forest))
+  assert.equal(notQuery.ids, null, '不是查询块 ⇒ 不构成约束')
+  assert.equal(notQuery.dangling, 'query')
+})
+
+/* ------------------------------------------------------------ 5. 只读 ＋ 选择器 */
+
+test('候选集只读不写：算一遍候选不改任何块（域是配置，不是派生缓存）', () => {
+  const { forest, def, p1 } = scene()
+  withDomain(def, { kind: 'block', id: p1.id })
+  const src = kbOf(forest)
+  const before = JSON.stringify(src.roots())
+  refDomainIds(def, src)
+  assert.equal(JSON.stringify(src.roots()), before)
 })
 
 test('选择器接着用：onlyIds 收窄候选，空集合真的给出空清单', () => {
@@ -194,31 +298,45 @@ test('选择器接着用：onlyIds 收窄候选，空集合真的给出空清单
   assert.deepEqual(none.rows(''), [], '空集合 ≠ 不限制：这里必须一行都没有')
 })
 
-test('候选标签名：给的是名字不是 id；悬空标签不念名字（念了也查不到）', () => {
-  const { def } = scene()
-  withTags(def, ['people', 'gone'])
-  const names = refTagNames(def, (id) => (id === 'people' ? '人物' : ''))
-  assert.deepEqual(names, ['人物'], '标题要念名字；悬空标签跳过')
-})
+/* ------------------------------------------------------------ 6. 写路径 */
 
-/* ------------------------------------------------------------ 3. 写路径 */
-
-test('setPropRefTags：写清单、去重、空数组摘键、非 ref 定义拒绝', () => {
+test('setPropRefDomain：三档都写进同一个槽；标签去重；null 摘键；非 ref 定义拒绝', () => {
   const { cmds, kb } = commandHarness()
   const refDef = cmds.createPropDef('', '作者', 'ref', 'own')
   const textDef = cmds.createPropDef('', '备注', 'text', 'own')
 
-  cmds.setPropRefTags(refDef, ['people', 'actor', 'people'])
-  assert.deepEqual(refTagIds(kb.get(refDef)), ['people', 'actor'], '重复的 id 只留一个')
+  cmds.setPropRefDomain(refDef, { kind: 'tags', ids: ['people', 'actor', 'people'] })
+  assert.deepEqual(refDomainOf(kb.get(refDef)), { kind: 'tags', ids: ['people', 'actor'] }, '重复的 id 只留一个')
 
-  cmds.setPropRefTags(refDef, [])
-  assert.equal('_refTags' in (kb.get(refDef)?.props ?? {}), false, '空清单＝摘键：「没有约束」与「约束是空集」是两件事')
+  cmds.setPropRefDomain(refDef, { kind: 'block', id: 'p1' })
+  assert.deepEqual(refDomainOf(kb.get(refDef)), { kind: 'block', id: 'p1' }, '换档＝换同一个槽')
 
-  cmds.setPropRefTags(textDef, ['people'])
-  assert.equal('_refTags' in (kb.get(textDef)?.props ?? {}), false, '非 ref 定义不写（写了也没人读）')
+  cmds.setPropRefDomain(refDef, { kind: 'query', id: 'q1' })
+  assert.deepEqual(refDomainOf(kb.get(refDef)), { kind: 'query', id: 'q1' })
+
+  cmds.setPropRefDomain(refDef, null)
+  assert.equal('_refDomain' in (kb.get(refDef)?.props ?? {}), false, 'null＝摘键（不限）')
+
+  cmds.setPropRefDomain(refDef, { kind: 'tags', ids: [] })
+  assert.equal('_refDomain' in (kb.get(refDef)?.props ?? {}), false, '空 tags 不落盘')
+
+  cmds.setPropRefDomain(textDef, { kind: 'block', id: 'p1' })
+  assert.equal('_refDomain' in (kb.get(textDef)?.props ?? {}), false, '非 ref 定义不写（写了也没人读）')
 })
 
-/* ------------------------------------------------------------ 4. 新建并引用 */
+test('setPropRefDomain：首次写域时把旧形状 _refTags 清掉（一槽一真值）', () => {
+  const { cmds, kb } = commandHarness()
+  const defId = cmds.createPropDef('', '作者', 'ref', 'own')
+  kb.tx((tx) => tx.setProp(defId, '_refTags', ['people']))
+
+  cmds.setPropRefDomain(defId, { kind: 'block', id: 'p1' })
+  assert.equal('_refTags' in (kb.get(defId)?.props ?? {}), false, '旧键不留在库里（否则摘掉域它会复活）')
+  assert.deepEqual(refDomainOf(kb.get(defId)), { kind: 'block', id: 'p1' })
+
+  assert.deepEqual(refTagIds(kb.get(defId)), [], '旧读法读到空')
+})
+
+/* ------------------------------------------------------------ 7. 新建并引用 */
 
 test('createPropRefTarget：建页落顶层 ＋ 写值同一笔；同名地址复用不建第二个', () => {
   const { cmds, kb } = commandHarness()
@@ -269,9 +387,9 @@ test('createPropRefTarget：空名 / 非 ref 定义 / 块不在 ⇒ 一个字节
   assert.equal(kb.roots().length, rootsBefore, '没有建出任何块')
 })
 
-/* ------------------------------------------------------------ 5. 软约束（判据） */
+/* ------------------------------------------------------------ 8. 软约束（判据） */
 
-test('软约束：约束之外的块仍可写值，已有值照常显示（不校验存量值）', () => {
+test('软约束：域之外的块仍可写值，已有值照常显示（不校验存量值）', () => {
   const { cmds, kb } = commandHarness()
   const defId = cmds.createPropDef('', '作者', 'ref', 'own')
   const host = plain('host', '一块')
@@ -285,13 +403,13 @@ test('软约束：约束之外的块仍可写值，已有值照常显示（不�
 
   // 先有值，再收紧约束（顺序反过来也要成立）
   cmds.setPropValue('host', defId, outsider.id)
-  cmds.setPropRefTags(defId, [other.id])
+  cmds.setPropRefDomain(defId, { kind: 'tags', ids: [other.id] })
 
-  assert.equal(valueOf(kb.get('host')!, defId), outsider.id, '约束变了，存量值一个字节不动')
+  assert.equal(valueOf(kb.get('host')!, defId), outsider.id, '域变了，存量值一个字节不动')
   const row = fieldRows(kb.get('host')!, kb.roots()).find((r) => r.propId === defId)
-  assert.equal(row?.value, outsider.id, '行派生照常给出值（显示层不按约束过滤）')
+  assert.equal(row?.value, outsider.id, '行派生照常给出值（显示层不按域过滤）')
 
-  // 约束在时写一个约束外的值：值层不拒（软约束的落点就是「不硬校验」）
+  // 域在时写一个域外的值：值层不拒（软约束的落点就是「不硬校验」）
   cmds.setPropValue('host', defId, 'another-outsider')
   assert.equal(valueOf(kb.get('host')!, defId), 'another-outsider')
   assert.equal(propKindOf(kb.get(defId)!), 'ref', 'kind 没被这条约束改过')

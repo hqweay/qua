@@ -29435,15 +29435,16 @@ await check('T306 自定义色：色盘选 hex 写入并进最近色；chip soft
 })
 
 /**
- * **`ref` 的候选域（`_refTags` 软约束 ＋ 新建并引用）**。
+ * **`ref` 的候选域（`_refDomain` 软约束 ＋ 新建并引用）**。
  *
- * 一条故事走完：定义页限定候选标签 → 值选择器只剩下那些成员 → 搜索词给「新建并引用」
- * → 新建的块没打那个标签，值**照常显示**（软约束的判据：只过滤候选，不校验存量值）。
+ * 一条故事走完：定义页把候选域切到「限定标签」并选 #演员 → 值选择器只剩下那些成员
+ * → 搜索词给「新建并引用」→ 新建的块没打那个标签，值**照常显示**
+ * （软约束的判据：只过滤候选，不校验存量值）。
  *
- * ⚠️ 失败方式要能分辨：候选没被收窄（约束写了没人读）、或存量值被过滤掉（软约束做成了硬校验）
+ * ⚠️ 失败方式要能分辨：候选没被收窄（域写了没人读）、或存量值被过滤掉（软约束做成了硬校验）
  *    —— 一个是漏接，一个是越线，两者的现象都是「列表不对」，但结论相反。
  */
-await check('T309 ref 的候选域：_refTags 过滤候选、标题带约束；新建并引用；存量值不受约束影响', async () => {
+await check('T309 ref 的候选域：四档切换；标签档过滤候选、标题带约束；锚块档不列标签块且有「这一块」；新建并引用；存量值不受约束影响', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
@@ -29466,18 +29467,32 @@ await check('T309 ref 的候选域：_refTags 过滤候选、标题带约束；�
   assert(setup.defId !== '' && setup.tagId !== '', '前置：定义与标签都该建出来：' + JSON.stringify(setup))
   await page.waitForTimeout(260)
 
-  // ② 定义页：候选段空态写「不限」，点「＋」选 #演员 ⇒ 写 _refTags
+  // ② 定义页：候选域四档下拉，默认「不限」；切到「限定标签」⇒ 选 #演员 ⇒ 写 _refDomain
   await page.evaluate((defId) => window.__qua.invoke('core.block/focus-block', { blockId: defId }), setup.defId)
   await page.waitForTimeout(300)
-  const emptyState = await page.evaluate(() => ({
-    row: Boolean(document.querySelector('.prop-ref-tags-row')),
-    any: document.querySelector('.prop-ref-tags')?.textContent ?? '',
-    chip: document.querySelectorAll('.prop-ref-tags .props-tag').length,
-  }))
+  const emptyState = await page.evaluate(() => {
+    const row = document.querySelector('.prop-ref-domain-row')
+    const sel = row?.querySelector('.prop-ref-mode')
+    return {
+      row: Boolean(row),
+      mode: sel?.value ?? '',
+      modes: [...(row?.querySelectorAll('.prop-ref-mode option') ?? [])].map((o) => o.value),
+      chip: row?.querySelectorAll('.props-tag').length ?? 0,
+    }
+  })
   assert(emptyState.row, 'ref 定义页应有「候选」这一段：' + JSON.stringify(emptyState))
-  assert(emptyState.chip === 0 && emptyState.any.includes('不限'), '没有约束时写「不限」：' + JSON.stringify(emptyState))
+  assert(emptyState.mode === 'any' && emptyState.chip === 0, '没有约束时档位是「不限」且没有 chip：' + JSON.stringify(emptyState))
+  assert(
+    ['any', 'tags', 'block', 'query'].every((m) => emptyState.modes.includes(m)),
+    '四档都在（不限／限定标签／限定范围／按查询）：' + JSON.stringify(emptyState.modes),
+  )
 
-  await page.click('.prop-ref-add')
+  // 切档本身不写库（取消选择＝一切照旧）；真选中标签才落一条 tags 档的域
+  await page.evaluate(() => {
+    const sel = document.querySelector('.prop-ref-mode')
+    sel.value = 'tags'
+    sel.dispatchEvent(new Event('change', { bubbles: true }))
+  })
   await page.waitForSelector('.layer .layer-input', { timeout: 4000 })
   await page.fill('.layer .layer-input', '演员')
   await page.waitForTimeout(220)
@@ -29489,15 +29504,22 @@ await check('T309 ref 的候选域：_refTags 过滤候选、标题带约束；�
   const constrained = await page.evaluate((defId) => {
     const live = window.__qua.__editor.store.find(defId)
     return {
-      tags: live?.props?._refTags ?? null,
-      chips: [...document.querySelectorAll('.prop-ref-tags .props-tag')].map((e) => e.textContent ?? ''),
+      domain: live?.props?._refDomain ?? null,
+      legacy: live?.props?._refTags ?? null,
+      chips: [...document.querySelectorAll('.prop-ref-domain-row .props-tag')].map((e) => e.textContent ?? ''),
+      mode: document.querySelector('.prop-ref-mode')?.value ?? '',
     }
   }, setup.defId)
   assert(
-    Array.isArray(constrained.tags) && constrained.tags.length === 1 && constrained.tags[0] === setup.tagId,
-    '选中的标签应写进 _refTags：' + JSON.stringify(constrained),
+    constrained.domain?.kind === 'tags' &&
+      Array.isArray(constrained.domain.ids) &&
+      constrained.domain.ids.length === 1 &&
+      constrained.domain.ids[0] === setup.tagId,
+    '选中的标签应写进 _refDomain 的 tags 档：' + JSON.stringify(constrained),
   )
+  assert(constrained.legacy === null, '旧键 _refTags 不再写（一槽一真值）：' + JSON.stringify(constrained))
   assert(constrained.chips.some((s) => s.includes('#演员')), '候选段应画出这枚标签 chip：' + JSON.stringify(constrained.chips))
+  assert(constrained.mode === 'tags', '档位跟着存储走：' + JSON.stringify(constrained.mode))
 
   // ③ 值选择器：候选只剩 #演员 的成员；标题说明「为什么只有这几行」
   await page.evaluate((host) => window.__qua.invoke('core.block/focus-block', { blockId: host }), setup.host)
@@ -29564,8 +29586,83 @@ await check('T309 ref 的候选域：_refTags 过滤候选、标题带约束；�
   )
   assert(soft.shown === '新人', '约束之外的存量值必须照常显示（软约束，不做硬校验）：' + JSON.stringify(soft))
 
+  // ⑥ 换档不写库：切到「限定范围」只弹选择器；标签块不进候选；第一行是「这一块」；Esc 取消 ⇒ 域一个字节不动
+  await page.evaluate((defId) => window.__qua.invoke('core.block/focus-block', { blockId: defId }), setup.defId)
+  await page.waitForTimeout(280)
+  await page.evaluate(() => {
+    const sel = document.querySelector('.prop-ref-mode')
+    sel.value = 'block'
+    sel.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await page.waitForSelector('.layer .layer-input', { timeout: 4000 })
+  const anchorPick = await page.evaluate(() => ({
+    title: document.querySelector('.layer-head')?.textContent ?? '',
+    labels: [...document.querySelectorAll('.layer-item .layer-label')].map((e) => e.textContent ?? ''),
+  }))
+  assert(anchorPick.labels.length > 0, '锚块选择器应有候选：' + JSON.stringify(anchorPick))
+  assert(
+    !anchorPick.labels.some((x) => x.includes('演员') || x.includes('人物')),
+    '标签块不进锚块候选（选了拿到的是「标签块自己的子块」，不是成员）：' + JSON.stringify(anchorPick.labels),
+  )
+  assert(
+    anchorPick.labels.some((x) => x.includes('这一块')),
+    '第一行应是「这一块（引用处）」这个相对域入口：' + JSON.stringify(anchorPick.labels),
+  )
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(220)
+  const unchanged = await page.evaluate(
+    (defId) => window.__qua.__editor.store.find(defId)?.props?._refDomain ?? null,
+    setup.defId,
+  )
+  assert(unchanged?.kind === 'tags', '取消选择不改存储（控件不许比存储先说）：' + JSON.stringify(unchanged))
+
+  // ⑦ 真选「这一块」⇒ 存相对域（`$self`）；值选择器按每一行的宿主算，抬头说「这一块下面」
+  await page.evaluate(() => {
+    const sel = document.querySelector('.prop-ref-mode')
+    sel.value = 'block'
+    sel.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await page.waitForSelector('.layer .layer-input', { timeout: 4000 })
+  await page.evaluate(() => {
+    const item = [...document.querySelectorAll('.layer-item')].find((el) => el.textContent?.includes('这一块'))
+    item?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+  })
+  await page.waitForTimeout(300)
+  const selfDomain = await page.evaluate(
+    (defId) => ({
+      domain: window.__qua.__editor.store.find(defId)?.props?._refDomain ?? null,
+      chips: [...document.querySelectorAll('.prop-ref-domain-row .props-tag')].map((e) => e.textContent ?? ''),
+    }),
+    setup.defId,
+  )
+  assert(
+    selfDomain.domain?.kind === 'block' && selfDomain.domain.id === '$self',
+    '「这一块」应存相对域（`$self`）：' + JSON.stringify(selfDomain),
+  )
+  assert(selfDomain.chips.some((s) => s.includes('这一块')), 'chip 应写「这一块（引用处）」：' + JSON.stringify(selfDomain.chips))
+
+  await page.evaluate((host) => window.__qua.invoke('core.block/focus-block', { blockId: host }), setup.host)
+  await page.waitForTimeout(400)
+  /**
+   * ⚠️ 有值时**点名字是「打开目标」**，换目标要用尾键（`.prop-ref-change`）。
+   * 这一条与 T310 同一条判据：看它和改它是两件事。
+   */
+  await page.evaluate((pid) => {
+    document.querySelector('.prop-row[data-prop-id="' + pid + '"] .prop-ref-change')?.click()
+  }, setup.defId)
+  await page.waitForTimeout(300)
+  const selfTitle = await page.evaluate(() => ({
+    layer: Boolean(document.querySelector('.layer')),
+    head: document.querySelector('.layer-head')?.textContent ?? '',
+  }))
+  assert(
+    selfTitle.layer && selfTitle.head.includes('这一块'),
+    '值选择器抬头应说「这一块下面」：' + JSON.stringify(selfTitle),
+  )
+  await page.keyboard.press('Escape')
+
   await ctx.close()
-  return `定义页限 #演员 ⇒ 候选只剩成员（标题带「限」）；搜索「新人」新建并引用；约束外的值仍显示`
+  return `定义页限 #演员 ⇒ 候选只剩成员（标题带「限」）；新建并引用；约束外的值仍显示；锚块档不列标签块、第一行是「这一块」、取消不改存储、选中后抬头说「这一块下面」`
 })
 
 /**

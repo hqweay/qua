@@ -49,10 +49,13 @@ import {
   prop,
   propKindOf,
   propLabel,
-  refTagIds,
+  refDomainOf,
   refViewOf,
+  SELF,
   valueItemsOf,
   valueListOf,
+  type RefDomain,
+  type RefDomainMode,
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import { renderIcon } from '../../view/icons.ts'
@@ -251,14 +254,16 @@ export interface PropertiesDeps {
   /** 定义格式的写入口（同值形状内的约束与画法；`plain` ＝ 摘键） */
   setFormat: (defId: string, format: string) => void
   /**
-   * **`ref` 定义的候选标签**（`_refTags` 软约束）的两个入口：选一个标签、写一份清单。
+   * **`ref` 定义的候选域**（`_refDomain` 软约束）的三个入口：标签、锚块、查询。
    *
-   * 选择器必须经装配层开（浮层不归组件）；这里只传已有清单当排除项 ——
+   * 选择器必须经装配层开（浮层不归组件）；标签这一档收已有清单当排除项 ——
    * 第二次为同一个标签点「＋」不该再多给一条同样的 chip。
    */
   pickRefTag: (exclude: readonly string[], onPick: (tagId: string) => void, anchor: DOMRect) => void
-  /** 写候选标签清单（`[]` ＝ 摘掉约束，回到「全部块都可选」） */
-  setRefTags: (defId: string, tagIds: readonly string[]) => void
+  pickRefAnchor: (onPick: (blockId: string) => void, anchor: DOMRect) => void
+  pickRefQuery: (onPick: (queryId: string) => void, anchor: DOMRect) => void
+  /** 写候选域（`null` ＝ 不限，摘键） */
+  setRefDomain: (defId: string, domain: RefDomain | null) => void
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
 }
 
@@ -1329,8 +1334,8 @@ export class PropertiesPanel {
       const fmt = this.buildDefFormat(target)
       if (fmt) config.appendChild(fmt)
       // `ref` 的候选域：只对 ref 定义出现（别的 kind 没有「候选」这回事）
-      const refTags = this.buildRefTargets(target)
-      if (refTags) config.appendChild(refTags)
+      const refDomain = this.buildRefDomain(target)
+      if (refDomain) config.appendChild(refDomain)
       if (this.selectDef()) {
         this.choicesFull.render()
         config.appendChild(this.choicesFull.root)
@@ -1767,60 +1772,179 @@ export class PropertiesPanel {
   }
 
   /**
-   * **`ref` 定义的候选域**（`_refTags`）：候选按这些标签的成员过滤（含下级标签闭包）。
+   * **`ref` 定义的候选域**（`_refDomain`）：候选从哪儿来。
    *
-   * 它在定义页，不在值行上：约束是**这条属性**的性质（谁可以被引用），不是某一格值的性质。
-   * 值行只画「现在指向谁」—— chip 那条路一个字节都不动。
+   * 四档同一根轴：**不限**（键缺席）／标签成员（含下级标签闭包）／锚块子树／查询块结果。
+   * 它在定义页，不在值行上：域是**这条属性**的性质（谁可以被引用），不是某一格值的性质；
+   * 值行只画「现在指向谁」——一个字节都不动。
    *
-   * ⚠️ 空清单 ≠ 约束是空集：没有这一格 ＝ **不限**（全部块都可选）。所以空态写「不限」，
-   *    不是写「没有候选」——后者会让用户以为这条属性选不了任何东西。
+   * 两个判据：
+   *   · **控件不许比存储先说**：切到某一档时先还原 `<select>` 的显示值，等「选中目标」
+   *     那一步真的写进库、面板重画，档位才变。取消选择 ⇒ 一切照旧（不丢原有配置）。
+   *   · **悬空不静默**：锚块/查询被删了仍画出来并标「已删除」，摘掉它就是回到不限。
    */
-  private buildRefTargets(def: Block): HTMLElement | null {
+  private buildRefDomain(def: Block): HTMLElement | null {
     if (propKindOf(def) !== 'ref') return null
-    const ids = refTagIds(def)
-    const value = document.createElement('span')
-    value.className = 'prop-value prop-ref-tags'
-    value.dataset.refTags = '1'
-    if (ids.length === 0) {
-      const none = document.createElement('span')
-      none.className = 'props-empty'
-      none.textContent = t('ui.props.refTags.any')
-      value.appendChild(none)
+    const domain = refDomainOf(def)
+    const mode: RefDomainMode = domain?.kind ?? 'any'
+
+    const value = document.createElement('div')
+    value.className = 'prop-value prop-ref-domain'
+    value.dataset.refDomain = '1'
+
+    const sel = document.createElement('select')
+    sel.className = 'prop-input prop-ref-mode'
+    sel.dataset.refDomainMode = '1'
+    const modes = [
+      ['any', 'ui.props.refDomain.any'],
+      ['tags', 'ui.props.refDomain.mode.tags'],
+      ['block', 'ui.props.refDomain.mode.block'],
+      ['query', 'ui.props.refDomain.mode.query'],
+    ] as const
+    for (const [m, key] of modes) {
+      const o = document.createElement('option')
+      o.value = m
+      o.textContent = t(key)
+      sel.appendChild(o)
     }
-    for (const id of ids) {
+    sel.value = mode
+    sel.dataset.tip = t(
+      mode === 'tags'
+        ? 'ui.props.refDomain.hint.tags'
+        : mode === 'block'
+          ? 'ui.props.refDomain.hint.block'
+          : mode === 'query'
+            ? 'ui.props.refDomain.hint.query'
+            : 'ui.props.refDomain.any',
+    )
+    sel.addEventListener('change', () => {
+      const next = sel.value as RefDomainMode
+      // 存储没变之前控件不许先说（取消选择时这里就是全部的回滚）
+      sel.value = mode
+      const rect = sel.getBoundingClientRect()
+      if (next === 'any') {
+        this.deps.setRefDomain(def.id, null)
+        return
+      }
+      if (next === 'tags') {
+        const ids = domain?.kind === 'tags' ? [...domain.ids] : []
+        this.deps.pickRefTag(
+          [],
+          (tagId) => {
+            if (!ids.includes(tagId)) this.deps.setRefDomain(def.id, { kind: 'tags', ids: [...ids, tagId] })
+          },
+          rect,
+        )
+        return
+      }
+      if (next === 'block') {
+        this.deps.pickRefAnchor((id) => this.deps.setRefDomain(def.id, { kind: 'block', id }), rect)
+        return
+      }
+      this.deps.pickRefQuery((id) => this.deps.setRefDomain(def.id, { kind: 'query', id }), rect)
+    })
+    value.appendChild(sel)
+
+    /** 一枚约束 chip：点名字打开它；× 摘掉整条约束（回到不限） */
+    const targetChip = (id: string, text: string): HTMLElement => {
       const chip = document.createElement('span')
       chip.className = 'props-tag'
-      chip.dataset.refTag = id
-      const tag = this.deps.blockById(id)
+      chip.dataset.refDomainTarget = id
       const name = document.createElement('span')
       name.className = 'props-tag-name'
-      /**
-       * 悬空标签（删了/换库了）仍画出来并标短 id：约束的失效是状态，
-       * 静默少一枚 chip 会让用户以为约束本来就是这些。
-       */
-      name.textContent = tag ? `#${displayNameOf(tag)}` : `#${this.deps.shortId(id)}`
-      if (tag) {
-        name.dataset.refTo = id
-        name.dataset.tip = t('ui.props.openTag')
-        name.addEventListener('click', (e) => this.deps.openRef(id, clickModsOf(e)))
-      }
-      chip.append(
-        name,
-        chipDel(t('ui.props.refTags.remove'), () => this.deps.setRefTags(def.id, ids.filter((x) => x !== id))),
-      )
-      value.appendChild(chip)
+      name.textContent = text
+      name.dataset.refTo = id
+      name.dataset.tip = t('ui.props.openRef')
+      name.addEventListener('click', (e) => this.deps.openRef(id, clickModsOf(e)))
+      chip.append(name, chipDel(t('ui.props.refDomain.remove'), () => this.deps.setRefDomain(def.id, null)))
+      return chip
     }
-    const add = document.createElement('button')
-    add.type = 'button'
-    add.className = 'prop-ref-add'
-    add.dataset.refTagAdd = '1'
-    add.dataset.tip = t('ui.props.refTags.hint')
-    add.textContent = '+'
-    add.addEventListener('click', () => {
-      this.deps.pickRefTag(ids, (tagId) => this.deps.setRefTags(def.id, [...ids, tagId]), add.getBoundingClientRect())
-    })
-    value.appendChild(add)
-    return this.labeledRow('prop-ref-tags-row', t('ui.props.refTags.label'), value)
+    /** 「＋」：切换/补一个目标（标签是追加，锚块与查询是换一个） */
+    const addButton = (tip: string, onclick: (rect: DOMRect) => void): HTMLElement => {
+      const add = document.createElement('button')
+      add.type = 'button'
+      add.className = 'prop-ref-add'
+      add.dataset.refDomainAdd = '1'
+      add.dataset.tip = tip
+      add.textContent = '+'
+      add.addEventListener('click', () => onclick(add.getBoundingClientRect()))
+      return add
+    }
+
+    if (domain?.kind === 'tags') {
+      for (const id of domain.ids) {
+        const tag = this.deps.blockById(id)
+        /**
+         * 悬空标签（删了/换库了）仍画出来并标短 id：约束的失效是状态，
+         * 静默少一枚 chip 会让用户以为约束本来就是这些。
+         */
+        const chip = document.createElement('span')
+        chip.className = 'props-tag'
+        chip.dataset.refTag = id
+        const name = document.createElement('span')
+        name.className = 'props-tag-name'
+        name.textContent = tag ? `#${displayNameOf(tag)}` : `#${this.deps.shortId(id)}`
+        if (tag) {
+          name.dataset.refTo = id
+          name.dataset.tip = t('ui.props.openTag')
+          name.addEventListener('click', (e) => this.deps.openRef(id, clickModsOf(e)))
+        }
+        chip.append(
+          name,
+          chipDel(t('ui.props.refDomain.remove'), () =>
+            this.deps.setRefDomain(def.id, { kind: 'tags', ids: domain.ids.filter((x) => x !== id) }),
+          ),
+        )
+        value.appendChild(chip)
+      }
+      value.appendChild(
+        addButton(t('ui.props.refDomain.hint.tags'), (rect) =>
+          this.deps.pickRefTag(
+            domain.ids,
+            (tagId) => this.deps.setRefDomain(def.id, { kind: 'tags', ids: [...domain.ids, tagId] }),
+            rect,
+          ),
+        ),
+      )
+    } else if (domain?.kind === 'block') {
+      const anchor = domain.id === SELF ? undefined : this.deps.blockById(domain.id)
+      const text =
+        domain.id === SELF
+          ? t('ui.props.refDomain.self')
+          : anchor
+            ? displayNameOf(anchor).trim() || this.deps.shortId(domain.id)
+            : t('ui.props.refMissing', { id: this.deps.shortId(domain.id) })
+      if (domain.id === SELF) {
+        const chip = document.createElement('span')
+        chip.className = 'props-tag'
+        chip.dataset.refDomainTarget = SELF
+        const name = document.createElement('span')
+        name.className = 'props-tag-name'
+        name.textContent = text
+        name.dataset.tip = t('ui.props.refDomain.hint.block')
+        chip.append(name, chipDel(t('ui.props.refDomain.remove'), () => this.deps.setRefDomain(def.id, null)))
+        value.appendChild(chip)
+      } else {
+        value.appendChild(targetChip(domain.id, text))
+      }
+      value.appendChild(
+        addButton(t('ui.props.refDomain.pickBlock'), (rect) =>
+          this.deps.pickRefAnchor((id) => this.deps.setRefDomain(def.id, { kind: 'block', id }), rect),
+        ),
+      )
+    } else if (domain?.kind === 'query') {
+      const qb = this.deps.blockById(domain.id)
+      const text = qb
+        ? displayNameOf(qb).trim() || this.deps.shortId(domain.id)
+        : t('ui.props.refMissing', { id: this.deps.shortId(domain.id) })
+      value.appendChild(targetChip(domain.id, text))
+      value.appendChild(
+        addButton(t('ui.props.refDomain.pickQuery'), (rect) =>
+          this.deps.pickRefQuery((id) => this.deps.setRefDomain(def.id, { kind: 'query', id }), rect),
+        ),
+      )
+    }
+    return this.stackedRow('prop-ref-domain-row', t('ui.props.refDomain.label'), value)
   }
 
   /**

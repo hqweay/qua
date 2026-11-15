@@ -70,6 +70,7 @@ import {
   parseChoiceScope,
 } from './props.ts'
 import { isQueryNode, isQuerySpec } from '../query/query.ts'
+import { REF_DOMAIN_PROP, isRefDomainValue } from './ref-domain.ts'
 import { isActiveViewValue, isViewsValue } from '../views/view.ts'
 import { MOUNTS_PROP, isMountsValue } from '../views/mount.ts'
 import { EMBED_PROP, canonicalViewRef } from '../views/embed.ts'
@@ -107,10 +108,12 @@ export const SYSTEM_PROP_CHECKS: Readonly<Record<string, (value: unknown) => boo
   [OWN_PROPS_PROP]: isOwnPropSlots,
   [CHILD_PROPS_PROP]: isChildPropsValue,
   [UI_POSITION_PROP]: isUiPositionValue,
-  // `ref` 定义的候选标签（软约束：只过滤候选，不校验存量值）
+  // `ref` 定义的候选标签（旧形状：读侧当标签档认；新写入走后一条）
   [REF_TAGS_PROP]: isRefTagIds,
   // `ref` 定义的默认看法（看法槽：只改值行的画法，值层的块 id 不动）
   [REF_VIEW_PROP]: isRefViewValue,
+  // `ref` 定义的候选域（软约束：标签成员／锚块子树／查询结果；缺席＝不限）
+  [REF_DOMAIN_PROP]: isRefDomainValue,
   [DEFAULT_PROP]: isDefaultValue,
   // 归属与标签
   [BELONGS_TO_PROP]: isBelongsToRefs,

@@ -71,8 +71,9 @@ import {
   type PropChoice,
 } from './choices.ts'
 /**
- * `ref` 的候选域（`_refTags` 软约束）住 `./ref-target.ts`；本文件再导出，
- * **对外的符号名不变**（`core/index.ts` 只转一手）。
+ * `ref` 的旧候选域形状（`_refTags`）住 `./ref-target.ts`；候选域本身（`_refDomain`）
+ * 在 `./ref-domain.ts`，由 `core/index.ts` 直接转出（它依赖查询与视图的读面，
+ * 从本文件再导出会绕成环）。
  */
 export {
   REF_TAGS_PROP,
@@ -80,8 +81,6 @@ export {
   isRefTagIds,
   isRefViewValue,
   refTagIds,
-  refTagNames,
-  refTargetScope,
   type RefDefView,
 } from './ref-target.ts'
 import { REF_VIEW_PROP, isRefViewValue, type RefDefView } from './ref-target.ts'

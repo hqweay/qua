@@ -23,7 +23,10 @@ import {
   hasQueryBody,
   hasChildrenViewBody,
   findInForest,
+  flatten,
+  hasList,
   iconOf,
+  isQueryBlock,
   isHexColor,
   ICON_PROP,
   COLOR_PROP,
@@ -41,8 +44,8 @@ import {
   propLabel,
   queryFieldsOf,
   readMountView,
-  refTagNames,
-  refTargetScope,
+  refDomainIds,
+  refDomainTagNames,
   todayISO,
   type Block,
   type ClickMods,
@@ -281,19 +284,39 @@ export function setupPanels(deps: PanelsDeps) {
           ]
         : []
     /**
-     * **候选的软约束**（`_refTags`，定义块上）：只过滤列表，不校验存量值 ——
-     * 约束改了、标签删了，已引用的块照常显示（值不在这条路径上）。
-     * `null` ＝ 没有约束（没写，或写的标签一个都不在世了）。
+     * **候选域**（定义块上）：只过滤列表，不校验存量值 ——
+     * 约束改了、标签/锚块/查询变了，已引用的块照常显示（值不在这条路径上）。
+     * `ids === null` ＝ 不限（没写，或约束已失效退回）。
+     *
+     * `$self` 的宿主＝**值所在块**（打开选择器的这一行），不是定义块。
      */
     const def = propId === '' ? undefined : kb.get(propId)
-    const scope = refTargetScope(def, kb.roots())
-    const scopeNames =
-      scope === null
-        ? []
-        : refTagNames(def, (id) => {
-            const tag = kb.get(id)
-            return tag ? displayNameOf(tag).trim() : ''
-          })
+    const domain = refDomainIds(def, kb, owner?.id)
+    /** 抬头念出「为什么只有这几行」：类别名／锚块名／查询名，失效就说失效 */
+    const scopedTitle = (): string => {
+      if (domain.dangling !== null) return t('ui.props.pickRefDangling')
+      const label = domain.label
+      if (!label) return t('ui.props.pickRef')
+      if (label.kind === 'tags') {
+        const names = refDomainTagNames(label, (id) => {
+          const tag = kb.get(id)
+          return tag ? displayNameOf(tag).trim() : ''
+        })
+        return names.length > 0
+          ? t('ui.props.pickRefScoped', { tags: names.map((n) => `#${n}`).join('、') })
+          : t('ui.props.pickRef')
+      }
+      const target = kb.get(label.id)
+      if (label.kind === 'block') {
+        if (label.self) return t('ui.props.pickRefScopedSelf')
+        return target
+          ? t('ui.props.pickRefScopedBlock', { name: displayNameOf(target).trim() || blockLabel(target) })
+          : t('ui.props.pickRefDangling')
+      }
+      return target
+        ? t('ui.props.pickRefScopedQuery', { name: displayNameOf(target).trim() || blockLabel(target) })
+        : t('ui.props.pickRefDangling')
+    }
     /**
      * **新建并引用**：只在真实属性行上出现（条件树的虚拟根块没有「值所属的属性」，
      * 也没有可写回的块）；查询词为空时不出现——建一个没有名字的块不是一次选择。
@@ -318,21 +341,18 @@ export function setupPanels(deps: PanelsDeps) {
       // 自己不能指向自己：那会造出一个立刻成环的引用
       ...(owner ? { excludeIds: [owner.id] } : {}),
       currentId: current,
-      ...(scope === null ? {} : { onlyIds: scope }),
+      ...(domain.ids === null ? {} : { onlyIds: domain.ids }),
     })
     layers.openMenu({
       rows: [...newRow(''), ...rootRow(), ...choice.rows('')],
       anchor: anchor ?? deps.getEd().caretRect(),
       // 同一颗值按钮再点一次＝收起（toggle）
       ...(trigger ? { trigger } : {}),
-      // 标题带上约束的标签名：用户要知道「为什么只有这几行」
-      title:
-        scopeNames.length > 0
-          ? t('ui.props.pickRefScoped', { tags: scopeNames.map((n) => `#${n}`).join('、') })
-          : t('ui.props.pickRef'),
+      // 标题带上约束的名字：用户要知道「为什么只有这几行」
+      title: scopedTitle(),
       searchable: true,
       focusSearch: true,
-      emptyText: scope === null ? t('ui.props.refEmpty') : t('ui.props.refEmptyConstrained'),
+      emptyText: domain.ids === null ? t('ui.props.refEmpty') : t('ui.props.refEmptyConstrained'),
       onQuery: (q) => layers.setRows([...newRow(q), ...rootRow(), ...choice.rows(q)]),
       onPick: (row) => {
         /**
@@ -741,7 +761,7 @@ export function setupPanels(deps: PanelsDeps) {
           layers,
           forest: kb.roots(),
           anchor,
-          title: t('ui.props.refTags.add'),
+          title: t('ui.props.refDomain.addTag'),
           emptyText: t('ui.query.pickTagEmpty'),
           allowCreate: false,
           selectedIds: [...exclude],
@@ -751,8 +771,75 @@ export function setupPanels(deps: PanelsDeps) {
           },
         })
       },
-      setRefTags: (defId, tagIds) =>
-        propWrite('core.props/set-ref-tags', { defId, tagIds: [...tagIds] }),
+      /**
+       * **候选域的锚块档**：选一个块当范围（候选＝它下面的块）。
+       *
+       * **不列标签块**：锚在 `#项目` 上得到的是「标签块自己的子块」，不是成员 ——
+       * 读起来像「选同一样东西，意思换了」。标签场景归标签档。
+       *
+       * 第一行是**「这一块（引用处）」**：相对域（每处引用都按自己所在块算）。
+       * 它是虚拟行、不进候选目录——目录只列森林里的块（与条件树的「根块」同一处理）。
+       */
+      pickRefAnchor: (onPick, anchor) => {
+        const notTags = new Set<string>()
+        for (const b of flatten({ roots: [...kb.roots()] })) if (!hasList(b, 'tag')) notTags.add(b.id)
+        const choice = createNameChoice(kb.roots(), {
+          kind: 'ref',
+          allowCreate: false,
+          onlyIds: notTags,
+          idPrefix: 'refanchor',
+        })
+        const selfRow = (): Row[] => [
+          {
+            id: 'refanchor/self',
+            label: t('ui.props.refDomain.self'),
+            hint: t('ui.props.refDomain.hint.block'),
+            icon: 'lucide:square',
+          },
+        ]
+        layers.openMenu({
+          rows: [...selfRow(), ...choice.rows('')],
+          anchor,
+          title: t('ui.props.refDomain.pickBlock'),
+          searchable: true,
+          focusSearch: true,
+          emptyText: t('ui.props.refEmpty'),
+          onQuery: (q) => layers.setRows([...selfRow(), ...choice.rows(q)]),
+          onPick: (row) => {
+            if (row.id === 'refanchor/self') {
+              onPick(SELF)
+              return
+            }
+            const pick = row.pick
+            if (pick?.kind === 'block') onPick(pick.id)
+          },
+        })
+      },
+      /**
+       * **候选域的查询档**：只列查询块。
+       *
+       * 域指向查询块而不是内联一份条件：一份定义可以给 N 条属性共用，构建器/看法/反链
+       * 都是现成的；哪条属性用了这个域，看那个查询块的反链就有答案。
+       */
+      pickRefQuery: (onPick, anchor) => {
+        const queries = new Set<string>()
+        for (const b of flatten({ roots: [...kb.roots()] })) if (isQueryBlock(b)) queries.add(b.id)
+        openNameChoice({
+          layers,
+          forest: kb.roots(),
+          kind: 'ref',
+          allowCreate: false,
+          anchor,
+          onlyIds: queries,
+          title: t('ui.props.refDomain.pickQuery'),
+          emptyText: t('ui.props.refEmpty'),
+          idPrefix: 'refquery',
+          onPick: (pick) => {
+            if (pick.kind === 'block') onPick(pick.id)
+          },
+        })
+      },
+      setRefDomain: (defId, domain) => propWrite('core.props/set-ref-domain', { defId, domain }),
     }
   }
 
