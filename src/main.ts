@@ -2436,7 +2436,7 @@ const app: App = {
       app.toast(t('ui.toast.tagDeleted'))
       return true
     }
-    // B 档条件确认（决策 273）：只有它还连着成员/声明才问——叶子标签没有任何连带，直接删。
+    // B 档条件确认：只有它还连着成员/声明才问——叶子标签没有任何连带，直接删。
     // 与删页/删天同一个会话确认框（danger 红钮），不再用「菜单里嵌一行继续」的形状。
     if (members === 0 && declarations === 0) return drop()
     const body =
