@@ -225,9 +225,10 @@ export interface PropertiesDeps {
   /**
    * ref 值 inline 岛的装配（`_refView: 'inline'` 的值行用）。
    *
-   * **传没传是「看法落面」的门**：开了岛的面（属性抽屉）传它；检视卡与表格格子
-   * 不传 ⇒ ref 值照旧画引用 chip——inline 是 opt-in 的看法，一个面一个面验观感，
-   * 不一次铺满（右槽窄栏的观感没验过之前不进高频面）。
+   * **传没传是「看法落面」的门**：开了岛的面（`inlineRefIsland`）才用它，ref 值
+   * 否则照旧画引用 chip——inline 是 opt-in 的看法，一个面一个面验观感。
+   * 当前产品面都关着这一档（原地编辑先撤），机器留作口子；表格格子永不传（N 行 ×
+   * N 座岛是真实性能面，要先量）。
    */
   refIsland?: RefIslandDeps
   /**
@@ -1143,10 +1144,11 @@ export class PropertiesPanel {
   private readonly els: PropertiesEls
   private readonly deps: PropertiesDeps
   /**
-   ** 这个实例的 ref 值行装不装 inline 岛（`_refView: 'inline'` 时）。
+   * 这个实例的 ref 值行装不装 inline 岛（`_refView: 'inline'` 时）。
    *
-   * 检视卡不装（引用 chip，右槽窄栏的观感没验过之前不进高频面）；属性抽屉装——
-   * 同一份 deps，落面是**实例的门**不是装配的门。
+   * **当前所有实例都是关的**：产品面一律画引用 chip（原地编辑的复杂度大于收益，
+   * 侧槽编辑已够用）。开关与它下游的装配整包留着——要开时只改各宿主传的这个
+   * 参数，值行不在两条路径上各写一套。
    */
   private readonly inlineRefIsland: boolean
   /**

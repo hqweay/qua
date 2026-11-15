@@ -936,8 +936,9 @@ export function setupPanels(deps: PanelsDeps) {
       const panel = new PropertiesPanel(
         { root, title: titleEl, body, add },
         makePropertiesDeps(() => (drawerBlockId ? findInForest(deps.getWs().blocks, drawerBlockId) : null)),
-        // 属性抽屉是 inline 岛的面（检视卡保持引用 chip：右槽窄栏的观感没验过之前不进高频面）
-        { inlineRefIsland: true },
+        // 与检视卡**同一份面板**、同一个默认：ref 值一律画引用 chip。
+        // inline 岛的机器（`RefIslandDeps` ＋ `inlineRefIsland` 开关）整包留着——真要做
+        // 原地编辑时只在这里打开，不在两条路径上各写一套值行。
       )
       drawerPanel = panel
       drawerRootEl = root

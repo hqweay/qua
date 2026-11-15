@@ -30741,7 +30741,7 @@ await check('T321 检视卡的引用值：点名字跳目标，尾键换目标',
   return '点名字跳目标页；笔键重新开选择器'
 })
 
-await check('T322 ref 值的 inline 岛：就地编辑写回源块、别处写一笔岛不被拔、看法切换即时', async () => {
+await check('T322 ref 的 inline 看法机器保留、入口未开：抽屉里 `_refView:inline` 仍画引用 chip', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
@@ -30751,74 +30751,53 @@ await check('T322 ref 值的 inline 岛：就地编辑写回源块、别处写�
     const other = textful[1]
     window.__qua.invoke('core.props/create-def', { blockId: host.id, label: '岛测试', kind: 'ref', target: 'own' })
     const def = window.__qua.propDefs().find((d) => d.label === '岛测试')
-    // 目标用**已有内容的块**：空内容的行落不了焦点（岛里没字可点）
     window.__qua.invoke('core.props/set-value', { blockId: host.id, propId: def.id, value: other.id })
-    // def 可能是上一次运行的复用件：看法显式重设（幂等）
+    // 看法显式写成 inline（def 可能是上一次运行的复用件）：机器还在，面上一律 chip
     window.__qua.invoke('core.props/set-ref-view', { defId: def.id, view: 'inline' })
     return { host: host.id, propId: def.id, target: other.id }
   })
   assert(ids.target !== '', '前置：应找到两个有内容的块')
   await page.evaluate((hid) => window.__qua.invoke('core.block/inspect', { blockId: hid }), ids.host)
   const rowSel = `.props-drawer .prop-row[data-prop-id="${ids.propId}"]`
-  await page.waitForSelector(`${rowSel} .prop-ref-island[contenteditable="true"]`, { timeout: 5000 })
+  await page.waitForSelector(`${rowSel} .prop-ref`, { timeout: 5000 })
 
-  // 就地编辑写回源块：岛里打的字进的是目标块本体（禁止拷贝语义）
-  await page.click(`${rowSel} .prop-ref-island[contenteditable="true"]`)
-  await page.keyboard.type('XYZ')
-  await page.waitForFunction(
-    (tid) => (window.__qua.blocks().find((b) => b.id === tid)?.text ?? '').includes('XYZ'),
-    ids.target,
-    { timeout: 4000 },
-  )
-
-  // 打字中别处写一笔：面板重建不得拔岛（宿主是同一个元素、焦点还在岛里）
-  await page.evaluate(
-    (sel) => {
-      const host = document.querySelector(sel)
-      host.__t322keep = true
-      return true
-    },
-    `${rowSel} .prop-ref-island`,
-  )
-  await page.evaluate((hostId) => {
-    const other = window.__qua.blocks().find((b) => b.id !== hostId && b.roles.length === 0)
-    window.__qua.invoke('core.props/create-def', { blockId: other.id, label: '别处写入', kind: 'text', target: 'own' })
-    const def2 = window.__qua.propDefs().find((d) => d.label === '别处写入')
-    window.__qua.invoke('core.props/set-value', { blockId: other.id, propId: def2.id, value: '一笔别处的写入' })
-  }, ids.host)
-  await page.waitForTimeout(400)
-  const survived = await page.evaluate(
-    (sel) => {
-      const host = document.querySelector(sel)
+  const state = await page.evaluate(
+    (args) => {
+      const live = window.__qua.__editor.store.find(args.propId)
+      const row = document.querySelector(args.rowSel)
       return {
-        same: Boolean(host && host.__t322keep === true),
-        focused: Boolean(host && host.contains(document.activeElement)),
+        view: live?.props?._refView ?? '',
+        chip: row?.querySelector('.prop-ref')?.textContent ?? '',
+        islands: row?.querySelectorAll('.prop-ref-island, [data-edit-island]').length ?? -1,
       }
     },
-    `${rowSel} .prop-ref-island`,
+    { propId: ids.propId, rowSel },
   )
-  assert(survived.same, `别处写入后岛宿主应是同一个元素（未被重建拔掉）：${JSON.stringify(survived)}`)
-  assert(survived.focused, `别处写入后焦点应还在岛里：${JSON.stringify(survived)}`)
+  assert(state.view === 'inline', `看法槽照常可写（接口还在）：${JSON.stringify(state)}`)
+  assert(state.chip.trim() !== '', `抽屉里应画引用 chip（值本身可读）：${JSON.stringify(state)}`)
+  assert(state.islands === 0, `抽屉里不再装 inline 岛（原地编辑入口未开）：${JSON.stringify(state)}`)
 
-  // 看法切回 chip：岛当场退役、引用按钮回来；目标块里的字还在（值层没动过）
+  // 切回 chip：槽**摘键**（缺省就是 chip，不落壳）——面仍是同一枚 chip，两次写入都不是空操作
   await page.evaluate((defId) => window.__qua.invoke('core.props/set-ref-view', { defId, view: 'chip' }), ids.propId)
-  await page.waitForSelector(`${rowSel} .prop-ref`, { timeout: 4000 })
-  await page.waitForTimeout(100)
+  await page.waitForTimeout(150)
   const afterChip = await page.evaluate(
-    (sel) => ({ island: Boolean(document.querySelector(`${sel} .prop-ref-island`)) }),
-    rowSel,
+    (args) => ({
+      view: window.__qua.__editor.store.find(args.propId)?.props?._refView ?? '',
+      chip: Boolean(document.querySelector(`${args.rowSel} .prop-ref`)),
+      islands: document.querySelectorAll(`${args.rowSel} .prop-ref-island`).length,
+    }),
+    { propId: ids.propId, rowSel },
   )
-  assert(afterChip.island === false, `切回 chip 后岛应消失：${JSON.stringify(afterChip)}`)
   assert(
-    (await page.evaluate((tid) => (window.__qua.blocks().find((b) => b.id === tid)?.text ?? '').includes('XYZ'), ids.target)),
-    '换看法不动值：目标块正文仍在',
+    afterChip.view === '' && afterChip.chip && afterChip.islands === 0,
+    `切回缺省（摘键）后面仍是 chip：${JSON.stringify(afterChip)}`,
   )
 
   await ctx.close()
-  return '岛里改字写回源块；别处写入不拔岛；切回 chip 即时且值不动'
+  return '看法槽可写、面上一律 chip：抽屉不再装 inline 岛（原地编辑入口未开，机器留作口子）'
 })
 
-await check('T323 ref inline 岛的多值：每值一台岛、编辑写回各自源块、摘一枚仍数组', async () => {
+await check('T323 ref inline 看法的多值同样落在 chip：抽屉里两枚值两枚 chip、没有岛', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
@@ -30836,53 +30815,24 @@ await check('T323 ref inline 岛的多值：每值一台岛、编辑写回各自
   })
   await page.evaluate((hid) => window.__qua.invoke('core.block/inspect', { blockId: hid }), ids.host)
   const rowSel = `.props-drawer .prop-row[data-prop-id="${ids.propId}"]`
-  await page.waitForSelector(`${rowSel} .prop-ref-island[contenteditable="true"]`, { timeout: 5000 })
-  // 只数**值枚的岛**（岛内容里的挂载区/属性行自带的嵌套岛不算）
-  const count = await page.evaluate(
-    (sel) => document.querySelectorAll(`${sel} .prop-ref-item > [data-edit-island]`).length,
-    rowSel,
-  )
-  assert(count === 2, `两个值应各有一台岛：${count}`)
-
-  // 编辑第二枚：字进第二个源块
-  const tops = await page.evaluate(
-    (sel) => [...document.querySelectorAll(`${sel} .prop-ref-item > [data-edit-island]`)].map((el) => ({
-      refTarget: el.dataset.refTarget,
-      editable: Boolean(el.querySelector('.prop-ref-island[contenteditable="true"]')),
-    })),
-    rowSel,
-  )
-  const idx = tops.findIndex((t) => t.refTarget === ids.t2 && t.editable)
-  assert(idx >= 0, '第二枚值的岛应在场')
-  await page.click(`${rowSel} .prop-ref-item:nth-of-type(${idx + 1}) .prop-ref-island[contenteditable="true"]`)
-  await page.keyboard.type('XYZ2')
-  await page.waitForFunction(
-    (tid) => (window.__qua.blocks().find((b) => b.id === tid)?.text ?? '').includes('XYZ2'),
-    ids.t2,
-    { timeout: 4000 },
-  )
-
-  // 摘第一枚：值仍是数组且只剩第二枚；第一枚的岛随行退役
-  await page.click(`${rowSel} .prop-ref-item .props-tag-x`)
-  await page.waitForTimeout(300)
-  const after = await page.evaluate(
+  await page.waitForSelector(`${rowSel} .prop-chips .prop-chip`, { timeout: 5000 })
+  const state = await page.evaluate(
     (args) => {
-      const host = window.__qua.allBlocks().find((b) => b.id === args.host)
+      const row = document.querySelector(args.rowSel)
       return {
-        value: host?.props?.[args.propId],
-        islands: document.querySelectorAll(`${args.rowSel} .prop-ref-item > [data-edit-island]`).length,
+        chips: [...(row?.querySelectorAll('.prop-chips .prop-chip') ?? [])].map((c) => c.textContent ?? '').length,
+        islands: row?.querySelectorAll('.prop-ref-island, [data-edit-island]').length ?? -1,
+        value: window.__qua.__editor.store.find(args.host)?.props?.[args.propId],
       }
     },
     { host: ids.host, propId: ids.propId, rowSel },
   )
-  assert(
-    Array.isArray(after.value) && after.value.length === 1 && after.value[0] === ids.t2,
-    `摘一枚后值应是只剩 t2 的数组：${JSON.stringify(after.value)}`,
-  )
-  assert(after.islands === 1, `摘除后应只剩一台岛：${after.islands}`)
+  assert(state.chips === 2, `两枚值应画两枚 chip：${JSON.stringify(state)}`)
+  assert(state.islands === 0, `多值也不装 inline 岛：${JSON.stringify(state)}`)
+  assert(Array.isArray(state.value) && state.value.length === 2, `值层没被看法影响（仍是数组）：${JSON.stringify(state.value)}`)
 
   await ctx.close()
-  return '两枚值两台岛；编辑写回各自源块；摘一枚仍数组且岛跟着退'
+  return '两枚值两枚 chip；inline 看法在多值上同样不落岛（入口未开）'
 })
 
 const known = results.filter((r) => !r.ok && r.known)
