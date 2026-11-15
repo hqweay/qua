@@ -158,8 +158,12 @@ async function runSmoke() {
   let total = null
   const cases = []
   const problems = []
+  /** 分片退出码留到最后判：它只解释「这一片首跑有用例红」，重跑转绿之后这条理由就不成立了 */
+  const shardExits = new Map()
+  /** 每片看到的用例名：判「这一片的 1 还剩没有理由」时要知道它自己红了哪几条 */
+  const shardNames = new Map()
   for (const [i, r] of rs.entries()) {
-    if (r.code !== 0) problems.push(`冒烟 ${i + 1}/${SHARDS} 退出码 ${r.code}`)
+    if (r.code !== 0) shardExits.set(i, r.code)
     let rep = null
     try {
       rep = JSON.parse(await readFile(join(dir, `s${i}.json`), 'utf8'))
@@ -169,6 +173,7 @@ async function runSmoke() {
     }
     if (total === null) total = rep.total
     else if (rep.total !== total) problems.push(`冒烟 ${i + 1}/${SHARDS} 看到的用例数 ${rep.total} ≠ ${total}`)
+    shardNames.set(i, (rep.cases ?? []).map((c) => c.name))
     cases.push(...rep.cases)
   }
   if (total !== null && cases.length !== total) {
@@ -216,6 +221,7 @@ async function runSmoke() {
         else stillRed.push(again && !again.ok ? { ...f, msg: again.msg } : f)
       }
       failures = stillRed
+      if (failures.length === 0) await rm(FAILURES_FILE, { force: true })
       if (flaky.length) {
         console.log(
           `    ${C.yellow('FLAKY')} 重跑转绿 ${flaky.length} 条（只重跑一次）：${flaky.map((c) => c.name.split(' ')[0]).join(' · ')}`,
@@ -225,6 +231,20 @@ async function runSmoke() {
   } else if (failures.length === 0 && problems.length === 0) {
     // 批次全绿 ⇒ 名单过期，删掉，防下一轮 only-failed 重跑僵尸用例
     await rm(FAILURES_FILE, { force: true })
+  }
+
+  /**
+   * **分片退出码按最终结果判**：一片进程以 1 退出，理由只有一个——它自己有用例首跑红。
+   * 那几条若在重跑里转绿（FLAKY），这个 1 就是**历史事实**，不能拿它否掉重跑的结果：
+   * 否则「挂了先原样重跑一次」这条机制永远换不来绿，FLAKY 也就等于红（实测：迁移断言
+   * 那条转绿之后批次仍判红）。仍算问题的只剩两种：这一片**还有**红用例（真回归），
+   * 或它没留下可信报告（上面已单独记）。
+   */
+  const redNames = new Set(failures.map((c) => c.name))
+  for (const [i, code] of shardExits) {
+    const names = shardNames.get(i)
+    if (!names) continue
+    if (names.some((n) => redNames.has(n))) problems.push(`冒烟 ${i + 1}/${SHARDS} 退出码 ${code}`)
   }
 
   return {
