@@ -71,6 +71,12 @@ export interface ViewCardsDeps {
    * 见 `core.view/new-card`）；「未设置」列不写值。结构分组不用它（组头有「＋」）。
    */
   insertValueCard: (propId: string, raw: unknown) => void
+  /**
+   * 「新建」的**可用性判据**（每列现问）：能不能兑现「新卡出现在这一列」。
+   * children 源恒真；查询源按出生形态的假块试条件——命中才显示按钮，
+   * 不命中就不给（按钮出现即兑现，不出现即「这里长不出块」）。
+   */
+  canCreateAt: (propId: string, raw: unknown) => boolean
   openBlock: (blockId: string, place?: OpenAction) => void
   /** 点卡上的属性行 ⇒ 打开属性面板并聚焦那一栏 */
   inspect: (blockId: string, propId?: string) => void
@@ -333,21 +339,24 @@ export class ViewCards {
      * 列尾「新建」（看板软件的标准动作）：新卡**带着这一列的值**出生。
      * 与结构分组的「＋」对称——组＝块 ⇒ ＋ 在表头（插子块）；组＝值 ⇒ 新建在列尾
      * （插块＋写值，一笔事务）。「未设置」列不写值，新卡就落进「未设置」。
+     * 出不出这颗按钮由 `canCreateAt` 现问：兑现不了的列不给按钮。
      */
-    const add = document.createElement('button')
-    add.type = 'button'
-    add.className = 'vcol-new'
-    add.textContent = t('ui.cards.newCard')
-    add.dataset.tip = t('ui.cards.newCardTitle')
-    add.setAttribute('aria-label', t('ui.cards.newCardTitle'))
-    add.addEventListener('click', (e) => {
-      e.preventDefault()
-      e.stopPropagation()
-      // 先结束正在进行的编辑：改动时刻不该落在马上重排的列上
-      this.deps.cell.commit()
-      this.deps.insertValueCard(propId, b.unset ? undefined : b.raw)
-    })
-    col.appendChild(add)
+    if (this.deps.canCreateAt(propId, b.unset ? undefined : b.raw)) {
+      const add = document.createElement('button')
+      add.type = 'button'
+      add.className = 'vcol-new'
+      add.textContent = t('ui.cards.newCard')
+      add.dataset.tip = t('ui.cards.newCardTitle')
+      add.setAttribute('aria-label', t('ui.cards.newCardTitle'))
+      add.addEventListener('click', (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        // 先结束正在进行的编辑：改动时刻不该落在马上重排的列上
+        this.deps.cell.commit()
+        this.deps.insertValueCard(propId, b.unset ? undefined : b.raw)
+      })
+      col.appendChild(add)
+    }
 
     /**
      * 落点：整列接卡。`dragover` 必须 `preventDefault` 才有 `drop` ——

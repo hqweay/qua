@@ -50,6 +50,8 @@ import {
   freezeResult,
   frozenStale,
   readViewSet,
+  mkBlock,
+  setValue,
   todayISO,
   slicedSpec,
   maskIdsOf,
@@ -1542,6 +1544,23 @@ export class ViewHost {
           valueLabel: (propId, raw) => this.groupValueLabel(propId, raw),
           setValue: (blockId, propId, value) => this.deps.invoke('core.props/set-value', { blockId, propId, value }),
           clearValue: (blockId, propId) => this.deps.invoke('core.props/clear-value', { blockId, propId }),
+          // 列尾「新建」的**可用性判据**：children 源的家是真的，永远兑现；
+          // 查询源用「出生形态」的假块（只有列值、无引用、无父块）试一遍生效条件——
+          // 命中才给按钮，按钮出现即兑现；不命中就不给，而不是给了再道歉
+          canCreateAt: (propId, raw) => {
+            const src = this.source
+            if (src.kind !== 'query') return true
+            const spec = this.effective
+            if (!spec) return false
+            const probe = mkBlock('')
+            if (raw !== undefined && raw !== null) setValue(probe, propId, raw)
+            const ctx = this.evalContext(spec)
+            return this.deps.kb.matchesSpec(spec, probe, {
+              selfId: ctx.selfId,
+              excludeIds: ctx.excludeIds,
+              ...(ctx.today ? { today: ctx.today } : {}),
+            })
+          },
           // 列尾「新建」：children 源直接建；查询源建完按当前生效条件重算一次——
           // 新卡没进结果就直说（卡在库里，不在这一列），不让「点了没出现」变成悬案
           insertValueCard: (propId, raw) => {

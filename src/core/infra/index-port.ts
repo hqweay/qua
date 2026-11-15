@@ -30,6 +30,7 @@ import {
 import type { Op } from '../kb/types.ts'
 import {
   evaluateQuery,
+  createMatcher,
   isExactRoleJournal,
   resolveSelfSpec,
   usesRef,
@@ -875,12 +876,27 @@ export function queryByIndex(
   spec: QuerySpec,
   opts: { selfId?: string; excludeIds?: readonly string[]; today?: string } = {},
 ): QueryHit[] {
+  const { q, env, memberRoots } = specContextOf(index, forest, spec, opts)
+  return evaluateQuery(q, memberRoots, env, forest)
+}
+
+/**
+ * 一份条件的**求值上下文**（`$self` 解析 ＋ 环境表 ＋ 成员候选集）：
+ * `queryByIndex`（整库求值）与 `blockMatchesSpec`（单块判定）共用，
+ * 「环境怎么来」只有这一份，两条读路不许各漂各的。
+ */
+function specContextOf(
+  index: Index,
+  forest: readonly Block[],
+  spec: QuerySpec,
+  opts: { selfId?: string; excludeIds?: readonly string[]; today?: string } = {},
+): { q: QuerySpec; env: QueryEnv; memberRoots: readonly Block[] } {
   /**
    * `'$self'` 的解析与纯函数路径**共用同一份**（`resolveSelfSpec`），
    * 连「没有宿主 ⇒ 空结果」这条也在同一个判据上：两条路径只许在「环境怎么来」上不同。
    */
   const host = opts.selfId !== undefined ? lookupBlock(index, opts.selfId) : undefined
-  if (!host && usesSelf(spec.where)) return []
+  if (!host && usesSelf(spec.where)) return { q: { where: { any: [] } }, env: neverEnv(), memberRoots: [] }
   const q = host ? resolveSelfSpec(spec, host, forest) : spec
   const env: QueryEnv = {
     refSources: usesRef(q.where) ? refSourcesByIndex(index) : () => undefined,
@@ -899,7 +915,30 @@ export function queryByIndex(
   const memberRoots = isExactRoleJournal(q.where)
     ? [...index.journals.values()].map((id) => index.blocks.get(id)).filter((b): b is Block => b !== undefined)
     : roots
-  return evaluateQuery(q, memberRoots, env, forest)
+  return { q, env, memberRoots }
+}
+
+/** 「没有宿主 ⇒ 恒假」的环境：调用方直接拿空结果，不走判定 */
+function neverEnv(): QueryEnv {
+  return { refSources: () => undefined, tags: new Set<string>(), fields: fieldTableOf([]) }
+}
+
+/**
+ * **单块判定**：一个（可能还不在树里的）块若此刻在库里，会不会命中这份条件。
+ *
+ * 消费者是看板列尾的「新建」：按钮的可用性由「新卡的出生形态（只有列值、
+ * 无引用、无父块）能不能命中」**推导**出来——按钮出现即兑现，不出现即「这里长不出块」。
+ * 环境与 `queryByIndex` 同一份（`specContextOf`），判定与整库求值不许各漂各的。
+ */
+export function blockMatchesSpec(
+  index: Index,
+  forest: readonly Block[],
+  spec: QuerySpec,
+  block: Block,
+  opts: { selfId?: string; excludeIds?: readonly string[]; today?: string } = {},
+): boolean {
+  const { q, env } = specContextOf(index, forest, spec, opts)
+  return createMatcher(forest, env).matches(q.where, block)
 }
 
 /**

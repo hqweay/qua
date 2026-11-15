@@ -597,7 +597,7 @@ interface Matcher {
   matches(node: QueryNode, block: Block): boolean
 }
 
-function createMatcher(forest: readonly Block[], env: QueryEnv): Matcher {
+export function createMatcher(forest: readonly Block[], env: QueryEnv): Matcher {
   /** 位置事实（祖先／子孙）**按需**建：纯 `tag`／`text` 查询不该为方向原子付一次全树遍历 */
   interface VisibleTree {
     byId: Map<string, Block>

@@ -8,6 +8,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkBlock } from '../src/core/index.ts'
 import type { Atom, Block } from '../src/core/index.ts'
 import {
   canonicalSpec,
@@ -1237,4 +1238,25 @@ test('$self 解析：对象形态的 {ref:{to:$self}} 仍解析成宿主；不�
     ref: { to: 'host', kind: 'inline' },
   })
   assert.deepEqual(resolveSelfSpec({ where: { ref: { kind: 'inline' } } }, host, [host]).where, { ref: { kind: 'inline' } })
+})
+
+test('matchesSpec：出生形态的假块与整库求值同一份环境（看板「新建」可用性的判据）', () => {
+  const def = mkPropDef('任务状态', 'text')
+  const page = mkBlock('页')
+  page.id = 'p1'
+  const { kb } = kbOf([def, page])
+
+  const spec = { where: { prop: { id: def.id, exists: true } } }
+  const carrying = mkBlock('')
+  carrying.props = { [def.id]: '待办' }
+  const bare = mkBlock('')
+
+  assert.equal(kb.matchesSpec(spec, carrying), true, '带列值的假块命中：这一列能给「新建」')
+  assert.equal(kb.matchesSpec(spec, bare), false, '不带值的不命中')
+
+  const refSpec = { where: { ref: page.id } }
+  assert.equal(kb.matchesSpec(refSpec, carrying), false, '无引用的假块进不了「引用了 X」的看板')
+
+  const upSpec = { where: { up: { is: page.id } } }
+  assert.equal(kb.matchesSpec(upSpec, carrying), false, '假块无父块：住顶层的出生形态进不了「在…之下」')
 })

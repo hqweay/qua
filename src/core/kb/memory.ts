@@ -24,7 +24,7 @@ import { walkForest } from '../model/walk.ts'
 import { findTagByName, tagsOf as tagsOfBlock } from '../identity/tags.ts'
 import { isPropDef } from '../props/props.ts'
 import { findJournalDay } from '../identity/journal.ts'
-import { blockIdByAlias, indexPathOf, queryByIndex, relationsFrom, relationsTo } from '../infra/index-port.ts'
+import { blockIdByAlias, blockMatchesSpec, indexPathOf, queryByIndex, relationsFrom, relationsTo } from '../infra/index-port.ts'
 import {
   declaredFields,
   fieldRowsWithParent,
@@ -272,6 +272,19 @@ export class MemoryKb implements KbClient {
   ): QueryHit[] {
     // 走索引：ref/tag/journal 查表，判定与顺序与纯函数路径共用一份
     return queryByIndex(this.store.index, this.store.blocks, spec, {
+      selfId: opts.selfId,
+      excludeIds: opts.excludeIds,
+      ...(opts.today ? { today: opts.today } : {}),
+    })
+  }
+
+  matchesSpec(
+    spec: QuerySpec,
+    block: Block,
+    opts: { selfId?: string; excludeIds?: readonly string[]; today?: string } = {},
+  ): boolean {
+    // 与 query 同一份环境（specContextOf）：判定不许与整库求值各漂各的
+    return blockMatchesSpec(this.store.index, this.store.blocks, spec, block, {
       selfId: opts.selfId,
       excludeIds: opts.excludeIds,
       ...(opts.today ? { today: opts.today } : {}),

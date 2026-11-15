@@ -319,6 +319,15 @@ export interface KbClient {
    * 不在这层读时钟（求值要保持「同样输入同样输出」）。
    */
   query(spec: QuerySpec, opts?: { selfId?: string; excludeIds?: readonly string[]; today?: string }): QueryHit[]
+  /**
+   * **单块判定**：一个（可能还不在树里的）块若此刻在库里，会不会命中这份条件。
+   * 环境与 `query` 同一份；消费者是看板列「新建」的可用性——按钮出现即兑现。
+   */
+  matchesSpec(
+    spec: QuerySpec,
+    block: Block,
+    opts?: { selfId?: string; excludeIds?: readonly string[]; today?: string },
+  ): boolean
   backlinksOf(id: string): readonly BackrefSource[]
   /** 引用发生处的**块**（不是按页聚合）——反链 view block 的行；同一块多处引用各算一条 */
   backrefBlocksOf(id: string): readonly BackrefBlock[]
