@@ -73,6 +73,19 @@ function formatLabelOf(format: string): string {
   return t('ui.props.format.plain')
 }
 
+/**
+ * 下拉里「这条属性装什么」的目录名：`text` 的格式轴给一等名（链接／邮箱／电话），
+ * 其余按 kind。用户按内容类型认一条属性（「主页 · 链接」），不按 kind/format 的分界认。
+ */
+function defCatalogLabel(def: Block): string {
+  const kind = propKindOf(def)
+  if (kind === 'text') {
+    const f = formatOf(def)
+    if (f === 'url' || f === 'email' || f === 'phone') return t(`ui.props.format.${f}`)
+  }
+  return t(`ui.props.kind.${kind}`)
+}
+
 export interface PropertiesDeps {
   /**
    * 属性区画在哪个块上 —— **这一屏唯一的主体**（中心槽的当前对象）。
@@ -117,12 +130,12 @@ export interface PropertiesDeps {
   pickAsset?: (onPick: (hash: string) => void) => void
   /** 把已有属性加进**这一块自己的值槽**（`_ownProps`） */
   addOwnProp: (b: Block, propId: string) => void
-  /** 新建一条定义并加进**这一块自己的值槽**（`mode: 'new'` ＝ 同名也新建） */
-  createOwnDef: (b: Block, label: string, kind: PropKind, mode?: PropCreateMode) => void
+  /** 新建一条定义并加进**这一块自己的值槽**（`mode: 'new'` ＝ 同名也新建；`format` ＝ text 格式轴） */
+  createOwnDef: (b: Block, label: string, kind: PropKind, mode?: PropCreateMode, format?: string) => void
   /** 把已有属性**声明给成员**（标签属性／字段声明，写 `_fieldDefs`；只有页/标签能声明） */
   declareProp: (b: Block, propId: string) => void
-  /** 新建一条定义并**声明给成员**（标签属性／字段声明） */
-  createDeclaredDef: (b: Block, label: string, kind: PropKind, mode?: PropCreateMode) => void
+  /** 新建一条定义并**声明给成员**（标签属性／字段声明；`format` ＝ text 格式轴） */
+  createDeclaredDef: (b: Block, label: string, kind: PropKind, mode?: PropCreateMode, format?: string) => void
   /**
    * 页/标签**声明给成员**的那些属性定义（`_fieldDefs` 的活块）。
    *
@@ -1434,7 +1447,7 @@ export class PropertiesPanel {
       pick: t('ui.props.pick'),
       use: t('ui.props.use'),
       onUse: (propId) => this.deps.addOwnProp(target, propId),
-      onCreate: (label, kind, mode) => this.deps.createOwnDef(target, label, kind, mode),
+      onCreate: (label, kind, mode, format) => this.deps.createOwnDef(target, label, kind, mode, format),
     })
   }
 
@@ -1452,7 +1465,7 @@ export class PropertiesPanel {
       pick: t(isTag ? 'ui.props.pickTagProp' : 'ui.props.pickPageField'),
       use: t('ui.props.useDeclared'),
       onUse: (propId) => this.deps.declareProp(target, propId),
-      onCreate: (label, kind, mode) => this.deps.createDeclaredDef(target, label, kind, mode),
+      onCreate: (label, kind, mode, format) => this.deps.createDeclaredDef(target, label, kind, mode, format),
     })
   }
 
@@ -1476,7 +1489,7 @@ export class PropertiesPanel {
       pick: string
       use: string
       onUse: (propId: string) => void
-      onCreate: (label: string, kind: PropKind, mode?: PropCreateMode) => void
+      onCreate: (label: string, kind: PropKind, mode?: PropCreateMode, format?: string) => void
     },
   ): HTMLElement {
     const form = document.createElement('form')
@@ -1549,7 +1562,7 @@ export class PropertiesPanel {
       }
       const o = document.createElement('option')
       o.value = def.id
-      o.textContent = `${shownOf(def)} · ${t(`ui.props.kind.${propKindOf(def)}`)}${mark ? `（${mark}）` : ''}`
+      o.textContent = `${shownOf(def)} · ${defCatalogLabel(def)}${mark ? `（${mark}）` : ''}`
       o.disabled = disabled
       groups[groupOf(def)]!.appendChild(o)
     }
@@ -1572,13 +1585,33 @@ export class PropertiesPanel {
     const label = document.createElement('input')
     label.className = 'prop-input'
     label.placeholder = t('ui.props.newLabel')
+    /**
+     * **新建的「装什么」目录：kind 闭集 ＋ `text` 格式轴的一等入口。**
+     *
+     * `url`/`email`/`phone` 不是 kind（kind 按**值的存储形状**分，都是字符串），
+     * 但用户按内容类型想——「我要一条链接」，不是「我要一个 text 再去配置里补格式」。
+     * 所以目录层给它们一等名，落盘仍是 `text + _format`（模型不动）；
+     * 「纯文本」就是 kind 的 text 本名，不带格式。
+     */
+    const kindOptions: { value: string; kind: PropKind; format?: 'url' | 'email' | 'phone' }[] = []
+    for (const k of PROP_KINDS) {
+      kindOptions.push({ value: k, kind: k })
+      if (k === 'text')
+        for (const f of ['url', 'email', 'phone'] as const) kindOptions.push({ value: `text:${f}`, kind: 'text', format: f })
+    }
     const kind = document.createElement('select')
     kind.className = 'prop-input'
-    for (const k of PROP_KINDS) {
+    for (const opt of kindOptions) {
       const o = document.createElement('option')
-      o.value = k
-      o.textContent = t(`ui.props.kind.${k}`)
+      o.value = opt.value
+      o.textContent = opt.format ? t(`ui.props.format.${opt.format}`) : t(`ui.props.kind.${opt.kind}`)
       kind.appendChild(o)
+    }
+
+    /** 下拉此刻选中的那条目录项（kind ＋ 可选格式） */
+    const pickedOf = (): { kind: PropKind; format?: string } => {
+      const opt = kindOptions.find((x) => x.value === kind.value) ?? kindOptions[0]!
+      return opt.format ? { kind: opt.kind, format: opt.format } : { kind: opt.kind }
     }
 
     /**
@@ -1586,11 +1619,18 @@ export class PropertiesPanel {
      *
      * 默认复用（错了好改），但「新建同名属性」也必须当下可见 ——
      * 藏进对话框的那一下会被当成「复用失败」，而用户真正要的是另一个定义。
+     * 匹配按 **kind ＋ 有效格式**：声明的格式不同就是两条属性（链接 ≠ 纯文本）——
+     * 复用一条纯文本定义会让「要链接」静默丢格式。
      */
     const matchNow = (): Block | undefined => {
       const name = normalizeAlias(label.value.trim())
       if (name === '') return undefined
-      return defs.find((d) => propKindOf(d) === (kind.value as PropKind) && normalizeAlias(propLabel(d)) === name)
+      const picked = pickedOf()
+      return defs.find((d) => {
+        if (propKindOf(d) !== picked.kind || normalizeAlias(propLabel(d)) !== name) return false
+        const defFormat = picked.kind === 'text' ? (formatOf(d) ?? 'plain') : undefined
+        return defFormat === (picked.format ?? (picked.kind === 'text' ? 'plain' : undefined))
+      })
     }
     const ao4 = document.createElement('div')
     ao4.className = 'props-ao4'
@@ -1613,9 +1653,9 @@ export class PropertiesPanel {
         this.deps.toast(t('ui.props.needLabel'), 'warn')
         return
       }
-      const k = kind.value as PropKind
+      const picked = pickedOf()
       const match = matchNow()
-      opts.onCreate(name, k, mode === 'new' ? 'new' : match ? 'reuse' : undefined)
+      opts.onCreate(name, picked.kind, mode === 'new' ? 'new' : match ? 'reuse' : undefined, picked.format)
       this.closeForm()
     }
 

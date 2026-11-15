@@ -38,7 +38,8 @@ export const PROPS_HANDLERS: Record<string, Handler> = {
     if (!label) return false
     // 同名两义：显式「新建同名属性」跳过同名复用；其它值一律按默认复用
     const mode = a.mode === 'new' ? 'new' : 'reuse'
-    return app.createPropDef(blockId, label, kind, target, mode) !== ''
+    const format = S(a.format)
+    return app.createPropDef(blockId, label, kind, target, mode, format || undefined) !== ''
   },
   'core.props/add-field': (a, app) => {
     const blockId = S(a.blockId)

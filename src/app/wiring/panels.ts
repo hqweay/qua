@@ -441,13 +441,13 @@ export function setupPanels(deps: PanelsDeps) {
    * **新建**后把用户带到它的定义页，那里就是选项编辑器。复用已有定义不跳 ——
    * 用户还在原来那一块上，而且那条定义已经有选项。
    */
-  const createDef = (b: Block, label: string, kind: PropKind, target: PropTarget, mode?: PropCreateMode): void => {
+  const createDef = (b: Block, label: string, kind: PropKind, target: PropTarget, mode?: PropCreateMode, format?: string): void => {
     const name = normalizeAlias(label)
     const existed = kb.propDefs().some((d) => normalizeAlias(propLabel(d)) === name && propKindOf(d) === kind)
     const before = new Set(kb.propDefs().map((d) => d.id))
     void deps
       .getRegistry()
-      .invoke('core.props/create-def', { blockId: b.id, label, kind, target, ...(mode ? { mode } : {}) }, 'ui')
+      .invoke('core.props/create-def', { blockId: b.id, label, kind, target, ...(mode ? { mode } : {}), ...(format ? { format } : {}) }, 'ui')
     if (kind !== 'select') return
     if (mode !== 'new' && existed) return
     const defs = kb.propDefs()
@@ -618,10 +618,10 @@ export function setupPanels(deps: PanelsDeps) {
       // ⚠️ 两个去处显式声明（`target`），不按块类型猜：标签块既要有自己的值、又要声明给成员
       addOwnProp: (b, propId) =>
         void deps.getRegistry().invoke('core.props/add-field', { blockId: b.id, propId, target: 'own' }, 'ui'),
-      createOwnDef: (b, label, kind, mode) => createDef(b, label, kind, 'own', mode),
+      createOwnDef: (b, label, kind, mode, format) => createDef(b, label, kind, 'own', mode, format),
       declareProp: (b, propId) =>
         void deps.getRegistry().invoke('core.props/add-field', { blockId: b.id, propId, target: 'declared' }, 'ui'),
-      createDeclaredDef: (b, label, kind, mode) => createDef(b, label, kind, 'declared', mode),
+      createDeclaredDef: (b, label, kind, mode, format) => createDef(b, label, kind, 'declared', mode, format),
       declaredFields: (b) => [...kb.declaredFieldsOf(b.id)],
       undeclareField: (b, propId) => void deps.getRegistry().invoke('core.props/undeclare', { blockId: b.id, propId }, 'ui'),
       /**

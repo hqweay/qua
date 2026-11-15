@@ -180,18 +180,28 @@ export function propsCommands(
      * `mode: 'new'` 是那条「错了好改」的退路：同名两义是合法的，各自一个 `propId`。
      * 定义清单与标签清单都是**命名的库读**（`kb.propDefs`／`kb.tags`），不扫森林。
      */
-    createPropDef: (blockId, label, kind, target, mode: PropCreateMode = 'reuse') => {
+    createPropDef: (blockId, label, kind, target, mode: PropCreateMode = 'reuse', format?: string) => {
       const name = label.trim()
       if (name === '') {
         d.toast(t('ui.props.needLabel'), 'warn')
         return ''
       }
       const k = kind.trim() === '' ? 'text' : kind.trim()
+      const effKind = isCurrentPropKind(k) ? k : 'text'
+      // 格式只在 kind 的允许集里收；不在允许集 ⇒ 忽略（宽容面与 set-format 同一条：坏值不写，不拒整笔）
+      const fmt =
+        format !== undefined && format !== '' && PROP_KIND_SPECS[effKind].formats.includes(format) ? format : undefined
+      // text 的复用按**有效格式**双向对齐：要链接、已有同名纯文本（或反过来）都是
+      // 两条属性——单向判会有一边静默丢格式。其余 kind 没有格式轴，维持旧口径。
+      const wantFormat = effKind === 'text' ? (fmt ?? 'plain') : undefined
       const existing =
         mode === 'new'
           ? undefined
           : d.kb.propDefs().find(
-              (def) => normalizeAlias(propLabel(def)) === normalizeAlias(name) && propKindOf(def) === k,
+              (def) =>
+                normalizeAlias(propLabel(def)) === normalizeAlias(name) &&
+                propKindOf(def) === k &&
+                (wantFormat === undefined || (formatOf(def) ?? 'plain') === wantFormat),
             )
       let propId = ''
       if (existing) {
@@ -203,7 +213,7 @@ export function propsCommands(
           .join('、')
         d.toast(t('ui.props.reused', { source: from === '' ? t('ui.props.own') : from }), 'info')
       } else {
-        const def = mkPropDef(name, isCurrentPropKind(k) ? k : 'text')
+        const def = mkPropDef(name, effKind, fmt !== undefined ? { [FORMAT_PROP]: fmt } : {})
         propId = def.id
         // 定义块与「挂到这一块」是**同一笔**：拆开就会留下「定义有了、没人用它」的半批。
         // 定义住**森林顶层**（不被任何标签子树带走）；结构写经 `tx.insert` 产 op，

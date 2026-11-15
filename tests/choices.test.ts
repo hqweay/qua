@@ -435,6 +435,26 @@ test('createPropDef：默认复用同名同 kind；mode:new 建第二个 propId'
   assert.equal(kb.propDefs().length, 3)
 })
 
+test('createPropDef：格式一等入口——建时落 _format；同名不同格式不复用；坏格式忽略', () => {
+  const { cmds, kb } = commandHarness()
+  // 新建时就定格式（「链接」入口）：落 `_format`，不用建完再进配置页
+  const link = cmds.createPropDef('', '主页', 'text', 'own', undefined, 'url')
+  assert.equal(formatOf(kb.propDefs().find((d) => d.id === link)!), 'url')
+
+  // 同名不同格式 ⇒ 不复用（复用会静默丢格式），另建一条纯文本
+  const plain = cmds.createPropDef('', '主页', 'text', 'own')
+  assert.notEqual(plain, link, '链接 ≠ 同名纯文本')
+  assert.equal(formatOf(kb.propDefs().find((d) => d.id === plain)!), undefined)
+
+  // 同名同格式 ⇒ 复用同一条
+  assert.equal(cmds.createPropDef('', '主页', 'text', 'own', undefined, 'url'), link)
+
+  // 坏格式（number 没有格式轴）⇒ 忽略，按普通定义建，不拒整笔
+  const n = cmds.createPropDef('', '数量', 'number', 'own', undefined, 'url')
+  assert.ok(n !== '')
+  assert.equal(formatOf(kb.propDefs().find((d) => d.id === n)!), undefined)
+})
+
 test('选项命令：加/改名/移动/作用域/删除都写定义块（值不清、不插子块）', () => {
   const { cmds, kb } = commandHarness()
   const defId = cmds.createPropDef('', '状态', 'select', 'own')

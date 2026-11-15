@@ -330,6 +330,8 @@ export interface App {
     kind: string,
     target: PropTarget,
     mode?: PropCreateMode,
+    /** text 格式轴的一等入口（新建时就定格式，不用建完再进配置）；不在允许集 ⇒ 忽略 */
+    format?: string,
   ): string
   /**
    * 把已有定义挂到块上：`own` ＝ 这一块自己的值槽，`declared` ＝ 声明给成员。
