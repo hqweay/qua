@@ -40,6 +40,16 @@ test('`select` 的值是选项 id：chip 要显示选项名', () => {
   assert.deepEqual(withChoices, ['状态 ＝ 已完成'])
 })
 
+test('`ref` 属性的值是块 id：chip 要显示目标块名，不把裸 id 摆给用户', () => {
+  const refFields = [{ id: 'r', label: '引用测试', kind: 'ref' as const }]
+  assert.deepEqual(
+    queryChips({ where: { prop: { id: 'r', eq: 'blk1' } } }, refFields, undefined, (id) =>
+      id === 'blk1' ? '项目页' : '已删除',
+    ),
+    ['引用测试 ＝ 项目页'],
+  )
+})
+
 test('引用／这一块／角色：这些形状以前一律是「复合条件」', () => {
   const label = (id: string) => (id === 'x' ? '目标块' : id)
   assert.deepEqual(queryChips({ where: { ref: 'x' } }, fields, undefined, label), ['引用了 目标块'])

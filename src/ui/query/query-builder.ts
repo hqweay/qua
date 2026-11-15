@@ -21,6 +21,7 @@ import {
   DIVIDER_TYPE,
   EMBED_TYPE,
   type Marks,
+  type PropKind,
   type QuerySpec,
   type TreeRow,
   type TreeNode,
@@ -71,8 +72,11 @@ const DIR_CHIP: Record<'up' | 'down' | 'near', MsgId> = {
 }
 
 export interface ConditionTextDeps {
-  /** 属性定义（id → 显示名）；不在表里的 id 再问系统槽名字 */
-  fields: readonly { id: string; label: string }[]
+  /**
+   * 属性定义（id → 显示名）；不在表里的 id 再问系统槽名字。
+   * `kind` 要跟着带：值位是不是块 id 由它判（`ref` 的值要翻名字，见 `propText`）。
+   */
+  fields: readonly { id: string; label: string; kind?: PropKind }[]
   /** `select` 的值是选项块 id，要换成选项名 */
   choices?: (propId: string) => readonly { id: string; label: string }[]
   /** 引用／这一块 `/` 某一块的目标 id → 名字 */
@@ -92,7 +96,7 @@ export interface ConditionTextDeps {
  */
 export function queryChips(
   spec: QuerySpec,
-  fields: readonly { id: string; label: string }[],
+  fields: readonly { id: string; label: string; kind?: PropKind }[],
   choices?: (propId: string) => readonly { id: string; label: string }[],
   refLabel?: (id: string) => string,
   tagLabel?: (id: string) => string,
@@ -222,13 +226,17 @@ function dayText(row: Extract<TreeRow, { kind: 'day' }>): string {
 }
 
 function propText(row: Extract<TreeRow, { kind: 'prop' }>, deps: ConditionTextDeps): string {
-  const name =
-    deps.fields.find((f) => f.id === row.field)?.label ??
-    systemQueryFieldLabel(row.field) ??
-    t('ui.query.fieldMissing')
+  const field = deps.fields.find((f) => f.id === row.field)
+  const name = field?.label ?? systemQueryFieldLabel(row.field) ?? t('ui.query.fieldMissing')
   if (row.op === 'exists') return t(row.value === 'false' ? 'ui.query.label.notExists' : 'ui.query.label.exists', { name })
   if (row.op === 'empty') return t(row.value === 'false' ? 'ui.query.label.notEmpty' : 'ui.query.label.empty', { name })
   const choice = deps.choices?.(row.field)?.find((c) => c.id === row.value)
+  /**
+   * **值是块 id 的字段一律翻名字**（`ref`）——与分组列头、卡片、属性行同一条口径，
+   * 都走 `refLabel`（目标没了由它兜「已删除」），裸 id 不许露给用户。
+   * 判据按字段的 kind，不猜值的形状：`select` 的值也是 id，但它走上面的选项表。
+   */
+  const refShown = field?.kind === 'ref' ? deps.refLabel?.(row.value) : undefined
   const shown =
     row.value === SELF
       ? t('ui.query.selfProp')
@@ -236,6 +244,6 @@ function propText(row: Extract<TreeRow, { kind: 'prop' }>, deps: ConditionTextDe
         ? t('ui.query.builder.noValue')
         : row.field === '_type'
           ? typeValueLabel(row.value)
-          : (choice?.label ?? row.value)
+          : (choice?.label ?? refShown ?? row.value)
   return t('ui.query.label.cmp', { name, op: t(OP_TEXT[row.op]), value: shown })
 }
