@@ -45,6 +45,9 @@ import {
   propKindOf,
   propLabel,
   queryFieldsOf,
+  evaluateQuerySpec,
+  fieldCoverageOf,
+  resolveRows,
   readMountView,
   refDomainIds,
   refDomainNames,
@@ -1090,6 +1093,24 @@ export function setupPanels(deps: PanelsDeps) {
   ): ViewHost {
     const hostId = host.id
     const ownerBlock = blockOf(owner)
+    /**
+     * 求值上下文按**拥有者**分（与下面喂给 ViewHost 的同一份）：
+     *   · tab 拥有者（local）是挂载表面 ⇒ `$self`＝**宿主块自己**；
+     *     顶层宿主（日记的天、顶层页）也能当 `$self`，方向条件自己决定往下看多少。
+     *   · 块拥有者（center 查询块）`$self` 指它所在的容器：查询块住在哪一页，
+     *     `{up:{is:$self}}` 就是那一页之下；顶层没有容器 ⇒ `$self` 不可用（无条件即整库）。
+     */
+    const evalContext: QueryContext =
+      binding?.kind === 'embed'
+        ? embedContextFor(binding.blockId, hostId)
+        : owner.kind === 'tab'
+          ? tabContextFor(host, ownerBlock?.id)
+          : contextFor(ownerBlock?.id ?? hostId)
+    /** 这台宿主查询源的结果集（条件树字段覆盖率的分母；children 源没有查询条件 ⇒ 空 ⇒ 全量） */
+    const queryRecords = () => {
+      const q = owners.read(owner)?.query
+      return q ? resolveRows(evaluateQuerySpec(q, kb, evalContext), kb) : []
+    }
     const vh = new ViewHost(createViewHostEls(), {
       store: blocks,
       write: editorRun(run, () => opts?.source?.() ?? edOfMount(hostId)),
@@ -1099,19 +1120,7 @@ export function setupPanels(deps: PanelsDeps) {
       ...(binding ? { binding } : {}),
       ...(derived ? { derived } : {}),
       host: () => blocks.find(hostId) ?? host,
-      /**
-       * 求值上下文按**拥有者**分：
-       *   · tab 拥有者（local）是挂载表面 ⇒ `$self`＝**宿主块自己**；
-       *     顶层宿主（日记的天、顶层页）也能当 `$self`，方向条件自己决定往下看多少。
-       *   · 块拥有者（center 查询块）`$self` 指它所在的容器：查询块住在哪一页，
-       *     `{up:{is:$self}}` 就是那一页之下；顶层没有容器 ⇒ `$self` 不可用（无条件即整库）。
-       */
-      context:
-        binding?.kind === 'embed'
-          ? embedContextFor(binding.blockId, hostId)
-          : owner.kind === 'tab'
-            ? tabContextFor(host, ownerBlock?.id)
-            : contextFor(ownerBlock?.id ?? hostId),
+      context: evalContext,
       surface: opts?.surface ?? (owner.kind === 'tab' ? 'mount' : 'center'),
       ...(opts?.titleInto ? { titleInto: opts.titleInto } : {}),
       onChange: () => {
@@ -1144,10 +1153,11 @@ export function setupPanels(deps: PanelsDeps) {
       // 选项显示名里 `· #名` 的解析（`select` 单元格与属性区同一份口径）
       tagName: tagNameOf,
       /**
-       * 条件树的字段下拉：属性定义 ＋ **有值控件的系统槽**（`core/query-fields.ts` 一处给）。
+       * 条件树的字段下拉：属性定义 ＋ **有值控件的系统槽**（`core/query-fields.ts` 一处给）；
+       * 有覆盖率时按「这批结果里真有值的栏」排前（与分组下拉同一条原则）。
        * 引擎属性与没有值控件的系统槽不进下拉（它们仍可由 JSON 写成）。
        */
-      fields: () => queryFieldsOf(kb.roots()),
+      fields: () => queryFieldsOf(kb.roots(), fieldCoverageOf(queryRecords())),
       /**
        * 分组列头／条件 chip 的**选项域**：`select` 的选项是定义块上的记录
        * （数组序＝选项序，含墓碑——值指向已删选项时名字仍要读得出，与 `choiceById`

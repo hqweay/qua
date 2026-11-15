@@ -45,7 +45,7 @@ import { markPicker } from './mark-picker.ts'
 export interface QueryTreeDeps {
   /** 当前条件（现读：可能被命令／撤销改过） */
   spec: () => QuerySpec
-  fields: () => readonly { id: string; label: string; kind?: PropKind }[]
+  fields: () => readonly { id: string; label: string; kind?: PropKind; count?: number; total?: number }[]
   /** `select` 属性的选项（值是选项块 id） */
   choices?: (propId: string) => readonly { id: string; label: string }[]
   /** 写条件（一次事务／一轮撤销） */
@@ -686,7 +686,11 @@ export class QueryTree {
     const row = leaf.row
     const out: HTMLElement[] = []
     const fields = this.deps.fields()
-    const fieldOptions = fields.map((f) => ({ value: f.id, label: f.label }))
+    // 覆盖率标在选项上（与分组下拉同一格式）：只对这批结果有意义的栏才值得出现在前面
+    const fieldOptions = fields.map((f) => ({
+      value: f.id,
+      label: f.count !== undefined ? `${f.label}（${f.count}／${f.total}）` : f.label,
+    }))
     if (row.field !== '' && !fields.some((f) => f.id === row.field)) {
       /**
        * 不在下拉里有两种情况，必须分开说：

@@ -26,6 +26,37 @@ export interface QueryFieldOption {
   label: string
   kind: PropKind
   cardinality?: Cardinality
+  /** 这批结果里多少块带着这一栏（只在给了覆盖率时出现；渲染端拼「（n／m）」标在选项上） */
+  count?: number
+  /** 覆盖率分母（与 `count` 成对出现） */
+  total?: number
+}
+
+/**
+ * 一批结果上的字段覆盖率 —— **候选来自结果**（决策口径：字段下拉按覆盖率排序）在
+ * 条件树这一面的分子与分母。「出现过」＝ 记录的属性袋里这一栏**有非空值**
+ * （与分组候选 `groupChoicesOf` 同一份判据，两处各算一遍就会出现排位不同）。
+ */
+export interface FieldCoverage {
+  /** 这批结果一共多少块（分母） */
+  total: number
+  counts: ReadonlyMap<string, number>
+}
+
+/**
+ * 从一批记录现算覆盖率。空结果 ⇒ `undefined`：没有可数的答案就别假装知道——
+ * 下拉回落全量平铺（现状），不发明一个「0 覆盖」的空推荐。
+ */
+export function fieldCoverageOf(records: readonly { values: Readonly<Record<string, unknown>> }[]): FieldCoverage | undefined {
+  if (records.length === 0) return undefined
+  const counts = new Map<string, number>()
+  for (const r of records) {
+    for (const [k, v] of Object.entries(r.values)) {
+      if (v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0)) continue
+      counts.set(k, (counts.get(k) ?? 0) + 1)
+    }
+  }
+  return { total: records.length, counts }
 }
 
 /**
@@ -38,13 +69,13 @@ export interface QueryFieldOption {
 const QUERY_FIELD_SYSTEM_SLOTS: readonly string[] = ['_date', '_aliases']
 
 /** 条件树字段下拉：属性定义（先序）＋ 系统槽；顺序＝前者按库、后者固定 */
-export function queryFieldsOf(forest: readonly Block[]): QueryFieldOption[] {
+export function queryFieldsOf(forest: readonly Block[], coverage?: FieldCoverage): QueryFieldOption[] {
   const labels = propDisplayLabels(forest)
-  const out: QueryFieldOption[] = []
+  const defs: QueryFieldOption[] = []
   for (const def of allPropDefs(forest)) {
     if (isEngineProp(def.id)) continue
     const card = cardinalityOf(def)
-    out.push({
+    defs.push({
       id: def.id,
       label: labels.get(def.id) ?? def.id,
       kind: propKindOf(def),
@@ -54,7 +85,26 @@ export function queryFieldsOf(forest: readonly Block[]): QueryFieldOption[] {
   for (const id of QUERY_FIELD_SYSTEM_SLOTS) {
     const label = systemQueryFieldLabel(id)
     if (label === undefined) continue
-    out.push({ id, label, kind: id === '_date' ? 'date' : 'text' })
+    defs.push({ id, label, kind: id === '_date' ? 'date' : 'text' })
   }
-  return out
+  if (!coverage || coverage.total === 0) return defs
+  /**
+   * **候选来自结果**（与分组下拉同一条原则的条件树面）：这批结果里真有值的栏排前
+   * （覆盖率降序，同数保持库序），没人有的栏殿后——**软排序，不禁选**：跨标签、
+   * 临时属性仍是合法条件，只是要往下滚。系统槽不参与排序也不标注（它对任何一批
+   * 结果都可问，覆盖率不携带信息）。空结果在入口就回落了，这里不会有 0 推荐假聪明。
+   */
+  const isSystem = new Set(QUERY_FIELD_SYSTEM_SLOTS)
+  const propDefs = defs.filter((f) => !isSystem.has(f.id))
+  const slots = defs.filter((f) => isSystem.has(f.id))
+  const withCoverage = propDefs
+    .map((f, i) => ({ f, i, count: coverage.counts.get(f.id) ?? 0 }))
+    .sort((a, b) => b.count - a.count || a.i - b.i)
+  return [
+    ...withCoverage
+      .filter((x) => x.count > 0)
+      .map(({ f, count }) => ({ ...f, count, total: coverage.total })),
+    ...withCoverage.filter((x) => x.count === 0).map(({ f }) => f),
+    ...slots,
+  ]
 }

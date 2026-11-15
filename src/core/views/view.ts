@@ -24,6 +24,7 @@ import type { KbClient } from '../kb/types.ts'
 import { declaredFieldIds, ownFieldIds } from '../props/props.ts'
 import { plainText } from '../model/runs.ts'
 import { canonicalNode, isEmptyWhere, isQueryNode, type QueryNode, type QuerySpec, type SortKey } from '../query/query.ts'
+import { fieldCoverageOf } from '../query/query-fields.ts'
 
 /* ------------------------------------------------------------ 类型 */
 
@@ -1304,14 +1305,10 @@ export function groupChoicesOf(
     cardinalityOf?: (propId: string) => 'one' | 'many'
   },
 ): GroupChoice[] {
-  const total = records.length
-  const counts = new Map<string, number>()
-  for (const r of records) {
-    for (const [k, v] of Object.entries(r.values)) {
-      if (v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0)) continue
-      counts.set(k, (counts.get(k) ?? 0) + 1)
-    }
-  }
+  // 覆盖率只有一份判据（「出现过」＝ 属性袋里非空）：与条件树字段下拉同一份（query-fields）
+  const coverage = fieldCoverageOf(records)
+  const total = coverage?.total ?? 0
+  const counts = coverage?.counts ?? new Map<string, number>()
   return [...counts.entries()]
     .filter(([k, n]) => n > 0 && (k === '_tags' || opts.fields.some((f) => f.id === k)))
     .sort((a, b) => b[1] - a[1])

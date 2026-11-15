@@ -8,7 +8,7 @@
  */
 import './styles.css'
 import { addAlias, addList, blockLabel, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, COLOR_PROP, ICON_PROP, isColorValue, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, cardLayoutOf, DERIVED_VIEW_KINDS, propKindOf, propLabel, choicesOf, choicesFor, childDisplayProps, enginePropDefs, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec, withBlockOwnerData, VIEW_KIND_ICON, type StoredViewKind, type UndoKind, type ColorAxis } from './core/index.ts'
-import { belowFieldsRows, childrenRecords, choiceDisplayLabel, defaultDisplayPropsFor, evaluateQuerySpec, TAGS_COLUMN, cardinalityOf, queryFieldsOf, resolveRows, singleValueOf, valueListOf, type BelowFields } from './core/index.ts'
+import { belowFieldsRows, childrenRecords, choiceDisplayLabel, defaultDisplayPropsFor, evaluateQuerySpec, fieldCoverageOf, TAGS_COLUMN, cardinalityOf, queryFieldsOf, resolveRows, singleValueOf, valueListOf, type BelowFields, type FieldCoverage } from './core/index.ts'
 import { openChoicePicker } from './app/choice-picker.ts'
 import { plainText } from './core/model/runs.ts'
 import { checkExternalUrl, rejectText } from './core/relations/link.ts'
@@ -1744,6 +1744,8 @@ function openSpecPopover(opts: {
   spec: () => QuerySpec
   showOptions?: boolean
   onApply: (spec: QuerySpec) => void
+  /** 这批结果的覆盖率（字段下拉按它排序；不给＝全量平铺，现状） */
+  coverage?: () => FieldCoverage | undefined
 }): void {
   const hostId =
     opts.owner.kind === 'block'
@@ -1755,8 +1757,9 @@ function openSpecPopover(opts: {
   layers.openPopover((box) => {
     const tree = new QueryTree(box, {
       spec: opts.spec,
-      // 条件树的字段候选只有一份（`core/query-fields.ts`）：属性定义 ＋ 有值控件的系统槽
-      fields: () => queryFieldsOf(kb.roots()),
+      // 条件树的字段候选只有一份（`core/query-fields.ts`）：属性定义 ＋ 有值控件的系统槽；
+      // 有覆盖率时按「这批结果里真有值的栏」排前（与分组下拉同一条原则）
+      fields: () => queryFieldsOf(kb.roots(), opts.coverage?.()),
       /**
        * `select` 的选项：**定义块的直接子块，全量、排除软删**。
        * 不按某一块的可选范围收窄（`choicesForDef`）—— 查询是跨块的，
@@ -2289,7 +2292,6 @@ const app: App = {
     const anchor =
       owner.kind === 'block' ? (app.ed.blockEl(owner.blockId)?.getBoundingClientRect() ?? null) : app.ed.caretRect()
     layers.openPopover((box) => {
-      const fields = () => queryFieldsOf(kb.roots())
       const readSource = () => {
         const d = owners.read(owner)
         if (!d) return { view: null, source: { kind: 'children', blockId: '' } as const, filter: null, display: undefined }
@@ -2306,17 +2308,20 @@ const app: App = {
         if (src.kind !== 'children') return []
         return childrenRecords(src.blockId, kb)
       }
+      /** 筛选候选与字段覆盖率共用同一批：children 现读子块；query 现算 spec（各答各的问法） */
+      const candidateRecords = () => {
+        const src = readSource().source
+        if (src.kind !== 'query') return records()
+        return resolveRows(evaluateQuerySpec(src.spec, kb, {}), kb)
+      }
+      const fields = () => queryFieldsOf(kb.roots(), fieldCoverageOf(candidateRecords()))
       const panel = new ViewOptionsPanel({
         owner,
         viewId: () => readViewSet(owners.read(owner) ?? { views: [] }).active?.id ?? '',
         read: readSource,
         fields,
         records,
-        filterCandidates: () => {
-          const src = readSource().source
-          if (src.kind !== 'query') return records()
-          return resolveRows(evaluateQuerySpec(src.spec, kb, {}), kb)
-        },
+        filterCandidates: candidateRecords,
         atomLabel: (atom) => {
           if ('tag' in atom) return atom.tag
           const b = kb.get(atom.up.is)
@@ -2362,6 +2367,19 @@ const app: App = {
             ? (owners.read(owner)?.defaultFilter ?? { any: [] })
             : (owners.read(owner)?.views.find((v) => v.id === viewId)?.filter ?? { any: [] }),
       }),
+      /** 覆盖率分母＝这个拥有者显示的那批块（children 现读；query 现算） */
+      coverage: () => {
+        const d = owners.read(owner)
+        if (!d) return undefined
+        const src = sourceOfOwner(owner, d, owner.kind === 'block' ? (blocks.find(owner.blockId) ?? undefined) : undefined)
+        const records =
+          src.kind === 'children'
+            ? childrenRecords(src.blockId, kb)
+            : src.kind === 'query'
+              ? resolveRows(evaluateQuerySpec(src.spec, kb, {}), kb)
+              : []
+        return fieldCoverageOf(records)
+      },
       showOptions: false,
       onApply: (spec) => {
         void registry.invoke('core.view/set-filter', { owner, viewId, filter: filterOfSpec(spec) }, 'menu')
@@ -2388,6 +2406,11 @@ const app: App = {
       owner,
       anchor,
       spec: () => owners.read(owner)?.query ?? { where: { any: [] } },
+      /** 覆盖率分母＝查询自己的结果集（条件还没圈出块时 ⇒ 空 ⇒ 下拉回落全量） */
+      coverage: () => {
+        const q = owners.read(owner)?.query
+        return q ? fieldCoverageOf(resolveRows(evaluateQuerySpec(q, kb, {}), kb)) : undefined
+      },
       onApply: (spec) => {
         void registry.invoke('core.query/set-spec', { owner, spec }, 'builder')
         layers.closePopover()
