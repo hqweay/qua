@@ -63,6 +63,15 @@ export interface NameChoiceOpts {
    * 悄悄退回全部候选（那时用户看到的是「限制没生效」，比空清单更难查）。
    */
   onlyIds?: ReadonlySet<string>
+  /**
+   * `onlyIds` 的**软**档：白名单只收窄**空查询**的列表（＝默认范围），
+   * 一旦输入查询词，域外的候选也列出来，域内的命中排在前面。
+   *
+   * 判据是「域只是方便筛的默认值，不是语义限制」：块引用就是这样——域外的块
+   * 照样可以被引用，只是默认不摆在眼前。反过来，条件树的标签值是**硬**白名单
+   * （只能在这些里选），所以那一档不传它。
+   */
+  onlyIdsSoft?: boolean
   /** 已用候选优先：这些 id 排在最前（其余保持既定顺序） */
   priorityIds?: readonly string[]
   /** 当前值的那一行标「当前」徽标（值选择器接住「现在选的是谁」） */
@@ -229,9 +238,18 @@ export function createNameChoice(
 
   const rows = (query: string): Row[] => {
     const want = normalizeAlias(query)
-    const hits = ordered()
+    const soft = opts.onlyIdsSoft === true && want !== ''
+    const scoped = ordered()
       .filter((b) => hidden.size === 0 || !hidden.has(b.id))
-      .filter((b) => only === null || only.has(b.id))
+      // 硬白名单：域外一律不列。软白名单：只在**没输入查询词**时收窄 —— 默认范围
+      .filter((b) => only === null || only.has(b.id) || soft)
+    /** 软域的域内命中排前面：用户先看到「他配的那一片」，再看到全库的其它命中 */
+    const white = only
+    if (soft && white !== null) {
+      const inDomain = (b: Block): number => (white.has(b.id) ? 0 : 1)
+      scoped.sort((a, b) => inDomain(a) - inDomain(b))
+    }
+    const hits = scoped
       .filter((b) => subtree === null || subtree.has(b.id))
       .filter((b) => matches(b, want))
       .map(rowFor)

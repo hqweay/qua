@@ -342,17 +342,19 @@ export function setupPanels(deps: PanelsDeps) {
       // 自己不能指向自己：那会造出一个立刻成环的引用
       ...(owner ? { excludeIds: [owner.id] } : {}),
       currentId: current,
-      ...(domain.ids === null ? {} : { onlyIds: domain.ids }),
+      // 候选域是**默认范围**不是白名单：空查询只列域内，一输入就搜全库（域内命中在前）
+      ...(domain.ids === null ? {} : { onlyIds: domain.ids, onlyIdsSoft: true }),
     })
     layers.openMenu({
       rows: [...newRow(''), ...rootRow(), ...choice.rows('')],
       anchor: anchor ?? deps.getEd().caretRect(),
       // 同一颗值按钮再点一次＝收起（toggle）
       ...(trigger ? { trigger } : {}),
-      // 标题带上约束的名字：用户要知道「为什么只有这几行」
+      // 标题说明**默认范围**（域是方便筛的默认值，不是白名单）；输入框说「可以搜全库」
       title: scopedTitle(),
       searchable: true,
       focusSearch: true,
+      ...(domain.ids === null ? {} : { placeholder: t('ui.props.pickRefSearchAll') }),
       emptyText: domain.ids === null ? t('ui.props.refEmpty') : t('ui.props.refEmptyConstrained'),
       onQuery: (q) => layers.setRows([...newRow(q), ...rootRow(), ...choice.rows(q)]),
       onPick: (row) => {

@@ -29437,7 +29437,8 @@ await check('T306 自定义色：色盘选 hex 写入并进最近色；chip soft
 /**
  * **`ref` 的候选域（`_refDomain` 软约束 ＋ 新建并引用）**。
  *
- * 一条故事走完：定义页把候选域切到「限定标签」并选 #演员 → 值选择器只剩下那些成员
+ * 一条故事走完：定义页把默认候选切到「按标签」并选 #演员 → 值选择器默认只剩那些成员，
+ * 输入查询词则能搜到范围外的块
  * → 搜索词给「新建并引用」→ 新建的块没打那个标签，值**照常显示**
  * （软约束的判据：只过滤候选，不校验存量值）。
  *
@@ -29467,7 +29468,7 @@ await check('T309 ref 的候选域：四档切换；标签档过滤候选；手�
   assert(setup.defId !== '' && setup.tagId !== '', '前置：定义与标签都该建出来：' + JSON.stringify(setup))
   await page.waitForTimeout(260)
 
-  // ② 定义页：候选域四档下拉，默认「不限」；切到「限定标签」⇒ 选 #演员 ⇒ 写 _refDomain
+  // ② 定义页：默认候选四档下拉，默认「不限」；切到「按标签」⇒ 选 #演员 ⇒ 写 _refDomain
   await page.evaluate((defId) => window.__qua.invoke('core.block/focus-block', { blockId: defId }), setup.defId)
   await page.waitForTimeout(300)
   const emptyState = await page.evaluate(() => {
@@ -29484,7 +29485,7 @@ await check('T309 ref 的候选域：四档切换；标签档过滤候选；手�
   assert(emptyState.mode === 'any' && emptyState.chip === 0, '没有约束时档位是「不限」且没有 chip：' + JSON.stringify(emptyState))
   assert(
     ['any', 'tags', 'blocks', 'query'].every((m) => emptyState.modes.includes(m)),
-    '四档都在（不限／限定标签／指定块／按查询）：' + JSON.stringify(emptyState.modes),
+    '四档都在（不限／按标签／指定块／按查询）：' + JSON.stringify(emptyState.modes),
   )
 
   // 切档本身不写库（取消选择＝一切照旧）；真选中标签才落一条 tags 档的域
@@ -29535,7 +29536,16 @@ await check('T309 ref 的候选域：四档切换；标签档过滤候选；手�
   assert(menu.labels.some((x) => x.includes('候选甲')), '成员应在候选里：' + JSON.stringify(menu.labels))
   assert(!menu.labels.some((x) => x.includes('候选乙')), '打了别的标签的块不该在候选里（约束生效）：' + JSON.stringify(menu.labels))
   assert(!menu.labels.some((x) => x.includes('候选丙')), '没打标签的块不该在候选里：' + JSON.stringify(menu.labels))
-  assert(menu.title.includes('限') && menu.title.includes('演员'), '标题应带约束的标签名：' + JSON.stringify(menu.title))
+  assert(menu.title.includes('默认') && menu.title.includes('演员'), '标题应说「默认范围」并带标签名：' + JSON.stringify(menu.title))
+
+  // ③b 默认范围是**软的**：输入域外的块名照样能搜到（域只收窄空查询的列表，不锁死可选集）
+  await page.fill('.layer .layer-input', '候选丙')
+  await page.waitForTimeout(220)
+  const widened = await page.evaluate(() =>
+    [...document.querySelectorAll('.layer-item .layer-label')].map((e) => e.textContent ?? ''),
+  )
+  assert(widened.some((x) => x.includes('候选丙')), '输入查询词应能搜到默认范围外的块：' + JSON.stringify(widened))
+  assert(!widened.some((x) => x.includes('候选甲')), '查询词仍然过滤（不命中的成员不列）：' + JSON.stringify(widened))
 
   // ④ 搜索词 ⇒ 「新建并引用」；选中当场建页并写值
   await page.fill('.layer .layer-input', '新人')
@@ -29698,7 +29708,7 @@ await check('T309 ref 的候选域：四档切换；标签档过滤候选；手�
   assert(!dayChip[0].includes(journalId.slice(0, 4)), 'chip 里不许出现裸 id：' + JSON.stringify(dayChip[0]))
 
   await ctx.close()
-  return `定义页限 #演员 ⇒ 候选只剩成员（标题带「限」）；新建并引用；约束外的值仍显示；手选块＝清单即候选、已选的不再出现、抬头念名字；日记块 chip 显示日期不露 id`
+  return `定义页按 #演员 ⇒ 默认候选只剩成员（标题说「默认」）；输入查询词能搜到范围外的块；新建并引用；范围外的值仍显示；手选块＝清单即候选、已选的不再出现、抬头念名字；日记块 chip 显示日期不露 id`
 })
 
 /**

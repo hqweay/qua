@@ -9,7 +9,8 @@
  *   ⑤ **目录只建一次**：标签再多、查询再多次，邻接表也只建一遍（旧写法是每行建一遍）；
  *   ⑥ 页／页＋标签源：只收身份块、按主地址排、身份组复用 `pick/1`／`pick/2`、**没有新建行**；
  *   ⑦ 引用源：保持**文档序**不重排、排除自己、当前值行打「当前」徽标；
- *   ⑧ `tags` 会话的既有形状（`pageFor`／`tagById`）不因泛化而丢。
+ *   ⑧ `tags` 会话的既有形状（`pageFor`／`tagById`）不因泛化而丢；
+ *   ⑨ 白名单的**软**档：空查询只列域内（默认范围），一输入就搜全库、域内命中在前。
  *
  * ⚠️ 这里刻意不测浮层 DOM／按键：菜单的键盘与 IME 组合守卫住在 `ui/overlay/layers.ts`
  *    与 `ui/overlay/query-gate.ts`，前者由真浏览器冒烟验，后者的状态机由 `query-gate` 单测钉。
@@ -208,4 +209,22 @@ test('⑧ tag 会话的既有形状不因泛化而丢（tags 表、pageFor、tag
   assert.deepEqual(choice.blocks.map((b) => b.id), ['a'], 'blocks 就是标签表（按主地址排）')
   assert.equal(choice.pageFor('brandnew')?.id, 'p')
   assert.equal(choice.tagById('a')?.id, 'a')
+})
+
+test('⑨ 白名单的软档：空查询只列域内（默认范围），一输入就搜全库、域内命中在前', () => {
+  const forest = [item('a1', 'Apple'), item('b1', 'Banana'), item('c1', 'Cherry')]
+  const scope = new Set(['b1'])
+
+  const hard = createNameChoice(forest, { kind: 'ref', onlyIds: scope })
+  assert.deepEqual(hard.rows('').map((r) => r.id), ['ref/b1'], '硬白名单：空查询只列域内')
+  assert.deepEqual(hard.rows('cherry').map((r) => r.id), [], '硬白名单：查询也出不了域')
+
+  const soft = createNameChoice(forest, { kind: 'ref', onlyIds: scope, onlyIdsSoft: true })
+  assert.deepEqual(soft.rows('').map((r) => r.id), ['ref/b1'], '软白名单：空查询仍是默认范围')
+  assert.deepEqual(
+    soft.rows('a').map((r) => r.id),
+    ['ref/b1', 'ref/a1'],
+    '软白名单：查询词命中域外块时也列出来，域内命中排在前面',
+  )
+  assert.deepEqual(soft.rows('app').map((r) => r.id), ['ref/a1'], '软白名单：只有域外命中时就列域外')
 })
