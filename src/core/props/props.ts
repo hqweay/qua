@@ -22,6 +22,7 @@ import {
   COLOR_PROP,
   ICON_PROP,
   aliasesOf,
+  blockTypeOf,
   isDeleted,
   hasList,
   isPropDefBlock,
@@ -1177,7 +1178,7 @@ export function systemQueryFieldLabel(propId: string): string | undefined {
  * |---|---|---|
  * | `_date` | `journalDate(b) !== ''`（`isJournalBlock` 同一份） | 日期串 |
  * | `_kind` | `isPropDefBlock(b)` | `text`／`date`… |
- * | `_type` | 顶层 `_type` 槽在（**开放性**：未知 id 合法） | 类型 id |
+ * | `_type` | 恒在（`blockTypeOf`：没键＝默认类型） | 类型 id（未知 id 合法，读侧降级） |
  * | `_aliases` | `aliasesOf(b)` 非空 | 地址数组（`eq` 按任一元素判） |
  * | `_tags` | 归属边里**有活着的标签**（屏幕画得出来的那些） | 标签块 id 数组 |
  * | `core/created`／`core/modified` | 必填字段，恒在 | 墙钟毫秒 |
@@ -1195,8 +1196,13 @@ function readSystemField(block: Block, propId: string, table: FieldTable): Field
       : { declared: false, value: undefined }
   }
   if (propId === '_type') {
-    const type = block.props?._type
-    return type === undefined ? { declared: false, value: undefined } : { declared: true, value: type }
+    /**
+     * 问模型判据（`blockTypeOf`）：**没有 `_type` 键就是默认类型**——「缺省＝大纲」
+     * 本来就是模型的读法，查询跟着读。⇒ `eq` 默认类型能命中没写过类型的块
+     * （裸键读法会让它命中空集，条件看起来坏了）；`exists` 恒真（类型是必答槽，
+     * 与 `core/created` 同档）；「非默认类型」用 `neq`。
+     */
+    return { declared: true, value: blockTypeOf(block) }
   }
   if (propId === ALIASES_PROP) {
     const names = aliasesOf(block)

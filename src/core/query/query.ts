@@ -81,8 +81,17 @@ export type QueryNode =
   | { ref: string | RefTarget }
   /** 带某个标签的块：值是**标签块 id**（与 `{prop}` 同一条「键是 id」纪律——标签改名不影响查询语义）；id 解析不到活着的标签块就是空集 */
   | { tag: string }
-  /** 正文包含某串 */
-  | { text: string }
+  /** 正文包含某串；**空串拒形**（contains 空串恒真，见 `isQueryNode`），对象形态＝「有正文」 */
+  | { text: string | { nonempty: true } }
+  /**
+   * **有子级**（直接子块 ≥1，可见树口径与 `{down}` 同一条：属性定义的子树不进判定）。
+   *
+   * 只留真值档：`{children:false}` 与 `{not:{children:true}}` 是同一件事的两种字节，
+   * 「叶子块」由 `not` 表达 —— 一个语义不许两种形状（与 `{ref}` 不限目标同一条判据：
+   * 「没有子级」不是恒真条件，否定是有意义的判定，所以它归「非」那一格管）。
+   * children 是结构事实不是属性槽，不进 `{prop}` 白名单——`_children` 会是第二份写法。
+   */
+  | { children: true }
   /**
    * 某属性**等于某值**，或**有没有这一栏**。
    *
@@ -752,7 +761,21 @@ export function createMatcher(forest: readonly Block[], env: QueryEnv): Matcher 
      * 否则一次查询会退化成 O(块数 × 条件数) 次森林遍历。
      */
     if ('tag' in node) return env.tags.has(block.id)
-    if ('text' in node) return plainText(block.content).includes(node.text)
+    /**
+     * 正文条件：字符串＝包含（投影坐标，原子不占格）；对象形态＝「有正文」——
+     * `plainText` 去空白后非空。只有图没有字不算（「正文」这个词问的是字，
+     * 问 asset 是另一轴，等真实问法出现再立，不预造）。
+     */
+    if ('text' in node) {
+      if (typeof node.text === 'string') return plainText(block.content).includes(node.text)
+      return plainText(block.content).trim() !== ''
+    }
+    /**
+     * 有子级：可见树按需建（与 `{up}`/`{down}` 共用同一份——纯 tag/text 查询
+     * 不为它付一次全树遍历）。直接子块，不含孙：那是「有子级」的字面意思，
+     * 「子树里有东西」由 `{down}` 答，两条不混。
+     */
+    if ('children' in node) return (visibleTree().childrenOf.get(block.id)?.length ?? 0) > 0
     if ('mark' in node) return contentHasMarks(block.content, node.mark)
     if ('link' in node) return contentHasLink(block.content, node.link.url)
     if ('prop' in node) {
@@ -985,7 +1008,16 @@ export function isQueryNode(raw: unknown): raw is QueryNode {
     return Array.isArray(ref.kind) && ref.kind.every((k) => isRefKind(k))
   }
   if ('tag' in n) return typeof n.tag === 'string'
-  if ('text' in n) return typeof n.text === 'string'
+  /**
+   * 正文条件两态：字符串＝包含，**空串拒形**（`includes('')` 恒真——一条写歪的条件
+   * 看起来像「这条条件成立」，与 `{mark:{}}` 同一条守卫；「有正文」有对象形态，不用它）；
+   * 对象＝「有正文」，只认 `{nonempty:true}` 这一个形状。
+   */
+  if ('text' in n) {
+    if (typeof n.text === 'string') return n.text !== ''
+    return !!n.text && typeof n.text === 'object' && !Array.isArray(n.text) && (n.text as { nonempty?: unknown }).nonempty === true
+  }
+  if ('children' in n) return n.children === true
   /**
    * `{mark}`：键必须是已知的 mark 键、值轴必须是合法槽名，且**归一化后非空**——
    * 空 marks 恒真（命中全库），一条写歪的条件看起来像「这条条件成立」。
@@ -1059,7 +1091,8 @@ export function canonicalNode(n: QueryNode): QueryNode {
     }
   }
   if ('tag' in n) return { tag: n.tag }
-  if ('text' in n) return { text: n.text }
+  if ('text' in n) return typeof n.text === 'string' ? { text: n.text } : { text: { nonempty: true } }
+  if ('children' in n) return { children: true }
   if ('mark' in n) return { mark: normMarks(n.mark) ?? {} }
   if ('link' in n) return n.link.url ? { link: { url: n.link.url } } : { link: {} }
   /**

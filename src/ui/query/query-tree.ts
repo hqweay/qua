@@ -24,6 +24,7 @@ import {
   TREE_ROW_KINDS,
   isQueryableSystemProp,
   systemQueryFieldLabel,
+  TYPE_DECLS,
   ENGINE_CREATED,
   ENGINE_MODIFIED,
   todayISO,
@@ -40,6 +41,7 @@ import {
   isJournalDate,
 } from '../../core/index.ts'
 import { t, type MsgId } from '../../core/infra/msg.ts'
+import { typeValueLabel } from './query-builder.ts'
 import { markPicker } from './mark-picker.ts'
 
 export interface QueryTreeDeps {
@@ -92,6 +94,7 @@ const ROW_KIND_TEXT: Record<TreeRowKind, MsgId> = {
   text: 'ui.query.prefix.text',
   prop: 'ui.query.prefix.prop',
   ref: 'ui.query.prefix.ref',
+  children: 'ui.query.prefix.children',
   is: 'ui.query.prefix.is',
   role: 'ui.query.kind.role',
   day: 'ui.query.kind.day',
@@ -118,6 +121,7 @@ function defaultRow(kind: TreeRowKind, field: string): TreeRow {
   if (kind === 'text') return { kind: 'text', value: '' }
   if (kind === 'prop') return { kind: 'prop', field, op: 'eq', value: '' }
   if (kind === 'ref') return { kind: 'ref', target: '' }
+  if (kind === 'children') return { kind: 'children' }
   if (kind === 'is') return { kind: 'is', target: '' }
   if (kind === 'role') return { kind: 'role', role: 'journal' }
   if (kind === 'mark') return { kind: 'mark', value: {} }
@@ -593,6 +597,9 @@ export class QueryTree {
           ),
         )
         break
+      case 'children':
+        // 无值位：一行就是一条完整条件（「叶子块」＝ 挂「非」），与 role 行同款
+        break
       case 'day':
         el.append(...this.dayControls(row))
         break
@@ -669,6 +676,7 @@ export class QueryTree {
     input.className = 'qt-value ui-input qt-slot'
     input.dataset.qt = 'value'
     input.placeholder = t('ui.query.builder.textHint')
+    input.dataset.tip = t('ui.query.textEmptyHint')
     input.value = row.value
     input.addEventListener('input', () => {
       row.value = input.value
@@ -685,7 +693,7 @@ export class QueryTree {
     if (leaf.row.kind !== 'prop') return []
     const row = leaf.row
     const out: HTMLElement[] = []
-    const fields = this.deps.fields()
+    const fields = this.deps.fields(this.batchSpec())
     // 覆盖率标在选项上（与分组下拉同一格式）：只对这批结果有意义的栏才值得出现在前面
     const fieldOptions = fields.map((f) => ({
       value: f.id,
@@ -719,7 +727,7 @@ export class QueryTree {
     )
     out.push(
       selectEl(
-        opsFor(this.fieldKind(row.field), row.op).map((op) => ({ value: op, label: t(OP_TEXT[op]) })),
+        opsFor(this.fieldKind(row.field), row.op, row.field).map((op) => ({ value: op, label: t(OP_TEXT[op]) })),
         row.op,
         (next) => {
           row.op = next as DraftOp
@@ -752,6 +760,27 @@ export class QueryTree {
         'qt-value',
         'value',
       )
+      return sel
+    }
+    /**
+     * 块类型的值域是**封闭注册表**（`TYPE_DECLS`）——给下拉不给输入框，
+     * 用户没有机会拼错 id。JSON 写进来的未知 id 如实显示（读侧降级画成大纲，
+     * 但「块类型＝那个 id」仍是可编辑的事实）。
+     */
+    if (row.field === '_type') {
+      const known = Object.keys(TYPE_DECLS)
+      const current = row.value
+      const sel = document.createElement('select')
+      sel.className = 'qt-value'
+      sel.dataset.qt = 'value'
+      sel.appendChild(option('', t('ui.query.builder.noValue')))
+      if (current !== '' && !known.includes(current)) sel.appendChild(option(current, current))
+      for (const id of known) sel.appendChild(option(id, typeValueLabel(id)))
+      sel.value = current
+      sel.addEventListener('change', () => {
+        row.value = sel.value
+        this.syncRow(sel, row)
+      })
       return sel
     }
     const kind = this.fieldKind(row.field)

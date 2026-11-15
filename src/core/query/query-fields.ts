@@ -62,11 +62,13 @@ export function fieldCoverageOf(records: readonly { values: Readonly<Record<stri
 /**
  * 下拉里真正列出来的系统槽（每一项都有对应的值控件与清楚的问法）。
  *
- * 加一项的前提：**用户能不查文档就填出值**。`_date` 有日期控件、`_aliases` 是名字文本；
- * `_tags` 要等标签选择器（且只该有「有标签」这一档，避免与 `{tag}` 重复），
- * `core/created`／`core/modified` 走「时间」行（`kind:'stamp'`），都不进这一列。
+ * 加一项的前提：**用户能不查文档就填出值**。`_date` 有日期控件、`_aliases` 是名字文本、
+ * `_type` 的值域是封闭注册表（`TYPE_DECLS`，值控件是类型下拉）；
+ * `core/created`／`core/modified` 走「时间」行（`kind:'stamp'`），不进这一列。
+ * `_tags` **不进**：「有任意标签」由标签行空值承载（拼回 `_tags exists`），
+ * 而 `eq` 要标签块 id，用户填不出——下拉不给「必然填错」的入口。
  */
-const QUERY_FIELD_SYSTEM_SLOTS: readonly string[] = ['_date', '_aliases']
+const QUERY_FIELD_SYSTEM_SLOTS: readonly string[] = ['_date', '_aliases', '_type']
 
 /** 条件树字段下拉：属性定义（先序）＋ 系统槽；顺序＝前者按库、后者固定 */
 export function queryFieldsOf(forest: readonly Block[], coverage?: FieldCoverage): QueryFieldOption[] {

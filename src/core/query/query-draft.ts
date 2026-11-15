@@ -27,15 +27,24 @@ export const SELECT_OPS: readonly DraftOp[] = ['eq', 'neq', 'exists', 'empty']
  * 这一行**能问**哪些算子（按字段 kind 收窄）。
  *
  * - **布尔**：没有未填态，`empty` 与 `exists:false` 是同一个答案 ⇒ 不给 `empty`；
- * - **`select`**：只有「等于／不等于某一项」「有没有这一栏」「填了没填」这四个问法。
+ * - **`select`**：只有「等于／不等于某一项」「有没有这一栏」「填了没填」这四个问法；
+ * - **`_type`**（系统槽，按字段 id 特判——它没有定义块、kind 表达不了）：
+ *   只有「是哪种／不是哪种／写没写过」，`empty` 与 `eq` 默认类型同解
+ *   （`readSystemField` 读 `blockTypeOf`，缺省就是默认类型），按 F 批纪律收掉。
  *
  * ⚠️ 已经存下来的算子**永远留在下拉里**：收窄只决定「新加时不给什么」，
  *    不许打开一次就悄悄把用户的条件改掉。
  */
-export function opsFor(kind: PropKind | undefined, current: DraftOp | undefined): readonly DraftOp[] {
+export function opsFor(kind: PropKind | undefined, current: DraftOp | undefined, field?: string): readonly DraftOp[] {
   const cur = current ?? 'eq'
   const allow: readonly DraftOp[] =
-    kind === 'checkbox' ? DRAFT_OPS.filter((o) => o !== 'empty') : kind === 'select' ? SELECT_OPS : DRAFT_OPS
+    field === '_type'
+      ? ['eq', 'neq', 'exists']
+      : kind === 'checkbox'
+        ? DRAFT_OPS.filter((o) => o !== 'empty')
+        : kind === 'select'
+          ? SELECT_OPS
+          : DRAFT_OPS
   return allow.includes(cur) ? allow : [...allow, cur]
 }
 

@@ -1273,3 +1273,52 @@ test('matchesSpec：出生形态的假块与整库求值同一份环境（看板
   const upSpec = { where: { up: { is: page.id } } }
   assert.equal(kb.matchesSpec(upSpec, carrying), false, '假块无父块：住顶层的出生形态进不了「在…之下」')
 })
+
+/* ------------------------------------------------- 存在量化：值位空＝「有」（决策 286） */
+
+test('{children}：有子级（直接子块）；「叶子块」＝ not 包着；属性定义的子树不算数', () => {
+  const parent = b('parent', '父', { children: [b('c1', '子一'), b('c2', '子二')] })
+  const leaf = b('leaf', '叶子')
+  const def = mkPropDef('字段', 'text')
+  def.children = [b('dc', '定义的子块')]
+  const blocks = [parent, leaf, def]
+  const ids = (where: QueryNode) => runQuery({ where }, { blocks }).map((h) => h.blockId)
+  assert.deepEqual(ids({ children: true }), ['parent'], '直接子块 ≥1 才命中')
+  assert.deepEqual(ids({ not: { children: true } }), ['c1', 'c2', 'leaf', def.id], '候选是整片森林：没子级的块各是一条「叶子」——定义块自己的子树不进可见树')
+  assertSameHits({ where: { children: true } }, blocks)
+  assertSameHits({ where: { not: { children: true } } }, blocks)
+})
+
+test('{children:false} 拒形：「没有子级」由 not 表达，一个语义不许两种形状', () => {
+  assert.equal(isQueryNode({ children: false }), false)
+  assert.equal(isQueryNode({ children: true }), true)
+})
+
+test('{text:{nonempty}}：有正文——空块、纯空白、只有图不算；{text:\'\'} 恒真 ⇒ 拒形', () => {
+  const withText = b('t1', '有字')
+  const blank = b('t2', '')
+  const ws = b('t3', '   ')
+  const imgOnly = b('t4', '')
+  imgOnly.content = [{ id: 'a1', t: 'asset', asset: 'aabbccdd' }]
+  const blocks = [withText, blank, ws, imgOnly]
+  const ids = (where: QueryNode) => runQuery({ where }, { blocks }).map((h) => h.blockId)
+  assert.deepEqual(ids({ text: { nonempty: true } }), ['t1'], 'plainText 去空白后非空才命中；只有图没有字不算有正文')
+  assert.deepEqual(ids({ not: { text: { nonempty: true } } }), ['t2', 't3', 't4'], '「空块」＝ not 包着')
+  assert.equal(isQueryNode({ text: '' }), false, '空串 contains 命中全库——与 {mark:{}} 同一条守卫')
+  assert.equal(isQueryNode({ text: { nonempty: true } }), true)
+  assert.equal(isQuerySpec({ where: { text: '' } }), false, '整份 spec 也读不出来（一句实话，不静默恒真）')
+  assert.equal(isQueryNode({ children: false }), false)
+  assert.deepEqual(canonicalSpec({ where: { text: { nonempty: true } } }), { where: { text: { nonempty: true } } })
+  assertSameHits({ where: { text: { nonempty: true } } }, blocks)
+})
+
+test('_type 读 blockTypeOf：eq 默认类型命中没写过 _type 的块；exists 恒真（类型是必答槽）', () => {
+  const divider: Block = b('v', '', { props: { _type: 'core/divider' } })
+  const plain = b('p', '普通一行')
+  const blocks = [divider, plain]
+  const ids = (where: QueryNode) => runQuery({ where }, { blocks }).map((h) => h.blockId)
+  assert.deepEqual(ids({ prop: { id: '_type', eq: 'outline' } }), ['p'], '缺省＝默认类型，是模型的读法')
+  assert.deepEqual(ids({ prop: { id: '_type', neq: 'outline' } }), ['v'], '「非默认类型」＝ neq')
+  assert.deepEqual(ids({ prop: { id: '_type', eq: 'core/divider' } }), ['v'])
+  assert.deepEqual(ids({ prop: { id: '_type', exists: true } }), ['v', 'p'], '每块都有类型：exists 恒真')
+})

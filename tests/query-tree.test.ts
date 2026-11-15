@@ -221,11 +221,13 @@ test('多键排序拆得动：树草稿整组保全，拼回去逐字节相等�
 })
 
 test('条件树：没填完的行要能被指出来（不静默丢掉刚敲的那一行）', () => {
-  const draft = treeOfSpec({ where: { all: [{ tag: '任务' }, { text: 'x' }] } })
+  // tag／text 行的空值现在是「存在量化」的完整条件（有任意标签／有正文），
+  // 「没填完」的样本改用属性行——值位空才是真未完成。
+  const draft = treeOfSpec({ where: { all: [{ tag: '任务' }, { prop: { id: TASK_STATUS_PROP_ID, eq: 1 } }] } })
   assert.ok(draft)
   assert.equal(treeIncomplete(draft.root), false)
   const leaf = draft.root.items[1]
-  assert.ok(leaf && leaf.kind === 'leaf' && leaf.row.kind === 'text')
+  assert.ok(leaf && leaf.kind === 'leaf' && leaf.row.kind === 'prop')
   leaf.row.value = ''
   assert.equal(treeIncomplete(draft.root), true)
   assert.equal(treeLeafCount(draft.root), 2, '条数按叶子算（未填的也算一条，用户看得见）')
@@ -244,4 +246,28 @@ test('相对时间窗：「最近 N 天」存表达式（{rel:{days}}），往�
   }
   // lt 档的相对界不是「时间行」生成的形状，但普通属性行能按 JSON 字面量诚实编辑（往返仍逐字节）
   roundTrip({ where: { prop: { id: 'core/modified', lt: { rel: { days: -7 } } } } })
+})
+
+/* ------------------------------------------------------------ 草稿批次（字段覆盖率的分母） */
+
+import { batchSpecOfDraft } from '../src/core/index.ts'
+
+
+test('存在量化行往返：tag 空→_tags exists、text 空→{nonempty}、children 行，全部逐字节', () => {
+  roundTrip({ where: { prop: { id: '_tags', exists: true } } }, )
+  roundTrip({ where: { not: { prop: { id: '_tags', exists: true } } } })
+  roundTrip({ where: { text: { nonempty: true } } })
+  roundTrip({ where: { children: true } })
+  roundTrip({ where: { not: { children: true } } })
+  // _tags 的其它算子不映射成标签行（拼回字节不同）：走通用属性行如实显示
+  roundTrip({ where: { prop: { id: '_tags', exists: false } } })
+})
+
+test('存在量化行是完整条件：空值行不进「未完成」（应用不禁用），拒形拆不动', () => {
+  assert.deepEqual(treeNodeOfRow({ kind: 'tag', value: '' }), { prop: { id: '_tags', exists: true } })
+  assert.deepEqual(treeNodeOfRow({ kind: 'text', value: '' }), { text: { nonempty: true } })
+  assert.deepEqual(treeNodeOfRow({ kind: 'children' }), { children: true })
+  // 恒真/布尔假档是拒形：返回 null ⇒ 只读 JSON，不假装能编辑
+  assert.equal(treeOfSpec({ where: { text: '' } as unknown as QuerySpec['where'] }), null)
+  assert.equal(treeOfSpec({ where: { children: false } as unknown as QuerySpec['where'] }), null)
 })

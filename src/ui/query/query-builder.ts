@@ -17,13 +17,33 @@ import {
   SELF,
   systemQueryFieldLabel,
   treeOfSpec,
+  DEFAULT_BLOCK_TYPE,
+  DIVIDER_TYPE,
+  EMBED_TYPE,
   type Marks,
   type QuerySpec,
   type TreeRow,
   type TreeNode,
 } from '../../core/index.ts'
 import { t, type MsgId } from '../../core/infra/msg.ts'
+import { NOTE_TYPE } from '../../core/relations/annotates.ts'
 import type { DraftOp } from '../../core/query/query-draft.ts'
+
+/**
+ * 块类型的值 → 人话（`TYPE_DECLS` 的封闭值域，条件树下拉与 chip 共用这一份；
+ * 未知 id——别的版本或插件写进来的——由 `typeValueLabel` 原样显示）。
+ */
+const TYPE_VALUE_TEXT: Record<string, MsgId> = {
+  [DEFAULT_BLOCK_TYPE]: 'ui.query.type.outline',
+  [DIVIDER_TYPE]: 'ui.query.type.divider',
+  [EMBED_TYPE]: 'ui.query.type.embed',
+  [NOTE_TYPE]: 'ui.query.type.note',
+}
+
+export function typeValueLabel(id: string): string {
+  const key = TYPE_VALUE_TEXT[id]
+  return key ? t(key) : id
+}
 
 const OP_TEXT: Record<DraftOp, MsgId> = {
   eq: 'ui.query.op.eq',
@@ -118,12 +138,18 @@ function rowSentence(row: TreeRow, deps: ConditionTextDeps): string {
   switch (row.kind) {
     case 'tag': {
       if (row.value === SELF) return t('ui.query.selfTag')
+      // 值位空＝**有任意标签**（`_tags exists` 的措辞），一条完整条件，不是没填完
+      if (row.value === '') return t('ui.query.chip.tagAny')
       // 条件按**标签块 id**存：显示名现解析；解析不到说「已删除」，不把 id 摆给用户
       const name = deps.tagLabel?.(row.value) ?? row.value
       return name === '' ? t('ui.query.tagGone') : `#${name}`
     }
     case 'text':
+      // 值位空＝「有正文」，与 ref/link 行同一条「空值＝存在量化」
+      if (row.value === '') return t('ui.query.chip.textNonempty')
       return row.value === SELF ? t('ui.query.selfText') : t('ui.query.label.text', { text: row.value })
+    case 'children':
+      return t('ui.query.chip.children')
     case 'ref': {
       // 不限目标是一条完整条件（「有引用」），不是没填完
       const suffix = row.kinds ? `（${row.kinds.map((k) => t(`ui.query.refkind.${k}` as MsgId)).join('／')}）` : ''
@@ -204,6 +230,12 @@ function propText(row: Extract<TreeRow, { kind: 'prop' }>, deps: ConditionTextDe
   if (row.op === 'empty') return t(row.value === 'false' ? 'ui.query.label.notEmpty' : 'ui.query.label.empty', { name })
   const choice = deps.choices?.(row.field)?.find((c) => c.id === row.value)
   const shown =
-    row.value === SELF ? t('ui.query.selfProp') : row.value === '' ? t('ui.query.builder.noValue') : (choice?.label ?? row.value)
+    row.value === SELF
+      ? t('ui.query.selfProp')
+      : row.value === ''
+        ? t('ui.query.builder.noValue')
+        : row.field === '_type'
+          ? typeValueLabel(row.value)
+          : (choice?.label ?? row.value)
   return t('ui.query.label.cmp', { name, op: t(OP_TEXT[row.op]), value: shown })
 }

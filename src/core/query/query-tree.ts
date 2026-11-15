@@ -20,6 +20,7 @@ import { SELF, type QueryNode, type QuerySpec, type SortKey } from './query.ts'
 import type { RefKind } from '../relations/relations.ts'
 import { canonicalSpec } from './query-view.ts'
 import { ENGINE_CREATED, ENGINE_MODIFIED } from '../props/props.ts'
+import { TAGS_PROP } from '../identity/tags.ts'
 import { dateOfMs, dayStartMs, isJournalDate, shiftISO } from '../identity/journal.ts'
 
 /** 方向：一格值位（缺省「自身」＝不包方向）。`up`／`down` 不含自己，`near` 含自己 */
@@ -27,7 +28,14 @@ export type TreeDir = 'up' | 'down' | 'near'
 
 /** 叶子行能表达的几种条件 */
 export type TreeRow =
+  /**
+   * 标签行。`value: ''` ＝ **有任意标签**（`{prop:{id:'_tags',exists:true}}`，一条完整条件）；
+   * 填了 ＝ 带那个标签（标签块 id，与 `{prop}` 同一条「键是 id」纪律）。
+   * 「没有标签」＝ 这一行挂「非」（值位仍空）——`_tags` 的 `exists:false` 不映射回这一行
+   * （拼回字节不同，`specKey` 会误判「条件变了」），那种形状走通用属性行如实显示。
+   */
   | { kind: 'tag'; value: string }
+  /** 正文行。`value: ''` ＝ **有正文**（`{text:{nonempty:true}}`，一条完整条件），填了比包含 */
   | { kind: 'text'; value: string }
   | { kind: 'prop'; field: string; op: DraftOp; value: string }
   /**
@@ -36,6 +44,8 @@ export type TreeRow =
    * （缺省 `undefined` ＝ 三类全算）——它出现在条件里时拼回对象形态（canonical 的样子）。
    */
   | { kind: 'ref'; target: string; kinds?: readonly RefKind[] }
+  /** **有子级**（直接子块 ≥1；`{children:true}`）。无值位：「叶子块」＝ 挂「非」 */
+  | { kind: 'children' }
   | { kind: 'is'; target: string }
   | { kind: 'role'; role: 'journal' | 'page' | 'tag' }
   /**
@@ -70,7 +80,7 @@ export type TreeRow =
 export type TreeRowKind = TreeRow['kind']
 
 /** 行种类下拉的顺序（与「加一条条件」的选择器分开） */
-export const TREE_ROW_KINDS: readonly TreeRowKind[] = ['tag', 'prop', 'text', 'ref', 'is', 'role', 'day', 'stamp', 'mark', 'link']
+export const TREE_ROW_KINDS: readonly TreeRowKind[] = ['tag', 'prop', 'text', 'ref', 'children', 'is', 'role', 'day', 'stamp', 'mark', 'link']
 
 export interface TreeLeaf {
   kind: 'leaf'
@@ -263,7 +273,17 @@ export function treeRowOf(node: QueryNode): TreeRow | null {
   const stamp = stampRowOf(node)
   if (stamp) return stamp
   if ('tag' in node) return { kind: 'tag', value: node.tag }
-  if ('text' in node) return { kind: 'text', value: node.text }
+  /**
+   * 对象形态＝「有正文」，行的值位就是空的（与 ref/link 行同一条「空值＝存在量化」模式）。
+   * 空串是**拒形**（contains '' 恒真）：拆不动返回 null，不许把它拆成空值行——
+   * 那样拼回去会变成 `{text:{nonempty:true}}`，语义被悄悄改写。
+   */
+  if ('text' in node) {
+    if (typeof node.text === 'string') return node.text === '' ? null : { kind: 'text', value: node.text }
+    return { kind: 'text', value: '' }
+  }
+  /** 只认真值档：`{children:false}` 是拒形（否定走 `not`），拆不动 */
+  if ('children' in node && node.children === true) return { kind: 'children' }
   if ('ref' in node) {
     if (typeof node.ref === 'string') return { kind: 'ref', target: node.ref }
     /**
@@ -295,6 +315,18 @@ export function treeRowOf(node: QueryNode): TreeRow | null {
       : null
   }
   if (!('prop' in node)) return null
+
+  /**
+   * 「有任意标签」拆回**标签行**（值位空）——它是 tag 行空值的拼回形状，往返必须闭合。
+   * 只认 `exists:true` 单算子这一种形状：`exists:false`（没有标签）语义相同、
+   * 拼回字节不同（会多包一层「非」），那种形状走下面的通用属性行如实显示。
+   */
+  if (node.prop.id === TAGS_PROP) {
+    const opKeys = PROP_OP_KEYS.filter((k) => k in node.prop)
+    if (opKeys.length === 1 && opKeys[0] === 'exists' && 'exists' in node.prop && node.prop.exists === true) {
+      return { kind: 'tag', value: '' }
+    }
+  }
 
   const op = node.prop
   const id = node.prop.id
@@ -364,8 +396,13 @@ export function treeOfSpec(spec: QuerySpec): TreeDraft | null {
 
 /** 一行 → 叶子条件；没填完返回 `null`（UI 据此禁用「应用」） */
 export function treeNodeOfRow(row: TreeRow): QueryNode | null {
-  if (row.kind === 'tag') return row.value.trim() === '' ? null : { tag: row.value }
-  if (row.kind === 'text') return row.value.trim() === '' ? null : { text: row.value }
+  /**
+   * 值位空＝**存在量化**（tag／text 两行；ref/link 早就是这条模式）：空值不是「还没填」，
+   * 是「有任意标签／有正文」这条完整条件。「一个都没有」由行上的「非」表达。
+   */
+  if (row.kind === 'tag') return row.value.trim() === '' ? { prop: { id: TAGS_PROP, exists: true } } : { tag: row.value }
+  if (row.kind === 'text') return row.value.trim() === '' ? { text: { nonempty: true } } : { text: row.value }
+  if (row.kind === 'children') return { children: true }
   if (row.kind === 'ref') {
     const target = row.target.trim()
     if (target !== '') return row.kinds ? { ref: { to: target, kind: row.kinds } } : { ref: target }
