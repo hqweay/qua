@@ -22,6 +22,7 @@ import {
   type FieldRow,
 } from '../src/core/index.ts'
 import { textRuns } from '../src/core/model/runs.ts'
+import { PROP_VALUE_CHIPS_SHOWN, valueChipItemsOf } from '../src/ui/block-ui/props-line.ts'
 
 /* ------------------------------------------------------------ 夹具 */
 
@@ -269,4 +270,41 @@ test('传递型引用：引用后跟空格（[ref, text(空格)]）仍透传—�
   withWords.content = [{ id: 'r7', t: 'ref', to: 'tag-life2' }, ...textRuns(' 今天看了 ')]
   const rows2 = (belowFieldsFor([child], forest, (id) => (id === 'c1' ? withWords : null)).get('c1')?.rows ?? []).map((r) => r.propId)
   assert.deepEqual(rows2, [], '有可见文字 ⇒ 不透传')
+})
+
+/* ------------------------------------------------------------ 一条多值的「值内投影」 */
+
+const row = (over: Partial<FieldRow> & Pick<FieldRow, 'kind' | 'value'>): FieldRow => ({
+  propId: 'p-multi',
+  label: '多选',
+  cardinality: 'many',
+  filled: true,
+  sources: [],
+  order: 0,
+  ...over,
+})
+
+test('值内投影：返回全量（截断是版面的决定，计数才能与宽度无关）', () => {
+  const labels = ['甲', '乙', '丙', '丁', '戊']
+  const items = valueChipItemsOf(row({ kind: 'select', value: ['a', 'b', 'c', 'd', 'e'], currentChoiceLabels: labels }), (id) => id)
+  assert.deepEqual(items.map((i) => i.text), labels, '顺序＝选项兄弟序')
+  assert.equal(items.length, 5, '五枚都在投影里——画几枚是渲染层的事')
+  assert.ok(PROP_VALUE_CHIPS_SHOWN < items.length, '夹具必须超过一行的额度，否则这条断言没有意义')
+})
+
+test('值内投影：ref 各带自己的目标；只有 text 的 url 格式才挂链接', () => {
+  const named: Record<string, string> = { r1: '甲', r2: '乙' }
+  assert.deepEqual(valueChipItemsOf(row({ kind: 'ref', value: ['r1', 'r2'] }), (id) => named[id] ?? ''), [
+    { text: '甲', refId: 'r1' },
+    { text: '乙', refId: 'r2' },
+  ], '每一枚各带 data-ref-to 的来源，不是整格挂一次')
+
+  const urls = valueChipItemsOf(row({ kind: 'text', format: 'url', value: ['https://a.example', 'https://b.example'] }), (id) => id)
+  assert.deepEqual(urls, [
+    { text: 'https://a.example', url: 'https://a.example' },
+    { text: 'https://b.example', url: 'https://b.example' },
+  ], '多链接逐枚可点')
+
+  const plain = valueChipItemsOf(row({ kind: 'text', value: ['甲', '乙'] }), (id) => id)
+  assert.equal(plain[0]?.url, undefined, 'plain 文本不挂链接（点了会去开一个不是地址的东西）')
 })

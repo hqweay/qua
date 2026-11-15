@@ -1170,6 +1170,10 @@
   display: inline-flex;
   align-items: center;
   gap: var(--ui-gap-1);
+  /* 值内多值：缩略图让位给计数徽章，被裁的永远是图、不是数字 */
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
 }
 /* 缩略图在这行里可点（lightbox／浏览器／详情，判据在 activateAssetRef） */
 .blk-props-line .prop-asset-thumb {
@@ -1178,18 +1182,21 @@
 /*
   块下行的多值：**一行 chips，不换行**。这一行的高度是虚拟化估高的输入
   （268：行数 × 行高），折行会多出一行没人算 ⇒ 滚动条系统性偏小。
-  装不下就裁——读者点这一行进面板看全，比在这里多长一行更可接受。
+  装不下的项收成计数徽章（`blk-prop-count`）：**不靠裁剪表达「还有」**——
+  被裁掉的 chip 读作「不存在」，那是投影在说谎。
 */
 .blk-prop-chips {
   display: inline-flex;
   align-items: baseline;
   gap: var(--ui-gap-1);
   flex-wrap: nowrap;
+  flex: 0 1 auto;
   overflow: hidden;
   min-width: 0;
 }
 .blk-prop-chip {
-  flex: 0 0 auto;
+  /* 可缩；截字交给 `.ui-ellipsis`（原语只定义一次，几何不在组件里再写一份） */
+  flex: 0 1 auto;
   padding: 0 3px;
   border-radius: var(--ui-radius-sm);
   background: var(--ui-surface-sunken);
@@ -1778,6 +1785,10 @@
   max-width: 60%;
   text-align: end;
 }
+/* 多值的值容器是 flex：右对齐由 justify 管，`text-align` 对它不生效 */
+.blk-props-line[data-props-density='list'] .blk-prop-value.blk-prop-multi {
+  justify-content: flex-end;
+}
 /*
   **这一块怎么排**（`⋯`，三态菜单的入口）：悬停/聚焦才显形。
 
@@ -1819,6 +1830,22 @@
 .blk-props-line .blk-prop-value {
   color: var(--ui-text);
   max-width: 24ch;
+}
+/*
+  **多值的值容器**：chip 可缩、计数徽章不缩。
+  这两个弹性系数是「投影不说谎」的实现：宽度不够时先缩/裁 chip，
+  「共几项」这个语义量永远留在行内。
+*/
+.blk-props-line .blk-prop-value.blk-prop-multi {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--ui-gap-1);
+  min-width: 0;
+}
+.blk-props-line .blk-prop-count {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  color: var(--ui-text-tertiary);
 }
 /* 值是引用或链接：点得动才像能跳的东西（跳转各归各的落点，这里只给可点的观感） */
 .blk-props-line .blk-prop-ref,

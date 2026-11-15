@@ -395,6 +395,9 @@ export const MSG = {
   'ui.props.lineHint': '点击在属性面板里改这一项',
   'ui.props.lineMore': '还有 {n} 项',
   'ui.props.lineMoreHint': '就地展开成「一栏一行」；再点「收起」回去',
+  /* 一条多值里**没画出来**的项：徽章写总项数，不是剩余项数——宽度只改变画几枚，不改变这个数字 */
+  'ui.props.valueCount': '{n} 项',
+  'ui.props.valueAllTip': '共 {n} 项：{list}。点开在属性面板里看全部',
   'ui.props.lineCollapse': '收起',
   'ui.props.lineMode': '这一块的属性怎么排',
   'ui.props.lineMode.follow': '跟随默认',

@@ -30258,6 +30258,95 @@ await check(
   },
 )
 
+await check(
+  'T324 块下行的一条多值：只画前两枚＋总项数徽章（不再静默裁）；徽章不被裁；点它开面板聚焦该栏',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    /**
+     * 五枚值：两枚在额度内、三项靠计数徽章声明。
+     * 这里不放 `block-left`（那是 gutter 的多值图标，另一条口径）——这一条钉的是块下行。
+     */
+    const fx = await page.evaluate(() => {
+      const plain = window.__qua.blocks().filter((b) => b.roles.length === 0 && b.text.trim().length > 1)
+      const host = plain[0]
+      window.__qua.invoke('core.props/create-def', {
+        blockId: host.id,
+        label: '冒烟属性多选',
+        kind: 'select',
+        target: 'own',
+      })
+      const defId = window.__qua.propDefs().find((d) => d.label === '冒烟属性多选')?.id ?? ''
+      const labels = ['甲', '乙', '丙', '丁', '戊']
+      for (const label of labels) window.__qua.invoke('core.props/add-choice', { defId, label })
+      window.__qua.invoke('core.props/set-choice-cardinality', { defId, cardinality: 'many' })
+      const row = window.__qua.fields(host.id).find((f) => f.propId === defId)
+      const ids = labels.map((label) => row?.choices.find((c) => c.label === label)?.id ?? '')
+      window.__qua.invoke('core.props/set-value', { blockId: host.id, propId: defId, value: ids })
+      window.__qua.focusBlock(host.id)
+      return { host: host.id, defId, ids, labels }
+    })
+    assert(
+      fx.defId !== '' && fx.ids.every(Boolean),
+      `前置：块、定义与五个选项都要在：${JSON.stringify(fx)}`,
+    )
+    assert(fx.ids.length === 5, `前置：五枚都要写进值：${JSON.stringify(fx)}`)
+
+    await page.waitForFunction(
+      (host) => document.querySelectorAll(`.blk[data-block-id="${host}"] .blk-prop-chip`).length === 2,
+      fx.host,
+      { timeout: 4000 },
+    )
+    const line = await page.evaluate(({ host, defId, labels }) => {
+      const el = document.querySelector(`.blk[data-block-id="${host}"] > .blk-props-line`)
+      const value = el?.querySelector('.blk-prop-value')
+      const badge = el?.querySelector('.blk-prop-count')
+      const rect = (x) => (x ? x.getBoundingClientRect() : null)
+      const lineRect = rect(el)
+      const badgeRect = rect(badge)
+      const tip = value?.getAttribute('data-tip') ?? ''
+      return {
+        chips: [...(el?.querySelectorAll('.blk-prop-chip') ?? [])].map((c) => c.textContent ?? ''),
+        badge: badge?.textContent ?? '',
+        tipHasAll: labels.every((label) => tip.includes(label)),
+        badgeFits: Boolean(lineRect && badgeRect && badgeRect.width > 0 && badgeRect.right <= lineRect.right + 1),
+        height: lineRect?.height ?? 0,
+        propId: el?.querySelector('.blk-prop')?.getAttribute('data-prop-id') ?? '',
+        expectedPropId: defId,
+      }
+    }, fx)
+
+    assert(line.chips.length === 2, `一条多值只画前两枚（第三枚起收进计数）：${JSON.stringify(line)}`)
+    assert(line.chips.every((x) => x.trim() !== ''), `两枚 chip 各写着选项名：${JSON.stringify(line)}`)
+    assert(line.badge.includes('5'), `计数徽章写总项数 5，不是剩余数：${JSON.stringify(line)}`)
+    assert(line.tipHasAll, `悬停说明里要有全量五项：${JSON.stringify(line)}`)
+    assert(line.badgeFits, `计数徽章不能被裁（被裁的只能是 chip）：${JSON.stringify(line)}`)
+    assert(Math.abs(line.height - 18) <= 2, `不换行、仍是定高一行：${JSON.stringify(line)}`)
+    assert(line.propId === line.expectedPropId, `这一栏就是刚建的多选：${JSON.stringify(line)}`)
+
+    // 点徽章：冒泡到整对按钮 ⇒ 打开属性面板并聚焦这一栏（值内唯一例外是引用／链接）
+    await page.locator(`.blk[data-block-id="${fx.host}"] > .blk-props-line .blk-prop-count`).click()
+    await page.waitForTimeout(350)
+    const drawer = await page.evaluate((propId) => {
+      const root = document.querySelector('.props-drawer')
+      const el = root?.querySelector(`.prop-row[data-prop-id="${propId}"]`)
+      const active = document.activeElement
+      return {
+        open: Boolean(root),
+        row: Boolean(el),
+        focused: Boolean(el && active && el.contains(active)),
+      }
+    }, fx.defId)
+    assert(drawer.open && drawer.row, `点计数要打开属性面板并列出那一栏：${JSON.stringify(drawer)}`)
+    assert(drawer.focused, `焦点要落在那一栏的控件上：${JSON.stringify(drawer)}`)
+
+    await ctx.close()
+    return '一条多值只画前两枚＋总项数；徽章不被裁、悬停有全量；点它开面板并聚焦该栏'
+  },
+)
+
 await check('T316 表格的多值格是 chips：一块两值 ⇒ 两枚 chip；摘一枚写回数组', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))

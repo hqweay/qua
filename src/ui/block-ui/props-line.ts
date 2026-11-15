@@ -45,7 +45,7 @@ export interface PropsLineDeps {
   onSetMode?: (blockId: string, mode: PropsLineDensity | '') => void
   /** 打开「这一块怎么排」的菜单（三态；`⋯` 与右键共用，浮层归装配层） */
   onMenu?: (blockId: string, anchor: DOMRect) => void
-  /** 最多画几对（其余收成 `+N`）；缺省 3，与多值图标的 `cap` 同一档 */
+  /** 最多画几**条属性**（其余收成 `+N`）；缺省 3。与「一条值里画几项」是两条轴（后者见 `PROP_VALUE_CHIPS_SHOWN`） */
   cap?: number
 }
 
@@ -85,37 +85,93 @@ export function fieldRowText(row: FieldRow, refLabel: (id: string) => string): s
 }
 
 /**
+ * **一条多值在块下行画几枚**。
+ *
+ * 判据是「两枚典型标签 ＋ 计数徽章落在 24ch 以里」（见 `.blk-prop-value` 的宽度）：
+ * 三枚时第四枚起会被静默裁掉——那种截断读作「这个值只有三项」，是投影在说谎。
+ * 所以先在能装下的额度里画前几枚，**超出多少不靠裁、靠计数徽章说**。
+ */
+export const PROP_VALUE_CHIPS_SHOWN = 2
+
+/** 同一行里资产是 1em 缩略图，比 chip 窄；3 枚仍放得下，沿用原判据 */
+const PROP_VALUE_ASSETS_SHOWN = 3
+
+export interface ValueChipItem {
+  text: string
+  /** 值是引用时带上目标 id：每一枚 chip 各带自己的 `data-ref-to` */
+  refId?: string
+  /** `text` 的 url 格式：每一枚各自可点 */
+  url?: string
+}
+
+/**
+ * 多值的**全量**项投影（纯函数，不碰 DOM）。
+ *
+ * 为什么全量而不是「已经截好的前两枚」：截断的**额度**是版面的决定，
+ * 而「一共有几项」是语义——两者必须分开算，否则计数会跟着标签长度漂。
+ * 顺序沿用值的规范序（select 走选项兄弟序），不重排、不按频率取。
+ */
+export function valueChipItemsOf(row: FieldRow, refLabel: (id: string) => string): ValueChipItem[] {
+  if (row.kind === 'select') return (row.currentChoiceLabels ?? []).map((text) => ({ text }))
+  if (row.kind === 'ref') return valueListOf(row.value).map((id) => ({ text: refLabel(id), refId: id }))
+  const asUrl = row.kind === 'text' && row.format === 'url'
+  return valueItemsOf(row.value).map((v) => ({
+    text: String(v),
+    ...(asUrl ? { url: String(v) } : {}),
+  }))
+}
+
+/**
  * 多值在块下行的露面：一行 chips（不换行；引用项各自带 `data-ref-to`）。
  *
  * `text`／`number` 的 chips 只是分段，不承载任何跳转 —— 它们的值是字面量，
  * `data-ref-to` 挂上去会让「点一个数字」去开别的块。
+ *
+ * **装不下的项收成计数徽章**（总项数，不是剩余项数）：chip 自己可以省略号缩字，
+ * 但「还有几项」必须与当前宽度无关。徽章是值里的最后一个 flex 项且不收缩，
+ * 所以被裁的永远是 chip、不会是计数。
  */
 function appendValueChips(value: HTMLElement, row: FieldRow, deps: PropsLineDeps): void {
-  value.classList.add('blk-prop-chips')
-  const push = (text: string, refId?: string, url?: string): void => {
+  const items = valueChipItemsOf(row, deps.refLabel)
+  const shown = items.slice(0, PROP_VALUE_CHIPS_SHOWN)
+  const box = document.createElement('span')
+  box.className = 'blk-prop-chips'
+  for (const item of shown) {
     const chip = document.createElement('span')
-    chip.className = 'blk-prop-chip'
-    chip.textContent = text
-    if (refId !== undefined && refId !== '') {
-      chip.dataset.refTo = refId
+    chip.className = 'blk-prop-chip ui-ellipsis'
+    chip.textContent = item.text
+    if (item.refId !== undefined && item.refId !== '') {
+      chip.dataset.refTo = item.refId
       chip.classList.add('blk-prop-ref')
-    } else if (url !== undefined && url !== '') {
-      chip.dataset.openUrl = url
+    } else if (item.url !== undefined && item.url !== '') {
+      chip.dataset.openUrl = item.url
       chip.classList.add('blk-prop-url')
     }
-    value.appendChild(chip)
+    box.appendChild(chip)
   }
-  if (row.kind === 'select') {
-    for (const label of row.currentChoiceLabels ?? []) push(label)
-    return
+  value.appendChild(box)
+  if (items.length > shown.length) {
+    value.dataset.tip = t('ui.props.valueAllTip', {
+      n: items.length,
+      list: items.map((item) => item.text).join('、'),
+    })
+    appendValueCount(value, items.length)
   }
-  if (row.kind === 'ref') {
-    for (const id of valueListOf(row.value)) push(deps.refLabel(id), id)
-    return
-  }
-  // `text` 的 url 格式（多链接＝text+url+many）：每一枚 chip 各自可点（`data-open-url`）
-  const asUrl = row.kind === 'text' && row.format === 'url'
-  for (const v of valueItemsOf(row.value)) push(String(v), undefined, asUrl ? String(v) : undefined)
+}
+
+/**
+ * 值内截断的计数徽章：**写总项数**（`5 项`），不写剩余数（`+3`）。
+ *
+ * 两种写法的差别不是口味：剩余数只有「画了几枚」确定时才对，而 chip 会被压缩、
+ * 窗口宽度会变；总项数是值本身的事实，任何版面下都成立。
+ * 不另挂点击监听：它冒泡到整对按钮，落点就是「打开面板并聚焦这一栏」——
+ * 与点名字、点空白同一条路（值内唯一例外是引用与链接，各归各的落点）。
+ */
+function appendValueCount(value: HTMLElement, total: number): void {
+  const badge = document.createElement('span')
+  badge.className = 'blk-prop-count'
+  badge.textContent = t('ui.props.valueCount', { n: total })
+  value.appendChild(badge)
 }
 
 export function renderPropsLine(
@@ -248,12 +304,16 @@ function pairOf(blockId: string, row: FieldRow, deps: PropsLineDeps, pendingText
     /**
      * **asset 值画成露面，不画裸 hash／裸链接**：这一行是「读值」的投影面，
      * 一枚 1em 高的行内缩略图不改变行高（估高按行数 × 定高，多一行就漏算）。
-     * 多值最多画三枚；原值留在 `data-tip` 里，hover 仍看得出指向哪一份。
+     * 多值最多画三枚；超出的项由计数徽章报总数，原值留在 `data-tip` 里。
      */
     const refs = assetRefsOf(row.value)
     if (refs.length > 0) {
-      value.classList.add('blk-prop-assets')
-      for (const ref of refs.slice(0, 3)) {
+      value.classList.remove('ui-ellipsis')
+      value.classList.add('blk-prop-multi')
+      const box = document.createElement('span')
+      box.className = 'blk-prop-assets'
+      const shown = refs.slice(0, PROP_VALUE_ASSETS_SHOWN)
+      for (const ref of shown) {
         const thumb = makeAssetThumb(ref, { size: 'line' })
         /**
          * **点缩略图＝这枚资产自己的默认动作**（lightbox／交系统浏览器／详情），
@@ -271,11 +331,15 @@ function pairOf(blockId: string, row: FieldRow, deps: PropsLineDeps, pendingText
               onDetails: focusColumn,
             })
         })
-        value.appendChild(thumb)
+        box.appendChild(thumb)
       }
+      value.appendChild(box)
       value.dataset.tip = refs.join('、')
+      if (refs.length > shown.length) appendValueCount(value, refs.length)
     } else value.textContent = fieldRowText(row, deps.refLabel)
   } else if (manyChips) {
+    value.classList.remove('ui-ellipsis')
+    value.classList.add('blk-prop-multi')
     appendValueChips(value, row, deps)
   } else {
     value.textContent = pendingText ?? fieldRowText(row, deps.refLabel)
