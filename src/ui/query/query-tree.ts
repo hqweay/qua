@@ -566,6 +566,17 @@ export class QueryTree {
       'qt-kind',
       'kind',
     )
+    /**
+     * 行首词是**这句话的主语**，不是分类汇报：属性行的主语是字段名——
+     * 「状态 ＝ 进行中」「块类型 ＝ 分割线」「别名 · 有这一栏」。「属性」这个词
+     * 只住在拾取器里（那里回答「我在加什么」），不进句子——属性有严格含义
+     * （用户造的定义块、开放值域），系统槽（块类型／别名／日记日期）不借它的名字。
+     * 字段删了（或拼错）如实显示「已删除」，不静默回落。
+     */
+    if (row.kind === 'prop') {
+      const opt = kind.querySelector<HTMLOptionElement>('option[value="prop"]')
+      if (opt) opt.textContent = this.fieldDisplayName(row)
+    }
     el.append(kind)
     switch (row.kind) {
       case 'tag':
@@ -689,6 +700,13 @@ export class QueryTree {
 
   private fieldKind(id: string): PropKind | undefined {
     return this.deps.fields(this.batchSpec()).find((f) => f.id === id)?.kind
+  }
+
+  /** 属性行的行首词＝字段显示名（属性定义用它的名字，系统槽用系统名）；都不在 ⇒ 「属性已删除」 */
+  private fieldDisplayName(row: Extract<TreeRow, { kind: 'prop' }>): string {
+    if (row.field === '') return t('ui.query.prefix.prop')
+    const f = this.deps.fields(this.batchSpec()).find((x) => x.id === row.field)
+    return f?.label ?? systemQueryFieldLabel(row.field) ?? t('ui.query.fieldMissing')
   }
 
   private propControls(leaf: TreeLeaf): HTMLElement[] {
