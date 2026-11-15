@@ -30241,6 +30241,25 @@ await check('T317 asset 值控件：检视卡窄槽里缩略图与地址不叠�
   assert(geom.rowH < 44, '常规槽宽下这一栏不该无端折成上下两行：' + JSON.stringify(geom))
   assert(geom.pickLabel !== '' && geom.pickIcon, '选文件图标键保留可读名与图形：' + JSON.stringify(geom))
 
+  /**
+   * 顺带钉住「收成滚动容器」的副作用：缩略图列的 overflow-x 会让 overflow-y 也按
+   * auto 算，挂在盒外的摘除 × 会被上沿裁掉 —— 它必须整枚落在自己那枚图里。
+   */
+  await page.hover(`#inspect-card .prop-row[data-prop-id="${ids.propId}"] .prop-asset-thumb`)
+  await page.waitForTimeout(300)
+  const remove = await page.evaluate((propId) => {
+    const box = document.querySelector(`#inspect-card .prop-row[data-prop-id="${propId}"] [data-asset-editor]`)
+    const wrap = box?.querySelector('.prop-asset-thumbs')?.getBoundingClientRect()
+    const x = box?.querySelector('.prop-asset-remove')?.getBoundingClientRect()
+    if (!wrap || !x) return { found: false }
+    return {
+      found: true,
+      shown: Number(getComputedStyle(box.querySelector('.prop-asset-remove')).opacity) > 0.9,
+      inside: x.top >= wrap.top && x.bottom <= wrap.bottom && x.left >= wrap.left && x.right <= wrap.right,
+    }
+  }, ids.propId)
+  assert(remove.found && remove.shown && remove.inside, `摘除 × 要显形且不被裁切：${JSON.stringify(remove)}`)
+
   await ctx.close()
   return `检视卡窄槽：缩略图 ${geom.thumbW}px、地址 ${geom.inputW}px 同框不叠压；选文件退图标键`
 })

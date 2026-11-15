@@ -905,9 +905,11 @@
 }
 .prop-asset-chip-ico { display: inline-flex; }
 .prop-asset-remove {
+  /* 缩略图列是横向裁切容器（overflow-x ⇒ overflow-y 也按 auto 算）：× 不许
+     挂在盒外，否则上沿／右沿会被裁掉。落在图自己的右上角里，hover 才显形。 */
   position: absolute;
-  inset-block-start: -0.35em;
-  inset-inline-end: -0.35em;
+  inset-block-start: 0;
+  inset-inline-end: 0;
   appearance: none;
   border: 1px solid var(--ui-border-subtle);
   background: var(--ui-surface);
