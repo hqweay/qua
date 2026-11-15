@@ -20,6 +20,17 @@ import { t } from '../../core/infra/msg.ts'
 import { rootsFor, rootsForMany } from './roots.ts'
 import type { PageDeps } from './types.ts'
 
+/** 一棵子树里有多少块（含根自己）——确认框里告诉用户这一下影响多大 */
+function countBlocks(b: Block): number {
+  let n = 0
+  const walk = (x: Block): void => {
+    n++
+    x.children.forEach(walk)
+  }
+  walk(b)
+  return n
+}
+
 /**
  * 日记（日记流）。
  *
@@ -216,14 +227,24 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
     deleteJournal: (id) => {
       const b = d.kb.get(id)
       if (!b || !isJournal(b) || journalDate(b) === todayISO()) return false
-      const loaded = d.activeId() === id || d.rootIds().includes(id)
-      d.removeBlock(id)
-      if (loaded) openFeed(todayISO())
-      else {
-        d.refreshList()
-        d.saveNow()
-      }
-      d.toast(t('ui.toast.journalDeleted'))
+      // 爆炸半径：删一天带走整棵子树（日期行＋所有内容），与删页/删标签同一判据确认
+      const blocks = countBlocks(b)
+      d.confirm({
+        title: t('ui.confirm.deleteJournalTitle'),
+        body: t('ui.confirm.deleteJournalBody', { count: String(blocks) }),
+        confirmLabel: t('ui.confirm.delete'),
+        danger: true,
+        onConfirm: () => {
+          const loaded = d.activeId() === id || d.rootIds().includes(id)
+          d.removeBlock(id)
+          if (loaded) openFeed(todayISO())
+          else {
+            d.refreshList()
+            d.saveNow()
+          }
+          d.toast(t('ui.toast.journalDeleted'))
+        },
+      })
       return true
     },
   }

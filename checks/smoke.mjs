@@ -3707,6 +3707,9 @@ await check('T39 显示名 = 主别名：改正文＝改描述；别名编辑器
   await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), target.targetId)
   await page.waitForTimeout(150)
   await page.evaluate(() => window.__qua.invoke('core.page/delete'))
+  await page.waitForTimeout(120)
+  await page.locator('.confirm-ok').click() // 删页弹确认（爆炸半径：整棵子树）
+  await page.waitForTimeout(100)
   await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), homeId)
   await page.waitForTimeout(200)
   const dead = await page.evaluate((id) => {
@@ -8835,6 +8838,8 @@ await check(
     assert(created.pageId && created.kidId, `前置：新页与子块都应存在：${JSON.stringify(created)}`)
 
     await page.evaluate(() => window.__qua.invoke('core.page/delete'))
+    await page.waitForTimeout(120)
+    await page.locator('.confirm-ok').click() // 删页确认（T2：删除即弹确认，不再同步）
     await page.waitForTimeout(200)
 
     const after = await page.evaluate((t) => {
@@ -21126,6 +21131,8 @@ await check(
       `页块的块菜单应有「删除页面」：${JSON.stringify(pageMenu)}`,
     )
     await page.locator('.layer-item', { hasText: '删除页面' }).first().click()
+    await page.waitForTimeout(120)
+    await page.locator('.confirm-ok').click() // 删页走会话确认框（整棵子树）
     await page.waitForTimeout(200)
     const afterPage = await page.evaluate(
       (t) => ({
@@ -21240,6 +21247,8 @@ await check(
       `右键日记块标（块菜单打开、光标指到这一块）时日期投影必须还在：${JSON.stringify(dayMenu.ph)}`,
     )
     await page.locator('.layer-item', { hasText: '删除这一天' }).first().click()
+    await page.waitForTimeout(120)
+    await page.locator('.confirm-ok').click() // 删天走会话确认框（整棵子树）
     await page.waitForTimeout(200)
 
     const after = await page.evaluate((t) => {

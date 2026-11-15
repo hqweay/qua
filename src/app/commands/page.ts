@@ -175,8 +175,21 @@ export function pageCommands(d: PageDeps): Pick<
       }
       const i = before.findIndex((p) => p.id === id)
       if (i < 0) return
-      dropIdentity(d, id)
-      d.toast(t('ui.toast.pageDeleted'))
+      // **爆炸半径**：删页带走整棵子树（页名行＋所有内容块）。与删除标签（有成员/
+      // 声明时确认）同一判据——可撤销＋回收站都能找回来，但要用户在这之前说一次要。
+      const p = before[i]!
+      // 只数 p 的后代（不含 p 自己），与 `listPages` 的 blocks 口径一致；整棵含 p 自己
+      const blocks = count(p) + 1
+      d.confirm({
+        title: t('ui.confirm.deletePageTitle'),
+        body: t('ui.confirm.deletePageBody', { name: d.pageTitle(p), count: String(blocks) }),
+        confirmLabel: t('ui.confirm.delete'),
+        danger: true,
+        onConfirm: () => {
+          dropIdentity(d, id)
+          d.toast(t('ui.toast.pageDeleted'))
+        },
+      })
     },
 
     renamePage: (id, title) => {

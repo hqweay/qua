@@ -784,6 +784,8 @@ export function setupPages(deps: PagesDeps) {
     },
     ensureDockCard: (side, id) => deps.ensureDockCard(side, id),
     toast: (text, kind) => deps.getApp().toast(text, kind),
+    // 后果性操作的确认框：与删除标签确认同一条会话原语（删除页/天是「带走整棵子树」的动作）
+    confirm: (o) => layers.confirm(o),
     openRefPicker: (rows, onPick, title) =>
       layers.openMenu({
         rows,

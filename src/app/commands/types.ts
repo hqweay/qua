@@ -166,6 +166,21 @@ export interface PageDeps {
   ensureDockCard: (side: 'left' | 'right', id: 'inspect' | 'belongs' | 'mount' | 'trash' | 'calendar') => void
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
   /**
+   * **后果性操作的确认框**（会话层 `Layers.confirm` 的接口子集）。
+   *
+   * 删除页／删除一天这类**爆炸半径大**的动作在动手前问一句：它与删除小块的差别
+   * 不在可撤销性（都走撤销＋回收站），而在「这一下带走一整棵命名子树」。判据与
+   * 删除标签（有成员/声明时确认）同源，所以这里共用同一个原语，而不是各写一套。
+   */
+  confirm: (o: {
+    title: string
+    body?: string
+    confirmLabel: string
+    cancelLabel?: string
+    danger?: boolean
+    onConfirm: () => void
+  }) => void
+  /**
    * 打开一个**目标选择器**：装配层负责把它渲染成菜单。
    *
    * `onPick` 省略 ＝ 插入引用（默认语义）。「移动到…」复用它，只是把
