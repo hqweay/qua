@@ -245,8 +245,8 @@ export class BlockSelection {
   }
 
   /** 批量切换待办：每块按自己的字段翻值，一笔撤销；选区保持 */
-  toggleTodoSelectedBlocks(): boolean {
-    const ok = this.ed.toggleTodoMany(this.blockSelRoots().map((b) => b.id))
+  toggleClosureSelectedBlocks(): boolean {
+    const ok = this.ed.toggleClosureMany(this.blockSelRoots().map((b) => b.id))
     if (ok) this.paintBlockSel()
     return ok
   }

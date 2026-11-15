@@ -57,7 +57,7 @@ export function taskStatusChoices(): PropChoice[] {
 /**
  * 造一份「任务状态」词汇：定义块（选项已写进 `_choices`）＋ 缺省「待办」＋ gutter 快捷位。
  *
- * `_use: 'status'` 是语义（唯一一条任务状态），`_check` 是显示/编辑映射
+ * `_use: 'closure'` 是语义（唯一一条任务状态），`_check` 是显示/编辑映射
  * （勾选＝完成、取消＝待办）。两者分开：没有 `_use` 的 `_check` 只是一个普通勾选框。
  */
 export function taskStatusVocabulary(): Block {
@@ -67,7 +67,7 @@ export function taskStatusVocabulary(): Block {
     {
       [UI_POSITION_PROP]: 'block-left',
       [DEFAULT_PROP]: TASK_STATUS_TODO_ID,
-      [USE_PROP]: 'status',
+      [USE_PROP]: 'closure',
       [CHECK_PROP]: { on: TASK_STATUS_DONE_ID, off: TASK_STATUS_TODO_ID },
       // 未填时 gutter 上画定义块自己的图标（与「待办」同形），入口不会因没有值而消失
       [ICON_PROP]: 'lucide:circle',

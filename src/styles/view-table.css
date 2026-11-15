@@ -301,11 +301,11 @@
   display: block;
 }
 /**
- * **投影里的完成态**：与大纲里 `.blk[data-todo='done'] .tx` 同一条外观
+ * **投影里的完成态**：与大纲里 `.blk[data-closure='closed'] .tx` 同一条外观
  * （`blocks.css` 那一份）——读的时候就要看得出做完了，不必先聚焦。
- * `data-todo` 由装配层的投影入口盖（判据 `todoOf`，见 `app/wiring/todo-stamp.ts`）。
+ * `data-closure` 由装配层的投影入口盖（判据 `closureOf`，见 `app/wiring/closure-stamp.ts`）。
  */
-.surface-text[data-todo='done'] {
+.surface-text[data-closure='closed'] {
   color: var(--ui-text-tertiary);
   text-decoration: line-through;
   text-decoration-color: var(--ui-text-tertiary);

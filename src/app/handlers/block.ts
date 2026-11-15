@@ -140,24 +140,24 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     }
     return app.convertMention(S(a.blockId), S(a.to), Number(a.start), Number(a.end))
   },
-  'core.editor/toggle-todo': (_a, app) => {
+  'core.editor/toggle-closure': (_a, app) => {
     const id = curBlock(app)
     if (!id) return false
-    app.ed.toggleTodo(id)
+    app.ed.toggleClosure(id)
     return true
   },
   /**
-   * 「取消待办」：摘掉这一块的任务状态（`toggleTodo` 的反向，见 `editor.clearTodo`）。
+   * 「取消待办」：摘掉这一块的任务状态（`toggleClosure` 的反向，见 `editor.clearClosure`）。
    *
    * ⚠️ 返回值分三种，但**命令只回答「做没做」**：`none`（本来就不是任务）＝ false，
    *    另外两种都改过模型 ＝ true。牌子只在「摘了但它还在」时打一句 ——
    *    那种情况是标签声明给的，静默就会变成「点了没反应」。
    */
-  'core.editor/clear-todo': (_a, app) => {
+  'core.editor/clear-closure': (_a, app) => {
     const id = curBlock(app)
     if (!id) return false
-    const r = app.ed.clearTodo(id)
-    if (r === 'declared') app.toast(t('ui.todo.declaredByTag'), 'info')
+    const r = app.ed.clearClosure(id)
+    if (r === 'declared') app.toast(t('ui.closure.declaredByTag'), 'info')
     return r !== 'none'
   },
   'core.editor/insert-block': (a, app) => {
@@ -172,9 +172,9 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
      * `invoke` 不会按它校验——放过去就会「插了一行普通文字」，
      * 而用户以为那个类型还在（删掉的入口不该变成另一种东西）。
      */
-    if (type !== 'paragraph' && type !== 'todo') return false
-    const todo = type === 'todo' ? ('todo' as const) : undefined
-    app.ed.insert.insertBlockAfter(id, text, todo)
+    if (type !== 'paragraph' && type !== 'closure') return false
+    const closure = type === 'closure' ? ('open' as const) : undefined
+    app.ed.insert.insertBlockAfter(id, text, closure)
     return true
   },
   // 缺省目标取光标所在块（curBlock），不是「当前打开的那一屏」——
@@ -303,7 +303,7 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
   'core.editor/delete-selected-blocks': (_a, app) => app.ed.bsel.deleteSelectedBlocks(),
   'core.editor/indent-selected-blocks': (_a, app) => app.ed.bsel.indentSelectedBlocks(),
   'core.editor/outdent-selected-blocks': (_a, app) => app.ed.bsel.outdentSelectedBlocks(),
-  'core.editor/toggle-todo-selected-blocks': (_a, app) => app.ed.bsel.toggleTodoSelectedBlocks(),
+  'core.editor/toggle-closure-selected-blocks': (_a, app) => app.ed.bsel.toggleClosureSelectedBlocks(),
   'core.editor/copy-selected-blocks': (_a, app) => {
     const text = app.ed.bsel.selectedBlocksText()
     if (!text) return false

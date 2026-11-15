@@ -28,7 +28,7 @@ import {
   prop,
   type Block,
   type BlockProps,
-  type TodoState,
+  type ClosureState,
 } from '../model/model.ts'
 import { displayNameOf } from '../identity/alias.ts'
 import { plainText, textRuns, type RefRun } from '../model/runs.ts'
@@ -144,7 +144,7 @@ export const TASK_STATUS_PROP_ID = derivedId('prop', 'core/task-status')
 /**
  * 任务状态的三个**选项 id**（select 的选项＝定义块的直接子块，值存选项块 id）。
  *
- * 选项块与定义块一样是**核心词汇**：`todoOf`、⌘↵ 切换、种子查询都要按 id 认「完成」，
+ * 选项块与定义块一样是**核心词汇**：`closureOf`、⌘↵ 切换、种子查询都要按 id 认「完成」，
  * 不能按正文认（显示名可改，改显示名不动任何值）。kind 前缀 `choice` 与定义块的
  * `prop` 分域哈希，同名不撞。
  */
@@ -192,10 +192,10 @@ export interface FieldTable {
   /** 属性 id → 缺省值（定义块写了 `_default` 才有；`readField` 对「已声明未填」按它取值） */
   defaults: ReadonlyMap<string, unknown>
   /**
-   * **唯一**的「任务状态」定义（`_use: 'status'` ＋ 合法 `_check`）。
+   * **唯一**扮演「关闭」角色的定义（`_use: 'closure'` ＋ 合法 `_check`）。
    * 库级概念：没有「多个完成型属性取第一条」的裁决。
    */
-  status?: { defId: string; on: string; off: string }
+  closure?: { defId: string; on: string; off: string }
   /** 属性 id → 基数（缺省 `one`；定义块写了 `_cardinality: 'many'` 才是多值） */
   cardinality: ReadonlyMap<string, Cardinality>
 }
@@ -211,20 +211,20 @@ export function fieldTableOf(forest: readonly Block[]): FieldTable {
   const kinds = new Map<string, PropKind>()
   const defaults = new Map<string, unknown>()
   const cardinality = new Map<string, Cardinality>()
-  let status: FieldTable['status']
+  let closure: FieldTable['closure']
   for (const def of allPropDefs(forest)) {
     kinds.set(def.id, propKindOf(def))
     const dflt = prop<unknown>(def, DEFAULT_PROP)
     if (dflt !== undefined) defaults.set(def.id, dflt)
     const card = cardinalityOf(def)
     if (card === 'many') cardinality.set(def.id, card)
-    // 写入路径保证最多一个 status；坏数据带多个时按先序取第一个，不抛错
-    if (!status && useOf(def) === 'status') {
+    // 写入路径保证最多一个 closure；坏数据带多个时按先序取第一个，不抛错
+    if (!closure && useOf(def) === 'closure') {
       const check = checkOf(def)
-      if (check) status = { defId: def.id, on: check.on, off: check.off }
+      if (check) closure = { defId: def.id, on: check.on, off: check.off }
     }
   }
-  return { byTag, liveTags, kinds, defaults, cardinality, ...(status ? { status } : {}) }
+  return { byTag, liveTags, kinds, defaults, cardinality, ...(closure ? { closure } : {}) }
 }
 
 /**
@@ -265,7 +265,7 @@ export interface FieldRead {
  * 数据里「没点过」仍然是没点过，**解释**上由归一口径给出（布尔是未完成、带缺省的是缺省项）。
  *
  * ⚠️ 归一只对「没写过值」的块生效；没有缺省的定义，未填仍是未填（`undefined`）。
- *    查询、看板分组、`todoOf` 都走这里 ⇒ 同一块在所有读法里是同一个答案。
+ *    查询、看板分组、`closureOf` 都走这里 ⇒ 同一块在所有读法里是同一个答案。
  */
 export function readField(block: Block, propId: string, table: FieldTable): FieldRead {
   // 系统槽（`_date`／`_kind`／`_tags`…）走模型判据，不读 `props` 裸键
@@ -280,30 +280,32 @@ export function readField(block: Block, propId: string, table: FieldTable): Fiel
 }
 
 /**
- * 「任务」的派生读法：**库里唯一的 status 定义**。
+ * **关闭态**的派生读法：唯一扮演 `closure` 角色的定义（＋标签声明）。
  *
  * 三态与值这样对上：
- *   · 值＝该定义 `_check.on` ⇒ `'done'`（做完了）；
- *   · 其余任何已声明形态 ⇒ `'todo'`（**是任务、还没做完**）——待办、进行中、
+ *   · 值＝该定义 `_check.on` ⇒ `'closed'`（关闭了）；
+ *   · 其余任何已声明形态 ⇒ `'open'`（**有关闭态、还没关闭**）——未填、进行中、
  *     以及**靠标签声明拿到这一栏还没填**的块（读侧缺省读出缺省项）；
- *   · 没有 status 定义，或这块没有那一栏 ⇒ `undefined`（这块压根不是任务）。
+ *   · 没有 closure 定义，或这块没有那一栏 ⇒ `undefined`（这一行没有关闭态）。
  *
  * ⚠️ **判据是「有没有这一栏」（`readField`），不是「有没有值」。** 把「未填」并进
- *    `undefined` 会让刚挂上的任务立刻不算任务 —— 屏幕上画着空心方框、查询查不到它。
+ *    `undefined` 会让刚挂上的开关立刻消失 —— 屏幕上画着空心方框、查询查不到它。
  *
- * ⚠️ 必须传 `FieldTable`：只认 `_ownProps` 会漏掉**标签声明**那一半，而「任务」这个
- *    种子标签正是用 `declareField` 把这一栏给到成员的。那种块屏幕上是未完成、模型里
- *    却不是任务 —— 同一个块两种答案，且没有任何一层报错。
+ * ⚠️ 必须传 `FieldTable`：只认 `_ownProps` 会漏掉**标签声明**那一半。那种块屏幕上是
+ *    未关闭、模型里却没有关闭态 —— 同一个块两种答案，且没有任何一层报错。
  *
- * ⚠️ **不再有「第一条完成型属性」**：`_use: 'status'` 全局唯一（写入路径保证），
- *    `todoOf` 只认这一条；两个属性的歧义在模型层就不存在。
+ * ⚠️ **角色不是类型**：这里一个字都不提「任务」。`#任务` 是种子给「closure 角色 +
+ *    标签声明」起的一个约定名；换一套词汇（`#书` ＋ `读完`）零代码。
+ *
+ * ⚠️ **不再有「第一条完成型属性」**：`_use: 'closure'` 全局唯一（写入路径保证），
+ *    `closureOf` 只认这一条；两个属性的歧义在模型层就不存在。
  */
-export function todoOf(block: Block, table: FieldTable): TodoState | undefined {
-  const status = table.status
-  if (!status) return undefined
-  const { declared, value } = readField(block, status.defId, table)
+export function closureOf(block: Block, table: FieldTable): ClosureState | undefined {
+  const closure = table.closure
+  if (!closure) return undefined
+  const { declared, value } = readField(block, closure.defId, table)
   if (!declared) return undefined
-  return singleValueOf(value) === status.on ? 'done' : 'todo'
+  return singleValueOf(value) === closure.on ? 'closed' : 'open'
 }
 
 /**
@@ -558,30 +560,41 @@ export function assetRefsOf(value: unknown): string[] {
 /**
  * 属性定义的**用途**（系统属性）：这条属性拿来干什么。
  *
- * 现在只有 `status`（任务状态）。优先级先作为普通 select，等有应用级消费者
- * （任务表／快捷键／默认任务模板）再扩这个联合——不要为假设的用途先造枚举值。
+ * 现在只有 `closure`（这条属性的 on 值表示「关闭」）。优先级等角色先作为普通 select，
+ * 等有应用级消费者（任务表／快捷键／默认模板）再扩这个联合——不要为假设的用途先造枚举值。
+ *
+ * **角色不是类型**：「任务」是种子内容（`#任务` ＋ 标签声明），不是模型概念。
  *
  * 用途与显示分开：`_use` 说语义，`_check` 说怎么编辑/显示。
  */
-export type PropUse = 'status'
+export type PropUse = 'closure'
 
 export const USE_PROP = '_use'
 
+/**
+ * 旧库遗留的用途名（`status` 是这次改名之前的写法）。
+ *
+ * 与 `LEGACY_KINDS` 同一条理由：浏览器库靠版本号作废，**桌面库的旧值仍在盘上**，
+ * 冷启动不能把它判成坏形状、也不能静默丢掉关闭态。只在读路径认，写路径只写新值。
+ */
+const LEGACY_USE: readonly string[] = ['status']
+
 export function isUseValue(v: unknown): boolean {
-  return v === 'status'
+  return typeof v === 'string' && (v === 'closure' || LEGACY_USE.includes(v))
 }
 
 /** 定义的用途；不是 `select`／没写／未知值 ⇒ 缺席（普通属性） */
 export function useOf(def: Block | undefined): PropUse | undefined {
   if (!def || propKindOf(def) !== 'select') return undefined
-  return prop<string>(def, USE_PROP) === 'status' ? 'status' : undefined
+  const v = prop<string>(def, USE_PROP)
+  return v === 'closure' || (typeof v === 'string' && LEGACY_USE.includes(v)) ? 'closure' : undefined
 }
 
 /**
  * 勾选框映射（系统属性）：勾选写 `on`、取消写 `off`。
  *
- * 它是**显示/编辑**映射，不自动等于任务：`_use: 'status'` 时才驱动
- * `todoOf`/删除线/⌘↵；没有 `_use` 就只是一个普通的两态开关（如「已读/未读」）。
+ * 它是**显示/编辑**映射，不自动等于关闭态：`_use: 'closure'` 时才驱动
+ * `closureOf`/删除线/⌘↵；没有 `_use` 就只是一个普通的两态开关（如「已读/未读」）。
  */
 export interface CheckSpec {
   on: string
@@ -1781,8 +1794,8 @@ function gutterFieldOf(
 /**
  * **`⌘↵`（切换待办）该切哪一格**——单块与批量共用的唯一判据。
  *
- * 只认库级唯一的**任务状态**（`_use: 'status'` ＋ 合法 `_check`）：
- * 它是「这一行做完了没有」的唯一答案，`⌘↵` 就是这个动作的快捷通道。
+ * 只认库级唯一的**关闭态角色**（`_use: 'closure'` ＋ 合法 `_check`）：
+ * 它是「这一行关闭了没有」的唯一答案，`⌘↵` 就是这个动作的快捷通道。
  *
  * ⚠️ **不退回普通两态字段**（无 `_use` 的 `_check`、布尔开关）：同一行可能有两个
  *    长得一样的方框，按「第一个」取就是一个用户看不见的优先级规则；`⌘↵` 一旦
@@ -1790,8 +1803,8 @@ function gutterFieldOf(
  * ⚠️ 这里返回 `undefined` **不等于「什么都别做」**：调用方的人话是「这一行还不是任务 ⇒
  *    先把它变成任务（落核心任务状态，待办）」，与「第一次按 ⌘↵ 变成待办」同一手感。
  */
-export function todoTargetField(fields: readonly GutterField[]): GutterField | undefined {
-  return fields.find((f) => f.use === 'status' && f.check !== undefined)
+export function closureTargetField(fields: readonly GutterField[]): GutterField | undefined {
+  return fields.find((f) => f.use === 'closure' && f.check !== undefined)
 }
 
 /**

@@ -19,7 +19,7 @@ import {
   mkQueryBlock,
   setBlockType,
   isEmbedBlock,
-  todoOf,
+  closureOf,
   TASK_STATUS_PROP_ID,
   TASK_STATUS_TODO_ID,
   TASK_STATUS_DONE_ID,
@@ -36,7 +36,7 @@ import {
   type Block,
   type Located,
   type QuerySpec,
-  type TodoState,
+  type ClosureState,
 } from '../../core/index.ts'
 import {
   insertRunAt,
@@ -83,11 +83,11 @@ export class InsertOps {
    *
    * ⚠️ 「空块」的判据是**正文为空且没有子块**：有子块的块不能被改掉类型/值 ——
    *    那会让子树挂在一个用户没打算改的块下面。
-   * ⚠️ 待办这一支还要看**已经有值没有**：已经是任务的空块（读出「待办」＝
-   *    是任务但没做完）不该被「/待办」翻回未完成 —— 那是改值，不是插入。
-   *    这一条与 `toggleTodo` 分工：那个是**切换**，这个是**插入**。
+   * ⚠️ 关闭态这一支还要看**已经有值没有**：已经有关闭态的空块（读出「未关闭」）
+   *    不该被「/待办」翻回去 —— 那是改值，不是插入。
+   *    这一条与 `toggleClosure` 分工：那个是**切换**，这个是**插入**。
    */
-  insertBlockAfter(id: string, text: string, todo?: TodoState): string | null {
+  insertBlockAfter(id: string, text: string, closure?: ClosureState): string | null {
     const loc = locate(this.ed.doc, id)
     if (!loc) return null
     this.ed.beginUndoEntry()
@@ -98,31 +98,31 @@ export class InsertOps {
        *   · 「正文块」⇒ 这一行**本来就是**一个正文块，意图已经满足：不动模型、
        *     不记撤销，把光标落回它自己（返回它的 id，而不是 `null` ——
        *     `null` 的意思是「这里放不下一个块」，与「已经就是这样」是两件事）。
-       *   · 「待办」⇒ 原地变成任务（但已有任务状态值时不覆盖，见上）。
+       *   · 「待办」（闭合态）⇒ 原地落值（但已有关闭态值时不覆盖，见上）。
        */
-      if (!todo) {
+      if (!closure) {
         this.ed.placeCaret(loc.block.id, 0)
         return loc.block.id
       }
-      if (todoOf(loc.block, this.ed.fieldTable()) !== undefined) return null
+      if (closureOf(loc.block, this.ed.fieldTable()) !== undefined) return null
       // 只落一个属性值、不动结构 ⇒ 一笔事务里正好 1 条 `prop.set`（定义块缺了就同批补上）。
-      // 自有槽同批登记：这一栏「在」不能只靠值撑着（见 toggleTodo 的注释）
+      // 自有槽同批登记：这一栏「在」不能只靠值撑着（见 toggleClosure 的注释）
       this.ed.write((tx) => {
         ensureTaskStatusInTx(this.ed.store.blocks, tx)
         tx.patch(loc.block.id, (b) => {
           declareOwnProp(b, TASK_STATUS_PROP_ID)
-          setValue(b, TASK_STATUS_PROP_ID, todo === 'done' ? TASK_STATUS_DONE_ID : TASK_STATUS_TODO_ID)
+          setValue(b, TASK_STATUS_PROP_ID, closure === 'closed' ? TASK_STATUS_DONE_ID : TASK_STATUS_TODO_ID)
         })
       })
       this.ed.structTail({ id: loc.block.id, off: 0 }, [loc.block.id])
       return loc.block.id
     }
     const b = mkBlock(text)
-    // 待办不是块的字段，是**任务状态属性**的一个值：这里落值，不落「块的种类」。
-    // 自有槽跟值一起登记（见 toggleTodo）：清空值行还在，「待办」这个身份不靠值独撑
-    if (todo) {
+    // 待办不是块的字段，是**关闭态属性**的一个值：这里落值，不落「块的种类」。
+    // 自有槽跟值一起登记（见 toggleClosure）：清空值行还在，「待办」这个身份不靠值独撑
+    if (closure) {
       declareOwnProp(b, TASK_STATUS_PROP_ID)
-      b.props = { ...(b.props ?? {}), [TASK_STATUS_PROP_ID]: todo === 'done' ? TASK_STATUS_DONE_ID : TASK_STATUS_TODO_ID }
+      b.props = { ...(b.props ?? {}), [TASK_STATUS_PROP_ID]: closure === 'closed' ? TASK_STATUS_DONE_ID : TASK_STATUS_TODO_ID }
     }
     /**
      * **落点只由 `tx.insert` 算**（它按整片森林取兄弟列表）。
@@ -132,7 +132,7 @@ export class InsertOps {
      * section 根（页／天／查询记录）没有兄弟位，插成它的**首个子块**：
      * 视觉上「根行之后」就是第一个子块，写回也按 root id 走。
      *
-     * 事务里**只**开结构那一笔：`b` 自带的待办值不另发属性 op ——
+     * 事务里**只**开结构那一笔：`b` 自带的关闭态值不另发属性 op ——
      * `insert` 已经为每个新块报了 `{parent,index}`，属性会随整块落库，
      * 再补一条 `prop.set` 就是同一件事记两遍。
      *
@@ -143,8 +143,8 @@ export class InsertOps {
     if (!site || site.kind === 'replace') return null
     const at = site.kind === 'first-child' ? { parentId: site.parentId, index: 0 } : site
     const ok = this.ed.write((tx) => {
-      // 新块自带待办值 ⇒ 定义块得同批在（与切换待办同一条判据）
-      if (todo) ensureTaskStatusInTx(this.ed.store.blocks, tx)
+      // 新块自带关闭态值 ⇒ 定义块得同批在（与切换关闭态同一条判据）
+      if (closure) ensureTaskStatusInTx(this.ed.store.blocks, tx)
       tx.insert(b, at.parentId, at.index)
       return true
     })

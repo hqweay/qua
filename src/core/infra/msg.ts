@@ -30,8 +30,8 @@ export const MSG = {
   'cmd.editor.toggle-collapse': '折叠 / 展开',
   'cmd.editor.duplicate-block': '复制块',
   'cmd.editor.delete-block': '删除块',
-  'cmd.editor.toggle-todo': '切换待办',
-  'cmd.editor.clear-todo': '取消待办',
+  'cmd.editor.toggle-closure': '切换待办',
+  'cmd.editor.clear-closure': '取消待办',
   'cmd.editor.insert-block': '在下方插入块',
   'cmd.editor.insert-block-before': '在上方插入块',
   'cmd.editor.clear-block': '清空本块',
@@ -44,7 +44,7 @@ export const MSG = {
   'cmd.editor.delete-selected-blocks': '删除选中的块',
   'cmd.editor.indent-selected-blocks': '缩进选中的块',
   'cmd.editor.outdent-selected-blocks': '反缩进选中的块',
-  'cmd.editor.toggle-todo-selected-blocks': '切换选中块的待办',
+  'cmd.editor.toggle-closure-selected-blocks': '切换选中块的待办',
   'cmd.editor.copy-selected-blocks': '复制选中的块（大纲文本）',
   'cmd.editor.copy-selected-block-refs': '复制选中块的引用',
   'cmd.editor.copy-block': '复制块（粘贴为引用）',
@@ -1260,12 +1260,12 @@ export const MSG = {
   'ui.block.menuHint': '右键打开块菜单',
   'ui.block.handleHint': '拖拽重排 · 右键打开块菜单',
   'ui.block.placeholderFirst': '写点什么…（按 / 呼出命令）',
-  'ui.todo.toggle': '点击切换完成 · 右键选择状态',
+  'ui.closure.toggle': '点击切换完成 · 右键选择状态',
   /**
    * 「取消待办」摘完这一块自己的槽之后，如果这一栏还在（标签声明给的），
    * 就得说清它从哪来 —— 否则看起来像「点了没反应」。
    */
-  'ui.todo.declaredByTag': '这一块的任务状态来自标签的属性声明，摘掉对应标签才会消失',
+  'ui.closure.declaredByTag': '这一块的关闭态来自标签的属性声明，摘掉对应标签才会消失',
   'ui.tag.mark': '标签',
   'ui.atom.unknown': '未知引用',
   // 资产 run 没带文件名快照时（老数据/异常形状）的摘要占位：它仍是内容，不许读成「无标题」

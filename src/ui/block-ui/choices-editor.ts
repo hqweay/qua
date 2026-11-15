@@ -43,8 +43,8 @@ export interface ChoiceActions {
   setScope: (choiceId: string, scope: ChoiceScope) => void
   /** 选项在块左侧的图标（空串＝无图标） */
   setIcon: (choiceId: string, icon: string) => void
-  /** 写/摘勾选框映射；`status: true` 同时标为库级唯一的任务状态 */
-  setCheck: (defId: string, spec: { on: string; off: string; status: boolean } | null) => void
+  /** 写/摘勾选框映射；`closure: true` 同时标为库级唯一的任务状态 */
+  setCheck: (defId: string, spec: { on: string; off: string; closure: boolean } | null) => void
   /** 单值/多值（多选不能是勾选框/任务状态；切回单值有「仍有块选了多个值」的守卫） */
   setCardinality: (defId: string, cardinality: 'one' | 'many') => void
   /** 定义块的快捷入口位置（block-left ＝ 块左侧图标；panel ＝ 只留属性卡） */
@@ -175,11 +175,11 @@ export class ChoicesEditor {
   }
 
   /**
-   * **勾选框映射**（`_check {on, off}`）与任务状态用途（`_use: 'status'`）。
+   * **勾选框映射**（`_check {on, off}`）与任务状态用途（`_use: 'closure'`）。
    *
    * 两个决定分开：
    *   · 「显示为勾选框」只影响编辑/显示（勾选写 on、取消写 off），普通属性也能用；
-   *   · 「勾选表示完成」把它标成库级唯一的任务状态（划线/⌘↵/todoOf）。
+   *   · 「勾选表示完成」把它标成库级唯一的关闭态角色（划线/⌘↵/closureOf）。
    * 多值属性不能勾选（单值才能「勾一个」）；少于两个选项时不给开。
    */
   private checkSection(def: Block): HTMLElement {
@@ -189,7 +189,7 @@ export class ChoicesEditor {
 
     const all = choicesOf(def)
     const check = checkOf(def)
-    const status = useOf(def) === 'status'
+    const closure = useOf(def) === 'closure'
 
     const head = document.createElement('label')
     head.className = 'choices-gutter'
@@ -203,7 +203,7 @@ export class ChoicesEditor {
       if (cb.checked) {
         const on = all[0]?.id ?? ''
         const off = all[1]?.id ?? ''
-        this.deps.write.setCheck(def.id, on && off ? { on, off, status: false } : null)
+        this.deps.write.setCheck(def.id, on && off ? { on, off, closure: false } : null)
       } else {
         this.deps.write.setCheck(def.id, null)
       }
@@ -246,7 +246,7 @@ export class ChoicesEditor {
       sel.value = current
       sel.addEventListener('change', () => {
         const next = { on: which === 'on' ? sel.value : check.on, off: which === 'off' ? sel.value : check.off }
-        this.deps.write.setCheck(def.id, { ...next, status })
+        this.deps.write.setCheck(def.id, { ...next, closure })
         this.render()
       })
       row.append(text, sel)
@@ -260,9 +260,9 @@ export class ChoicesEditor {
     sbox.type = 'checkbox'
     sbox.className = 'prop-check'
     sbox.dataset.choiceStatus = '1'
-    sbox.checked = status
+    sbox.checked = closure
     sbox.addEventListener('change', () => {
-      this.deps.write.setCheck(def.id, { on: check.on, off: check.off, status: sbox.checked })
+      this.deps.write.setCheck(def.id, { on: check.on, off: check.off, closure: sbox.checked })
       this.render()
     })
     const stext = document.createElement('span')

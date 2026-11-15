@@ -584,7 +584,7 @@ export function seedDock(): DockPrefs {
 function coreVocabulary(): { blocks: Block[]; featureTagId: string } {
   // 定义块与选项从 core 的构造器来：种子与写路径的按需物化共用同一份形状，
   // 两边各造一份就会漂移（种子有的选项、按需物化的没有，查询就分叉）。
-  // 选项 id 仍是核心词汇的**确定性 id**（`todoOf`／⌘↵／种子查询按 id 认「完成」）。
+  // 选项 id 仍是核心词汇的**确定性 id**（`closureOf`／⌘↵／种子查询按 id 认「完成」）。
   const taskStatus = taskStatusVocabulary()
   const task = mkTagBlock(TASK_TAG_LABEL)
   task.props = { ...(task.props ?? {}), _icon: 'lucide:check-square' }

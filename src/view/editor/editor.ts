@@ -58,7 +58,7 @@ import {
   walkForest,
   gutterFieldsOf,
   gutterFieldsFor,
-  todoTargetField,
+  closureTargetField,
   relationsFrom,
   relationsTo,
   refSourcesOf,
@@ -68,7 +68,7 @@ import {
   setValue,
   clearValue,
   declareOwnProp,
-  todoOf,
+  closureOf,
   TASK_STATUS_PROP_ID,
   TASK_STATUS_TODO_ID,
   canWriteText,
@@ -521,24 +521,24 @@ export type AcceptPick =
  * 与「第一次按 ⌘↵ ＝ 变成待办」的旧手感一致。
  * `clear`：完成型字段没有缺省值可回 ⇒ 清掉值但保留这一栏（行仍在「未填」）。
  */
-interface TodoPlan {
+interface ClosurePlan {
   propId: string
   next?: unknown
   clear: boolean
   createCore: boolean
 }
 
-function applyTodoPlan(b: Block, plan: TodoPlan): void {
+function applyClosurePlan(b: Block, plan: ClosurePlan): void {
   if (plan.createCore) declareOwnProp(b, TASK_STATUS_PROP_ID)
   if (plan.clear) clearValue(b, plan.propId, { keepField: true })
   else setValue(b, plan.propId, plan.next)
 }
 
 /** 目标字段不存在 ⇒ 落核心任务状态（「第一次按 ⌘↵ ＝ 变成待办」） */
-function todoPlanOfField(field: GutterField | undefined): TodoPlan {
+function closurePlanOfField(field: GutterField | undefined): ClosurePlan {
   if (!field) return { propId: TASK_STATUS_PROP_ID, next: TASK_STATUS_TODO_ID, clear: false, createCore: true }
   // 任务状态：勾选 ⇄ 取消在**两个显式选项**之间翻，不再靠 default/清空
-  if (field.use === 'status' && field.check) {
+  if (field.use === 'closure' && field.check) {
     const next = field.value === field.check.on ? field.check.off : field.check.on
     return { propId: field.propId, next, clear: false, createCore: false }
   }
@@ -651,7 +651,7 @@ export class BlockEditor {
   /** 空块占位（见 `ViewOpts.emptyPlaceholder`；省略＝默认） */
   private readonly emptyPlaceholder: string | undefined
   /**
-   * **字段读取表**（懒建）：判「这块是不是任务」要看标签声明（`todoOf`），
+   * **字段读取表**（懒建）：判「这块是不是任务」要看标签声明（`closureOf`），
    * 逐块现建要扫两趟森林。任何一次模型写之后作废，下一次问到时重建一次。
    */
   private fieldTableCache: FieldTable | null = null
@@ -686,7 +686,7 @@ export class BlockEditor {
     this.allowRootRemove = o.allowRootRemove !== false
     this.rootRemoveFill = o.rootRemoveFill !== false
     this.structuralScope = o.structuralScope ?? 'document'
-    // 写入口顺手作废那张派生表：标签声明／定义 kind 变了，下一次 `todoOf` 要重算
+    // 写入口顺手作废那张派生表：标签声明／定义 kind 变了，下一次 `closureOf` 要重算
     this.write = (fn, source, opts) => {
       this.fieldTableCache = null
       // 发起写的编辑器就是自己（见 `Run` 的 source 口径）：不注入的话，装配层的
@@ -1521,7 +1521,7 @@ export class BlockEditor {
   /**
    * @param ids 这次**动过哪些块**（可选）。查询视图靠它判断「结果里的块变没变」，
    *            而不是靠「store 被碰过几次」——后者会把刷新顺带的重渲染也算成过期。
-   *            ⚠️ 只给拿得到精确 id 的路径传（文本编辑、todo、删除）；结构操作先不传，
+   *            ⚠️ 只给拿得到精确 id 的路径传（文本编辑、关闭态、删除）；结构操作先不传，
    *            订阅方必须容忍 `ids === undefined`（那就是「不知道，按整体处理」）。
    */
   /** 协作对象（块选区删块）也要广播同一件事；对外仍是编辑器的口径 */
@@ -1789,7 +1789,7 @@ export class BlockEditor {
         /**
          * 白名单按**类名集合**匹配，不按 `className` 全等。
          *
-         * 渲染层放进去的节点会带状态类：`block-dom` 里 `if (todo === 'done') tx.classList.add('done')`
+         * 渲染层放进去的节点会带状态类：`block-dom` 里 `if (closure === 'closed') tx.classList.add('closed')`
          * ⇒ 完成态任务块的正文槽 className 是 `"tx done"`。全等匹配认不出它，就会把**正文槽
          * 连同里面的整段字**当游离内容删掉。实测（2026-11-12）：点「完成态任务块」的块下属性行，
          * 正文整段消失，而模型一字未动（⌘Z 无效、聚焦别处再回来又画出来）。
@@ -2587,7 +2587,7 @@ export class BlockEditor {
   /**
    * **gutter 上 select 类图标的取值菜单**：把锚点交给装配层开选项菜单。
    * 入口有三条：左键点普通 select、⌥+点状态标记、右键点任何 select 类图标
-   * （状态标记的普通左键不走这里——那一下翻完成，见 `toggleTodo`）。
+   * （状态标记的普通左键不走这里——那一下翻完成，见 `toggleClosure`）。
    */
   pickGutterValue(id: string, propId: string, anchor: DOMRect): void {
     if (!locate(this.doc, id)) return
@@ -2611,7 +2611,7 @@ export class BlockEditor {
    *    与原来「第一次切换 ＝ 变成待办」的手感一致。
    */
   /**
-   * **普通勾选框**（`_check` 无 `_use`）：只翻 on/off，不碰 `todoOf`/划线。
+   * **普通勾选框**（`_check` 无 `_use`）：只翻 on/off，不碰 `closureOf`/划线。
    * 每个字段自己的 propId 从 gutter 带过来；一行上多个勾选框互不串台。
    */
   toggleCheck(id: string, propId: string): void {
@@ -2625,13 +2625,13 @@ export class BlockEditor {
     this.structTail(null, [id])
   }
 
-  toggleTodo(id: string, onlyPropId?: string): void {
+  toggleClosure(id: string, onlyPropId?: string): void {
     const loc = locate(this.doc, id)
     if (!loc) return
     const fields = gutterFieldsOf(loc.block, this.store.blocks)
     /**
      * 目标字段：点 gutter 上哪一枚就传哪个 propId（多个勾选框不串台）；
-     * 命令／快捷键不带目标 ⇒ 库里唯一的任务状态（见 `todoTargetField`），
+     * 命令／快捷键不带目标 ⇒ 库里唯一的任务状态（见 `closureTargetField`），
      * 普通两态字段等它自己那一下点击。
      */
     let field: GutterField | undefined
@@ -2639,32 +2639,32 @@ export class BlockEditor {
       field = fields.find((f) => f.propId === onlyPropId)
       if (!field) return
     } else {
-      field = todoTargetField(fields)
+      field = closureTargetField(fields)
     }
-    const plan = todoPlanOfField(field)
+    const plan = closurePlanOfField(field)
     this.beginUndoEntry()
     // 切的是一个属性值：一笔 patch 落「值 ＋（新挂时）自有槽」，与「插入待办」同一形状。
     // 落的是核心任务状态 ⇒ 定义块得先在（恢复空库／定义被清掉的库里没有它，
     // 缺了它这一行只剩「未知属性」）；同一笔事务里补上，值与定义同批落盘。
     this.write((tx) => {
       if (plan.propId === TASK_STATUS_PROP_ID) ensureTaskStatusInTx(this.store.blocks, tx)
-      tx.patch(id, (b) => applyTodoPlan(b, plan))
+      tx.patch(id, (b) => applyClosurePlan(b, plan))
     })
     this.structTail(null, [id])
   }
 
   /**
-   * 批量切换待办（块选区）：每块按**自己**的字段判据翻值（同 `toggleTodo`），
+   * 批量切换待办（块选区）：每块按**自己**的字段判据翻值（同 `toggleClosure`），
    * 全部装进**一笔事务**：定义块只补一次、一次撤销整体复原。section 根跳过。
    */
-  toggleTodoMany(ids: readonly string[]): boolean {
-    const plans: { id: string; plan: TodoPlan }[] = []
+  toggleClosureMany(ids: readonly string[]): boolean {
+    const plans: { id: string; plan: ClosurePlan }[] = []
     for (const id of ids) {
       const loc = locate(this.doc, id)
       if (!loc || loc.parent === null) continue
       const fields = gutterFieldsOf(loc.block, this.store.blocks)
-      const field = todoTargetField(fields)
-      plans.push({ id, plan: todoPlanOfField(field) })
+      const field = closureTargetField(fields)
+      plans.push({ id, plan: closurePlanOfField(field) })
     }
     if (plans.length === 0) return false
     this.beginUndoEntry()
@@ -2672,17 +2672,17 @@ export class BlockEditor {
       if (plans.some((p) => p.plan.propId === TASK_STATUS_PROP_ID)) {
         ensureTaskStatusInTx(this.store.blocks, tx)
       }
-      for (const p of plans) tx.patch(p.id, (b) => applyTodoPlan(b, p.plan))
+      for (const p of plans) tx.patch(p.id, (b) => applyClosurePlan(b, p.plan))
     })
     this.structTail(null, plans.map((p) => p.id))
     return true
   }
 
   /**
-   * **摘掉这一块的任务状态**（`core.editor/clear-todo`）：`toggleTodo` 的逆。
+   * **摘掉这一块的关闭态**（`core.editor/clear-closure`）：`toggleClosure` 的逆。
    *
-   * 为什么不能只靠 `toggleTodo` 连着点：它翻的是**值**（`true` ⇄ `false`），
-   * 而「这块不是任务」说的是**这一栏根本不存在**（`undefined`，见 `todoOf` 的三态）。
+   * 为什么不能只靠 `toggleClosure` 连着点：它翻的是**值**（`true` ⇄ `false`），
+   * 而「这块不是任务」说的是**这一栏根本不存在**（`undefined`，见 `closureOf` 的三态）。
    * 值翻到 `false` 仍然是「是任务、没做完」—— 屏幕上还画着空心方框。
    * 所以退出的动作必须是摘栏：值连同自有槽一起删（`clearValue`）。
    *
@@ -2691,11 +2691,11 @@ export class BlockEditor {
    *    所以摘完要**再读一次**判据 —— 还剩下就返回 `'declared'`，
    *    由调用方解释「它来自标签」，而不是让用户对着一个没变化的方框猜。
    */
-  clearTodo(id: string): 'cleared' | 'declared' | 'none' {
+  clearClosure(id: string): 'cleared' | 'declared' | 'none' {
     const loc = locate(this.doc, id)
     if (!loc) return 'none'
-    // 目标与 `toggleTodo` 同一判据：库里唯一的任务状态字段
-    const field = gutterFieldsOf(loc.block, this.store.blocks).find((f) => f.use === 'status')
+    // 目标与 `toggleClosure` 同一判据：库里唯一的任务状态字段
+    const field = gutterFieldsOf(loc.block, this.store.blocks).find((f) => f.use === 'closure')
     if (!field) return 'none'
     this.beginUndoEntry()
     this.write((tx) => tx.patch(id, (b) => clearValue(b, field.propId)))
@@ -3443,7 +3443,7 @@ export class BlockEditor {
        * 本来就该作用于聚焦中的编辑器，语义不冲突。
        */
       toggleChildrenCollapse: (id) => this.toggleChildrenCollapse(id),
-      toggleTodo: (id, propId) => this.toggleTodo(id, propId),
+      toggleClosure: (id, propId) => this.toggleClosure(id, propId),
       toggleCheck: (id, propId) => this.toggleCheck(id, propId),
       pickGutterValue: (id, propId, anchor) => this.pickGutterValue(id, propId, anchor),
       blankArea: this.blankArea,
@@ -3707,7 +3707,7 @@ export class BlockEditor {
       blockCanDeleteJournal: b !== undefined && isJournal(b) && journalDate(b) !== todayISO(),
       blockSelection: this.bsel.blockSel !== null,
       blockSelectionCount: this.bsel.blockSel?.ids.length ?? 0,
-      blockType: b && todoOf(b, this.fieldTable()) ? 'todo' : 'paragraph',
+      blockType: b && closureOf(b, this.fieldTable()) ? 'closure' : 'paragraph',
       blockHasChildren: Boolean(b && hasLiveChildren(b)),
       /**
        * 这一行有没有可折的东西：子块，或**身体**（查询块的结果视图／露面投影）。
@@ -3725,7 +3725,7 @@ export class BlockEditor {
         b && (isQueryBlock(b) || isEmbedBlock(b) || hasLiveChildren(b) || activeView(b) !== null),
       ),
       blockCollapsed: Boolean(b && isFolded(this.doc, b.id)),
-      blockDone: b ? todoOf(b, this.fieldTable()) === 'done' : false,
+      blockClosed: b ? closureOf(b, this.fieldTable()) === 'closed' : false,
       marking: b ? this.marksAtSel().join('+') : '',
       inTrash: false,
       composing: this.probe.isComposing,

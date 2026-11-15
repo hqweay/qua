@@ -54,7 +54,7 @@ import { createRowBodyCache } from './app/wiring/row-bodies.ts'
 import { setupDocks } from './app/wiring/docks.ts'
 import { setupCardMenus } from './app/wiring/dock-menus.ts'
 import { setupPanels } from './app/wiring/panels.ts'
-import { createTodoStamp } from './app/wiring/todo-stamp.ts'
+import { createClosureStamp } from './app/wiring/closure-stamp.ts'
 import { setupAtomPopovers } from './app/wiring/atom-popovers.ts'
 import { createRefPeek } from './ui/block-refs/popover.ts'
 import { setupFeed } from './app/wiring/feed.ts'
@@ -2436,7 +2436,7 @@ const app: App = {
       app.toast(t('ui.toast.tagDeleted'))
       return true
     }
-    // B 档条件确认（决策 273）：只有它还连着成员/声明才问——叶子标签没有任何连带，直接删。
+    // B 档条件确认：只有它还连着成员/声明才问——叶子标签没有任何连带，直接删。
     // 与删页/删天同一个会话确认框（danger 红钮），不再用「菜单里嵌一行继续」的形状。
     if (members === 0 && declarations === 0) return drop()
     const body =
@@ -3297,9 +3297,9 @@ let panels: ReturnType<typeof setupPanels>
 
 /**
  * 投影的任务完成态：一个注入点管所有表面（表格／大纲表格／卡片／日历／导图）。
- * 字段表随写作废、懒重建，见 `app/wiring/todo-stamp.ts`。
+ * 字段表随写作废、懒重建，见 `app/wiring/closure-stamp.ts`。
  */
-const stampTodo = createTodoStamp(blocks)
+const stampClosure = createClosureStamp(blocks)
 
 /**
  * tab 标题的刷新是**去抖**的：正文每敲一个字都会 `change`，而 tab 条重建会
@@ -3421,8 +3421,8 @@ const {
   // 表格标题列画的是**块的样子**：投影与正文同一条路（run/marks/引用/图片）
   project: (b, into) => {
     fillBlockText(into, b, (id) => blocks.find(id), assetViewOf, markAssetMissing)
-    // 投影也要看得出「做完了」：判据与大纲同一份（`todoOf`），住在装配层的唯一投影入口
-    stampTodo(b, into)
+    // 投影也要看得出「关闭了」：判据与大纲同一份（`closureOf`），住在装配层的唯一投影入口
+    stampClosure(b, into)
   },
   atomClick: (atom, el, mods) => popovers.handleAtomClick(atom, el, mods, 'table'),
   // 挂载区/查询结果接的是**同一份**事件表（差别只在「装载谁」）

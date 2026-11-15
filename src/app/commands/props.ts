@@ -353,10 +353,10 @@ export function propsCommands(
     },
 
     /**
-     * 写/摘勾选框映射（`_check {on, off}`），可选把它标成任务状态（`_use: 'status'`）。
+     * 写/摘勾选框映射（`_check {on, off}`），可选把它标成任务状态（`_use: 'closure'`）。
      *
      * - `spec === null` ⇒ 摘掉 `_check` 与 `_use`；
-     * - `status: true` ⇒ 库级唯一：已有另一条任务状态属性就拒绝，不静默换主；
+     * - `closure: true` ⇒ 库级唯一：已有另一条任务状态属性就拒绝，不静默换主；
      * - 多值属性不能有勾选框（单值才能「勾一个」）。
      */
     setChoiceCheck: (defId, spec) => {
@@ -366,7 +366,7 @@ export function propsCommands(
         d.run((tx) =>
           tx.patch(defId, (b) => {
             patchProp(b, CHECK_PROP, undefined)
-            if (useOf(b) === 'status') patchProp(b, USE_PROP, undefined)
+            if (useOf(b) === 'closure') patchProp(b, USE_PROP, undefined)
           }),
         )
         return
@@ -380,8 +380,8 @@ export function propsCommands(
         d.toast(t('ui.props.choice.checkMultiBlocked'), 'warn')
         return
       }
-      if (spec.status) {
-        const other = d.kb.propDefs().find((x) => x.id !== defId && useOf(x) === 'status')
+      if (spec.closure) {
+        const other = d.kb.propDefs().find((x) => x.id !== defId && useOf(x) === 'closure')
         if (other) {
           d.toast(t('ui.props.choice.statusTaken', { label: propLabel(other) }), 'warn')
           return
@@ -390,7 +390,7 @@ export function propsCommands(
       d.run((tx) =>
         tx.patch(defId, (b) => {
           patchProp(b, CHECK_PROP, parsed)
-          patchProp(b, USE_PROP, spec.status ? 'status' : undefined)
+          patchProp(b, USE_PROP, spec.closure ? 'closure' : undefined)
         }),
       )
     },

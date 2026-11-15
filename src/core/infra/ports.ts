@@ -354,12 +354,12 @@ export interface App {
   /** 写选项的图标（`lucide:<name>` 或字面文本；空串＝无图标） */
   setChoiceIcon(choiceId: string, icon: string): void
   /**
-   * 写/摘勾选框映射（`_check {on, off}`），可选标成任务状态（`_use: 'status'`）。
+   * 写/摘勾选框映射（`_check {on, off}`），可选标成任务状态（`_use: 'closure'`）。
    *
-   * `null` ＝ 摘掉；`status: true` 时库级唯一（已有另一条就拒绝）；
+   * `null` ＝ 摘掉；`closure: true` 时库级唯一（已有另一条就拒绝）；
    * 多值属性不能有 `_check`。
    */
-  setChoiceCheck(defId: string, spec: { on: string; off: string; status: boolean } | null): void
+  setChoiceCheck(defId: string, spec: { on: string; off: string; closure: boolean } | null): void
   /**
    * 切换单值/多值（全 kind 轴；允许集按 kind 收，见 `PROP_KIND_SPECS`）。
    *
