@@ -58,6 +58,7 @@ import {
   walkForest,
   gutterFieldsOf,
   gutterFieldsFor,
+  todoTargetField,
   relationsFrom,
   relationsTo,
   refSourcesOf,
@@ -2629,15 +2630,16 @@ export class BlockEditor {
     if (!loc) return
     const fields = gutterFieldsOf(loc.block, this.store.blocks)
     /**
-     * 目标字段：点 gutter 上哪一枚就传哪个 propId（多个 checkbox 不串台）；
-     * 命令／快捷键不带目标 ⇒ 库里唯一的 status 字段，其次 checkbox。
+     * 目标字段：点 gutter 上哪一枚就传哪个 propId（多个勾选框不串台）；
+     * 命令／快捷键不带目标 ⇒ 库里唯一的任务状态（见 `todoTargetField`），
+     * 普通两态字段等它自己那一下点击。
      */
     let field: GutterField | undefined
     if (onlyPropId !== undefined) {
       field = fields.find((f) => f.propId === onlyPropId)
       if (!field) return
     } else {
-      field = fields.find((f) => f.use === 'status') ?? fields.find((f) => f.kind === 'checkbox')
+      field = todoTargetField(fields)
     }
     const plan = todoPlanOfField(field)
     this.beginUndoEntry()
@@ -2661,7 +2663,7 @@ export class BlockEditor {
       const loc = locate(this.doc, id)
       if (!loc || loc.parent === null) continue
       const fields = gutterFieldsOf(loc.block, this.store.blocks)
-      const field = fields.find((f) => f.use === 'status') ?? fields.find((f) => f.kind === 'checkbox')
+      const field = todoTargetField(fields)
       plans.push({ id, plan: todoPlanOfField(field) })
     }
     if (plans.length === 0) return false

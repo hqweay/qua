@@ -1778,6 +1778,22 @@ function gutterFieldOf(
 }
 
 /**
+ * **`⌘↵`（切换待办）该切哪一格**——单块与批量共用的唯一判据。
+ *
+ * 只认库级唯一的**任务状态**（`_use: 'status'` ＋ 合法 `_check`）：
+ * 它是「这一行做完了没有」的唯一答案，`⌘↵` 就是这个动作的快捷通道。
+ *
+ * ⚠️ **不退回普通两态字段**（无 `_use` 的 `_check`、布尔开关）：同一行可能有两个
+ *    长得一样的方框，按「第一个」取就是一个用户看不见的优先级规则；`⌘↵` 一旦
+ *    能切它们，「这一下切的是哪个」就没有可解释的答案。普通两态只由它自己那一下点击切。
+ * ⚠️ 这里返回 `undefined` **不等于「什么都别做」**：调用方的人话是「这一行还不是任务 ⇒
+ *    先把它变成任务（落核心任务状态，待办）」，与「第一次按 ⌘↵ 变成待办」同一手感。
+ */
+export function todoTargetField(fields: readonly GutterField[]): GutterField | undefined {
+  return fields.find((f) => f.use === 'status' && f.check !== undefined)
+}
+
+/**
  * 这个块上**该在 gutter 画快捷入口**的属性。
  *
  * 为什么和 `fieldRows` 分开而写在 core：gutter 与右侧面板吃的是**同一份行派生**

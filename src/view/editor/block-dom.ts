@@ -777,34 +777,32 @@ export function makeBlockEl(
   /** 这一行下面是否要画**行内**的身体（按源分派：有结果身体就画，段根同此） */
   const inlineBody = Boolean(opts.viewBody) && rowHasInlineViewBody(r)
   /**
-   * gutter 上那个**任务开关**：`_use: 'status'` 的字段优先，其次 checkbox。
+   * gutter 上那个**任务开关**：只认 `_use: 'status'` 的字段。
    *
    * ⚠️ 判据是定义的 status 用途 + `_check`，不是固定 propId：自定义的「任务」属性
    *    和内置任务状态走同一套。status 库级唯一，没有「多个完成型字段取第一条」的裁决。
+   * ⚠️ **布尔开关（`checkbox` kind）不参与**：它是「值没有名字」的两态，谁也不知道
+   *    `true` 是不是「完成」；让它借任务方框（`data-todo`／划线）＝ 同一枚方框两种意思。
+   *    它自己在 gutter 上画自己的方框，只由那一下点击切（与 `⌘↵` 无关）。
    */
   const statusField = opts.gutter?.find((f) => f.use === 'status' && f.check !== undefined)
-  const box = statusField ?? opts.gutter?.find((f) => f.kind === 'checkbox')
   /**
    * 待办三态：任务状态字段的值＝`_check.on` ⇒ 做完了；其余已声明形态（待办／进行中／未填）
-   * ⇒ 是任务但没做完；没有 status 字段（gutter 里也没有别的 checkbox）⇒ 不是任务。
+   * ⇒ 是任务但没做完；没有 status 字段 ⇒ 不是任务。
    *
    * ⚠️ **未填要算「未完成」，不能算「不是任务」**：这个槽的准入判据是「这块有这条属性」
    *    而不是「这条属性有值」（见 `gutterFieldsOf`）—— 刚给它加上、还没点过的那一下，
-   *    正是这个入口存在的理由。若未填落进「不是任务」，块左边会画出一个空心方框
-   *    （`box` 为真），却同时被当成普通块（没有 `data-todo`）⇒ 方框与状态各说一套。
+   *    正是这个入口存在的理由。若未填落进「不是任务」，块左边会画出一个空心方框，
+   *    却同时被当成普通块（没有 `data-todo`）⇒ 方框与状态各说一套。
    *
    * ⚠️ `data-todo` 是 **CSS 与冒烟的契约**（删除线按它选），所以这里不换成属性名。
    */
   const todo: 'todo' | 'done' | undefined =
-    box === undefined
+    statusField === undefined || statusField.check === undefined
       ? undefined
-      : box.use === 'status' && box.check
-        ? box.value === box.check.on
-          ? 'done'
-          : 'todo'
-        : box.value === true
-          ? 'done'
-          : 'todo'
+      : statusField.value === statusField.check.on
+        ? 'done'
+        : 'todo'
   const el = document.createElement('div')
   el.className = 'blk'
   el.dataset.blockId = b.id
@@ -1138,8 +1136,9 @@ export function makeBlockEl(
    *     这两个名字是 CSS 与冒烟的契约；
    *   · `_check`（无 status）：普通勾选框（翻 on/off，不划线）——`.check-box` ＋ `data-check-for`；
    *   · 其余 select：普通值（点开选项菜单）——`.prop-mark` ＋ `data-prop-for`；
-   *   · checkbox：布尔翻转（点一下切换它自己的值）——也走 `data-todo-for`，
-   *     但带 `data-prop-id`，所以多个 checkbox 不会互相串台。
+   *   · `checkbox`（布尔开关）：翻它自己的布尔值（`.check-box` ＋ `data-todo-for`）；
+   *     **不是任务**（没有 `data-todo`／划线，`⌘↵` 也不切它）。带 `data-prop-id`，
+   *     所以一行多个开关不会互相串台。
    *
    * **右键任何 select 类图标都开取值菜单**（状态标记也如此）：换到哪个值是显式意图，
    * 不该逼用户记住 ⌥ 才够得着（入口判据在 editor-events 的 contextmenu 支）。
@@ -1229,7 +1228,10 @@ export function makeBlockEl(
     }
     if (field.kind === 'checkbox') {
       const mark = document.createElement('span')
-      mark.className = 'identity todo-box check-mark'
+      // **开关**：值是布尔、没有名字 ⇒ 不是任务（不拿 `data-todo`、不划线）。
+      // 走 `data-todo-for` 只是复用「点一下切自己那一格」的既有通道（带 propId 不串台），
+      // 视觉用普通勾选框那一档：同一个方框图形，但没有完成任务的含义。
+      mark.className = 'identity check-box check-mark'
       mark.dataset.todoFor = b.id
       mark.dataset.propId = field.propId
       mark.appendChild(createIcon(field.value === true ? 'square-check' : 'square', 'sm'))
