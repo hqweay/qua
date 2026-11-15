@@ -8,7 +8,7 @@
  */
 import './styles.css'
 import { addAlias, addList, blockLabel, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, COLOR_PROP, ICON_PROP, isColorValue, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, cardLayoutOf, DERIVED_VIEW_KINDS, propKindOf, propLabel, choicesOf, choicesFor, childDisplayProps, enginePropDefs, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec, withBlockOwnerData, VIEW_KIND_ICON, type StoredViewKind, type UndoKind, type ColorAxis } from './core/index.ts'
-import { belowFieldsRows, childrenRecords, choiceDisplayLabel, evaluateQuerySpec, cardinalityOf, queryFieldsOf, resolveRows, singleValueOf, valueListOf, type BelowFields } from './core/index.ts'
+import { belowFieldsRows, childrenRecords, choiceDisplayLabel, defaultDisplayPropsFor, evaluateQuerySpec, TAGS_COLUMN, cardinalityOf, queryFieldsOf, resolveRows, singleValueOf, valueListOf, type BelowFields } from './core/index.ts'
 import { openChoicePicker } from './app/choice-picker.ts'
 import { plainText } from './core/model/runs.ts'
 import { checkExternalUrl, rejectText } from './core/relations/link.ts'
@@ -2317,6 +2317,19 @@ const app: App = {
         },
         cardinalityOf: (id) => fields().find((f) => f.id === id)?.cardinality ?? 'one',
         invoke: (name, args) => void registry.invoke(name, args, 'menu'),
+        // 自定义编辑态的预选基线（与抬头选项面板同一口径）：表格＝计算列；rich＝有值的键
+        displayDefaults: () => {
+          const { view, source } = readSource()
+          if (view?.kind === 'table') return defaultDisplayPropsFor(source, kb)
+          const keys = new Set<string>()
+          for (const r of records()) {
+            for (const [k, val] of Object.entries(r.values)) {
+              if (val !== undefined && val !== null && val !== '' && !(Array.isArray(val) && val.length === 0)) keys.add(k)
+            }
+            if (r.tags.length > 0) keys.add(TAGS_COLUMN)
+          }
+          return [...keys]
+        },
         ...(owner.kind === 'block' ? { openChildProps: (blockId: string) => app.showChildPropsPicker(blockId) } : {}),
         openBuilder: () => {
           layers.closePopover()

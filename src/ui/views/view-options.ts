@@ -73,8 +73,14 @@ export interface ViewOptionsDeps {
   invoke: (name: string, args: Record<string, unknown>) => void
   /** 「编辑默认」：声明层选择器（`_childProps` 写口不变；面板不自己画第二份） */
   openChildProps?: (blockId: string) => void
-  /** chips 认不出的复杂条件：交给条件构建器（query 源才有） */
+  /** 复杂条件交给条件构建器（chips 认不出时给；query 源才有） */
   openBuilder?: () => void
+  /**
+   * **跟随默认时的生效显示键**（进入自定义编辑态的预选基线）：
+   * 表格＝计算列；rich 看法＝这批记录里真有值的键（声明链效果的近似）。
+   * 只用于画勾选框的初态，不写盘——首次勾选才落白名单。
+   */
+  displayDefaults?: () => string[]
   /** 写完把焦点交回正文（撤销的键位挂在编辑器焦点上） */
   afterApply?: () => void
   onClose?: () => void
@@ -83,6 +89,8 @@ export interface ViewOptionsDeps {
 export class ViewOptionsPanel {
   readonly root: HTMLElement
   private readonly deps: ViewOptionsDeps
+  /** 自定义编辑态（跟随默认下点「自定义」进入；只影响勾选清单是否展开，不写盘） */
+  private displayEditing = false
 
   constructor(deps: ViewOptionsDeps) {
     this.deps = deps
@@ -378,10 +386,13 @@ export class ViewOptionsPanel {
     // 「自定义」＝白名单覆写（空选＝只标题）
     const seg = document.createElement('div')
     seg.className = 'vopt-seg'
+    const editing = custom || this.displayEditing
     seg.append(
-      this.segBtn(t('ui.view.opt.followDefault'), !custom, () => {
-        if (!custom) return
-        this.deps.invoke('core.view/set-display', { owner: this.deps.owner, viewId: this.deps.viewId(), props: null })
+      this.segBtn(t('ui.view.opt.followDefault'), !editing, () => {
+        this.displayEditing = false
+        if (custom) {
+          this.deps.invoke('core.view/set-display', { owner: this.deps.owner, viewId: this.deps.viewId(), props: null })
+        }
         this.refresh()
       }),
     )
@@ -395,14 +406,25 @@ export class ViewOptionsPanel {
         }),
       )
     }
-    seg.append(this.segBtn(t('ui.view.opt.custom'), custom, () => {}))
+    seg.append(
+      this.segBtn(t('ui.view.opt.custom'), custom, () => {
+        // 进入编辑态**不写盘**：勾选清单按当前生效显示预选，首次勾选才落白名单——
+        // 「点开看看」不该让显示跳变（配置写一条撤销，但没动过的配置不该产生撤销）
+        if (!editing) {
+          this.displayEditing = true
+          this.render()
+        }
+      }),
+    )
     body.append(seg)
 
-    if (!custom) {
+    if (!editing) {
       body.append(this.note(t('ui.view.opt.defaultHint')))
       return
     }
-    // 自定义清单：勾选即写（整份替换）；全不勾 ＝ 只标题
+    // 勾选清单：基线＝白名单（已在自定义态）或当前生效显示（编辑态预选）；
+    // 勾选即写（整份替换）；全不勾 ＝ 只标题
+    const base = whitelist ?? (this.deps.displayDefaults?.() ?? [])
     const list = document.createElement('div')
     list.className = 'vopt-props'
     for (const r of this.displayCandidates()) {
@@ -410,9 +432,9 @@ export class ViewOptionsPanel {
       row.className = 'qcp-row'
       const box = document.createElement('input')
       box.type = 'checkbox'
-      box.checked = (whitelist ?? []).includes(r.key)
+      box.checked = base.includes(r.key)
       box.addEventListener('change', () => {
-        const current = this.deps.read().display ?? []
+        const current = this.deps.read().display ?? this.deps.displayDefaults?.() ?? []
         const next = box.checked ? [...current, r.key] : current.filter((k) => k !== r.key)
         this.deps.invoke('core.view/set-display', { owner: this.deps.owner, viewId: this.deps.viewId(), props: next })
         this.refresh()

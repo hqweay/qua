@@ -43,6 +43,7 @@ import {
   resolveTodayBase,
   journalDate,
   defaultDisplayPropsFor,
+  TAGS_COLUMN,
   viewsBroken,
   viewNameOf,
   droppedFrom,
@@ -1216,6 +1217,20 @@ export class ViewHost {
         invoke: (name, args) => this.deps.invoke(name, args),
         ...(this.deps.openChildProps ? { openChildProps: this.deps.openChildProps } : {}),
         ...(this.deps.openBuilder ? { openBuilder: this.deps.openBuilder } : {}),
+        // 自定义编辑态的预选基线：表格＝计算列；rich 看法＝这批记录里真有值的键
+        displayDefaults: () => {
+          if (this.view?.kind === 'table') {
+            return defaultDisplayPropsFor(this.source, this.deps.kb, { hits: this.frozen?.hits ?? [] })
+          }
+          const keys = new Set<string>()
+          for (const r of this.records()) {
+            for (const [k, val] of Object.entries(r.values)) {
+              if (val !== undefined && val !== null && val !== '' && !(Array.isArray(val) && val.length === 0)) keys.add(k)
+            }
+            if (r.tags.length > 0) keys.add(TAGS_COLUMN)
+          }
+          return [...keys]
+        },
         afterApply: () => this.refocusBody(),
       })
       panel.replaceChildren(this.optionsUi.root)
