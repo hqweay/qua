@@ -505,18 +505,11 @@ export class QueryTree {
       { pick: 'group:any', label: t('ui.query.group.addOr') },
       { pick: 'group:not', label: t('ui.query.group.addNot') },
     ])
-    section(t('ui.query.tree.changeKind'), [
-      { pick: 'row:tag', label: t('ui.query.kind.tag') },
-      { pick: 'row:prop', label: t('ui.query.kind.prop') },
-      { pick: 'row:text', label: t('ui.query.kind.text') },
-      { pick: 'row:ref', label: t('ui.query.kind.ref') },
-      { pick: 'row:is', label: t('ui.query.kind.is') },
-      { pick: 'row:role', label: t('ui.query.kind.role') },
-      { pick: 'row:day', label: t('ui.query.kind.day') },
-      { pick: 'row:stamp', label: t('ui.query.kind.stamp') },
-      { pick: 'row:mark', label: t('ui.query.kind.mark') },
-      { pick: 'row:link', label: t('ui.query.kind.link') },
-    ])
+    /** 行种类清单只有一份（`TREE_ROW_KINDS`）：拾取器与「换一类」下拉都从它派生，不再各抄一份 */
+    section(
+      t('ui.query.tree.changeKind'),
+      TREE_ROW_KINDS.map((k) => ({ pick: `row:${k}`, label: t(ROW_KIND_TEXT[k]) })),
+    )
     return picker
   }
 
