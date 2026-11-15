@@ -30225,7 +30225,7 @@ await check('T317 asset 值控件：预览独立成带、地址在下一行，�
   /**
    * 判据是**几何**（不是看截图）：预览带在上、地址带在下，两条带不许相交；
    * 预览必须是「图的值」而不是行内小缩略图（高度足够），地址仍能拿回全文。
-   * 上一版把三者塞进一个框里，真机反馈「图贴着输入框」，读不出哪部分是值。
+   * 上一版把三者塞进一个框里，图贴着输入框，读不出哪部分是值。
    */
   const geom = await page.evaluate((propId) => {
     const row = document.querySelector(`#inspect-card .prop-row[data-prop-id="${propId}"]`)

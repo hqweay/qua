@@ -587,7 +587,7 @@ export function makeCellEditor(
     box.dataset.assetSurface = surface
 
     /**
-     * **预览与地址是两份投影，各占一条带**（真机反馈：同一框里图贴着输入框，
+     * **预览与地址是两份投影，各占一条带**（同一个框里图贴着输入框时，
      * 读不出哪部分是「值」、哪部分是可改的地址）。
      *
      * 面板里预览整宽在上、地址在下；表格格定高，仍收成一行（`data-asset-surface`）。
