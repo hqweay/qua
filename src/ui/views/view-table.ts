@@ -75,6 +75,8 @@ export interface ViewTableDeps {
   clearValue: (blockId: string, propId: string) => void
   /** 表头排序：`dir === ''` 取消（children 源只改显示序；查询源由装配层转成重查） */
   sort: (by: string, dir: string) => void
+  /** 列宽拖完的一次写（布局元数据 `table.widths`）；省略 ＝ 不给拖（派生栏没有可写配置） */
+  setWidth?: (key: string, width: number | null) => void
   insertRow: () => void
   deleteRow: (rowId: string) => void
   openBlock: (blockId: string, place?: OpenAction) => void
@@ -420,6 +422,7 @@ export class ViewTable {
         mark.textContent = dir === 'desc' ? '↓' : '↑'
         el.appendChild(mark)
       }
+      if (this.deps.setWidth) el.appendChild(this.resizeHandle(col))
       this.head.appendChild(el)
     }
     this.head.appendChild(cell('tv-actions'))
@@ -445,6 +448,36 @@ export class ViewTable {
   private toggleSort(key: string): void {
     const cur = (this.deps.view().sort ?? []).find((s) => s.by === key)?.dir
     this.deps.sort(key, cur === undefined ? 'asc' : cur === 'asc' ? 'desc' : '')
+  }
+
+  /**
+   * 列缘的拖拽把手：按下起记、拖动只改**本地的**预期宽（格子宽度跟着指针走），
+   * 松手才写一次 `setWidth`（配置写一条撤销，拖动过程零写）。
+   * 宽度夹档在读路径（`withWidth`），这里只管把指针位移换算成 px。
+   */
+  private resizeHandle(col: TableCol): HTMLElement {
+    const handle = document.createElement('span')
+    handle.className = 'tv-resize'
+    handle.addEventListener('pointerdown', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      const startX = e.clientX
+      const startW = col.width
+      const onMove = (ev: PointerEvent): void => {
+        const next = Math.max(60, Math.min(480, startW + (ev.clientX - startX)))
+        col.width = next
+        this.applyShape()
+      }
+      const onUp = (ev: PointerEvent): void => {
+        window.removeEventListener('pointermove', onMove)
+        window.removeEventListener('pointerup', onUp)
+        const next = Math.max(60, Math.min(480, startW + (ev.clientX - startX)))
+        this.deps.setWidth?.(col.key, next)
+      }
+      window.addEventListener('pointermove', onMove)
+      window.addEventListener('pointerup', onUp)
+    })
+    return handle
   }
 
   private labelOf(key: string): string {

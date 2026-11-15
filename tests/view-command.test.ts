@@ -303,20 +303,31 @@ test('setViewFilter：一次动作只写一次（一步撤销）；清掉删键�
     '清掉是删键，不留空值',
   )
 
-  // children 源：没有可叠加的条件 ⇒ 拒绝并提示（写进去也会被 canonicalViews 丢掉）
+  // children 记录视图**接** filter（显示掩码语义）；不认 filter 的看法与默认看法才拒绝
   const plain = mkBlock('普通')
   plain.id = 'n'
+  plain.props = { _views: [{ id: 't', kind: 'table' }, { id: 'l', kind: 'list-table' }] }
   const plainWrites: unknown[] = []
+  const plainHeld = readViews(plain)
   const plainOwners: OwnerStore = {
     ...owners,
-    read: () => ({ views: [] }),
-    write: (_owner, patch) => plainWrites.push(patch),
+    read: () => ({ views: plainHeld }),
+    write: (_owner, patch) => {
+      if (patch.views) plainHeld.splice(0, plainHeld.length, ...patch.views)
+      plainWrites.push(patch)
+    },
   }
   const app2 = viewConfigCommands({ ...d, owners: plainOwners })
-  assert.equal(app2.setViewFilter({ kind: 'block', blockId: 'n' }, 'v', { tag: 'y' }), false)
-  assert.equal(plainWrites.length, 0, '拒绝时一个字节都不写')
-  assert.equal(toasts.length, 1, '要说一句话')
-  assert.match(toasts[0]!, /切片/, `提示要指到切片：${toasts[0]}`)
+  const plainOwner = { kind: 'block', blockId: 'n' } as const
+  assert.equal(app2.setViewFilter(plainOwner, 't', { tag: 'y' }), true, 'children 记录视图：filter 是显示掩码')
+  assert.equal(plainWrites.length, 1)
+  // 默认看法（children 源）没有切片可写：那一层要按父块做行过滤，未做 ⇒ 拒绝
+  assert.equal(app2.setViewFilter(plainOwner, '', { tag: 'y' }), false)
+  assert.equal(plainWrites.length, 1, '拒绝时一个字节都不写')
+  // 映射表不认 filter 轴（矩阵拒绝）
+  assert.equal(app2.setViewFilter(plainOwner, 'l', { tag: 'y' }), false)
+  assert.equal(plainWrites.length, 1)
+  assert.ok(toasts.length >= 1, '要说一句话')
 })
 
 test('set-filter 缺 filter 参数 ⇒ 拒绝且不产生写（不会静默清空切片）', () => {
@@ -384,4 +395,145 @@ test('viewSetCover：只写卡片视图的封面；别的 kind 拒绝（不写�
   const before = writes.length
   assert.equal(app.viewSetCover(owner, 't', 'none'), false, '表格不是卡片视图：拒绝')
   assert.equal(writes.length, before, '拒绝时一个字节都不写')
+})
+
+test('viewSetSort：多键数组序即优先级；卡片也接；矩阵外的看法拒绝', () => {
+  const q = mkBlock('查询')
+  q.id = 'q'
+  q.props = {
+    _query: { where: { tag: 'x' } },
+    _views: [
+      { id: 't', kind: 'table' },
+      { id: 'c', kind: 'cards' },
+    ],
+  }
+  const kb = kbOf([q]).kb
+  const held = readViews(q)
+  const writes: { patch: Partial<ViewOwnerData> }[] = []
+  const owners: OwnerStore = {
+    read: () => ({ query: { where: { tag: 'x' } }, views: held }),
+    write: (_owner, patch) => {
+      if (patch.views) held.splice(0, held.length, ...patch.views)
+      writes.push({ patch })
+    },
+    readBinding: () => null,
+    setBindingView: () => {},
+    entriesOf: () => [],
+    writeEntries: () => {},
+    entryOf: () => undefined,
+  }
+  const app = viewConfigCommands({
+    kb,
+    owners,
+    run: <R,>(fn: (tx: Tx) => R) => kb.tx(fn),
+    reloadPage: () => {},
+    rerenderEditor: () => {},
+    rootIds: () => [],
+    viewShown: () => true,
+    activeId: () => 'q',
+    openBlock: () => {},
+    refreshList: () => {},
+    toast: () => {},
+  })
+  const owner = { kind: 'block', blockId: 'q' } as const
+
+  assert.equal(app.viewSetSort(owner, 't', [{ by: 'p1', dir: 'desc' }, { by: 'title', dir: 'asc' }]), true)
+  assert.deepEqual(
+    writes.at(-1)!.patch.views?.find((v) => v.id === 't')?.sort,
+    [{ by: 'p1', dir: 'desc' }, { by: 'title', dir: 'asc' }],
+    '多键按数组序落顶层',
+  )
+  assert.equal(app.viewSetSort(owner, 'c', [{ by: 'p1', dir: 'asc' }]), true, '卡片排序是真的（不再读 table.sort）')
+  assert.equal(app.viewSetSort(owner, '', [{ by: 'p1', dir: 'asc' }]), false, '默认看法（大纲）不排序：矩阵拒绝')
+  assert.equal(app.viewSetSort(owner, 'zz', [{ by: 'p1', dir: 'asc' }]), false, '解析不到视图：拒绝')
+})
+
+test('viewSetDisplay：默认看法写 _defaultDisplayProps（空数组＝只标题）；命名视图按矩阵写', () => {
+  const n = mkBlock('容器')
+  n.id = 'n'
+  n.props = { _views: [{ id: 't', kind: 'table' }] }
+  const kb = kbOf([n]).kb
+  const held = readViews(n)
+  const writes: { patch: Partial<ViewOwnerData> }[] = []
+  const owners: OwnerStore = {
+    read: () => ({ views: held }),
+    write: (_owner, patch) => {
+      if (patch.views) held.splice(0, held.length, ...patch.views)
+      writes.push({ patch })
+    },
+    readBinding: () => null,
+    setBindingView: () => {},
+    entriesOf: () => [],
+    writeEntries: () => {},
+    entryOf: () => undefined,
+  }
+  const app = viewConfigCommands({
+    kb,
+    owners,
+    run: <R,>(fn: (tx: Tx) => R) => kb.tx(fn),
+    reloadPage: () => {},
+    rerenderEditor: () => {},
+    rootIds: () => [],
+    viewShown: () => true,
+    activeId: () => 'n',
+    openBlock: () => {},
+    refreshList: () => {},
+    toast: () => {},
+  })
+  const owner = { kind: 'block', blockId: 'n' } as const
+
+  assert.equal(app.viewSetDisplay(owner, '', ['p1']), true)
+  assert.deepEqual(writes.at(-1)!.patch.defaultDisplayProps, ['p1'], 'viewId \'\' ⇒ 默认看法的显示覆写')
+  assert.equal(app.viewSetDisplay(owner, '', []), true)
+  assert.deepEqual(writes.at(-1)!.patch.defaultDisplayProps, [], '空数组＝只标题，也是覆写')
+  assert.equal(app.viewSetDisplay(owner, 't', ['title', 'p1']), true)
+  const next = writes.at(-1)!.patch.views?.find((v) => v.id === 't')
+  assert.deepEqual(next?.displayProps, ['p1'], '标题列被摘掉（它是行身份，不在白名单里）')
+  assert.equal(app.viewSetDisplay(owner, '', null), true)
+  assert.equal(writes.at(-1)!.patch.defaultDisplayProps, null, 'null ＝ 清掉覆写，回 rich 默认')
+})
+
+test('viewSetWidth：写 table.widths（含标题列）；null 回缺省；非表格拒绝', () => {
+  const n = mkBlock('容器')
+  n.id = 'n'
+  n.props = { _views: [{ id: 't', kind: 'table' }, { id: 'c', kind: 'cards' }] }
+  const kb = kbOf([n]).kb
+  const held = readViews(n)
+  const writes: { patch: Partial<ViewOwnerData> }[] = []
+  const owners: OwnerStore = {
+    read: () => ({ views: held }),
+    write: (_owner, patch) => {
+      if (patch.views) held.splice(0, held.length, ...patch.views)
+      writes.push({ patch })
+    },
+    readBinding: () => null,
+    setBindingView: () => {},
+    entriesOf: () => [],
+    writeEntries: () => {},
+    entryOf: () => undefined,
+  }
+  const app = viewConfigCommands({
+    kb,
+    owners,
+    run: <R,>(fn: (tx: Tx) => R) => kb.tx(fn),
+    reloadPage: () => {},
+    rerenderEditor: () => {},
+    rootIds: () => [],
+    viewShown: () => true,
+    activeId: () => 'n',
+    openBlock: () => {},
+    refreshList: () => {},
+    toast: () => {},
+  })
+  const owner = { kind: 'block', blockId: 'n' } as const
+
+  assert.equal(app.viewSetWidth(owner, 't', 'title', 320), true)
+  assert.deepEqual(
+    writes.at(-1)!.patch.views?.find((v) => v.id === 't')?.table?.widths,
+    { title: 320 },
+    '标题列宽度也在 widths 里（它是行身份的宽度，不是一条可选属性）',
+  )
+  assert.equal(app.viewSetWidth(owner, 't', 'title', null), true)
+  assert.equal(writes.at(-1)!.patch.views?.find((v) => v.id === 't')?.table?.widths, undefined, 'null ＝ 删键')
+  assert.equal(app.viewSetWidth(owner, 'c', 'p1', 200), false, '卡片没有列宽：拒绝')
 })

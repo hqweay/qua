@@ -31,16 +31,27 @@ export const VIEW_CONFIG_HANDLERS: Record<string, Handler> = {
     if (!owner) return false
     return app.renameActiveView(owner, S(a.name))
   },
+  /** 多键（table/cards 的顶层显示序）；结构映射表走列位置例外（`by`＝列序号） */
   'core.view/set-sort': (a, app) => {
     const owner = ownerOrCur(a, app)
+    if (!owner) return false
+    if (Array.isArray(a.sort)) return app.viewSetSort(owner, S(a.viewId), a.sort)
     const by = S(a.by)
-    if (!owner || !by) return false
-    return app.viewSetSort(owner, S(a.viewId), by, S(a.dir))
+    if (!by) return false
+    return app.viewSetListSort(owner, S(a.viewId), by, S(a.dir))
   },
-  /** 显示白名单（显示轴）：形状校验在命令层（`displayPropsOfRaw`），这里只接参数 */
+  'core.view/set-width': (a, app) => {
+    const owner = ownerOrCur(a, app)
+    const key = S(a.key)
+    if (!owner || !key) return false
+    const width = a.width === null ? null : typeof a.width === 'number' ? a.width : null
+    return app.viewSetWidth(owner, S(a.viewId), key, width)
+  },
+  /** 显示白名单（显示轴）：形状校验在命令层（`displayPropsOfRaw`）；`null` ＝ 清掉覆写 */
   'core.view/set-display': (a, app) => {
     const owner = ownerOrCur(a, app)
-    if (!owner || !Array.isArray(a.props)) return false
+    if (!owner) return false
+    if (!Array.isArray(a.props) && a.props !== null) return false
     return app.viewSetDisplay(owner, S(a.viewId), a.props)
   },
   /** 写卡片封面；只认卡片视图（别的 kind 会被 canonicalViews 丢掉） */

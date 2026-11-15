@@ -1971,6 +1971,11 @@ export class ViewHost {
         }),
       setValue: (blockId, propId, value) => this.deps.invoke('core.props/set-value', { blockId, propId, value }),
       clearValue: (blockId, propId) => this.deps.invoke('core.props/clear-value', { blockId, propId }),
+      // 列宽是布局元数据（`table.widths`）：拖完一次写、一条撤销；派生栏没有可写配置 ⇒ 不给拖
+      setWidth: this.deps.derived
+        ? undefined
+        : (key, width) =>
+            this.deps.invoke('core.view/set-width', { owner: this.writeOwner, viewId: this.view?.id ?? '', key, width }),
       // 表头排序写**视图的显示序**：不重查、不改 `_query.sort`（成员只由条件/上限决定）
       // 派生栏没有可写的配置：排序只在这一屏内生效（切走回原序，不留第二真相）
       sort: (by, dir) => {
@@ -1979,7 +1984,12 @@ export class ViewHost {
           this.sync(true)
           return
         }
-        this.deps.invoke('core.view/set-sort', { owner: this.writeOwner, viewId: this.view?.id ?? '', by, dir })
+        // 表头点击＝写**第一键**：整份多键在排序面板里编辑
+        this.deps.invoke('core.view/set-sort', {
+          owner: this.writeOwner,
+          viewId: this.view?.id ?? '',
+          sort: dir === '' ? [] : [{ by, dir: dir === 'desc' ? 'desc' : 'asc' }],
+        })
       },
       insertRow: () => this.deps.invoke('core.view/new-row', { owner: this.writeOwner }),
       deleteRow: (rowId) => this.deps.invoke('core.view/delete-row', { rowId }),

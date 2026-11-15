@@ -34,8 +34,11 @@ import {
   withGroup,
   withTabsDirection,
   withListSort,
+  axesFor,
+  sortKeysOfRaw,
   withSort,
   withDisplay,
+  withWidth,
   displayPropsOfRaw,
   withStructureGroup,
   type Block,
@@ -104,6 +107,8 @@ export function viewConfigCommands(
   | 'viewDeleteRow'
   | 'viewSetSort'
   | 'viewSetDisplay'
+  | 'viewSetListSort'
+  | 'viewSetWidth'
   | 'viewSetGroup'
   | 'viewSetCover'
   | 'viewSetTabsDirection'
@@ -271,34 +276,57 @@ export function viewConfigCommands(
     },
 
     /**
-     * 表头排序：**只写视图的显示序**。
+     * 写**显示排序**（顶层轴，多键：数组序即优先级）。
      *
-     * 三种落点（不是分支癖，是语义）：
-     *   · 平表 ⇒ `view.table.sort`（键＝列）；
-     *   · 结构映射表 ⇒ `view.listTable.sort`（键＝**第几列**，位置）；
-     *   · 查询源**不再**写 `QuerySpec.sort` —— 那是成员顺序，由构建器编辑。
-     *     点表头只排当前这批成员，不重查。
-     *
-     * `dir === ''` ＝ 清掉这一格的排序（表头第三次点击的落点）。
+     * 只写视图的显示序——不重查、不改成员（`QuerySpec.sort` 是成员顺序，由构建器编辑）。
+     * `sort` 是原始数组，形状校验在 `sortKeysOfRaw`；空数组 ＝ 不排序（删键）。
+     * 矩阵不认 sort 的看法（默认看法、页签、日历…）当场拒绝：写了也会被
+     * `canonicalViews` 丢掉，那是「点了没生效」。
      */
-    viewSetSort: (owner, viewId, by, dir) => {
+    viewSetSort: (owner, viewId, sort) => {
       const data = d.owners.read(owner)
       if (!data) return false
       const view = resolveView(data, viewId)
-      if (!view) return false
-      const direction = dir === 'desc' ? 'desc' : dir === 'asc' ? 'asc' : ''
-      if (view.kind === 'list-table') {
-        // `by` 在这一档是**列序号**（命令面只有字符串参数，语义由视图种类决定）
-        const col = Number(by)
-        if (!Number.isInteger(col) || col < 0) return false
-        const next: ListSort | undefined = direction === '' ? undefined : { col, dir: direction }
-        d.owners.write(owner, { views: upsertView(data.views, withListSort(view, next)) })
-        after()
-        return true
+      const source = sourceOfRef(d, owner)
+      if (!view || !source) return false
+      if (!axesFor(source, view.kind).includes('sort') || view.kind === 'list-table') {
+        d.toast(t('ui.view.axisNotSupported'), 'warn')
+        return false
       }
-      if (view.kind !== 'table') return false
-      const sort = direction === '' ? [] : [{ by, dir: direction as 'asc' | 'desc' }]
-      d.owners.write(owner, { views: upsertView(data.views, withSort(view, sort)) })
+      d.owners.write(owner, { views: upsertView(data.views, withSort(view, sortKeysOfRaw(sort))) })
+      after()
+      return true
+    },
+
+    /**
+     * 写**结构映射表的排序**（矩阵的声明例外：键是**第几列**的位置，不与 `sort` 合成一个键空间）。
+     * `dir === ''` ＝ 清掉（菜单的第三击）。
+     */
+    viewSetListSort: (owner, viewId, col, dir) => {
+      const data = d.owners.read(owner)
+      if (!data) return false
+      const view = resolveView(data, viewId)
+      if (!view || view.kind !== 'list-table') return false
+      const position = Number(col)
+      if (!Number.isInteger(position) || position < 0) return false
+      const direction = dir === 'desc' ? 'desc' : dir === 'asc' ? 'asc' : ''
+      const next: ListSort | undefined = direction === '' ? undefined : { col: position, dir: direction }
+      d.owners.write(owner, { views: upsertView(data.views, withListSort(view, next)) })
+      after()
+      return true
+    },
+
+    /**
+     * 写**列宽**（含标题列；布局元数据，与显示白名单分开两个位）。
+     * `width === null` ＝ 回到缺省宽度（删键）。只认表格视图：宽度是平表的形状。
+     */
+    viewSetWidth: (owner, viewId, key, width) => {
+      const data = d.owners.read(owner)
+      if (!data) return false
+      const view = resolveView(data, viewId)
+      if (!view || view.kind !== 'table' || typeof key !== 'string' || key === '') return false
+      if (width !== null && (typeof width !== 'number' || !Number.isFinite(width))) return false
+      d.owners.write(owner, { views: upsertView(data.views, withWidth(view, key, width)) })
       after()
       return true
     },
@@ -307,14 +335,31 @@ export function viewConfigCommands(
      * 写**显示白名单**（显示轴的视图级写口）。形状校验在 `displayPropsOfRaw`：
      * 标题列不在清单里（它是行身份）、其余按 key 去重——坏项丢掉而不是让整表消失。
      * **空数组是合法值**（＝只标题）；`null` ＝ 清掉白名单，回到该看法的缺省。
-     * 只认矩阵上支持 display 的 kind：别的写进去会被 `canonicalViews` 丢掉（「点了没生效」）。
+     * 矩阵不认 display 的看法当场拒绝；`viewId === ''` ＝ 默认看法的显示覆写
+     * （`_defaultDisplayProps`，与 `_defaultFilter` 同一层）。
      */
     viewSetDisplay: (owner, viewId, props) => {
       const data = d.owners.read(owner)
       if (!data) return false
+      const next = props === null ? null : displayPropsOfRaw(props)
+      if (viewId === '') {
+        const source = sourceOfRef(d, owner)
+        if (!source || !axesFor(source, 'outline').includes('display')) {
+          d.toast(t('ui.view.axisNotSupported'), 'warn')
+          return false
+        }
+        d.owners.write(owner, { defaultDisplayProps: next })
+        reveal(owner)
+        return true
+      }
       const view = resolveView(data, viewId)
-      if (!view) return false
-      d.owners.write(owner, { views: upsertView(data.views, withDisplay(view, displayPropsOfRaw(props))) })
+      const source = sourceOfRef(d, owner)
+      if (!view || !source) return false
+      if (!axesFor(source, view.kind).includes('display')) {
+        d.toast(t('ui.view.axisNotSupported'), 'warn')
+        return false
+      }
+      d.owners.write(owner, { views: upsertView(data.views, withDisplay(view, next)) })
       after()
       return true
     },
@@ -379,38 +424,35 @@ export function viewConfigCommands(
     },
 
     /**
-     * 写**这一张视图的切片**（基础条件 ∩ 切片里的后半句）。
+     * 写**这一张视图的 filter**（两种语义共用一份 `QueryNode`，落点由矩阵回答）：
+     *   · query 源＝**切片**（基础条件 ∩ 切片；与 `setQuerySpec` 的分工：基础条件全视图共享）；
+     *   · children 记录视图＝**显示掩码**（不匹配的行消失，children 顺序一个字节不动）。
      *
-     * 与 `setQuerySpec` 的分工：那份基础条件全视图共享、住在源的 `_query`；
-     * 切片只属于一张视图、住在它的 `filter`。这里**不碰 `_query`**：
-     * 叠加是求值时的事（`slicedSpec`），不是把切片并进基础条件。
-     *
-     * `filter === null` ＝ 清掉切片（删键，不留空值）。
-     * 源不是 query ⇒ 当场拒绝并提示：children/items 没有可叠加的条件，
-     * 写进去会被 `canonicalViews` 丢掉（「点了没生效」）。
+     * `filter === null` ＝ 清掉（删键，不留空值）。
+     * 矩阵不认 filter 的看法（映射表、导图）当场拒绝；默认看法（`viewId === ''`）只有
+     * query 源接（`_defaultFilter`）——children 源的默认大纲筛选另需按父块的行过滤，未做。
      */
     setViewFilter: (owner, viewId, filter) => {
       const data = d.owners.read(owner)
       if (!data) return false
       const source = sourceOfRef(d, owner)
-      if (!source || source.kind !== 'query') {
-        d.toast(t('ui.view.sliceOnlyQuery'), 'warn')
-        return false
-      }
+      if (!source) return false
       if (filter !== null && !isQueryNode(filter)) return false
-      /**
-       * `viewId === ''` ＝ **默认看法（大纲）的切片**。它没有视图配置可挂，
-       * 所以住在拥有者自己的那一格（`_defaultFilter`）——同一个语义、同一个判据
-       * （此刻激活的是哪张视图），只是位置不同。没有这一条，新建查询块（还没有
-       * 任何命名视图）在最常见的面上就无处可筛。
-       */
       if (viewId === '') {
+        if (source.kind !== 'query') {
+          d.toast(t('ui.view.sliceOnlyQuery'), 'warn')
+          return false
+        }
         d.owners.write(owner, { defaultFilter: filter })
         reveal(owner)
         return true
       }
       const view = resolveView(data, viewId)
       if (!view) return false
+      if (!axesFor(source, view.kind).includes('filter')) {
+        d.toast(t('ui.view.sliceOnlyQuery'), 'warn')
+        return false
+      }
       d.owners.write(owner, { views: upsertView(data.views, withFilter(view, filter)) })
       reveal(owner)
       return true

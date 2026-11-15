@@ -652,12 +652,19 @@ export interface App {
   /** 删除一行＝软删那个子块（可恢复） */
   viewDeleteRow(rowId: string): boolean
   /**
-   * **表头排序＝显示排序**：只写视图顶层的 `sort`（或结构映射表的 `listTable.sort` 例外）。
+   * **表头排序＝显示排序**：写视图顶层的 `sort`（多键，数组序即优先级）。
    *
-   * ⚠️ 不再写查询的成员顺序（`QuerySpec.sort`）：那是「取哪些、按什么序」，
-   *    由构建器编辑。点表头不该换一批行。`dir === ''` ＝ 清掉。
+   * ⚠️ 不写查询的成员顺序（`QuerySpec.sort`）：那是「取哪些、按什么序」，
+   *    由构建器编辑。点表头不该换一批行。空数组 ＝ 清掉。
    */
-  viewSetSort(owner: ViewOwnerRef, viewId: string, by: string, dir: string): boolean
+  viewSetSort(owner: ViewOwnerRef, viewId: string, sort: unknown): boolean
+  /**
+   * **结构映射表的排序**（矩阵的声明例外）：键是**第几列**的位置，不与 `sort` 合成一个键空间。
+   * `dir === ''` ＝ 清掉。
+   */
+  viewSetListSort(owner: ViewOwnerRef, viewId: string, col: string, dir: string): boolean
+  /** 写**列宽**（含标题列；布局元数据）。`width === null` ＝ 回到缺省宽度。只认表格视图。 */
+  viewSetWidth(owner: ViewOwnerRef, viewId: string, key: string, width: number | null): boolean
   /**
    * 写**显示白名单**（显示轴的视图级写口）：`props` 是原始数组，形状校验在读路径那一份
    * （`displayPropsOfRaw`）——标题列不在清单里，其余按 key 去重；空数组＝只标题。

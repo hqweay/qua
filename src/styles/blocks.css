@@ -1655,6 +1655,18 @@
 .queryview-stale[hidden] {
   display: none;
 }
+/* 列缘拖拽把手：只在悬停表头格时显形（平时不占视觉）；拖动中整表给 col-resize */
+.tv-resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+}
+.tv-h:hover .tv-resize {
+  background: var(--ui-border);
+}
 /* 「已隐藏 N 项」：掩码的实话与退路（点击清除）。只是提示件，不拦编辑、不改变排版 */
 .queryview-hidden {
   background: none;
