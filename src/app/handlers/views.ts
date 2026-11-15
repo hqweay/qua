@@ -156,6 +156,12 @@ export const VIEW_CONFIG_HANDLERS: Record<string, Handler> = {
     }
     return app.insertViewBlock(at, kind) !== ''
   },
+  'core.view/options': (a, app) => {
+    const owner = ownerOrCur(a, app)
+    if (!owner) return false
+    app.showViewOptions(owner)
+    return true
+  },
   'core.view/menu': (a, app) => {
     /**
      * 块菜单里这一条**不带参数**（绑定表是静态的，而菜单要的是「此刻聚焦的那一块」）。

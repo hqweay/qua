@@ -8,7 +8,7 @@
  */
 import './styles.css'
 import { addAlias, addList, blockLabel, blockTypeOf, buildAdjacency, checkEdge, cyclePathLabels, COLOR_PROP, ICON_PROP, isColorValue, DISPLAY_PROP,    claimAlias, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, primaryAliasOf, prop,  pruneGone, removeList,  resolveEmbed, setBlockType, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, cardLayoutOf, DERIVED_VIEW_KINDS, propKindOf, propLabel, choicesOf, choicesFor, childDisplayProps, enginePropDefs, type Block, type QuerySpec, type TriggerChar, type ViewOwnerRef, trashOf, filterOfSpec, withBlockOwnerData, VIEW_KIND_ICON, type StoredViewKind, type UndoKind, type ColorAxis } from './core/index.ts'
-import { belowFieldsRows, choiceDisplayLabel, cardinalityOf, queryFieldsOf, singleValueOf, valueListOf, type BelowFields } from './core/index.ts'
+import { belowFieldsRows, childrenRecords, choiceDisplayLabel, evaluateQuerySpec, cardinalityOf, queryFieldsOf, resolveRows, singleValueOf, valueListOf, type BelowFields } from './core/index.ts'
 import { openChoicePicker } from './app/choice-picker.ts'
 import { plainText } from './core/model/runs.ts'
 import { checkExternalUrl, rejectText } from './core/relations/link.ts'
@@ -61,6 +61,7 @@ import { setupFeed } from './app/wiring/feed.ts'
 import { installDispatch, setupKeys } from './app/wiring/keys.ts'
 import { dispatchKey } from './core/infra/dispatch.ts'
 import { setupOwners } from './app/wiring/owners.ts'
+import { ViewOptionsPanel } from './ui/views/view-options.ts'
 import { QueryTree } from './ui/query/query-tree.ts'
 import { SearchFace, type SearchFaceDeps } from './ui/search/search-face.ts'
 import type { SettingsFaceDeps } from './ui/settings/settings-face.ts'
@@ -2103,6 +2104,12 @@ const app: App = {
           })
         }
       }
+      rows.push({
+        id: 'view/options',
+        label: t('ui.view.options'),
+        icon: 'lucide:sliders-horizontal',
+        group: 'view/7-manage',
+      })
       rows.push({ id: 'view/rename', label: t('ui.view.rename'), icon: 'lucide:pencil', group: 'view/7-manage' })
       if (source.kind === 'query') {
         rows.push({
@@ -2195,6 +2202,8 @@ const app: App = {
             { owner, viewId: active.id, direction: id.slice('view/tabs-dir/'.length) },
             'menu',
           )
+        } else if (id === 'view/options') {
+          app.showViewOptions(owner)
         } else if (id === 'view/rename' && active) {
           // 名字是这一张视图的配置：就在同一份菜单里改，走命令面落盘／可撤销
           layers.openPopover(
@@ -2262,6 +2271,63 @@ const app: App = {
    * 切片没有「默认看法」那一份配置：`spec` 每次现读，视图被删了就退回空树；
    * 点「应用」才写一次，空树收成 `null` ⇒ `withFilter` 删键。
    */
+  /**
+   * **视图选项**（四轴一个面）：块菜单入口落在浮层里（默认大纲没有抬头可挂），
+   * 抬头的「选项」按钮与这里共用同一台组件——一个轴在两个落点里说法必须一致。
+   */
+  showViewOptions: (owner) => {
+    const data = owners.read(owner)
+    if (!data) return
+    const host = owner.kind === 'block' ? blocks.find(owner.blockId) : undefined
+    const anchor =
+      owner.kind === 'block' ? (app.ed.blockEl(owner.blockId)?.getBoundingClientRect() ?? null) : app.ed.caretRect()
+    layers.openPopover((box) => {
+      const fields = () => queryFieldsOf(kb.roots())
+      const readSource = () => {
+        const d = owners.read(owner)
+        if (!d) return { view: null, source: { kind: 'children', blockId: '' } as const, filter: null, display: undefined }
+        const view = readViewSet(d).active
+        return {
+          view,
+          source: sourceOfOwner(owner, d, host ?? undefined),
+          filter: view ? (view.filter ?? null) : (d.defaultFilter ?? null),
+          display: view ? view.displayProps : d.defaultDisplayProps,
+        }
+      }
+      const records = () => {
+        const src = readSource().source
+        if (src.kind !== 'children') return []
+        return childrenRecords(src.blockId, kb)
+      }
+      const panel = new ViewOptionsPanel({
+        owner,
+        viewId: () => readViewSet(owners.read(owner) ?? { views: [] }).active?.id ?? '',
+        read: readSource,
+        fields,
+        records,
+        filterCandidates: () => {
+          const src = readSource().source
+          if (src.kind !== 'query') return records()
+          return resolveRows(evaluateQuerySpec(src.spec, kb, {}), kb)
+        },
+        atomLabel: (atom) => {
+          if ('tag' in atom) return atom.tag
+          const b = kb.get(atom.up.is)
+          return b ? blockLabel(b, kbGet) : t('ui.page.untitled')
+        },
+        cardinalityOf: (id) => fields().find((f) => f.id === id)?.cardinality ?? 'one',
+        invoke: (name, args) => void registry.invoke(name, args, 'menu'),
+        ...(owner.kind === 'block' ? { openChildProps: (blockId: string) => app.showChildPropsPicker(blockId) } : {}),
+        openBuilder: () => {
+          layers.closePopover()
+          app.openQueryBuilder(owner)
+        },
+      })
+      box.append(panel.root)
+      panel.render()
+    }, anchor)
+  },
+
   openViewSlice: (owner, viewId, sliceAnchor) => {
     openSpecPopover({
       owner,

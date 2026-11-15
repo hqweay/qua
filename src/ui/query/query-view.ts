@@ -23,11 +23,7 @@
  */
 import {
   childrenRecords,
-  chipsOfFilter,
-  EMPTY_QUICK_FILTER,
   evaluateQuerySpec,
-  groupChoicesOf,
-  groupsByStructure,
   blockLabel,
   displayNameOf,
   expandContexts,
@@ -36,10 +32,6 @@ import {
   isOwnEdit,
   isQueryBlock,
   listTableOf,
-  quickFilterActive,
-  quickFilterAdd,
-  quickFilterDrop,
-  quickFilterNode,
   propKindOf,
   resolveRows,
   resolveFrozen,
@@ -72,7 +64,6 @@ import {
   type QueryNode,
   type QuerySpec,
   type QuickFilterAtom,
-  type QuickFilterState,
   type Source,
   type ViewBindingRef,
   type DerivedViewKind,
@@ -84,22 +75,18 @@ import {
   type ViewRecord,
   type ViewSurface,
   type PropKind,
-  CHILDREN_COLUMN,
-  CREATED_COLUMN,
-  MODIFIED_COLUMN,
-  PATH_COLUMN,
 } from '../../core/index.ts'
 import type { KbClient } from '../../core/kb/types.ts'
 import { t } from '../../core/infra/msg.ts'
 import { BlockEditor, type Run } from '../../view/editor/editor.ts'
 import { DeferredFlush } from '../../view/editor/deferred-flush.ts'
 import { renderIcon } from '../../view/icons.ts'
-import { renderQuickFilter } from '../chrome/quick-filter.ts'
 import { SurfaceEditor } from '../block-ui/surface-editor.ts'
 import { EditableBlock } from '../block-ui/editable-block.ts'
 import { mountTitleEditor, type TitleEditor } from '../block-ui/title-editor.ts'
 import { queryChips } from './query-builder.ts'
 import { QueryTree, treeSummary } from './query-tree.ts'
+import { ViewOptionsPanel } from '../views/view-options.ts'
 import { ViewCards } from '../views/view-cards.ts'
 import { ViewTabs } from '../views/view-tabs.ts'
 import { ViewCalendar } from '../views/view-calendar.ts'
@@ -114,7 +101,6 @@ import { ViewGrouped } from '../views/view-grouped.ts'
  * 落盘的是 `ViewConfig.groupByStructure: true`，不是这个字符串——
  * 它是 `<option>` 的 value，只活在 DOM 里；不要写进 `_views`。
  */
-const STRUCTURE_GROUP = '\u0000structure'
 
 /**
  * 条件树开没开：**设备状态，不落盘、不进 KB**。
@@ -214,6 +200,10 @@ export interface ViewHostDeps {
    * 不必先绕进菜单。`anchor` 取 chip 的矩形，浮层贴着它弹。
    */
   openSlice?: (owner: ViewOwnerRef, viewId: string, anchor: DOMRect | null) => void
+  /** 复杂条件交给条件构建器（选项面板的筛选节认不出 chips 时给） */
+  openBuilder?: () => void
+  /** 声明层选择器（选项面板显示节的「编辑默认」；`_childProps` 写口不变） */
+  openChildProps?: (blockId: string) => void
   /** 标题列的投影（run/marks/引用/图片）——由装配层注入，`ui` 不拿整片森林 */
   project: (block: Block, into: HTMLElement) => void
   /** 点标题里的引用/原子（与正文同一条口径） */
@@ -288,23 +278,10 @@ export interface ViewHostEls {
   topCount: HTMLElement
   /** 视图切换器（默认看法 ＋ 已有视图 ＋ 加一张） */
   views: HTMLElement
-  /**
-   * **分组**选择（记录视图才有）：候选＝这批结果里真正出现过的栏，按覆盖率排序。
-   * 换的是**视图配置**（`core.view/set-group`），不重查、不改成员。
-   */
-  group: HTMLSelectElement
-  /** **排序**按钮（查询源才有）：就地展开排序面板，编辑的是成员顺序（`spec.sort`，多键） */
-  sort: HTMLButtonElement
-  /** 排序面板：与条件树同一哲学的就地一行（不是浮层），打开时按当前 spec 现画 */
-  sortPanel: HTMLElement
-  /** **快速筛选**的漏斗（查询源才有）：就地展开 chips 面板，写这一张视图的 `filter` */
-  filterBtn: HTMLButtonElement
-  /** chips 面板（就地展开；与排序面板同一处哲学，不是浮层） */
-  filterPanel: HTMLElement
-  /** **列**按钮（表格视图才有）：就地展开列管理面板，勾选要显示的列 */
-  columnsBtn: HTMLButtonElement
-  /** 显示面板：勾选即落盘（`core.view/set-display`），整份替换 */
-  columnsPanel: HTMLElement
+  /** **选项**按钮：四轴一个面（筛选/排序/分组/显示；可用性读 `axesFor`） */
+  optionsBtn: HTMLButtonElement
+  /** 选项面板（就地展开；与条件树同一哲学） */
+  optionsPanel: HTMLElement
   /** 条件 chip 条（查询源才有；收起时只剩一条摘要） */
   filters: HTMLElement
   /** 条件树（就地展开；与抬头同属这一段，不是浮层） */
@@ -356,30 +333,13 @@ export function createViewHostEls(): ViewHostEls {
   filters.className = 'queryview-filters'
   const views = document.createElement('div')
   views.className = 'queryview-views'
-  const group = document.createElement('select')
-  group.className = 'queryview-group'
-  group.hidden = true
-  const sort = document.createElement('button')
-  sort.type = 'button'
-  sort.className = 'queryview-sort'
-  sort.hidden = true
-  const sortPanel = document.createElement('div')
-  sortPanel.className = 'queryview-sortpanel'
-  sortPanel.hidden = true
-  const filterBtn = document.createElement('button')
-  filterBtn.type = 'button'
-  filterBtn.className = 'queryview-filter'
-  filterBtn.hidden = true
-  const filterPanel = document.createElement('div')
-  filterPanel.className = 'queryview-filterpanel'
-  filterPanel.hidden = true
-  const columnsBtn = document.createElement('button')
-  columnsBtn.type = 'button'
-  columnsBtn.className = 'queryview-columns'
-  columnsBtn.hidden = true
-  const columnsPanel = document.createElement('div')
-  columnsPanel.className = 'queryview-sortpanel queryview-columnspanel'
-  columnsPanel.hidden = true
+  const optionsBtn = document.createElement('button')
+  optionsBtn.type = 'button'
+  optionsBtn.className = 'queryview-options'
+  optionsBtn.hidden = true
+  const optionsPanel = document.createElement('div')
+  optionsPanel.className = 'queryview-sortpanel queryview-optionspanel'
+  optionsPanel.hidden = true
   const refresh = document.createElement('button')
   refresh.type = 'button'
   refresh.className = 'queryview-refresh'
@@ -395,7 +355,7 @@ export function createViewHostEls(): ViewHostEls {
   hiddenNote.type = 'button'
   hiddenNote.className = 'queryview-hidden'
   hiddenNote.hidden = true
-  head.append(title, count, topCount, stale, filters, views, group, sort, filterBtn, columnsBtn, hiddenNote, refresh, foldAll, newRow)
+  head.append(title, count, topCount, stale, filters, views, optionsBtn, hiddenNote, refresh, foldAll, newRow)
 
   const tree = document.createElement('div')
   tree.className = 'queryview-tree'
@@ -419,7 +379,7 @@ export function createViewHostEls(): ViewHostEls {
   table.hidden = true
   body.append(editor, table)
 
-  root.append(head, tree, sortPanel, columnsPanel, filterPanel, body)
+  root.append(head, tree, optionsPanel, body)
   return {
     root,
     head,
@@ -429,13 +389,8 @@ export function createViewHostEls(): ViewHostEls {
     topCount,
     filters,
     views,
-    group,
-    sort,
-    sortPanel,
-    filterBtn,
-    filterPanel,
-    columnsBtn,
-    columnsPanel,
+    optionsBtn,
+    optionsPanel,
     refresh,
     foldAll,
     newRow,
@@ -462,6 +417,9 @@ export class ViewHost {
   private tabs: ViewTabs | null = null
   /** children 记录视图当前的显示掩码（命中 id 集；`null` ＝ 无掩码）。`paintChrome` 每次重画现算 */
   private maskIds: Set<string> | null = null
+  /** 选项面板（四轴一个面；懒建一台，切视图只换它读到的活配置） */
+  private optionsUi: ViewOptionsPanel | null = null
+  private optionsOpen = false
   private calendar: ViewCalendar | null = null
   private mindmap: ViewMindmap | null = null
   /** 分组包装（表格带 `groupBy` 时）：段头归它、段身仍是表格 */
@@ -485,7 +443,6 @@ export class ViewHost {
   /** 条件树（查询源；懒建，收起只隐藏不清空草稿） */
   private treeUi: QueryTree | null = null
   /** chips 面板开着没有（就地展开；与排序面板同一种寿命） */
-  private filterOpen = false
   private staleIds = new Set<string>()
   /** 上下文展开栈（祖先 id）；刷新时清空，外部编辑重画时保留 */
   private expanded = new Set<string>()
@@ -544,15 +501,10 @@ export class ViewHost {
     this.els.refresh.dataset.tip = t('ui.query.refresh')
     this.els.refresh.setAttribute('aria-label', t('ui.query.refresh'))
     this.els.refresh.addEventListener('click', () => this.refresh())
-    renderIcon(this.els.sort, 'lucide:arrow-up-down', 'arrow-up-down')
-    this.els.sort.dataset.tip = t('ui.query.sortTitle')
-    this.els.sort.setAttribute('aria-label', t('ui.query.sort'))
-    this.els.sort.addEventListener('click', () => this.toggleSortPanel())
-    this.els.filterBtn.addEventListener('click', () => this.toggleFilterPanel())
-    renderIcon(this.els.columnsBtn, 'lucide:columns-3', 'columns-3')
-    this.els.columnsBtn.dataset.tip = t('ui.view.columnsTitle')
-    this.els.columnsBtn.setAttribute('aria-label', t('ui.view.columns'))
-    this.els.columnsBtn.addEventListener('click', () => this.toggleColumnsPanel())
+    renderIcon(this.els.optionsBtn, 'lucide:sliders-horizontal', 'sliders-horizontal')
+    this.els.optionsBtn.dataset.tip = t('ui.view.optionsTitle')
+    this.els.optionsBtn.setAttribute('aria-label', t('ui.view.options'))
+    this.els.optionsBtn.addEventListener('click', () => this.toggleOptions())
     this.els.newRow.textContent = t('ui.view.newRow')
     this.els.newRow.dataset.tip = t('ui.view.newRowTitle')
     this.els.newRow.addEventListener('click', () => this.deps.invoke('core.view/new-row', { owner: this.writeOwner }))
@@ -1070,27 +1022,13 @@ export class ViewHost {
     // 大纲折叠的次要文案由 `render()` 现算（它才知道这一屏画了几行）；其余分支没有折叠
     if (!query || view !== null) this.els.topCount.hidden = true
     this.els.refresh.hidden = !query
-    this.els.sort.hidden = !query
-    if (!query) this.els.sortPanel.hidden = true
     /**
-     * **快速筛选的漏斗**：查询源、且这一份 filter **认得出是 chips** 才给。
-     *
-     * 认不出的形状（树里拼的嵌套条件／按正文/属性写的条件）不给漏斗——点开只会
-     * 得到两列空 chips，一动手势就把那份条件整份换掉（静默丢条件）。那种形状
-     * 由切片摘要 chip 承接（同一份条件的另一条路）。
+     * **四轴一个面**：筛选/排序/分组/显示都从这一颗进（Tana 的工具栏也默认隐藏）。
+     * 派生栏没有可写配置（看法/分组由设备状态回答，挂载区自己画）⇒ 不给这一颗。
      */
-    const filterable = query && !embed && chipsOfFilter(this.activeFilter) !== null
-    this.els.filterBtn.hidden = !filterable
-    if (!filterable) {
-      this.filterOpen = false
-      this.els.filterPanel.hidden = true
-    } else {
-      this.paintFilterButton()
-    }
-    // 列管理只对表格视图开放（写的是 table.columns）；派生栏没有可写配置，列由来源定
-    const columnsEditable = !derived && view?.kind === 'table'
-    this.els.columnsBtn.hidden = !columnsEditable
-    if (!columnsEditable) this.els.columnsPanel.hidden = true
+    this.els.optionsBtn.hidden = Boolean(derived)
+    if (derived) this.optionsOpen = false
+    this.repaintOptions()
     // 派生栏是只读关系视图 ⇒ 不给新建/改名/刷新
     this.els.newRow.hidden = Boolean(derived) || query
     /**
@@ -1105,256 +1043,11 @@ export class ViewHost {
     this.paintFilters(b)
     this.paintTree()
     this.paintViews(b, view)
-    this.paintGroup(view)
-  }
-
-  /**
-   * **分组选择**（记录视图才有）：候选吃 core 的 `groupChoicesOf`（唯一实现）——
-   * 查询视图与挂载区派生栏的两个下拉必须给出同一份候选。多值键带尾注
-   * （能分组，但看板拖拽禁用——写路径只有单值有唯一动作）。
-   *
-   * ⚠️ **派生栏不画**：它的分组下拉由挂载区抬头画（与看法切换同排）——
-   * ViewHost 的抬头对派生栏是隐藏的，留下这一颗就是「不分组」孤零零一行（实测难看）。
-   */
-  private paintGroup(view: ViewConfig | null): void {
-    const kind = view?.kind
-    const record = kind === 'table' || kind === 'cards'
-    this.els.group.hidden = !record || !view || Boolean(this.deps.derived)
-    if (!record || !view || this.deps.derived) return
-    // 卡片的分组列**不支持多值属性**：拖卡写值没有唯一动作——多值去表格分组
-    const cards = kind === 'cards'
-    /**
-     * 「按一级子块」只对 **children 源的卡片**成立：组是容器的直接子块。
-     * query 源的命中是平的（没有「一级」），别把这一项列出来——写了也没人消费。
-     */
-    const structureOk = cards && this.source.kind === 'children'
-    const choices = groupChoicesOf(this.records(), {
-      fields: this.deps.fields(),
-      cardinalityOf: (id) => this.cardinalityOf(id),
-    }).filter((c) => !(cards && c.multi))
-    const options: HTMLOptionElement[] = []
-    const none = document.createElement('option')
-    none.value = ''
-    none.textContent = t('ui.query.group.none')
-    options.push(none)
-    if (structureOk) {
-      const o = document.createElement('option')
-      // UI-only 哨兵：落盘的是 `groupByStructure:true`，不是这个值
-      o.value = STRUCTURE_GROUP
-      o.textContent = t('ui.query.group.structure')
-      options.push(o)
-    }
-    for (const c of choices) {
-      const o = document.createElement('option')
-      o.value = c.key
-      o.textContent = `${c.label}${c.multi ? t('ui.query.group.multi') : ''}（${c.count}／${c.total}）`
-      options.push(o)
-    }
-    this.els.group.replaceChildren(...options)
-    this.els.group.value = groupsByStructure(view) ? STRUCTURE_GROUP : (view.groupBy ?? '')
-    if (!options.some((o) => o.value === this.els.group.value)) {
-      // 存着的分组键不在候选里（这批结果没有这一栏了）⇒ 显示「无分组」，不悄悄改配置
-      this.els.group.value = ''
-    }
-    this.els.group.onchange = () => {
-      const picked = this.els.group.value
-      const structure = picked === STRUCTURE_GROUP
-      this.deps.invoke('core.view/set-group', {
-        owner: this.writeOwner,
-        viewId: view.id,
-        groupBy: structure ? '' : picked,
-        ...(structure ? { structure: true } : {}),
-      })
-    }
   }
 
   /** `_tags` 的组名解析：标签块的显示名（列头与选项都从这一份走；兜底只有「无标题」一种） */
   private tagChoices(): readonly { id: string; label: string }[] {
     return this.deps.kb.tags().map((b) => ({ id: b.id, label: blockLabel(b, (x) => this.deps.kb.get(x)) }))
-  }
-
-  /**
-   * **能排序的键**：保留键（与列键同名同义：创建／修改时间、日志日期、被引用几次、随机）
-   * ＋ 属性定义。保留键的取值与两条求值路径的排序实现在 `query.ts` 的 `applySort`，
-   * 这里只管把名字给人看。
-   */
-  private sortKeys(): readonly { id: string; label: string }[] {
-    return [
-      { id: 'created', label: t('ui.query.sortKey.created') },
-      { id: 'modified', label: t('ui.query.sortKey.modified') },
-      { id: '_date', label: t('ui.query.sortKey.date') },
-      { id: 'refCount', label: t('ui.query.sortKey.refCount') },
-      { id: 'random', label: t('ui.query.sortKey.random') },
-      ...this.deps.fields().map((f) => ({ id: f.id, label: f.label })),
-    ]
-  }
-
-  /** 排序面板就地展开／收起；展开时按当前 spec 现画（成员顺序＝多键，按数组序生效） */
-  private toggleSortPanel(): void {
-    const panel = this.els.sortPanel
-    if (!panel.hidden) {
-      panel.hidden = true
-      return
-    }
-    const spec = this.source.kind === 'query' ? this.source.spec : null
-    if (!spec) return
-    this.paintSortRows(spec, (spec.sort ?? []).map((s) => ({ ...s })))
-    panel.hidden = false
-  }
-
-  /**
-   * 排序面板的行：字段 ＋ 方向 ＋ 上移／下移／移除（次序即优先级）。
-   *
-   * 编辑的是**本地副本**，「应用」才走 `core.query/set-spec` 落盘——与条件树同一套
-   * 落盘与撤销路径；清空全部行 ＝ 删掉 `sort` 键（空数组不留「排过序」的痕迹）。
-   */
-  private paintSortRows(spec: QuerySpec, draft: SortKey[]): void {
-    const panel = this.els.sortPanel
-    panel.replaceChildren()
-    const repaint = (): void => this.paintSortRows(spec, draft)
-    const fields = this.sortKeys()
-    draft.forEach((s, i) => {
-      const row = document.createElement('div')
-      row.className = 'qsp-row'
-      const col = document.createElement('select')
-      col.className = 'qsp-field'
-      for (const f of fields) {
-        const o = document.createElement('option')
-        o.value = f.id
-        o.textContent = f.label
-        col.append(o)
-      }
-      col.value = s.by
-      col.onchange = () => {
-        draft[i] = { ...s, by: col.value }
-        repaint()
-      }
-      const dir = document.createElement('select')
-      dir.className = 'qsp-dir'
-      for (const [v, key] of [
-        ['asc', 'ui.view.sortAsc'],
-        ['desc', 'ui.view.sortDesc'],
-      ] as const) {
-        const o = document.createElement('option')
-        o.value = v
-        o.textContent = t(key)
-        dir.append(o)
-      }
-      dir.value = s.dir
-      dir.onchange = () => {
-        draft[i] = { ...s, dir: dir.value === 'desc' ? 'desc' : 'asc' }
-        repaint()
-      }
-      const ops = document.createElement('span')
-      ops.className = 'qsp-ops'
-      for (const [label, disabled, act] of [
-        ['↑', i === 0, (): void => {
-          ;[draft[i - 1], draft[i]] = [draft[i]!, draft[i - 1]!]
-        }],
-        ['↓', i === draft.length - 1, (): void => {
-          ;[draft[i + 1], draft[i]] = [draft[i]!, draft[i + 1]!]
-        }],
-        ['×', false, (): void => {
-          draft.splice(i, 1)
-        }],
-      ] as const) {
-        const b = document.createElement('button')
-        b.type = 'button'
-        b.textContent = label
-        b.disabled = disabled
-        b.addEventListener('click', () => {
-          act()
-          repaint()
-        })
-        ops.append(b)
-      }
-      row.append(col, dir, ops)
-      panel.append(row)
-    })
-    // 添加一行：只列还没在用的字段；选了当场落一行（方向缺省升序，行内可改）
-    const unused = fields.filter((f) => !draft.some((s) => s.by === f.id))
-    const add = document.createElement('select')
-    add.className = 'qsp-add'
-    const placeholder = document.createElement('option')
-    placeholder.value = ''
-    placeholder.textContent = t('ui.query.sortAdd')
-    add.append(placeholder)
-    for (const f of unused) {
-      const o = document.createElement('option')
-      o.value = f.id
-      o.textContent = f.label
-      add.append(o)
-    }
-    add.disabled = unused.length === 0
-    add.onchange = () => {
-      if (add.value === '') return
-      draft.push({ by: add.value, dir: 'asc' })
-      repaint()
-    }
-    panel.append(add)
-    const apply = document.createElement('button')
-    apply.type = 'button'
-    apply.className = 'qsp-apply ui-btn'
-    apply.textContent = t('ui.query.builder.apply')
-    apply.addEventListener('click', () => {
-      const next: QuerySpec = { ...spec }
-      if (draft.length > 0) next.sort = draft.map((s) => ({ ...s }))
-      else delete next.sort
-      this.deps.invoke('core.query/set-spec', { owner: this.writeOwner, spec: next })
-      panel.hidden = true
-      this.refocusBody()
-    })
-    panel.append(apply)
-  }
-
-  /** 列管理面板就地展开／收起；打开时按当前视图的列配置现画 */
-  private toggleColumnsPanel(): void {
-    const panel = this.els.columnsPanel
-    if (!panel.hidden) {
-      panel.hidden = true
-      return
-    }
-    const view = this.view
-    if (!view || view.kind !== 'table') return
-    this.paintColumnsRows(view)
-    panel.hidden = false
-  }
-
-  /**
-   * 列管理的行：**标题恒在**（它是行身份，不进候选）＋ 一行一个候选列。
-   *
-   * 候选两路：字段（属性定义，`deps.fields()` 与条件树同一份）＋ 保留的系统列
-   * （子块数/创建/修改/路径——它们是「什么时候动过、在哪」的投影，不默认占位但随取随有）。
-   * 勾选即落盘（`core.view/set-display`，整份替换）：没有「应用」一步，勾完表格就地重画。
-   * 写的是**显示白名单**（空勾选＝只标题）；列宽是布局元数据（`table.widths`），不在这里动。
-   * ⚠️ 面板**不收**：连续勾选是常态；`current` 每次勾选都现读（`bound` 是活引用）——
-   * 用开面板那一刻的快照算下一份，第二次勾会把第一次的修改整个冲掉。
-   */
-  private paintColumnsRows(view: ViewConfig): void {
-    const panel = this.els.columnsPanel
-    panel.replaceChildren()
-    const rows: { key: string; label: string }[] = [
-      { key: CHILDREN_COLUMN, label: t('ui.view.col.children') },
-      { key: CREATED_COLUMN, label: t('ui.props.createdAt') },
-      { key: MODIFIED_COLUMN, label: t('ui.props.modifiedAt') },
-      { key: PATH_COLUMN, label: t('ui.view.col.path') },
-      ...this.deps.fields().map((f) => ({ key: f.id, label: f.label })),
-    ]
-    for (const r of rows) {
-      const row = document.createElement('label')
-      row.className = 'qcp-row'
-      const box = document.createElement('input')
-      box.type = 'checkbox'
-      box.checked = (view.displayProps ?? []).includes(r.key)
-      box.addEventListener('change', () => {
-        const current = this.defaultView()?.kind === 'table' ? (this.defaultView()!.displayProps ?? []) : []
-        const next = box.checked ? [...current, r.key] : current.filter((k) => k !== r.key)
-        this.deps.invoke('core.view/set-display', { owner: this.writeOwner, viewId: view.id, props: next })
-        this.refocusBody()
-      })
-      row.append(box, document.createTextNode(r.label))
-      panel.append(row)
-    }
   }
 
   /**
@@ -1494,71 +1187,40 @@ export class ViewHost {
 
   /* ---------------------------------------------------------- 快速筛选 */
 
-  /**
-   * 这一张视图的 chips。
-   *
-   * `chipsOfFilter` 认不出的形状不会走到这里（`paintChrome` 用同一条判据把漏斗藏了），
-   * 所以 `?? EMPTY` 只是给类型一个落点，不是「认不出就当没有」。
-   */
-  private filterState(): QuickFilterState {
-    return chipsOfFilter(this.activeFilter) ?? EMPTY_QUICK_FILTER
+  /** 选项面板就地开合（与条件树同一哲学；打开时按当前活配置现画） */
+  private toggleOptions(): void {
+    this.optionsOpen = !this.optionsOpen
+    this.repaintOptions()
   }
 
-  private paintFilterButton(): void {
-    const btn = this.els.filterBtn
-    renderIcon(btn, 'lucide:filter', 'filter')
-    const state = this.filterState()
-    const active = quickFilterActive(state)
-    if (active) btn.dataset.active = '1'
-    else delete btn.dataset.active
-    const count = state.include.length + state.remove.length
-    btn.dataset.tip = active ? t('ui.filter.buttonActive', { count }) : t('ui.filter.buttonHint')
-    btn.setAttribute('aria-label', t('ui.filter.button'))
-    this.els.filterPanel.hidden = !this.filterOpen
-  }
-
-  /** 漏斗：就地开合 chips 面板（与排序面板同一种寿命；不用浮层——用户会连点几颗） */
-  private toggleFilterPanel(): void {
-    this.filterOpen = !this.filterOpen
-    if (this.filterOpen) this.paintFilterPanel()
-    this.els.filterPanel.hidden = !this.filterOpen
-  }
-
-  private paintFilterPanel(): void {
-    renderQuickFilter(this.els.filterPanel, {
-      records: () => this.filterCandidates(),
-      state: () => this.filterState(),
-      labelOf: (atom) => this.atomLabel(atom),
-      onAdd: (atom, to) => this.writeFilter(quickFilterAdd(this.filterState(), atom, to)),
-      onDrop: (atom) => this.writeFilter(quickFilterDrop(this.filterState(), atom)),
-      onClear: () => {
-        this.deps.invoke('core.view/set-filter', {
-          owner: this.writeOwner,
-          viewId: this.view?.id ?? '',
-          filter: null,
-        })
-        this.paintFilterButton()
-        this.paintFilterPanel()
-      },
-      search: true,
-    })
-  }
-
-  /**
-   * 写一层切片：**只写这一张视图的镜头**，不碰 `_query` 的基础条件。
-   *
-   * 视图 id 为空串 ＝ 默认看法（大纲），写拥有者自己的 `_defaultFilter`——
-   * 新建查询块还没有命名视图，这是它唯一能落脚的地方（见 `setViewFilter`）。
-   */
-  private writeFilter(next: QuickFilterState | null): void {
-    if (!next) return
-    this.deps.invoke('core.view/set-filter', {
-      owner: this.writeOwner,
-      viewId: this.view?.id ?? '',
-      filter: quickFilterNode(next),
-    })
-    this.paintFilterButton()
-    this.paintFilterPanel()
+  /** 面板内容重画（配置一律现读；切视图/写配置后由 paintChrome 顺带调） */
+  private repaintOptions(): void {
+    const panel = this.els.optionsPanel
+    panel.hidden = !this.optionsOpen
+    if (!this.optionsOpen) return
+    if (!this.optionsUi) {
+      this.optionsUi = new ViewOptionsPanel({
+        owner: this.writeOwner,
+        viewId: () => this.view?.id ?? '',
+        read: () => ({
+          view: this.view,
+          source: this.source,
+          filter: this.activeFilter,
+          display: this.view ? this.view.displayProps : this.deps.owners.read(this.writeOwner)?.defaultDisplayProps,
+        }),
+        fields: () => this.deps.fields(),
+        records: () => this.records(),
+        filterCandidates: () => this.filterCandidates(),
+        atomLabel: (atom) => this.atomLabel(atom),
+        cardinalityOf: (id) => this.cardinalityOf(id),
+        invoke: (name, args) => this.deps.invoke(name, args),
+        ...(this.deps.openChildProps ? { openChildProps: this.deps.openChildProps } : {}),
+        ...(this.deps.openBuilder ? { openBuilder: this.deps.openBuilder } : {}),
+        afterApply: () => this.refocusBody(),
+      })
+      panel.replaceChildren(this.optionsUi.root)
+    }
+    this.optionsUi.render()
   }
 
   /**

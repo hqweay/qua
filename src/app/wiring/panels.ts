@@ -1115,6 +1115,9 @@ export function setupPanels(deps: PanelsDeps) {
       // 视图切换是下拉：贴着按钮弹「视图…」菜单（行仍由装配层现画）
       openViewMenu: (owner, anchor, trigger) => app.openViewMenu(owner, anchor, trigger),
       openSlice: (owner, viewId, anchor) => app.openViewSlice(owner, viewId, anchor),
+      // 选项面板的两个出口：复杂条件交给构建器；「编辑默认」调声明层选择器
+      openBuilder: () => app.openQueryBuilder(owner),
+      openChildProps: (blockId) => app.showChildPropsPicker(blockId),
       project: (b, into) => deps.project(b, into),
       refClick: (hit, el, mods) => deps.refClick(hit, mods, el),
       ...(deps.atomClick ? { onAtomClick: (atom, el, mods) => deps.atomClick!(atom, el, mods) } : {}),

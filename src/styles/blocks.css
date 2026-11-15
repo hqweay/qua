@@ -1594,10 +1594,7 @@
 .queryview-stale,
 .queryview-hidden,
 .queryview-views,
-.queryview-group,
-.queryview-sort,
-.queryview-filter,
-.queryview-columns,
+.queryview-options,
 .queryview-refresh,
 .queryview-foldall,
 .queryview-newrow {
@@ -1678,6 +1675,17 @@
 }
 .queryview-hidden[hidden] {
   display: none;
+}
+.queryview-options {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--ui-text-secondary);
+  cursor: pointer;
+}
+.queryview-options:hover {
+  color: var(--ui-text);
 }
 .queryview-refresh {
   margin-left: auto;

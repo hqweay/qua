@@ -19645,11 +19645,15 @@ await check('T267 卡片按一级子块分组：组＝直接子块（有身份�
   assert(gallery.layout === 'grid', `卡片默认仍是画廊：${JSON.stringify(gallery)}`)
   assert(gallery.cards.length === 3, `画廊的卡＝一级子块（3）：${JSON.stringify(gallery.cards)}`)
 
-  // 分组下拉里出现「一级子块」（只对 children 源的卡片；query 源由单测钉住「丢弃」）
+  // 分组入口收进「选项」面板：children 源的卡片应有「一级子块」候选（query 源由单测钉住「丢弃」）
+  await page.locator('.queryview-options').first().click()
+  await page.waitForTimeout(200)
   const hasStructureOption = await page.evaluate(() =>
-    [...document.querySelectorAll('.queryview-group option')].some((o) => o.textContent === '一级子块'),
+    [...document.querySelectorAll('.queryview-optionspanel .vopt-group option')].some(
+      (o) => o.textContent === '一级子块',
+    ),
   )
-  assert(hasStructureOption, 'children 源的卡片：分组下拉应有「一级子块」')
+  assert(hasStructureOption, 'children 源的卡片：选项面板的分组节应有「一级子块」')
 
   const viewId = await page.evaluate((rid) => {
     const v = (window.__qua.__editor.store.find(rid)?.props?._views ?? []).find((x) => x.kind === 'cards')
@@ -22778,14 +22782,17 @@ await check('T230 分组：入口按覆盖率给候选；卡片禁多值分组�
     { pid, groupId: gid },
   )
   await page.waitForTimeout(450)
+  // 分组入口收进了「选项」面板（抬头只留一颗入口）：点开再读候选
+  await page.locator('.queryview-options').first().click()
+  await page.waitForTimeout(200)
   const entry = await page.evaluate(() => {
-    const sel = document.querySelector('.queryview-group')
+    const sel = document.querySelector('.queryview-optionspanel .vopt-group')
     return {
-      visible: Boolean(sel) && sel?.hidden === false,
+      visible: Boolean(sel),
       options: [...(sel?.options ?? [])].map((o) => o.textContent ?? ''),
     }
   })
-  assert(entry.visible, '记录视图应显示分组入口')
+  assert(entry.visible, '记录视图的选项面板应显示分组节')
   assert(
     entry.options.some((o) => /（\d+／\d+）/.test(o)),
     `候选要标覆盖率（几条／共几条）：${JSON.stringify(entry.options)}`,
@@ -26909,14 +26916,14 @@ await check('T281 快速筛选：新建查询默认不查询；查询块的漏�
   const pre = await page.evaluate(() => ({
     rows: document.querySelectorAll('.queryview-outline .blk').length,
     undo: window.__qua.snapshot().undoDepth,
-    funnel: !document.querySelector('.queryview-filter')?.hidden,
+    funnel: !document.querySelector('.queryview-options')?.hidden,
   }))
   assert(pre.rows > 0, `前置：{tag:任务} 有结果：${pre.rows}`)
-  assert(pre.funnel, '查询块的漏斗可见')
+  assert(pre.funnel, '查询块的「选项」入口可见')
 
-  await page.locator('.queryview-filter').first().click()
+  await page.locator('.queryview-options').first().click()
   await page.waitForTimeout(200)
-  const tags = page.locator('.queryview-filterpanel .quick-filter-tags .quick-filter-chip')
+  const tags = page.locator('.queryview-optionspanel .quick-filter-tags .quick-filter-chip')
   assert((await tags.count()) > 0, '面板候选里有标签')
   await tags.first().click()
   await page.waitForTimeout(400)
@@ -26933,13 +26940,13 @@ await check('T281 快速筛选：新建查询默认不查询；查询块的漏�
     return {
       filter: b?.props?._defaultFilter ?? null,
       query: JSON.stringify(b?.props?._query ?? null),
-      active: document.querySelector('.queryview-filter')?.dataset.active ?? '',
+      active: document.querySelector('.queryview-options')?.dataset.active ?? '',
       undo: window.__qua.snapshot().undoDepth,
     }
   }, bid)
   assert(sliced.filter !== null, `包含一颗 chip 之后应写 _defaultFilter：${JSON.stringify(sliced.filter)}`)
   assert(sliced.query.includes('"tag":"'), `基础条件不许被 chips 改：${sliced.query}`)
-  assert(sliced.active === '1', '漏斗显示「已筛」态')
+  assert(sliced.active === '', '切片生效态由筛选 pill 承接（选项按钮不再自己翻色）')
   assert(sliced.undo > pre.undo, `写切片是一条可撤销的写：${pre.undo}→${sliced.undo}`)
 
   // Shift+点同一颗 ⇒ 挪到排除（全排掉）；清除 ⇒ 回到原样且删掉那一格
@@ -26949,7 +26956,7 @@ await check('T281 快速筛选：新建查询默认不查询；查询块的漏�
     (await page.evaluate(() => document.querySelectorAll('.queryview-outline .blk').length)) === 0,
     '排除命中 ⇒ 结果清空',
   )
-  await page.locator('.queryview-filterpanel .quick-filter-clear').click()
+  await page.locator('.queryview-optionspanel .quick-filter-clear').click()
   await page.waitForTimeout(400)
   const cleared = await page.evaluate((id) => {
     const find = (l) => {
