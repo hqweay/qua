@@ -30509,6 +30509,150 @@ await check('T321 检视卡的引用值：点名字跳目标，尾键换目标',
   return '点名字跳目标页；笔键重新开选择器'
 })
 
+await check('T322 ref 值的 inline 岛：就地编辑写回源块、别处写一笔岛不被拔、看法切换即时', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  const ids = await page.evaluate(() => {
+    const textful = window.__qua.blocks().filter((b) => b.roles.length === 0 && b.text.length > 2)
+    const host = textful[0]
+    const other = textful[1]
+    window.__qua.invoke('core.props/create-def', { blockId: host.id, label: '岛测试', kind: 'ref', target: 'own' })
+    const def = window.__qua.propDefs().find((d) => d.label === '岛测试')
+    // 目标用**已有内容的块**：空内容的行落不了焦点（岛里没字可点）
+    window.__qua.invoke('core.props/set-value', { blockId: host.id, propId: def.id, value: other.id })
+    // def 可能是上一次运行的复用件：看法显式重设（幂等）
+    window.__qua.invoke('core.props/set-ref-view', { defId: def.id, view: 'inline' })
+    return { host: host.id, propId: def.id, target: other.id }
+  })
+  assert(ids.target !== '', '前置：应找到两个有内容的块')
+  await page.evaluate((hid) => window.__qua.invoke('core.block/inspect', { blockId: hid }), ids.host)
+  const rowSel = `.props-drawer .prop-row[data-prop-id="${ids.propId}"]`
+  await page.waitForSelector(`${rowSel} .prop-ref-island[contenteditable="true"]`, { timeout: 5000 })
+
+  // 就地编辑写回源块：岛里打的字进的是目标块本体（禁止拷贝语义）
+  await page.click(`${rowSel} .prop-ref-island[contenteditable="true"]`)
+  await page.keyboard.type('XYZ')
+  await page.waitForFunction(
+    (tid) => (window.__qua.blocks().find((b) => b.id === tid)?.text ?? '').includes('XYZ'),
+    ids.target,
+    { timeout: 4000 },
+  )
+
+  // 打字中别处写一笔：面板重建不得拔岛（宿主是同一个元素、焦点还在岛里）
+  await page.evaluate(
+    (sel) => {
+      const host = document.querySelector(sel)
+      host.__t322keep = true
+      return true
+    },
+    `${rowSel} .prop-ref-island`,
+  )
+  await page.evaluate((hostId) => {
+    const other = window.__qua.blocks().find((b) => b.id !== hostId && b.roles.length === 0)
+    window.__qua.invoke('core.props/create-def', { blockId: other.id, label: '别处写入', kind: 'text', target: 'own' })
+    const def2 = window.__qua.propDefs().find((d) => d.label === '别处写入')
+    window.__qua.invoke('core.props/set-value', { blockId: other.id, propId: def2.id, value: '一笔别处的写入' })
+  }, ids.host)
+  await page.waitForTimeout(400)
+  const survived = await page.evaluate(
+    (sel) => {
+      const host = document.querySelector(sel)
+      return {
+        same: Boolean(host && host.__t322keep === true),
+        focused: Boolean(host && host.contains(document.activeElement)),
+      }
+    },
+    `${rowSel} .prop-ref-island`,
+  )
+  assert(survived.same, `别处写入后岛宿主应是同一个元素（未被重建拔掉）：${JSON.stringify(survived)}`)
+  assert(survived.focused, `别处写入后焦点应还在岛里：${JSON.stringify(survived)}`)
+
+  // 看法切回 chip：岛当场退役、引用按钮回来；目标块里的字还在（值层没动过）
+  await page.evaluate((defId) => window.__qua.invoke('core.props/set-ref-view', { defId, view: 'chip' }), ids.propId)
+  await page.waitForSelector(`${rowSel} .prop-ref`, { timeout: 4000 })
+  await page.waitForTimeout(100)
+  const afterChip = await page.evaluate(
+    (sel) => ({ island: Boolean(document.querySelector(`${sel} .prop-ref-island`)) }),
+    rowSel,
+  )
+  assert(afterChip.island === false, `切回 chip 后岛应消失：${JSON.stringify(afterChip)}`)
+  assert(
+    (await page.evaluate((tid) => (window.__qua.blocks().find((b) => b.id === tid)?.text ?? '').includes('XYZ'), ids.target)),
+    '换看法不动值：目标块正文仍在',
+  )
+
+  await ctx.close()
+  return '岛里改字写回源块；别处写入不拔岛；切回 chip 即时且值不动'
+})
+
+await check('T323 ref inline 岛的多值：每值一台岛、编辑写回各自源块、摘一枚仍数组', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  const ids = await page.evaluate(() => {
+    const textful = window.__qua.blocks().filter((b) => b.roles.length === 0 && b.text.length > 2)
+    const host = textful[0]
+    const t1 = textful[1]
+    const t2 = textful[2]
+    window.__qua.invoke('core.props/create-def', { blockId: host.id, label: '岛多值', kind: 'ref', target: 'own' })
+    const def = window.__qua.propDefs().find((d) => d.label === '岛多值')
+    window.__qua.invoke('core.props/set-choice-cardinality', { defId: def.id, cardinality: 'many' })
+    window.__qua.invoke('core.props/set-value', { blockId: host.id, propId: def.id, value: [t1.id, t2.id] })
+    window.__qua.invoke('core.props/set-ref-view', { defId: def.id, view: 'inline' })
+    return { host: host.id, propId: def.id, t1: t1.id, t2: t2.id }
+  })
+  await page.evaluate((hid) => window.__qua.invoke('core.block/inspect', { blockId: hid }), ids.host)
+  const rowSel = `.props-drawer .prop-row[data-prop-id="${ids.propId}"]`
+  await page.waitForSelector(`${rowSel} .prop-ref-island[contenteditable="true"]`, { timeout: 5000 })
+  // 只数**值枚的岛**（岛内容里的挂载区/属性行自带的嵌套岛不算）
+  const count = await page.evaluate(
+    (sel) => document.querySelectorAll(`${sel} .prop-ref-item > [data-edit-island]`).length,
+    rowSel,
+  )
+  assert(count === 2, `两个值应各有一台岛：${count}`)
+
+  // 编辑第二枚：字进第二个源块
+  const tops = await page.evaluate(
+    (sel) => [...document.querySelectorAll(`${sel} .prop-ref-item > [data-edit-island]`)].map((el) => ({
+      refTarget: el.dataset.refTarget,
+      editable: Boolean(el.querySelector('.prop-ref-island[contenteditable="true"]')),
+    })),
+    rowSel,
+  )
+  const idx = tops.findIndex((t) => t.refTarget === ids.t2 && t.editable)
+  assert(idx >= 0, '第二枚值的岛应在场')
+  await page.click(`${rowSel} .prop-ref-item:nth-of-type(${idx + 1}) .prop-ref-island[contenteditable="true"]`)
+  await page.keyboard.type('XYZ2')
+  await page.waitForFunction(
+    (tid) => (window.__qua.blocks().find((b) => b.id === tid)?.text ?? '').includes('XYZ2'),
+    ids.t2,
+    { timeout: 4000 },
+  )
+
+  // 摘第一枚：值仍是数组且只剩第二枚；第一枚的岛随行退役
+  await page.click(`${rowSel} .prop-ref-item .props-tag-x`)
+  await page.waitForTimeout(300)
+  const after = await page.evaluate(
+    (args) => {
+      const host = window.__qua.allBlocks().find((b) => b.id === args.host)
+      return {
+        value: host?.props?.[args.propId],
+        islands: document.querySelectorAll(`${args.rowSel} .prop-ref-item > [data-edit-island]`).length,
+      }
+    },
+    { host: ids.host, propId: ids.propId, rowSel },
+  )
+  assert(
+    Array.isArray(after.value) && after.value.length === 1 && after.value[0] === ids.t2,
+    `摘一枚后值应是只剩 t2 的数组：${JSON.stringify(after.value)}`,
+  )
+  assert(after.islands === 1, `摘除后应只剩一台岛：${after.islands}`)
+
+  await ctx.close()
+  return '两枚值两台岛；编辑写回各自源块；摘一枚仍数组且岛跟着退'
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

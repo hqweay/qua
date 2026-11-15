@@ -2,11 +2,13 @@
  * 属性命令：值的读写、字段定义的声明与摘除。
  */
 import {
+  CLOSURE_USE,
   CARDINALITY_PROP,
   CHECK_PROP,
   FORMAT_PROP,
   PROP_KIND_SPECS,
   REF_TAGS_PROP,
+  REF_VIEW_PROP,
   CHILD_PROPS_PROP,
   UI_POSITION_PROP,
   USE_PROP,
@@ -20,6 +22,7 @@ import {
   hasList,
   isAssetRef,
   isCurrentPropKind,
+  isRefViewValue,
   parseCheckSpec,
   useOf,
   valueListOf,
@@ -38,6 +41,7 @@ import {
   patchChoice,
   propKindOf,
   propLabel,
+  useTakenBy,
   setChoices,
   setValue,
   textFormatOk,
@@ -81,6 +85,7 @@ export function propsCommands(
   | 'restoreChoice'
   | 'setPropFormat'
   | 'setPropRefTags'
+  | 'setPropRefView'
   | 'createPropRefTarget'
 > {
   const find = (id: string): Block | undefined => d.kb.get(id)
@@ -378,7 +383,7 @@ export function propsCommands(
         return
       }
       if (spec.closure) {
-        const other = d.kb.propDefs().find((x) => x.id !== defId && useOf(x) === 'closure')
+        const other = useTakenBy(d.kb.propDefs(), CLOSURE_USE, defId)
         if (other) {
           d.toast(t('ui.props.choice.statusTaken', { label: propLabel(other) }), 'warn')
           return
@@ -387,7 +392,7 @@ export function propsCommands(
       d.run((tx) =>
         tx.patch(defId, (b) => {
           patchProp(b, CHECK_PROP, parsed)
-          patchProp(b, USE_PROP, spec.closure ? 'closure' : undefined)
+          patchProp(b, USE_PROP, spec.closure ? CLOSURE_USE : undefined)
         }),
       )
     },
@@ -464,6 +469,19 @@ export function propsCommands(
       const next: string[] = []
       for (const id of tagIds) if (typeof id === 'string' && id !== '' && !next.includes(id)) next.push(id)
       d.run((tx) => tx.patch(defId, (b) => patchProp(b, REF_TAGS_PROP, next.length > 0 ? next : undefined)))
+    },
+
+    /**
+     * 写 `ref` 定义的**默认看法**（`_refView`）。
+     *
+     * 这是**看法**不是值：值层的块 id 一个字节不动。缺省态不落盘（`chip` ＝ 摘键，
+     * 与格式命令「缺省不落空壳」同一口径）；非法值与非 ref 定义静默拒绝——
+     * 开关只对存在的槽负责，不往坏形状里写。
+     */
+    setPropRefView: (defId, view) => {
+      const def = find(defId)
+      if (!def || propKindOf(def) !== 'ref' || !isRefViewValue(view)) return
+      d.run((tx) => tx.patch(defId, (b) => patchProp(b, REF_VIEW_PROP, view === 'chip' ? undefined : view)))
     },
 
     /**

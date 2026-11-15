@@ -672,6 +672,22 @@ export function setupPanels(deps: PanelsDeps) {
       /** 页的脸（图标＋颜色）：开同一个块配置弹窗，脸面板直接展开 */
       pickFace: (b, anchor) => pickFace(b, anchor),
       refLabel: refLabelOf,
+      /**
+       * **ref 值的 inline 岛**（`_refView: 'inline'` 的值行，装配见 `RefIslandDeps`）。
+       * 与挂载区/侧槽窗口同一套三件：写事务归活动编辑器（editorRun 的 fallback）、
+       * 事件表是整份 viewEvents、焦点进来活动编辑器就是岛——键位与 op 归因都认它。
+       */
+      refIsland: {
+        store: blocks,
+        write: editorRun(run, () => deps.getEd()),
+        blockOf: (id) => kb.get(id),
+        wire: (editor, change) => deps.wireEditor(editor, change, 'props-ref-island'),
+        onChange: () => {
+          scheduleSave()
+          scheduleBadge()
+        },
+        onFocus: (editor) => deps.setEd(editor),
+      },
       toast: (text, kind) => app.toast(text, kind),
       /**
        * 选项作用域徽标里的 `#名`：一次 O(1) 的索引读，UI 不扫森林。
@@ -848,6 +864,8 @@ export function setupPanels(deps: PanelsDeps) {
       const panel = new PropertiesPanel(
         { root, title: titleEl, body, add },
         makePropertiesDeps(() => (drawerBlockId ? findInForest(deps.getWs().blocks, drawerBlockId) : null)),
+        // 属性抽屉是 inline 岛的面（检视卡保持引用 chip：右槽窄栏的观感没验过之前不进高频面）
+        { inlineRefIsland: true },
       )
       drawerPanel = panel
       drawerRootEl = root

@@ -29,6 +29,7 @@ import {
   setChoices,
   type PropChoice,
 } from '../props/props.ts'
+import { CLOSURE_USE } from '../props/uses.ts'
 
 /** 显示名是**种子内容**：改显示名不动任何值，值认记录 id */
 export const TASK_STATUS_LABEL = '任务状态'
@@ -67,7 +68,7 @@ export function taskStatusVocabulary(): Block {
     {
       [UI_POSITION_PROP]: 'block-left',
       [DEFAULT_PROP]: TASK_STATUS_TODO_ID,
-      [USE_PROP]: 'closure',
+      [USE_PROP]: CLOSURE_USE,
       [CHECK_PROP]: { on: TASK_STATUS_DONE_ID, off: TASK_STATUS_TODO_ID },
       // 未填时 gutter 上画定义块自己的图标（与「待办」同形），入口不会因没有值而消失
       [ICON_PROP]: 'lucide:circle',

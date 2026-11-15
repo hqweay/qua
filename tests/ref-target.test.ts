@@ -18,12 +18,15 @@ import {
   cardinalityOf,
   fieldRows,
   isRefTagIds,
+  isRefViewValue,
   mkPropDef,
   mkTagBlock,
+  prop,
   propKindOf,
   refTagIds,
   refTagNames,
   refTargetScope,
+  refViewOf,
   valueOf,
 } from '../src/core/index.ts'
 import { createNameChoice } from '../src/app/retrieval/name-choice.ts'
@@ -292,4 +295,45 @@ test('软约束：约束之外的块仍可写值，已有值照常显示（不�
   cmds.setPropValue('host', defId, 'another-outsider')
   assert.equal(valueOf(kb.get('host')!, defId), 'another-outsider')
   assert.equal(propKindOf(kb.get(defId)!), 'ref', 'kind 没被这条约束改过')
+})
+
+/* ------------------------------------------------------------ 6. 默认看法（_refView） */
+
+test('看法：缺省 chip、非 ref 定义一律按缺省读、def 不在场不炸、坏值回落', () => {
+  const { cmds, kb } = commandHarness()
+  const refDef = cmds.createPropDef('', '作者', 'ref', 'own')
+  const textDef = cmds.createPropDef('', '备注', 'text', 'own')
+
+  assert.equal(refViewOf(kb.get(refDef)!), 'chip', '没写过就是 chip（缺省不落盘）')
+  assert.equal(refViewOf(kb.get(textDef)!), 'chip', '非 ref 定义没有看法槽，一律 chip')
+  assert.equal(refViewOf(undefined), 'chip', 'def 不在场也按缺省（读路径不炸）')
+
+  // 手写坏值：tx 发看点会拒（「invalid value for system prop」），所以坏值只能
+  // 从冷启动读盘/遗留库来 —— 读判据直接对对象断言，不走 tx。
+  const broken = mkPropDef('坏数据', 'ref')
+  broken.id = 'broken'
+  broken.props = { _refView: 'sidebar' }
+  assert.equal(refViewOf(broken), 'chip', '坏值回落 chip')
+})
+
+test('看法：命令写 inline、切回 chip 摘键（缺省态不落空壳）、非法值与非 ref 定义拒绝', () => {
+  const { cmds, kb } = commandHarness()
+  const refDef = cmds.createPropDef('', '作者', 'ref', 'own')
+  const textDef = cmds.createPropDef('', '备注', 'text', 'own')
+
+  cmds.setPropRefView(refDef, 'inline')
+  assert.equal(refViewOf(kb.get(refDef)!), 'inline', '显式打开才付岛的账')
+
+  cmds.setPropRefView(refDef, 'chip')
+  assert.equal(refViewOf(kb.get(refDef)!), 'chip', '显式回落')
+  assert.equal(prop(kb.get(refDef)!, '_refView'), undefined, '缺省态不落盘（属性袋不留空壳）')
+
+  cmds.setPropRefView(textDef, 'inline')
+  assert.equal(refViewOf(kb.get(textDef)!), 'chip', '非 ref 定义拒绝写入')
+
+  cmds.setPropRefView(refDef, 'diagonal')
+  assert.equal(refViewOf(kb.get(refDef)!), 'chip', '非法值拒绝写入')
+
+  assert.equal(isRefViewValue('inline'), true)
+  assert.equal(isRefViewValue('diagonal'), false)
 })

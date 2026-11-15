@@ -377,6 +377,11 @@ export interface App {
    */
   setPropRefTags(defId: string, tagIds: readonly string[]): void
   /**
+   * 写 `ref` 定义的**默认看法**（`_refView`）：值行画引用 chip 还是正文岛。
+   * 这是看法不是值——块 id 一个字节不动；缺省态不落盘，非法值与非 ref 定义拒绝写入。
+   */
+  setPropRefView(defId: string, view: string): void
+  /**
    * **新建并引用**：物化一个新块（页块，落森林顶层；同名地址已存在则复用）并把它的 id
    * 写进 `blockId` 的这一格。建页与写值同一笔事务。返回 id（空串＝没写）。
    */

@@ -38,6 +38,7 @@ import { journalDate, todayISO } from '../identity/journal.ts'
 import { allTags, resolveTagIds, TAGS_PROP, tagIdsOf, tagsById } from '../identity/tags.ts'
 import { t } from '../infra/msg.ts'
 import { checkExternalUrl } from '../relations/link.ts'
+import { CLOSURE_USE, isUseId, useIsUnique, slotUseOf, type UseId } from './uses.ts'
 
 /**
  * 选项记录域：类型、形状判据、墓碑、作用域住 `./choices.ts`；
@@ -201,15 +202,25 @@ export interface FieldTable {
   /** 属性 id → 缺省值（定义块写了 `_default` 才有；`readField` 对「已声明未填」按它取值） */
   defaults: ReadonlyMap<string, unknown>
   /**
-   * **唯一**扮演「关闭」角色的定义（`_use: 'closure'` ＋ 合法 `_check`）。
-   * 库级概念：没有「多个完成型属性取第一条」的裁决。
+   * **用途 → 带这个用途的定义**（按定义序）。
+   *
+   * 关闭态之外的用途（优先级、评分、阅读状态）走这张表；`closureOf` 也从这里取
+   * 唯一那条关闭态定义。同一用途允许多条定义（优先级本来就可以有两个独立维度），
+   * 读法取先序第一条已声明的；要分开统计就换一个用途 id（`priority:ticket`），
+   * 不靠「先到先得」在同一 id 里分两件事。
    */
-  closure?: { defId: string; on: string; off: string }
+  byUse: ReadonlyMap<UseId, readonly UseBinding[]>
   /** 属性 id → 基数（缺省 `one`；定义块写了 `_cardinality: 'many'` 才是多值） */
   cardinality: ReadonlyMap<string, Cardinality>
 }
 
-/** 从森林建一份字段读取表（标签声明 ＋ 定义 kind／缺省值各扫一趟） */
+/** 一条带着某个用途的定义；`check` 是它自己的勾选框映射（用途驱动两态开关时才有） */
+export interface UseBinding {
+  defId: string
+  check?: CheckSpec
+}
+
+/** 从森林建一份字段读取表（标签声明 ＋ 定义 kind／缺省值／用途各扫一趟） */
 export function fieldTableOf(forest: readonly Block[]): FieldTable {
   const byTag = new Map<string, readonly string[]>()
   const liveTags = new Set<string>()
@@ -220,20 +231,22 @@ export function fieldTableOf(forest: readonly Block[]): FieldTable {
   const kinds = new Map<string, PropKind>()
   const defaults = new Map<string, unknown>()
   const cardinality = new Map<string, Cardinality>()
-  let closure: FieldTable['closure']
+  const byUse = new Map<UseId, UseBinding[]>()
   for (const def of allPropDefs(forest)) {
     kinds.set(def.id, propKindOf(def))
     const dflt = prop<unknown>(def, DEFAULT_PROP)
     if (dflt !== undefined) defaults.set(def.id, dflt)
     const card = cardinalityOf(def)
     if (card === 'many') cardinality.set(def.id, card)
-    // 写入路径保证最多一个 closure；坏数据带多个时按先序取第一个，不抛错
-    if (!closure && useOf(def) === 'closure') {
-      const check = checkOf(def)
-      if (check) closure = { defId: def.id, on: check.on, off: check.off }
-    }
+    const use = useOf(def)
+    if (use === undefined) continue
+    const check = checkOf(def)
+    const binding: UseBinding = { defId: def.id, ...(check ? { check } : {}) }
+    const list = byUse.get(use)
+    if (list) list.push(binding)
+    else byUse.set(use, [binding])
   }
-  return { byTag, liveTags, kinds, defaults, cardinality, ...(closure ? { closure } : {}) }
+  return { byTag, liveTags, kinds, defaults, byUse, cardinality }
 }
 
 /**
@@ -289,7 +302,7 @@ export function readField(block: Block, propId: string, table: FieldTable): Fiel
 }
 
 /**
- * **关闭态**的派生读法：唯一扮演 `closure` 角色的定义（＋标签声明）。
+ * **关闭态**的派生读法：唯一扮演 `closure` 用途的定义（＋标签声明）。
  *
  * 三态与值这样对上：
  *   · 值＝该定义 `_check.on` ⇒ `'closed'`（关闭了）；
@@ -303,18 +316,47 @@ export function readField(block: Block, propId: string, table: FieldTable): Fiel
  * ⚠️ 必须传 `FieldTable`：只认 `_ownProps` 会漏掉**标签声明**那一半。那种块屏幕上是
  *    未关闭、模型里却没有关闭态 —— 同一个块两种答案，且没有任何一层报错。
  *
- * ⚠️ **角色不是类型**：这里一个字都不提「任务」。`#任务` 是种子给「closure 角色 +
+ * ⚠️ **用途不是类型**：这里一个字都不提「任务」。`#任务` 是种子给「closure 用途 +
  *    标签声明」起的一个约定名；换一套词汇（`#书` ＋ `读完`）零代码。
  *
- * ⚠️ **不再有「第一条完成型属性」**：`_use: 'closure'` 全局唯一（写入路径保证），
+ * ⚠️ **不再有「第一条完成型属性」**：`closure` 用途库级唯一（写入路径保证），
  *    `closureOf` 只认这一条；两个属性的歧义在模型层就不存在。
  */
 export function closureOf(block: Block, table: FieldTable): ClosureState | undefined {
-  const closure = table.closure
-  if (!closure) return undefined
-  const { declared, value } = readField(block, closure.defId, table)
+  const binding = table.byUse.get(CLOSURE_USE)?.find((b) => b.check !== undefined)
+  const check = binding?.check
+  if (!binding || !check) return undefined
+  const { declared, value } = readField(block, binding.defId, table)
   if (!declared) return undefined
-  return singleValueOf(value) === closure.on ? 'closed' : 'open'
+  return singleValueOf(value) === check.on ? 'closed' : 'open'
+}
+
+/**
+ * **用途值**：这一块在那个用途上的值（`undefined` ＝ 没有这一栏／没填过）。
+ *
+ * 与 `closureOf` 读同一份 `readField`：标签声明、`_default` 缺省、自有槽三种来源
+ * 在这里已经归一，消费者不需要各自再判一次「有没有这一栏」。
+ *
+ * 同一用途有多条定义时取**先序第一条已声明的**：同一 id 里的两条不是两个答案；
+ * 想要两个答案就换 id（`priority:ticket`）。库级唯一的用途由写入口保证只有一条。
+ */
+export function useValue(block: Block, use: UseId, table: FieldTable): unknown {
+  for (const binding of table.byUse.get(use) ?? []) {
+    const { declared, value } = readField(block, binding.defId, table)
+    if (declared) return value
+  }
+  return undefined
+}
+
+/**
+ * 库级唯一的用途被**别的定义**占用了吗（写入口的唯一性判据）。
+ *
+ * 只对注册成 `unique` 的用途生效：优先级这类用途本来就允许两条定义各自带着，
+ * 未登记的用途没有任何约束。唯一性口径住在用途声明里，写入口不各记一份例外。
+ */
+export function useTakenBy(defs: readonly Block[], use: UseId, selfId: string): Block | undefined {
+  if (!useIsUnique(use)) return undefined
+  return defs.find((d) => d.id !== selfId && useOf(d) === use)
 }
 
 /**
@@ -569,25 +611,28 @@ export function assetRefsOf(value: unknown): string[] {
 /**
  * 属性定义的**用途**（系统属性）：这条属性拿来干什么。
  *
- * 现在只有 `closure`（这条属性的 on 值表示「关闭」）。优先级等角色先作为普通 select，
- * 等有应用级消费者（任务表／快捷键／默认模板）再扩这个联合——不要为假设的用途先造枚举值。
+ * 值是**命名空间式的用途 id**（`closure`、`closure:reading`、`priority`），不是封闭
+ * 枚举：用途是数据，加一个用途不该改模型层。语法与语义登记在 `./uses.ts`；本文件
+ * 只回答「这条定义带了哪个用途」，语义消费者（`closureOf`／gutter／`⌘↵`）按 id 精确匹配。
  *
- * **角色不是类型**：「任务」是种子内容（`#任务` ＋ 标签声明），不是模型概念。
+ * **用途不是类型**：「任务」是种子内容（`#任务` ＋ 标签声明），不是模型概念。
  *
  * 用途与显示分开：`_use` 说语义，`_check` 说怎么编辑/显示。
  */
-export type PropUse = 'closure'
+export type PropUse = UseId
 
 export const USE_PROP = '_use'
 
+/** 形状判据：合法的用途 id（**不要求已登记**——数据先于语义，认不出的用途只是没有消费者） */
 export function isUseValue(v: unknown): boolean {
-  return v === 'closure'
+  return isUseId(v)
 }
 
-/** 定义的用途；不是 `select`／没写／未知值 ⇒ 缺席（普通属性） */
+/** 定义的用途；不是 `select`／没写／不是合法 id ⇒ 缺席（普通属性） */
 export function useOf(def: Block | undefined): PropUse | undefined {
   if (!def || propKindOf(def) !== 'select') return undefined
-  return prop<string>(def, USE_PROP) === 'closure' ? 'closure' : undefined
+  const v = prop<unknown>(def, USE_PROP)
+  return isUseId(v) ? v : undefined
 }
 
 /**
@@ -1754,7 +1799,7 @@ export interface GutterField {
    * 没有 ⇒ 普通值，点击打开选项菜单。
    */
   check?: CheckSpec
-  /** `select`：用途；只有 `status` 时这个勾选框同时是任务开关（划线/⌘↵） */
+  /** `select`：用途；`closure` 时这个勾选框同时是关闭态开关（划线/⌘↵） */
   use?: PropUse
 }
 
@@ -1806,8 +1851,9 @@ function gutterFieldOf(
 /**
  * **`⌘↵`（切换待办）该切哪一格**——单块与批量共用的唯一判据。
  *
- * 只认库级唯一的**关闭态角色**（`_use: 'closure'` ＋ 合法 `_check`）：
- * 它是「这一行关闭了没有」的唯一答案，`⌘↵` 就是这个动作的快捷通道。
+ * 目标用途来自 `keymap` 消费者槽：关闭态是**内建的第一个** keymap 消费者，于是
+ * 「这一行关闭了没有」只有一个答案。取「槽里第一个」而不是「所有挂 keymap 的用途」，
+ * 是因为同一格动作不能按字段顺序随机落到两枚方框之一——那是用户看不见的优先级规则。
  *
  * ⚠️ **不退回普通两态字段**（无 `_use` 的 `_check`、布尔开关）：同一行可能有两个
  *    长得一样的方框，按「第一个」取就是一个用户看不见的优先级规则；`⌘↵` 一旦
@@ -1816,7 +1862,9 @@ function gutterFieldOf(
  *    先把它变成任务（落核心任务状态，待办）」，与「第一次按 ⌘↵ 变成待办」同一手感。
  */
 export function closureTargetField(fields: readonly GutterField[]): GutterField | undefined {
-  return fields.find((f) => f.use === 'closure' && f.check !== undefined)
+  const use = slotUseOf('keymap')
+  if (use === undefined) return undefined
+  return fields.find((f) => f.use === use && f.check !== undefined)
 }
 
 /**

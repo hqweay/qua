@@ -88,3 +88,22 @@ export function refTagNames(def: Block | undefined, name: (id: string) => string
     .map((id) => name(id))
     .filter((n) => n !== '')
 }
+
+/**
+ * **ref 定义上的「默认看法」槽**：值行画**引用**（名字，可跳）还是**正文岛**
+ * （目标块的正文就地编辑，深度 1——只编辑正文、子树不展开）。
+ *
+ * 这是**看法**不是值：`props[propId]` 的块 id 一个字节不动，换看法零迁移。
+ * 缺省 `chip`——「原地改正文」是少数场景，多数 ref 值要的只是一个可跳的名字；
+ * 岛的账（编辑器、重载、重建守卫）要显式打开才付。坏值回落 `chip`：
+ * 手写数据不该让值行整行失效。
+ */
+export const REF_VIEW_PROP = '_refView'
+
+/** 看法全集；写路径限这两枚，读侧只认这两枚（其余按缺省）。与正文引用的看法（`relations/ref.ts` 的 `RefView`）不是一个东西，所以名字分开 */
+export type RefDefView = 'chip' | 'inline'
+
+/** 看法的形状判据（写路径发看点与系统键登记表共用这一份） */
+export function isRefViewValue(v: unknown): v is RefDefView {
+  return v === 'chip' || v === 'inline'
+}

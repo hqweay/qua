@@ -921,6 +921,21 @@
   color: var(--ui-text);
   background: var(--ui-accent-soft);
 }
+/* ref 值的 inline 岛宿主：岛根 display:contents 已全局（不产生盒子），
+   宿主只接排版——内容是目标块的正文投影（深度 1，子树不展开），
+   宽度吃满值槽、随内容自然生长，与引用 chip 同在「标签左、值右」的一行里 */
+.prop-ref-island {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* inline 看法的多值：一枚值＝一台岛 ＋ 摘除键，横向一行（岛吃满剩余宽，与单值同一条）；
+   多枚值在 .prop-multi-value 的换行里各占一行 */
+.prop-ref-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ui-gap-1);
+  min-width: 0;
+}
 /*
   **asset 属性值**：值本身是预览，地址是它的第二种投影。
   面板/抽屉里两条带：预览整宽在上、地址在下 —— 缩略图贴着输入框时，
@@ -2760,6 +2775,77 @@
   gap: var(--ui-gap-2);
   padding-top: var(--ui-gap-2);
   border-top: 1px dashed var(--ui-border-subtle);
+}
+/* 勾选框映射：一行一个决定。图标承担「勾／未勾」，颜色承担「哪边是关闭态」，
+   值域仍在下拉里——三层各管一件事，不再让一行挤五个元素。 */
+.cc-toggle {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ui-gap-2);
+  font-size: var(--ui-fs-sm);
+  color: var(--ui-text-secondary);
+}
+.cc-map {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-1);
+  padding: var(--ui-gap-2);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-sunken);
+}
+.cc-row {
+  display: grid;
+  grid-template-columns: 14px auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--ui-gap-2);
+}
+.cc-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ui-text-tertiary);
+}
+.cc-row[data-cc-role='on'] .cc-ico {
+  color: var(--ui-accent);
+}
+.cc-label {
+  font-size: var(--ui-fs-sm);
+  color: var(--ui-text-secondary);
+  white-space: nowrap;
+}
+.cc-row .prop-input {
+  width: 100%;
+  min-width: 0;
+}
+.cc-state {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  margin-top: var(--ui-gap-1);
+  padding-top: var(--ui-gap-2);
+  border-top: 1px dashed var(--ui-border-subtle);
+}
+.cc-state-label {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.cc-state[data-on='1'] .cc-label {
+  color: var(--ui-accent);
+}
+.cc-info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: var(--ui-text-tertiary);
+  cursor: help;
+}
+.cc-info:hover {
+  color: var(--ui-text-secondary);
 }
 /* select 单元格：当前值图标 + 原生下拉。没有图标时不加壳，保持原样 */
 .prop-select {

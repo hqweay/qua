@@ -51,6 +51,7 @@ import {
   FORMAT_PROP,
   OWN_PROPS_PROP,
   REF_TAGS_PROP,
+  REF_VIEW_PROP,
   UI_POSITION_PROP,
   USE_PROP,
   isCardinalityValue,
@@ -63,6 +64,7 @@ import {
   isOwnPropSlots,
   isPropKind,
   isRefTagIds,
+  isRefViewValue,
   isUiPositionValue,
   isUseValue,
   parseChoiceScope,
@@ -107,6 +109,8 @@ export const SYSTEM_PROP_CHECKS: Readonly<Record<string, (value: unknown) => boo
   [UI_POSITION_PROP]: isUiPositionValue,
   // `ref` 定义的候选标签（软约束：只过滤候选，不校验存量值）
   [REF_TAGS_PROP]: isRefTagIds,
+  // `ref` 定义的默认看法（看法槽：只改值行的画法，值层的块 id 不动）
+  [REF_VIEW_PROP]: isRefViewValue,
   [DEFAULT_PROP]: isDefaultValue,
   // 归属与标签
   [BELONGS_TO_PROP]: isBelongsToRefs,

@@ -19,9 +19,13 @@
  *    把它当成另一条属性（也会诱导两个 picker 共用去重集合）。
  * ⚠️ 组件不写模型：所有写入经注入的回调（由装配层转成命令）。
  */
-import type { Block, ClickMods } from '../../core/index.ts'
+import type { Block, BlockStore, ClickMods } from '../../core/index.ts'
 import { clickModsOf, COLOR_PROP, enginePropText, identityColorCss, isColorValue, isEngineProp } from '../../core/index.ts'
 import { plainText } from '../../core/model/runs.ts'
+import { EDIT_ISLAND_ATTR } from '../../view/editor/block-dom.ts'
+import type { BlockEditor, Run } from '../../view/editor/editor.ts'
+import { inputSession } from '../../view/editor/input-session.ts'
+import { EditableBlock } from './editable-block.ts'
 import { onCommitKeys } from './keys.ts'
 import type { FieldRow, PropKind } from '../../core/index.ts'
 import type { PropCreateMode } from '../../core/infra/ports.ts'
@@ -46,6 +50,7 @@ import {
   propKindOf,
   propLabel,
   refTagIds,
+  refViewOf,
   valueItemsOf,
   valueListOf,
 } from '../../core/index.ts'
@@ -215,6 +220,14 @@ export interface PropertiesDeps {
   /** 把一个块 id 变成人能读的名字（`ref` 值的显示） */
   refLabel: (targetId: string) => string
   /**
+   * ref 值 inline 岛的装配（`_refView: 'inline'` 的值行用）。
+   *
+   * **传没传是「看法落面」的门**：开了岛的面（属性抽屉）传它；检视卡与表格格子
+   * 不传 ⇒ ref 值照旧画引用 chip——inline 是 opt-in 的看法，一个面一个面验观感，
+   * 不一次铺满（右槽窄栏的观感没验过之前不进高频面）。
+   */
+  refIsland?: RefIslandDeps
+  /**
    * 标签块的显示名（选项作用域徽标里的 `#名`）。
    *
    * 由装配层注入（`kb.get` 是 O(1) 的索引读）：UI 不该为了一个名字去扫整片森林。
@@ -256,6 +269,8 @@ export interface PropertiesDeps {
  * 后者不需要标签行、归属行、系统信息，只需要这一组回调。
  */
 export type FieldRowDeps = Pick<PropertiesDeps, 'shortId' | 'setValue' | 'clearValue' | 'pickRef' | 'refLabel'> & {
+  /** ref 值 inline 岛的装配（开了岛的面才传；见 `PropertiesDeps.refIsland`） */
+  refIsland?: RefIslandDeps
   /** 多值选择器（省略 ⇒ 多值字段只读；行内实例浮层可以不给） */
   pickChoice?: PropertiesDeps['pickChoice']
   /** 本地资源入库（省略 ⇒ asset 值只显示缩略图与手填链接，不给选文件按钮） */
@@ -281,7 +296,30 @@ export type CellEditorDeps = Partial<
     FieldRowDeps,
     'pickRef' | 'pickChoice' | 'pickAsset' | 'refLabel' | 'tagName' | 'openRef' | 'activateAsset' | 'refIcon'
   >
->
+> & {
+  /** ref 值 inline 岛的装配（缺省 ⇒ 该面永远画 chip）；见 `RefIslandDeps` */
+  refIsland?: RefIslandDeps
+}
+
+/**
+ * ref 值 inline 岛需要的装配（`EditableBlock` 的那一套，原样透传）。
+ *
+ * 岛是 `EditableBlock` 的又一个挂点（镜像/抬头/侧槽窗口/备注浮窗同一条装配线），
+ * 三件套都在组件里：岛根断链、唯一重载路径、整份事件表。这里只递参数。
+ */
+export interface RefIslandDeps {
+  store: BlockStore
+  /** 写事务入口（见 `Run`）：编辑**直接写回目标块本体**——禁止拷贝语义 */
+  write: Run
+  /** 目标块解析（值存的是 id）；解析不到（悬空值）就不画岛 */
+  blockOf: (id: string) => Block | undefined
+  /** 与正文同一份事件表（装配层 `wireViewEditor` 的整份 viewEvents） */
+  wire: (ed: BlockEditor, change: (kind: string) => void) => void
+  /** 岛里的编辑：落盘、刷角标 */
+  onChange: (kind: string) => void
+  /** 获得焦点：装配层把「活动编辑器」切过来（键位走命令层，认的是它） */
+  onFocus: (ed: BlockEditor) => void
+}
 
 export interface PropertiesEls {
   /** 卡片本身：`hidden` 与否表达「有没有主体」 */
@@ -293,6 +331,64 @@ export interface PropertiesEls {
   title: HTMLElement
   body: HTMLElement
   add: HTMLButtonElement
+}
+
+/**
+ * 活动岛登记表：键＝岛根元素，值＝建编辑器／退役两件收尾。
+ *
+ * 岛的编辑器要**等宿主挂进文档才建**（构造时量 DOM），退役要**退订 store**——
+ * 这两件事的时机都归面板的一次重建（见 `PropertiesPanel.render()`），
+ * 登记在元素上而不是面板字段里，行怎么重建都找得到自己那座岛。
+ */
+const REF_ISLANDS = new WeakMap<HTMLElement, { ensure: () => void; dispose: () => void }>()
+
+/**
+ * ref 值行装目标块的正文（深度 1 的 inline 岛）。
+ *
+ * 三个口径都写在参数里：
+ *   · **深度 1** ＝ `viewRootId`（目标的子树不归岛画——它们在大纲里本就有位置，
+ *     岛里再展开是把一棵树画第二遍）＋ `embedBodies: false`（露面身体同样不展开，
+ *     与镜像同一档构造性截断）；
+ *   · **禁止拷贝语义** ＝ 编辑直接写回目标块本体（`write` 是装配层事务）；
+ *   · `allowRootRemove: false`——岛绑定单一块，「值指向的块没了」走摘值/换目标，
+ *     不是岛内删除键的职责。
+ *
+ * 自刷新与冻结都归 `EditableBlock`（唯一重载路径）；面板重建对它的
+ * 保留/退役见 `PropertiesPanel` 的岛守卫（正被编辑的行整行保留）。
+ */
+function mountRefValueIsland(deps: RefIslandDeps, area: HTMLElement, targetId: string): void {
+  const target = deps.blockOf(targetId)
+  if (!target) return // 悬空值不画岛（读侧按悬空显示）
+  // 岛根包着编辑器宿主（`EditableBlock` 构造时 root.appendChild(host)）：
+  // 宿主必须是**新元素**，area 只当岛根的落点——同一个元素两头当，父子互包当场炸
+  const host = document.createElement('div')
+  // `inline-editor` 是既有的「裸正文」档（抬头/卡片格共用）：行 chrome 收掉、字号承容器——
+  // 共用类名选择，不另写一份按容器的覆盖
+  host.className = 'prop-ref-island inline-editor'
+  const island = new EditableBlock({
+    host,
+    store: deps.store,
+    write: deps.write,
+    initialRoots: [target],
+    viewRootId: target.id,
+    embedBodies: false,
+    structuralScope: 'roots',
+    allowRootRemove: false,
+    load: (ed, ids) => {
+      if (!ed) return
+      if (ids && !ids.includes(targetId)) return
+      ed.reloadFromStore()
+    },
+    wire: deps.wire,
+    onChange: deps.onChange,
+    onFocus: deps.onFocus,
+  })
+  island.root.dataset.refTarget = targetId
+  area.appendChild(island.root)
+  REF_ISLANDS.set(island.root, {
+    ensure: () => void island.ensureEditor(),
+    dispose: () => island.dispose(),
+  })
 }
 
 /**
@@ -482,16 +578,32 @@ export function makeCellEditor(
       const box = document.createElement('div')
       box.className = 'prop-multi-value'
       box.dataset.propMulti = '1'
-      box.appendChild(
-        valueChips(
-          ids.map((id) => ({ text: deps?.refLabel?.(id) ?? id, refId: id, icon: deps?.refIcon?.(id) })),
-          (i) => {
-            const next = ids.filter((_, j) => j !== i)
+      if (deps?.refIsland !== undefined && refViewOf(row.def) === 'inline') {
+        // **inline 看法的多值**：每个值一台岛（目标正文就地编辑，写回各自源块）。
+        // 值层不变——仍是整份 id 数组：摘除写回数组、追加走选择器，岛只是值的看法。
+        // 抽屉的一个属性就那么几个值，逐台岛的账付得起；表格/检视卡不传岛 deps，照旧 chips。
+        for (const id of ids) {
+          const item = document.createElement('span')
+          item.className = 'prop-ref-item'
+          mountRefValueIsland(deps.refIsland, item, id)
+          item.appendChild(chipDel(t('ui.props.multiRemove'), () => {
+            const next = ids.filter((x) => x !== id)
             send(next.length === 0 ? undefined : next)
-          },
-          deps?.openRef ? { onOpen: (i, e) => deps.openRef!(ids[i]!, clickModsOf(e)) } : {},
-        ),
-      )
+          }))
+          box.appendChild(item)
+        }
+      } else {
+        box.appendChild(
+          valueChips(
+            ids.map((id) => ({ text: deps?.refLabel?.(id) ?? id, refId: id, icon: deps?.refIcon?.(id) })),
+            (i) => {
+              const next = ids.filter((_, j) => j !== i)
+              send(next.length === 0 ? undefined : next)
+            },
+            deps?.openRef ? { onOpen: (i, e) => deps.openRef!(ids[i]!, clickModsOf(e)) } : {},
+          ),
+        )
+      }
       if (deps?.pickRef && owner) {
         const pick = deps.pickRef
         box.appendChild(
@@ -510,36 +622,9 @@ export function makeCellEditor(
       const current = row.value === undefined || row.value === null ? '' : String(row.value)
       const wrap = document.createElement('span')
       wrap.className = 'prop-ref-value'
-      /**
-       * **值本身是阅读面**：点名字＝打开目标（带修饰键走同一份 `openRef` 路由）。
-       * 换目标退成一枚尾键——「看它」与「改它」是两件事，不能挤在同一个点击上。
-       */
-      const btn = document.createElement('button')
-      btn.type = 'button'
-      btn.className = 'prop-input prop-ref'
-      btn.dataset.refId = current
-      btn.dataset.tip = current === '' ? t('ui.props.pickRef') : t('ui.props.refOpenHint')
-      const icon = current === '' ? undefined : deps.refIcon?.(current)
-      if (icon !== undefined && icon !== '') {
-        const ico = document.createElement('span')
-        ico.className = 'prop-ref-ico'
-        ico.setAttribute('aria-hidden', 'true')
-        renderIcon(ico, icon, 'circle', 'sm')
-        btn.appendChild(ico)
-      }
-      const name = document.createElement('span')
-      name.className = 'prop-ref-name ui-ellipsis'
-      name.textContent = current === '' ? t('ui.props.pending') : (deps.refLabel?.(current) ?? current)
-      btn.appendChild(name)
-      btn.addEventListener('click', (e) => {
-        if (current !== '' && deps.openRef) {
-          deps.openRef(current, clickModsOf(e))
-          return
-        }
-        pick(owner, row.propId, current, (targetId) => send(targetId === '' ? undefined : targetId), btn.getBoundingClientRect(), btn)
-      })
-      wrap.appendChild(btn)
-      if (current !== '') {
+
+      /** 换目标退成一枚尾键——「看它/编辑它」与「换它」是两件事，不能挤在同一个点击上 */
+      const changeKey = (): HTMLElement => {
         const change = document.createElement('button')
         change.type = 'button'
         change.className = 'prop-ref-change'
@@ -557,8 +642,46 @@ export function makeCellEditor(
             change,
           )
         })
-        wrap.appendChild(change)
+        return change
       }
+
+      const islandDeps = deps.refIsland
+      if (islandDeps && current !== '' && refViewOf(row.def) === 'inline') {
+        // **inline 看法**：值行直接装目标块的正文（深度 1，装配见 `mountRefValueIsland`）。
+        // 看法是 opt-in（缺省 chip）；正被编辑的行整行冻结（见 `PropertiesPanel.render()`），
+        // 不会走到这里重造。
+        mountRefValueIsland(islandDeps, wrap, current)
+      } else {
+        /**
+         * **值本身是阅读面**：点名字＝打开目标（带修饰键走同一份 `openRef` 路由）。
+         */
+        const btn = document.createElement('button')
+        btn.type = 'button'
+        btn.className = 'prop-input prop-ref'
+        btn.dataset.refId = current
+        btn.dataset.tip = current === '' ? t('ui.props.pickRef') : t('ui.props.refOpenHint')
+        const icon = current === '' ? undefined : deps.refIcon?.(current)
+        if (icon !== undefined && icon !== '') {
+          const ico = document.createElement('span')
+          ico.className = 'prop-ref-ico'
+          ico.setAttribute('aria-hidden', 'true')
+          renderIcon(ico, icon, 'circle', 'sm')
+          btn.appendChild(ico)
+        }
+        const name = document.createElement('span')
+        name.className = 'prop-ref-name ui-ellipsis'
+        name.textContent = current === '' ? t('ui.props.pending') : (deps.refLabel?.(current) ?? current)
+        btn.appendChild(name)
+        btn.addEventListener('click', (e) => {
+          if (current !== '' && deps.openRef) {
+            deps.openRef(current, clickModsOf(e))
+            return
+          }
+          pick(owner, row.propId, current, (targetId) => send(targetId === '' ? undefined : targetId), btn.getBoundingClientRect(), btn)
+        })
+        wrap.appendChild(btn)
+      }
+      if (current !== '') wrap.appendChild(changeKey())
       return wrap
     }
   }
@@ -895,7 +1018,14 @@ export function makeFieldRow(
    * 预览会贴到地址输入上、chips 会挤成一团；这时标签单占一行，值整宽落下。
    * 单行值仍保持「标签左、值右」的紧凑形（扫一列字段时更快）。
    */
-  if (row.kind === 'asset' || (row.cardinality === 'many' && allowsMany(row.kind))) el.dataset.stack = '1'
+  if (
+    row.kind === 'asset' ||
+    (row.cardinality === 'many' && allowsMany(row.kind)) ||
+    // inline 看法的值行：岛是一台块编辑器（带块级的行 chrome），半宽槽装不下——
+    // 与图／多值同一档：标签单占一行，值整宽落下
+    (row.kind === 'ref' && row.filled && deps.refIsland !== undefined && refViewOf(row.def) === 'inline')
+  )
+    el.dataset.stack = '1'
   if (!row.filled) el.dataset.pending = '1'
 
   const label = document.createElement('label')
@@ -1008,6 +1138,13 @@ export class PropertiesPanel {
   private readonly els: PropertiesEls
   private readonly deps: PropertiesDeps
   /**
+   ** 这个实例的 ref 值行装不装 inline 岛（`_refView: 'inline'` 时）。
+   *
+   * 检视卡不装（引用 chip，右槽窄栏的观感没验过之前不进高频面）；属性抽屉装——
+   * 同一份 deps，落面是**实例的门**不是装配的门。
+   */
+  private readonly inlineRefIsland: boolean
+  /**
    * 哪个添加表单开着：`own`（这一块自己的值）／`declared`（标签属性／字段声明）／`null`。
    *
    * ⚠️ 不能是一个布尔：两个入口写的是两个槽，同时开着会让「点了哪个」变得不可知。
@@ -1024,9 +1161,19 @@ export class PropertiesPanel {
   /** 标签视角打开的是哪条属性的选项（`chip` 上的「选项」按钮切换它） */
   private tagChoices: { def: Block; owner: Block } | null = null
 
-  constructor(els: PropertiesEls, deps: PropertiesDeps) {
+  constructor(els: PropertiesEls, deps: PropertiesDeps, opts: { inlineRefIsland?: boolean } = {}) {
     this.els = els
     this.deps = deps
+    this.inlineRefIsland = opts.inlineRefIsland === true
+    // **岛编辑会话结束后的整卡补画**：hold 期间值段冻结（其余段照常新），焦点
+    // 离开面板才需要补——面板内移动焦点由行控件自己的写路径兜。定时器在点击
+    // 完成之后才跑（click 是同步派发），不会吃掉正在进行的点击。
+    this.els.body.addEventListener('focusout', () => {
+      window.setTimeout(() => {
+        if (this.els.body.contains(document.activeElement)) return
+        this.render()
+      }, 0)
+    })
     const base = {
       tagById: (id: string) => this.deps.blockById(id),
       tags: () => this.deps.allTags(),
@@ -1074,6 +1221,8 @@ export class PropertiesPanel {
     if (!target) {
       this.els.root.hidden = true
       delete this.els.root.dataset.targetBlockId
+      // 面板收起：岛随卡退役——订阅不比面板活得久
+      this.retireAllIslands()
       return
     }
     /**
@@ -1101,8 +1250,28 @@ export class PropertiesPanel {
      */
     this.els.root.hidden = false
     // 诊断/冒烟面：面板现在画在哪一块上（收起时删掉，避免读到上一次的目标）
+    /**
+     * **有活岛在场时，这一次只重建岛不在的段**：inline 岛的每次防抖写回都会触发
+     * 这里的重建（store 订阅 → 面板重画）——把正被打字的岛拔掉，等于打到一半丢字。
+     *
+     * 判据是「岛的区域里有焦点或输入法锚点」（与 `EditableBlock` 的冻结判据同源）。
+     * 手法是**值段整段冻结**：移动节点会断焦点（reparent 与摘出文档实测都会），
+     * 所以保留不靠搬移，靠「这一段这一次不动」；其余段照常重建。代价是值段的
+     * 邻行在编辑期间不变新——由焦点离开面板后的整卡补画兜住（构造器里的
+     * focusout 钩子）。没有活岛时这些是一次空查询，重建路径一个字节不变。
+     */
+    const prevBlockId = this.els.root.dataset.targetBlockId
     this.els.root.dataset.targetBlockId = target.id
-    this.els.body.replaceChildren()
+    const islandHold = prevBlockId === target.id && this.islandHoldRows(rows)
+    if (islandHold) {
+      const fieldsEl = this.els.body.querySelector(':scope > .prop-fields')
+      for (const child of [...this.els.body.children]) {
+        if (child !== fieldsEl) child.remove()
+      }
+    } else {
+      this.retireAllIslands()
+      this.els.body.replaceChildren()
+    }
 
     /**
      * **段序按「打开这块要干什么」排，不按模型的字段序排**：
@@ -1115,7 +1284,8 @@ export class PropertiesPanel {
      * 职责在卡片内部分段即可，容器不该按字段类别复制。
      */
     const labels = this.deps.propLabels()
-    this.els.body.appendChild(this.buildFields(target, rows, labels))
+    // hold 期间值段（含正被编辑的岛）原样保留：不重建、不搬移，其余段照常换新
+    if (!islandHold) this.els.body.appendChild(this.buildFields(target, rows, labels))
 
     /**
      * **标签属性**：只有标签有。
@@ -1173,6 +1343,56 @@ export class PropertiesPanel {
 
     // 系统信息在**最后**：它是这一块的出生与改动记录，不是可编辑的数据
     this.els.body.appendChild(this.buildSystem(target))
+    this.ensureIslands()
+  }
+
+  /**
+   * 值段这一次要不要冻结：**每个正被编辑的岛对应的行仍与它的看法/值一致**才冻。
+   *
+   * 「正被编辑」＝ 岛的区域里有焦点或输入法锚点——只有这一小撮不能随重建换血；
+   * 冻结不靠搬移（reparent 与摘出文档都实测会断焦点），靠「这一段这一次不动」。
+   * 一致性是出口：看法切回 chip／值换了目标，冻结就不再成立——被冻的岛看到的
+   * 是旧看法，放行整卡重建才能让行跟上（岛随重建退役，编辑会话本来就结束了）。
+   */
+  private islandHoldRows(rows: readonly FieldRow[]): boolean {
+    let any = false
+    for (const node of this.els.body.querySelectorAll(`[${EDIT_ISLAND_ATTR}]`)) {
+      if (!(node instanceof HTMLElement) || !node.dataset.refTarget) continue
+      if (!(node.contains(document.activeElement) || inputSession.isAnchorInside(node))) continue
+      const row = node.closest('.prop-row')
+      const fr = row instanceof HTMLElement ? rows.find((r) => r.propId === row.dataset.propId) : undefined
+      // 一致性认**值**：单值＝同一个 id；多值＝数组里仍含这个目标（摘掉的那枚岛随重建退役）
+      const targetId = node.dataset.refTarget
+      const valueOk =
+        fr !== undefined &&
+        targetId !== undefined &&
+        (Array.isArray(fr.value) ? valueListOf(fr.value).includes(targetId) : String(fr.value ?? '') === targetId)
+      if (!fr || fr.kind !== 'ref' || refViewOf(fr.def) !== 'inline' || !valueOk) {
+        return false
+      }
+      any = true
+    }
+    return any
+  }
+
+  /** 进了文档的岛补建编辑器（构造时量 DOM，等挂好才建）；抽屉是「先 render 再挂载」，游离的等下一帧 */
+  private ensureIslands(): void {
+    for (const node of Array.from(this.els.body.querySelectorAll(`[${EDIT_ISLAND_ATTR}]`))) {
+      if (!(node instanceof HTMLElement)) continue
+      const entry = REF_ISLANDS.get(node)
+      if (!entry) continue
+      if (node.isConnected) entry.ensure()
+      else requestAnimationFrame(() => {
+        if (node.isConnected) entry.ensure()
+      })
+    }
+  }
+
+  /** 面板收起/换主体：全部岛退役——岛的订阅不比面板活得久 */
+  private retireAllIslands(): void {
+    for (const node of Array.from(this.els.body.querySelectorAll(`[${EDIT_ISLAND_ATTR}]`))) {
+      if (node instanceof HTMLElement) REF_ISLANDS.get(node)?.dispose()
+    }
   }
 
   /**
@@ -1202,8 +1422,11 @@ export class PropertiesPanel {
     const labelCount = new Map<string, number>()
     for (const r of rows) labelCount.set(r.label, (labelCount.get(r.label) ?? 0) + 1)
 
+    // inline 岛是**实例的门**：没开岛的面把装配摘掉，ref 值行照旧画 chip
+    const rowDeps: FieldRowDeps = this.inlineRefIsland ? this.deps : { ...this.deps, refIsland: undefined }
+
     for (const row of rows) {
-      fields.appendChild(makeFieldRow(row, target, this.deps, { labelCount, labels }))
+      fields.appendChild(makeFieldRow(row, target, rowDeps, { labelCount, labels }))
     }
     if (this.formOpen === 'own') fields.appendChild(this.buildForm(target, labels))
     return fields

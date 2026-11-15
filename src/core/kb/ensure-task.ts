@@ -33,6 +33,7 @@ import {
   useOf,
 } from '../props/props.ts'
 import { taskStatusChoices, taskStatusVocabulary } from '../fixtures/task-vocabulary.ts'
+import { CLOSURE_USE } from '../props/uses.ts'
 import type { Tx } from './types.ts'
 
 /** 按 id 找一块，**含软删**。确定性 id 意味着存在性可以按 id 判 */
@@ -66,11 +67,11 @@ export function ensureTaskStatusInTx(forest: readonly Block[], tx: Tx): void {
    * 定义块在、但语义/显示映射缺了（旧版本物化的那一份）：同一笔事务补上。
    * 这不是迁移数据——只补两个系统键，值一个字节不动。
    */
-  if (useOf(def) !== 'closure' || checkOf(def) === undefined) {
+  if (useOf(def) !== CLOSURE_USE || checkOf(def) === undefined) {
     tx.patch(def.id, (b) => {
       b.props = {
         ...(b.props ?? {}),
-        [USE_PROP]: 'closure',
+        [USE_PROP]: CLOSURE_USE,
         [CHECK_PROP]: { on: TASK_STATUS_DONE_ID, off: TASK_STATUS_TODO_ID },
       }
     })

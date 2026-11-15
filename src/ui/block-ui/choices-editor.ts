@@ -18,6 +18,7 @@
  */
 import { onCommitKeys } from './keys.ts'
 import {
+  CLOSURE_USE,
   allChoicesOf,
   cardinalityOf,
   checkOf,
@@ -132,10 +133,14 @@ export class ChoicesEditor {
       })
       const text = document.createElement('span')
       text.textContent = t('ui.props.choice.gutter')
-      const hint = document.createElement('span')
-      hint.className = 'choices-hint'
-      hint.textContent = t('ui.props.choice.gutterTitle')
-      gutter.append(box, text, hint)
+      // 「不勾选会落到哪」是解释，不是第二个决定：退到说明图标，行上只留开关。
+      const info = document.createElement('span')
+      info.className = 'cc-info'
+      info.dataset.tip = t('ui.props.choice.gutterTitle')
+      info.setAttribute('aria-label', t('ui.props.choice.gutterTitle'))
+      info.tabIndex = 0
+      renderIcon(info, 'lucide:info', 'info', 'sm')
+      gutter.append(box, text, info)
       section.appendChild(gutter)
     }
 
@@ -179,7 +184,7 @@ export class ChoicesEditor {
    *
    * 两个决定分开：
    *   · 「显示为勾选框」只影响编辑/显示（勾选写 on、取消写 off），普通属性也能用；
-   *   · 「勾选表示完成」把它标成库级唯一的关闭态角色（划线/⌘↵/closureOf）。
+   *   · 「勾选表示完成」把它标成库级唯一的关闭态用途（划线/⌘↵/closureOf）。
    * 多值属性不能勾选（单值才能「勾一个」）；少于两个选项时不给开。
    */
   private checkSection(def: Block): HTMLElement {
@@ -189,10 +194,10 @@ export class ChoicesEditor {
 
     const all = choicesOf(def)
     const check = checkOf(def)
-    const closure = useOf(def) === 'closure'
+    const closure = useOf(def) === CLOSURE_USE
 
-    const head = document.createElement('label')
-    head.className = 'choices-gutter'
+    const toggle = document.createElement('label')
+    toggle.className = 'cc-toggle'
     const cb = document.createElement('input')
     cb.type = 'checkbox'
     cb.className = 'prop-check'
@@ -211,18 +216,38 @@ export class ChoicesEditor {
     })
     const label = document.createElement('span')
     label.textContent = t('ui.props.choice.check')
-    const hint = document.createElement('span')
-    hint.className = 'choices-hint'
-    hint.textContent = all.length < 2 ? t('ui.props.choice.checkNeedTwo') : ''
-    head.append(cb, label, hint)
-    box.appendChild(head)
+    toggle.append(cb, label)
+    // 「至少两个选项」是**输入约束**，不是说明文字：留在界面上，不塞进 tip。
+    if (all.length < 2) {
+      const hint = document.createElement('span')
+      hint.className = 'choices-hint'
+      hint.textContent = t('ui.props.choice.checkNeedTwo')
+      toggle.appendChild(hint)
+    }
+    box.appendChild(toggle)
     if (!check) return box
 
+    /**
+     * 映射区：一行一个决定。图标说「勾／未勾」，颜色说哪一边是关闭态；
+     * 值域仍由下拉承担——三个视觉层各管一件事，不再靠一行挤五个元素。
+     */
+    const map = document.createElement('div')
+    map.className = 'cc-map'
     const names = new Map(all.map((c) => [c.id, c.label.trim() || c.id.slice(-6)]))
     const selectRow = (which: 'on' | 'off'): HTMLElement => {
       const row = document.createElement('label')
-      row.className = 'choices-gutter'
+      row.className = 'cc-row'
+      row.dataset.ccRole = which
+      const ico = document.createElement('span')
+      ico.className = 'cc-ico'
+      renderIcon(
+        ico,
+        which === 'on' ? 'lucide:circle-check' : 'lucide:circle',
+        which === 'on' ? 'circle-check' : 'circle',
+        'sm',
+      )
       const text = document.createElement('span')
+      text.className = 'cc-label'
       text.textContent = t(which === 'on' ? 'ui.props.choice.checkOn' : 'ui.props.choice.checkOff')
       const sel = document.createElement('select')
       sel.className = 'prop-input'
@@ -249,13 +274,22 @@ export class ChoicesEditor {
         this.deps.write.setCheck(def.id, { ...next, closure })
         this.render()
       })
-      row.append(text, sel)
+      row.append(ico, text, sel)
       return row
     }
-    box.append(selectRow('on'), selectRow('off'))
+    map.append(selectRow('on'), selectRow('off'))
 
-    const statusRow = document.createElement('label')
-    statusRow.className = 'choices-gutter'
+    /**
+     * 关闭态：开关 ＋ 短语 ＋ 说明图标。
+     *
+     * 说明（块标后变方框、划线、`⌘↵`）是解释而非操作，退到 `data-tip`；
+     * 行本身只留用户要做的那个决定。外层用 `div` 包：点说明图标不该顺手切换开关。
+     */
+    const statusRow = document.createElement('div')
+    statusRow.className = 'cc-state'
+    statusRow.dataset.on = closure ? '1' : '0'
+    const slabel = document.createElement('label')
+    slabel.className = 'cc-state-label'
     const sbox = document.createElement('input')
     sbox.type = 'checkbox'
     sbox.className = 'prop-check'
@@ -266,12 +300,19 @@ export class ChoicesEditor {
       this.render()
     })
     const stext = document.createElement('span')
+    stext.className = 'cc-label'
     stext.textContent = t('ui.props.choice.checkStatus')
-    const shint = document.createElement('span')
-    shint.className = 'choices-hint'
-    shint.textContent = t('ui.props.choice.checkStatusHint')
-    statusRow.append(sbox, stext, shint)
-    box.appendChild(statusRow)
+    slabel.append(sbox, stext)
+    const info = document.createElement('span')
+    info.className = 'cc-info'
+    info.dataset.tip = t('ui.props.choice.checkStatusHint')
+    info.setAttribute('aria-label', t('ui.props.choice.checkStatusHint'))
+    info.tabIndex = 0
+    renderIcon(info, 'lucide:info', 'info', 'sm')
+    statusRow.append(slabel, info)
+    map.appendChild(statusRow)
+
+    box.appendChild(map)
     return box
   }
 

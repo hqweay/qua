@@ -14,6 +14,7 @@
  *   3. gutter（块标/箭头/导轨）**不混进 `.tx`**：读回模型时会把它当成字。
  */
 import {
+  CLOSURE_USE,
   DEFAULT_BLOCK_TYPE,
   DIVIDER_TYPE,
   COLOR_PROP,
@@ -777,18 +778,18 @@ export function makeBlockEl(
   /** 这一行下面是否要画**行内**的身体（按源分派：有结果身体就画，段根同此） */
   const inlineBody = Boolean(opts.viewBody) && rowHasInlineViewBody(r)
   /**
-   * gutter 上那个**关闭态开关**：只认扮演 `closure` 角色的字段（`_use: 'closure'`＋`_check`）。
+   * gutter 上那个**关闭态开关**：只认 `_use: 'closure'` 的字段（＋合法 `_check`）。
    *
-   * ⚠️ 判据是**角色**，不是固定 propId、也不是「叫任务的那个属性」：自定义的关闭态属性
-   *    与内置的那条走同一套。角色库级唯一，没有「多个完成型字段取第一条」的裁决。
+   * ⚠️ 判据是**用途**，不是固定 propId、也不是「叫任务的那个属性」：自定义的关闭态属性
+   *    与内置的那条走同一套。这个用途库级唯一，没有「多个完成型字段取第一条」的裁决。
    * ⚠️ **布尔开关（`checkbox` kind）不参与**：它是「值没有名字」的两态，谁也不知道
    *    `true` 是不是「关闭」；让它借关闭态方框（`data-closure`／划线）＝ 同一枚方框两种意思。
    *    它自己在 gutter 上画自己的方框，只由那一下点击切（与 `⌘↵` 无关）。
    */
-  const closureField = opts.gutter?.find((f) => f.use === 'closure' && f.check !== undefined)
+  const closureField = opts.gutter?.find((f) => f.use === CLOSURE_USE && f.check !== undefined)
   /**
-   * 关闭态（开／关）：角色字段的值＝`_check.on` ⇒ 关闭；其余已声明形态（未填、进行中…）
-   * ⇒ 未关闭；没有角色字段 ⇒ 这一行没有关闭态（不是「未关闭」）。
+   * 关闭态（开／关）：该字段的值＝`_check.on` ⇒ 关闭；其余已声明形态（未填、进行中…）
+   * ⇒ 未关闭；没有这个字段 ⇒ 这一行没有关闭态（不是「未关闭」）。
    *
    * ⚠️ **未填要算「未关闭」，不能算「没有关闭态」**：这个槽的准入判据是「这块有这条属性」
    *    而不是「这条属性有值」（见 `gutterFieldsOf`）—— 刚给它加上、还没点过的那一下，
@@ -1185,8 +1186,8 @@ export function makeBlockEl(
       continue
     }
     if (field.kind === 'select') {
-      // 关闭态：勾选框 + 划线/⌘↵（`_use: 'closure'` + `_check`）
-      if (field.use === 'closure' && field.check) {
+      // 关闭态：勾选框 + 划线/⌘↵（`_use: CLOSURE_USE` + `_check`）
+      if (field.use === CLOSURE_USE && field.check) {
         const mark = document.createElement('span')
         mark.className = 'identity closure-box closure-mark'
         mark.dataset.propId = field.propId

@@ -41,6 +41,7 @@ import {
   type Block,
   type CtxKeys,
 } from '../../core/index.ts'
+import type { BlockProps } from '../../core/model/model.ts'
 import { readRuns } from '../../view/editor/dom-text.ts'
 import { assetRowCount, assetViewOf, assetsAvailable } from '../../view/asset-views.ts'
 import { t } from '../../core/infra/msg.ts'
@@ -533,6 +534,7 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
         aliases: string[]
         lists: string[]
         display: string | null
+        props: BlockProps | null
       }[] = []
       walkForest(deps.getWs().blocks, (b) => {
         out.push({
@@ -543,6 +545,8 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
           aliases: aliasesOf(b),
           lists: listsOf(b),
           display: prop<string>(b, DISPLAY_PROP) ?? null,
+          // 值层的形状断言要读属性袋（多值是数组还是被压成字符串，只有它能证）
+          props: b.props ?? null,
         })
       })
       return out

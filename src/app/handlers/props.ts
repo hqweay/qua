@@ -62,6 +62,12 @@ export const PROPS_HANDLERS: Record<string, Handler> = {
     app.setPropRefTags(defId, ids)
     return true
   },
+  'core.props/set-ref-view': (a, app) => {
+    const defId = S(a.defId)
+    if (!defId) return false
+    app.setPropRefView(defId, S(a.view))
+    return true
+  },
   'core.props/create-ref-target': (a, app) => {
     const blockId = S(a.blockId)
     const propId = S(a.propId)

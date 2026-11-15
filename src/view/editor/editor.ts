@@ -109,7 +109,7 @@ import {
 } from '../../core/model/runs.ts'
 import { ensureNoteInTx } from '../../core/kb/ensure-note.ts'
 import type { NotePair } from '../../core/relations/annotates.ts'
-import { journalDateLabel, type OpenAction, type SecLayout, type ShellCol } from '../../core/index.ts'
+import { CLOSURE_USE, journalDateLabel, type OpenAction, type SecLayout, type ShellCol } from '../../core/index.ts'
 export type { SecLayout }
 
 /**
@@ -538,7 +538,7 @@ function applyClosurePlan(b: Block, plan: ClosurePlan): void {
 function closurePlanOfField(field: GutterField | undefined): ClosurePlan {
   if (!field) return { propId: TASK_STATUS_PROP_ID, next: TASK_STATUS_TODO_ID, clear: false, createCore: true }
   // 任务状态：勾选 ⇄ 取消在**两个显式选项**之间翻，不再靠 default/清空
-  if (field.use === 'closure' && field.check) {
+  if (field.use === CLOSURE_USE && field.check) {
     const next = field.value === field.check.on ? field.check.off : field.check.on
     return { propId: field.propId, next, clear: false, createCore: false }
   }
@@ -2695,7 +2695,7 @@ export class BlockEditor {
     const loc = locate(this.doc, id)
     if (!loc) return 'none'
     // 目标与 `toggleClosure` 同一判据：库里唯一的任务状态字段
-    const field = gutterFieldsOf(loc.block, this.store.blocks).find((f) => f.use === 'closure')
+    const field = gutterFieldsOf(loc.block, this.store.blocks).find((f) => f.use === CLOSURE_USE)
     if (!field) return 'none'
     this.beginUndoEntry()
     this.write((tx) => tx.patch(id, (b) => clearValue(b, field.propId)))
