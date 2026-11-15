@@ -20,7 +20,7 @@
  *    归属要编辑时才用得上，点行进面板再看。装饰点还会与块标的身份点撞形。
  */
 import { t } from '../../core/infra/msg.ts'
-import { assetRefsOf, enginePropText, isEngineProp } from '../../core/index.ts'
+import { assetRefsOf, enginePropText, isEngineProp, valueItemsOf, valueListOf } from '../../core/index.ts'
 import type { BelowFields, FieldRow, PropsLineDensity } from '../../core/index.ts'
 import { makeAssetThumb } from './asset-value.ts'
 
@@ -63,12 +63,52 @@ export function fieldRowText(row: FieldRow, refLabel: (id: string) => string): s
   if (row.kind === 'checkbox') {
     return row.value === true ? t('ui.props.checkboxOn') : t('ui.props.checkboxOff')
   }
+  /**
+   * **多值在这里也只有一个读法：读成列表再逐项格式化。**
+   * 直接 `String(value)` 会把数组压成 `a,b` —— 显示面看起来像「一个名叫 a,b 的值」，
+   * 读者与下一次写入都会把它当单值（List 就这么被抹掉了）。
+   */
+  if (row.cardinality === 'many') {
+    if (row.kind === 'ref') return valueListOf(row.value).map((id) => refLabel(id)).join('、')
+    return valueItemsOf(row.value)
+      .map((v) => String(v))
+      .join('、')
+  }
   if (row.kind === 'ref') {
     return row.value === undefined || row.value === null || row.value === ''
       ? ''
       : refLabel(String(row.value))
   }
   return row.value === undefined || row.value === null ? '' : String(row.value)
+}
+
+/**
+ * 多值在块下行的露面：一行 chips（不换行；引用项各自带 `data-ref-to`）。
+ *
+ * `text`／`number` 的 chips 只是分段，不承载任何跳转 —— 它们的值是字面量，
+ * `data-ref-to` 挂上去会让「点一个数字」去开别的块。
+ */
+function appendValueChips(value: HTMLElement, row: FieldRow, deps: PropsLineDeps): void {
+  value.classList.add('blk-prop-chips')
+  const push = (text: string, refId?: string): void => {
+    const chip = document.createElement('span')
+    chip.className = 'blk-prop-chip'
+    chip.textContent = text
+    if (refId !== undefined && refId !== '') {
+      chip.dataset.refTo = refId
+      chip.classList.add('blk-prop-ref')
+    }
+    value.appendChild(chip)
+  }
+  if (row.kind === 'select') {
+    for (const label of row.currentChoiceLabels ?? []) push(label)
+    return
+  }
+  if (row.kind === 'ref') {
+    for (const id of valueListOf(row.value)) push(deps.refLabel(id), id)
+    return
+  }
+  for (const v of valueItemsOf(row.value)) push(String(v))
 }
 
 export function renderPropsLine(
@@ -188,6 +228,15 @@ function pairOf(blockId: string, row: FieldRow, deps: PropsLineDeps, pendingText
   name.textContent = row.label
   const value = document.createElement('span')
   value.className = 'blk-prop-value ui-ellipsis'
+  /**
+   * **多值画成一行 chips**（`select`／`ref`／`text`／`number`；`asset` 走缩略图那一支）。
+   *
+   * 为什么是 chips 而不是「a、b」一句话：块下行是**读值**的投影面，一串逗号串
+   * 读不出「这是几项」，而 chips 让每一项各占一段、引用项各自可点（`data-ref-to`）。
+   * 它必须**不换行**：这一行的行高是虚拟化估高的输入（268 的判据是「行数 × 行高」），
+   * 一换行就多出一行没人算，滚动条会系统性偏小。
+   */
+  const manyChips = row.cardinality === 'many' && pendingText === undefined && row.kind !== 'asset'
   if (row.kind === 'asset' && pendingText === undefined) {
     /**
      * **asset 值画成露面，不画裸 hash／裸链接**：这一行是「读值」的投影面，
@@ -200,6 +249,8 @@ function pairOf(blockId: string, row: FieldRow, deps: PropsLineDeps, pendingText
       for (const ref of refs.slice(0, 3)) value.appendChild(makeAssetThumb(ref, { size: 'line' }))
       value.dataset.tip = refs.join('、')
     } else value.textContent = fieldRowText(row, deps.refLabel)
+  } else if (manyChips) {
+    appendValueChips(value, row, deps)
   } else {
     value.textContent = pendingText ?? fieldRowText(row, deps.refLabel)
   }
@@ -209,8 +260,11 @@ function pairOf(blockId: string, row: FieldRow, deps: PropsLineDeps, pendingText
    * 这一行画在 `.blk` 里，也就在编辑器宿主内 ⇒ 事件层那一条分支把左键／⇧／⌘／⌥
    * 全套接上，这里一个事件都不挂。此前它是一段纯文本：点了只会冒泡到整对按钮去开面板，
    * 所以「引用打不开」。
+   *
+   * 多值的每一枚 chip 各自带 `data-ref-to`（由 `appendValueChips` 挂）——
+   * 整格只挂一次会让「点第二枚去第一块」变成静默的错误。
    */
-  if (row.kind === 'ref' && row.value !== undefined && row.value !== null && row.value !== '') {
+  if (!manyChips && row.kind === 'ref' && row.value !== undefined && row.value !== null && row.value !== '') {
     value.dataset.refTo = String(row.value)
     value.classList.add('blk-prop-ref')
   }

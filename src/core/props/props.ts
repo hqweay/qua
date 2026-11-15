@@ -644,6 +644,21 @@ export function valueListOf(value: unknown): string[] {
 }
 
 /**
+ * 把一格值读成**值列表**（任意 kind 的多值读法）。
+ *
+ * 与 `valueListOf` 的分工：那个只服务「值是 id 字符串」的 kind（select／ref／asset），
+ * 这个不滤类型 —— `number` 多值存的是数字数组，走 `valueListOf` 会读成空列表，
+ * 屏幕上就成了「有值但显示待填」。
+ *
+ * 单值一律视为「只有一项」：多值定义刚打开时旧块还没被写过（`valueListOf` 同一口径）。
+ */
+export function valueItemsOf(value: unknown): unknown[] {
+  if (value === undefined || value === null || value === '') return []
+  if (!Array.isArray(value)) return [value]
+  return value.filter((v) => v !== undefined && v !== null && v !== '')
+}
+
+/**
  * 把一格值读成**单个选项 id**（单值读法的唯一入口）。
  *
  * 数组只在「多值定义切回单值」的过渡期出现（切换命令会挡住仍有 >1 个值的库）；
@@ -942,7 +957,12 @@ export function choiceCells(
   lookup?: ChoiceLookup,
 ): Pick<
   FieldRow,
-  'choices' | 'currentChoiceLabel' | 'currentChoiceDeleted' | 'currentChoiceLabels' | 'currentChoices'
+  | 'choices'
+  | 'currentChoiceLabel'
+  | 'currentChoiceDeleted'
+  | 'currentChoiceLabels'
+  | 'currentChoices'
+  | 'currentChoiceIds'
 > {
   const look = lookup ?? choiceLookupOf(forest)
   const choices = choicesForDef(block, def, look.tagById)
@@ -968,7 +988,7 @@ export function choiceCells(
       currentChoices.push(current)
       currentChoiceLabels.push(choiceDisplayLabel(current, def, look.tagName))
     }
-    return { choices, currentChoices, currentChoiceLabels }
+    return { choices, currentChoices, currentChoiceLabels, currentChoiceIds: ordered }
   }
   const id = singleValueOf(value)
   if (id === '') return { choices }
@@ -1440,6 +1460,13 @@ export interface FieldRow {
   currentChoiceLabels?: string[]
   /** `select` 多值行：当前值指向的选项（含墓碑；缺失项不在里面） */
   currentChoices?: PropChoice[]
+  /**
+   * `select` 多值行：当前值的 id，**与 `currentChoiceLabels` 逐项对齐**。
+   *
+   * 多值 chips 摘除某一项要按 id 摘：只靠标签文本反查会撞名（同名选项合法），
+   * 靠 `valueListOf` 又与显示序不一致（显示按选项序、值按写入序）。
+   */
+  currentChoiceIds?: string[]
 }
 
 /**
@@ -1540,6 +1567,7 @@ function fieldRowOf(
   if (cells.currentChoiceDeleted === true) row.currentChoiceDeleted = true
   if (cells.currentChoiceLabels !== undefined) row.currentChoiceLabels = cells.currentChoiceLabels
   if (cells.currentChoices !== undefined) row.currentChoices = cells.currentChoices
+  if (cells.currentChoiceIds !== undefined) row.currentChoiceIds = cells.currentChoiceIds
   return row
 }
 

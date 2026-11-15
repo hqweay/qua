@@ -254,10 +254,17 @@ function onePropRows(block: string, name: string, value: unknown): RowWrite[] {
   return [{ table: 'BlockProperty', op: 'delete', key: { block, name } }, ...propRows(block, name, value)]
 }
 
-/** 一格属性 → 行（数组拆多行；空数组 ＝ 没有这一格） */
+/**
+ * 一格属性 → 行（数组拆多行；空数组 ＝ 没有这一格）。
+ *
+ * **判据是「值是不是数组」，不是「数组里是不是字符串」**：基数轴推广到全 kind 后
+ * `number` 多值存的是数字数组，只认字符串数组会让它掉进「单行 JSON」那一支 ——
+ * 读回来形状碰巧一样，`multi` 位却是 0，于是「这一格是列表」在落盘口径里消失
+ * （查询/索引用 `multi` 的那天，这一格会静默变成单值）。
+ */
 export function propRows(block: string, name: string, value: unknown): RowWrite[] {
   if (NOT_A_PROP.has(name) || value === undefined) return []
-  if (Array.isArray(value) && value.every((x) => typeof x === 'string')) {
+  if (Array.isArray(value)) {
     if (value.length === 0) return []
     return value.map((x, pos) => ({
       table: 'BlockProperty' as const,

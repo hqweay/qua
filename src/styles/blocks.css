@@ -904,6 +904,25 @@
   align-items: center;
   gap: var(--ui-gap-1);
 }
+/*
+  块下行的多值：**一行 chips，不换行**。这一行的高度是虚拟化估高的输入
+  （268：行数 × 行高），折行会多出一行没人算 ⇒ 滚动条系统性偏小。
+  装不下就裁——读者点这一行进面板看全，比在这里多长一行更可接受。
+*/
+.blk-prop-chips {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--ui-gap-1);
+  flex-wrap: nowrap;
+  overflow: hidden;
+  min-width: 0;
+}
+.blk-prop-chip {
+  flex: 0 0 auto;
+  padding: 0 3px;
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-sunken);
+}
 /* 属性面板里的标签行：与正文 chip 同一种东西的两个入口（这里是块级入口） */
 .props-tag-value {
   flex-wrap: wrap;
@@ -970,6 +989,73 @@
 }
 .prop-check {
   accent-color: var(--ui-accent);
+}
+/*
+  **多值（List）**：一格值是一个列表 —— chips 是它在编辑面与显示面的同一副面孔。
+
+  为什么不是「a、b」一句话：那句话读不出「这是几项」，每一项也不可摘、不可点。
+  面板／表格格子里允许折行（行高按内容走）；**块下行覆盖成不换行**——
+  那一行的高是虚拟化估高的输入，折一次就多一行没人算（268 的判据）。
+*/
+.prop-multi-value {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.prop-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.prop-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0 2px 0 4px;
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-sunken);
+  font-size: var(--ui-fs-xs);
+}
+.prop-chip-ref {
+  cursor: pointer;
+}
+.prop-chip-x {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0 2px;
+  font: inherit;
+  line-height: 1;
+  color: var(--ui-text-tertiary);
+  border-radius: var(--ui-radius-sm);
+  cursor: pointer;
+}
+.prop-chip-x:hover {
+  color: var(--ui-text);
+  background: var(--ui-surface);
+}
+.prop-chip-add {
+  background: none;
+  border: 0;
+  padding: 0 var(--ui-gap-1);
+  font: inherit;
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+}
+.prop-chip-add:hover {
+  color: var(--ui-text);
+}
+.prop-multi-add {
+  flex: 1 1 6ch;
+  min-width: 6ch;
 }
 /* 勾选框 ＋ 它的只读说明（值本身只由方框改；文字说的是「这一格现在是什么」） */
 .prop-check-row {

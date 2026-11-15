@@ -76,6 +76,32 @@ test('orderBuckets：按完整次序摆桶——声明了但还没出现的值�
   )
 })
 
+test('bucketize：用户字段多值（`_cardinality: many`）与 `_tags` 同一口径——fan-out，旧单值不落「未设置」', () => {
+  /**
+   * 基数轴推广到全 kind 之后，多值键不再只有 `_tags`：`cardinalityOf` 是唯一判据
+   * （`isMultiValueKey`）。这条同时钉住「定义刚从 one 切成 many、旧块还是单值」的过渡态：
+   * 单值要读成一项，不能掉进「未设置」。
+   */
+  const { multi, buckets } = bucketize(
+    [rec('a', { 'p-num': ['x', 'y'] }), rec('b', { 'p-num': 'y' }), rec('c', { 'p-num': [] })],
+    'p-num',
+    { choices: () => [], cardinalityOf: (id) => (id === 'p-num' ? 'many' : 'one') },
+  )
+  assert.equal(multi, true, '多值键走 fan-out 分支')
+  const y = buckets.find((b) => b.raw === 'y')!
+  assert.deepEqual(
+    y.records.map((r) => r.title),
+    ['a', 'b'],
+    '数组里的每一项各进一组；旧单值读成一项',
+  )
+  const unset = buckets.find((b) => b.unset)!
+  assert.deepEqual(
+    unset.records.map((r) => r.title),
+    ['c'],
+    '空数组＝没值，只进「未设置」',
+  )
+})
+
 test('bucketLabel：块 id 值翻译成名字；解析不到原样显示；「未设置」给专名', () => {
   const { buckets } = bucketize([rec('a', { g: 'c1' }), rec('b', { g: '幽灵' }), rec('c', {})], 'g', {
     choices: () => CHOICES,

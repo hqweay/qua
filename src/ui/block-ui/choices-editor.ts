@@ -114,6 +114,9 @@ export class ChoicesEditor {
      *
      * 勾上 ⇒ 这一条属性在每行的块标后画当前值的图标；不勾 ⇒ 有值时落在**块下属性行**。
      * 块属性卡里**仍然**能改，三者读同一份行派生、写同一条命令。
+     *
+     * **「允许多个值」不在这里**：基数轴推广到全 kind 之后，那个开关搬去了定义页的
+     * 通用值配置段（`properties.ts:buildDefCardinality`），这一段只管 select 自己的版面。
      */
     if (focusTag === '') {
       const gutter = document.createElement('label')
@@ -134,29 +137,6 @@ export class ChoicesEditor {
       hint.textContent = t('ui.props.choice.gutterTitle')
       gutter.append(box, text, hint)
       section.appendChild(gutter)
-
-      /**
-       * **单值/多值**：多值时一个块可以选多个选项，gutter 依次画它们的图标。
-       * 只在定义页给（标签视角改的是全局定义）。
-       */
-      const multi = document.createElement('label')
-      multi.className = 'choices-gutter'
-      const mbox = document.createElement('input')
-      mbox.type = 'checkbox'
-      mbox.className = 'prop-check'
-      mbox.dataset.choiceMulti = '1'
-      mbox.checked = cardinalityOf(def) === 'many'
-      mbox.addEventListener('change', () => {
-        this.deps.write.setCardinality(def.id, mbox.checked ? 'many' : 'one')
-        this.render()
-      })
-      const mtext = document.createElement('span')
-      mtext.textContent = t('ui.props.choice.multi')
-      const mhint = document.createElement('span')
-      mhint.className = 'choices-hint'
-      mhint.textContent = t('ui.props.choice.multiHint')
-      multi.append(mbox, mtext, mhint)
-      section.appendChild(multi)
     }
 
     const visible = this.visibleChoices(def, focusTag)

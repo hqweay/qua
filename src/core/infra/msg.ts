@@ -352,8 +352,13 @@ export const MSG = {
   'ui.props.pickChoice': '选择值',
   'ui.props.pickChoiceMulti': '选择值（可多选）',
   'ui.props.choice.current': '当前',
-  'ui.props.choice.multi': '允许多个值',
-  'ui.props.choice.multiHint': '每个值在块标后有一枚属性图标；勾选顺序不承载语义，显示按选项顺序',
+  // 基数轴（`_cardinality`）已推广到全 kind：开关住在定义页的通用值配置段，
+  // 旧 `ui.props.choice.multi*` 的文案讲的是 select 的块标图标，随开关一起退场。
+  'ui.props.cardinality.label': '允许多个值',
+  'ui.props.cardinality.hint': '一个块可以有多个值；显示成 chips，存的是数组',
+  'ui.props.multiAdd': '加一个值',
+  'ui.props.multiRemove': '移除这一项',
+  'ui.props.refAdd': '再加一个引用',
   'ui.props.choice.multiBlocked': '还有块选了多个值，先清理才能切回单值',
   'ui.props.cardinality.notAllowed': '{kind}属性不能多值',
   // 格式：同值形状内的约束与画法（url/email/phone 是 text 的格式，不是独立 kind）

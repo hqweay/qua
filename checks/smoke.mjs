@@ -29875,6 +29875,301 @@ await check('T313 asset 多值：值控件不把数组压成字符串，摘除�
   return '多值 asset：两枚缩略图、输入框留空；摘除一项后仍是数组，List 形状没被压坏'
 })
 
+await check(
+  'T314 定义页「允许多个值」对全 kind 显隐：text/number/ref/asset 有开关、date/checkbox 没有；切成多值后值控件画 chips',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+    const ids = await page.evaluate(() => {
+      const host = window.__qua.blocks().find((b) => b.roles.length === 0 && b.text.trim().length > 1)
+      const kinds = ['text', 'number', 'date', 'checkbox', 'ref', 'asset']
+      const defs = {}
+      for (const kind of kinds) {
+        window.__qua.invoke('core.props/create-def', {
+          blockId: host.id,
+          label: `基数-${kind}`,
+          kind,
+          target: 'own',
+        })
+        defs[kind] = window.__qua.propDefs().find((d) => d.label === `基数-${kind}`)?.id ?? ''
+      }
+      return { host: host.id, defs }
+    })
+    assert(
+      Object.values(ids.defs).every(Boolean),
+      `前置：六条定义都应建出来：${JSON.stringify(ids.defs)}`,
+    )
+
+    const seen = {}
+    for (const [kind, defId] of Object.entries(ids.defs)) {
+      await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), defId)
+      await page.waitForFunction(
+        (id) => document.querySelector('.props-drawer')?.dataset.targetBlockId === id,
+        defId,
+        { timeout: 4000 },
+      )
+      seen[kind] = await page.evaluate(() => Boolean(document.querySelector('.props-drawer [data-def-multi]')))
+    }
+    assert(
+      seen.text && seen.number && seen.ref && seen.asset,
+      `有基数轴的 kind 都要有开关（此前只有 select 有）：${JSON.stringify(seen)}`,
+    )
+    assert(!seen.date && !seen.checkbox, `date／checkbox 的允许集是 one，不该给开关：${JSON.stringify(seen)}`)
+
+    // 切到多值 ⇒ 写数组 ⇒ 值控件画 chips（不是一句「甲、乙」）
+    const textDef = ids.defs.text
+    await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), textDef)
+    await page.waitForFunction(
+      (id) =>
+        document.querySelector('.props-drawer')?.dataset.targetBlockId === id &&
+        Boolean(document.querySelector('.props-drawer [data-def-multi]')),
+      textDef,
+      { timeout: 4000 },
+    )
+    await page.evaluate(() => document.querySelector('.props-drawer [data-def-multi]')?.click())
+    await page.waitForFunction(
+      (id) => window.__qua.__editor.store.find(id)?.props?._cardinality === 'many',
+      textDef,
+      { timeout: 4000 },
+    )
+    await page.evaluate(
+      ({ host, propId }) =>
+        window.__qua.invoke('core.props/set-value', { blockId: host, propId, value: ['甲', '乙'] }),
+      { host: ids.host, propId: textDef },
+    )
+    await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), ids.host)
+    const readRow = () =>
+      page.evaluate(
+        ({ host, propId }) => ({
+          value: window.__qua.__editor.store.find(host)?.props?.[propId] ?? null,
+          chips:
+            document
+              .querySelector(`.props-drawer .prop-row[data-prop-id="${propId}"] [data-prop-chips]`)
+              ?.querySelectorAll('[data-chip]').length ?? -1,
+        }),
+        { host: ids.host, propId: textDef },
+      )
+    await page.waitForFunction(
+      (propId) => Boolean(document.querySelector(`.props-drawer .prop-row[data-prop-id="${propId}"] [data-prop-chips]`)),
+      textDef,
+      { timeout: 4000 },
+    )
+    const before = await readRow()
+    assert(before.chips === 2, `两项画两枚 chip：${JSON.stringify(before)}`)
+
+    await page.evaluate((propId) => {
+      document
+        .querySelector(`.props-drawer .prop-row[data-prop-id="${propId}"] .prop-chip-x`)
+        ?.click()
+    }, textDef)
+    await page.waitForFunction(
+      ({ host, propId }) => (window.__qua.__editor.store.find(host)?.props?.[propId] ?? []).length === 1,
+      { host: ids.host, propId: textDef },
+      { timeout: 4000 },
+    )
+    const after = await readRow()
+    assert(
+      Array.isArray(after.value) && after.value.length === 1 && after.value[0] === '乙',
+      `摘一枚仍写数组（不压成逗号串）：${JSON.stringify(after)}`,
+    )
+
+    await ctx.close()
+    return '基数开关对 text/number/ref/asset 出现、date/checkbox 不出现；多值 text 的值控件是 chips，摘一枚仍是数组'
+  },
+)
+
+await check(
+  'T315 多值 ref：值控件与块下行都是 chips，每枚各带 data-ref-to；摘一枚写回数组',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+    const setup = await page.evaluate(() => {
+      const plain = window.__qua.blocks().filter((b) => b.roles.length === 0 && b.text.trim().length > 1)
+      const host = plain[0]
+      const targets = plain.slice(1, 3).map((b) => b.id)
+      window.__qua.invoke('core.props/create-def', {
+        blockId: host.id,
+        label: '冒烟引用集',
+        kind: 'ref',
+        target: 'own',
+      })
+      const defId = window.__qua.propDefs().find((d) => d.label === '冒烟引用集')?.id ?? ''
+      window.__qua.invoke('core.props/set-choice-cardinality', { defId, cardinality: 'many' })
+      window.__qua.invoke('core.props/set-value', { blockId: host.id, propId: defId, value: targets })
+      return { host: host.id, defId, targets }
+    })
+    assert(
+      setup.defId !== '' && setup.targets.length === 2,
+      `前置：定义与两个引用目标都要有：${JSON.stringify(setup)}`,
+    )
+
+    await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), setup.host)
+    await page.waitForFunction(
+      (propId) =>
+        Boolean(document.querySelector(`.props-drawer .prop-row[data-prop-id="${propId}"] [data-prop-chips]`)),
+      setup.defId,
+      { timeout: 4000 },
+    )
+    const panel = await page.evaluate((propId) => {
+      const chips = [
+        ...document.querySelectorAll(`.props-drawer .prop-row[data-prop-id="${propId}"] .prop-chip`),
+      ]
+      return {
+        count: chips.length,
+        refs: chips.map((c) => c.querySelector('[data-ref-to]')?.getAttribute('data-ref-to') ?? ''),
+        texts: chips.map((c) => c.textContent ?? ''),
+      }
+    }, setup.defId)
+    assert(panel.count === 2, `两个值两枚 chip：${JSON.stringify(panel)}`)
+    assert(
+      panel.refs.join(',') === setup.targets.join(','),
+      `每枚各带自己的 data-ref-to（整格挂一次会让点第二枚去第一块）：${JSON.stringify(panel)}`,
+    )
+    assert(
+      panel.texts.every((t) => t.trim() !== '' && !t.includes(',')),
+      `chip 画的是名字而不是裸 id／逗号串：${JSON.stringify(panel.texts)}`,
+    )
+
+    await page.evaluate((propId) => {
+      document.querySelector(`.props-drawer .prop-row[data-prop-id="${propId}"] .prop-chip-x`)?.click()
+    }, setup.defId)
+    await page.waitForFunction(
+      ({ host, propId }) => (window.__qua.__editor.store.find(host)?.props?.[propId] ?? []).length === 1,
+      { host: setup.host, propId: setup.defId },
+      { timeout: 4000 },
+    )
+
+    // 块下行：多值画 chips（一行、不换行），引用项可点
+    await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.host)
+    await page.waitForFunction(
+      (id) => document.querySelectorAll(`.blk[data-block-id="${id}"] .blk-prop-chip`).length === 1,
+      setup.host,
+      { timeout: 4000 },
+    )
+    const line = await page.evaluate(({ host, propId }) => {
+      const chip = document.querySelector(`.blk[data-block-id="${host}"] .blk-prop-chip`)
+      return {
+        chip: chip?.textContent ?? '',
+        refTo: chip?.getAttribute('data-ref-to') ?? '',
+        rows: document.querySelectorAll(`.blk[data-block-id="${host}"] .blk-prop--row`).length,
+        value: window.__qua.__editor.store.find(host)?.props?.[propId] ?? null,
+      }
+    }, { host: setup.host, propId: setup.defId })
+    assert(Array.isArray(line.value) && line.value.length === 1, `摘除后仍是数组：${JSON.stringify(line)}`)
+    assert(
+      line.chip.trim() !== '' && line.refTo === line.value[0],
+      `块下行的 chip 是那一枚引用（带 data-ref-to）：${JSON.stringify(line)}`,
+    )
+
+    await ctx.close()
+    return '多值 ref：面板与块下行都是 chips、各带 data-ref-to；摘一枚写回数组（不是逗号串）'
+  },
+)
+
+await check('T316 表格的多值格是 chips：一块两值 ⇒ 两枚 chip；摘一枚写回数组', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  await page.waitForTimeout(350)
+
+  const setup = await page.evaluate(() => {
+    const host = window.__qua.snapshot().activeId
+    const kids = (window.__qua.__editor.store.find(host)?.children ?? [])
+      .filter((b) => b.children.length === 0)
+      .slice(0, 3)
+    if (kids.length < 2) return { host, defId: '', tagId: '', key: '' }
+    window.__qua.invoke('core.props/create-def', {
+      blockId: kids[0].id,
+      label: '冒烟多文本',
+      kind: 'text',
+      target: 'own',
+    })
+    const defId = window.__qua.propDefs().find((d) => d.label === '冒烟多文本')?.id ?? ''
+    window.__qua.invoke('core.props/set-choice-cardinality', { defId, cardinality: 'many' })
+    // 两块都要有这一栏：表格的默认列来自命中的自有属性
+    window.__qua.invoke('core.props/set-value', { blockId: kids[0].id, propId: defId, value: ['甲', '乙'] })
+    window.__qua.invoke('core.props/set-value', { blockId: kids[1].id, propId: defId, value: ['丙'] })
+    for (const k of kids) window.__qua.invoke('core.tags/add', { blockId: k.id, name: '冒烟多值表' })
+    const tagId = window.__tagId('冒烟多值表')
+    window.__qua.invoke('core.mount/add-local', {
+      host: { kind: 'block', blockId: host },
+      label: '多值表',
+      spec: { where: { tag: tagId } },
+    })
+    return { host, defId, tagId, kid0: kids[0].id }
+  })
+  assert(setup.defId !== '' && setup.tagId !== '', `前置：定义与标签都要有：${JSON.stringify(setup)}`)
+  await page.waitForTimeout(350)
+
+  const tabKey = await page.evaluate(() => {
+    const w = [...document.querySelectorAll('#editor .mount .mount-tabwrap')].find(
+      (x) => (x.querySelector('.mount-tab')?.textContent ?? '') === '多值表',
+    )
+    return w?.dataset.tab ?? ''
+  })
+  assert(tabKey !== '', '「多值表」这一栏应出现')
+  await mountTab(page, tabKey)
+  const viewId = await page.evaluate(
+    ({ host, tabId, defId }) => {
+      const owner = { kind: 'tab', host: { kind: 'block', blockId: host }, tabId }
+      window.__qua.invoke('core.view/add', { owner, kind: 'table' })
+      /**
+       * 视图 id 只能从**配置本身**读（`invoke` 回的是 `{ok,handled}`，不是处理器的返回值）。
+       * local 栏的视野住在宿主 `_mounts` 的那一条里。
+       */
+      const mounts = window.__qua.__editor.store.find(host)?.props?._mounts ?? []
+      const entry = mounts.find((m) => m.kind === 'local' && m.label === '多值表')
+      const id = entry?.views?.find((v) => v.kind === 'table')?.id ?? ''
+      // 表格的列清单是**逐字落到视图配置里**的（查询源的默认列从条件算，命中里的自有属性不参与）；
+      // 这里显式把多值那一栏加进去，钉的才是「这一格怎么画」
+      if (id !== '') {
+        window.__qua.invoke('core.view/set-columns', {
+          owner,
+          viewId: id,
+          columns: [{ key: 'title' }, { key: defId }],
+        })
+      }
+      return id
+    },
+    { host: setup.host, tabId: tabKey, defId: setup.defId },
+  )
+  assert(viewId !== '', '前置：应能建出表格视图并拿到它的 id')
+  await page.waitForTimeout(600)
+
+  const read = () =>
+    page.evaluate((defId) => {
+      const cell = document.querySelector(`#editor .mount .mount-view .tv-row [data-prop="${defId}"]`)
+      return {
+        heads: [...document.querySelectorAll('#editor .mount .mount-view .tv-head [data-col]')].map((e) => e.dataset.col),
+        rows: document.querySelectorAll('#editor .mount .mount-view .tv-row').length,
+        cells: document.querySelectorAll(`#editor .mount .mount-view .tv-row [data-prop="${defId}"]`).length,
+        chips: cell?.querySelectorAll('[data-prop-chips] [data-chip]').length ?? -1,
+        text: cell?.textContent ?? '',
+      }
+    }, setup.defId)
+  const before = await read()
+  assert(before.cells >= 2, `前置：这一栏应占一列、命中两行：${JSON.stringify(before)}`)
+  assert(before.chips === 2, `两值的那一格画两枚 chip（不是一句「甲、乙」）：${JSON.stringify(before)}`)
+
+  await page.evaluate((defId) => {
+    document
+      .querySelector(`#editor .mount .mount-view .tv-row [data-prop="${defId}"] .prop-chip-x`)
+      ?.click()
+  }, setup.defId)
+  await page.waitForFunction(
+    ({ kid0, defId }) => (window.__qua.__editor.store.find(kid0)?.props?.[defId] ?? []).length === 1,
+    { kid0: setup.kid0, defId: setup.defId },
+    { timeout: 4000 },
+  )
+  const after = await read()
+  assert(after.chips === 1, `摘掉一枚之后格子里只剩一枚 chip（表格格也要跟着重画）：${JSON.stringify(after)}`)
+
+  await ctx.close()
+  return '表格多值格画 chips；摘一枚写回数组、格子跟着重画'
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

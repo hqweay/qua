@@ -209,7 +209,11 @@ export class ViewTable {
     const block = blockId ? this.deps.store.find(blockId) : undefined
     if (!block || propId === '') return
     const value = block.props?.[propId]
-    const text = value === undefined || value === null ? '' : String(value)
+    /**
+     * 多值格：控件是 chips ＋ 一枚「加一个值」的输入框，Esc 只该把**那一枚输入框**清空。
+     * `String(value)` 会把数组压成 `a,b` 塞进输入框（按 Esc 反而给它填了一句假值）。
+     */
+    const text = Array.isArray(value) ? '' : value === undefined || value === null ? '' : String(value)
     if (el instanceof HTMLInputElement) {
       if (el.type === 'checkbox') el.checked = value === true
       else el.value = text
@@ -659,10 +663,23 @@ export class ViewTable {
     }
     for (const [key, cell] of els.cells) {
       if (key === TITLE_COLUMN) continue
-      if (cell.contains(document.activeElement)) continue
+      /**
+       * **正在打字的格子不碰**：重建会把焦点与 IME 的预编辑串一起弄丢。
+       * 判据收窄到「焦点在输入框／可编辑区里」——只是按过格子里的按钮（多值 chips 的
+       * `×`、下拉）不算：那种焦点本来就随控件一起消失，而把它算进来会让
+       * 「刚摘掉一项、格子还画着旧项」变成一次静默的无反应。
+       */
+      if (isTypingIn(cell)) continue
       cell.replaceChildren(this.cellContent(r, key))
     }
   }
+}
+
+/** 一个格子里现在有人**在打字**吗（输入框／可编辑区持焦；按钮持焦不算） */
+function isTypingIn(cell: HTMLElement): boolean {
+  const el = document.activeElement
+  if (!(el instanceof HTMLElement) || !cell.contains(el)) return false
+  return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el.isContentEditable
 }
 
 /** 一格属性需要的 `FieldRow`（派生不落库；与属性区同一份形状，只少来源与顺序） */
@@ -697,6 +714,7 @@ function cellRow(
     if (cells.currentChoiceDeleted === true) row.currentChoiceDeleted = true
     if (cells.currentChoiceLabels !== undefined) row.currentChoiceLabels = cells.currentChoiceLabels
     if (cells.currentChoices !== undefined) row.currentChoices = cells.currentChoices
+    if (cells.currentChoiceIds !== undefined) row.currentChoiceIds = cells.currentChoiceIds
   }
   return row
 }

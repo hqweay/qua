@@ -26,7 +26,9 @@ import type { PropCreateMode } from '../../core/infra/ports.ts'
 import {
   ICON_PROP,
   aliasesOf,
+  allowsMany,
   assetRefsOf,
+  cardinalityOf,
   choiceDisplayLabel,
   clockLabel,
   displayNameOf,
@@ -41,6 +43,7 @@ import {
   propKindOf,
   propLabel,
   refTagIds,
+  valueItemsOf,
   valueListOf,
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
@@ -238,6 +241,69 @@ export interface PropertiesEls {
 }
 
 /**
+ * 多值的**一枚 chip**：值文本 ＋ 摘除。
+ *
+ * 多值的读法一律从这里长出来（而不是各自拼字符串）：`asset` 用缩略图、
+ * `select`／`ref`／`text`／`number` 用 chip —— 但「一格值是一个列表」这件事
+ * 只有一种表达，写回时用 `valueListOf`／`valueItemsOf` 还原成数组，
+ * **绝不 `String(value)`**（那会把 `a,b` 写回去，List 就退化成单值了）。
+ */
+function valueChips(
+  items: readonly { text: string; refId?: string }[],
+  onRemove: (index: number) => void,
+): HTMLElement {
+  const box = document.createElement('div')
+  box.className = 'prop-chips'
+  box.dataset.propChips = '1'
+  for (const [i, item] of items.entries()) {
+    const chip = document.createElement('span')
+    chip.className = 'prop-chip'
+    chip.dataset.chip = '1'
+    const body = document.createElement('span')
+    body.className = 'prop-chip-text ui-ellipsis'
+    body.textContent = item.text
+    /**
+     * 引用类的值本身是一枚**露面**：`data-ref-to` 是应用里唯一的判据，跳转由事件层
+     * 那一条分支接管（与正文引用、块下属性行同一份）。这里不挂点击——
+     * 第二份跳转实现＝第二套语义。
+     */
+    if (item.refId !== undefined && item.refId !== '') {
+      body.dataset.refTo = item.refId
+      body.classList.add('prop-chip-ref')
+    }
+    const x = document.createElement('button')
+    x.type = 'button'
+    x.className = 'prop-chip-x'
+    x.dataset.chipRemove = '1'
+    x.dataset.tip = t('ui.props.multiRemove')
+    x.textContent = '×'
+    x.addEventListener('click', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      onRemove(i)
+    })
+    chip.append(body, x)
+    box.appendChild(chip)
+  }
+  return box
+}
+
+/** 多值的「追加一个」入口（`+`）：形状与定义页的「＋候选标签」同一枚，读者认得 */
+function chipAddButton(title: string, onClick: (anchor: DOMRect) => void): HTMLButtonElement {
+  const add = document.createElement('button')
+  add.type = 'button'
+  add.className = 'prop-chip-add'
+  add.dataset.chipAdd = '1'
+  add.dataset.tip = title
+  add.textContent = '+'
+  add.addEventListener('click', (e) => {
+    e.preventDefault()
+    onClick(add.getBoundingClientRect())
+  })
+  return add
+}
+
+/**
  * 一行值的编辑器（按 kind）。返回控件元素。
  *
  * `ref` 与其它类型不同：它不是「输入一个值」，而是**选一个块**。
@@ -245,6 +311,10 @@ export interface PropertiesEls {
  *
  * ⚠️ **属性区与表格单元格共用这一份**：两处各写一套控件，迟早出现
  *    「面板里 Enter 能提交、表格里不能」这种只在某处复现的分叉。
+ *
+ * 多值（`many`）也在这里：它是**值的形状**（一格是一个列表），不是某一种 kind 的脾气
+ * —— 所以 `text`／`number`／`select`／`ref`／`asset` 各自有控件，但共用「chips ＋ 追加」
+ * 这一副形状与「写回整份数组」这一条写路径。
  */
 export function makeCellEditor(
   row: FieldRow,
@@ -263,6 +333,8 @@ export function makeCellEditor(
    */
   let last: unknown = row.value
   const same = (a: unknown, b: unknown): boolean => {
+    // 多值的「同一个值」是**同样的数组**（引用比较恒不等 ⇒ 每次重画都多一笔零 op 事务）
+    if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((x, i) => x === b[i])
     const ea = a === undefined || a === null || a === ''
     const eb = b === undefined || b === null || b === ''
     if (ea && eb) return true
@@ -305,6 +377,13 @@ export function makeCellEditor(
     return box
   }
   /**
+   * **这一格是不是多值**（`_cardinality: 'many'` ＋ 注册表说这个 kind 允许多值）。
+   *
+   * 两个条件都要：注册表是写路径的闸，控制面不该比它更宽 —— 坏数据里
+   * `checkbox + many` 不该画出 chips（那会让用户以为这种形态是合法的）。
+   */
+  const many = row.cardinality === 'many' && allowsMany(kind)
+  /**
    * `ref`：显示目标的名字，点一下换目标。
    *
    * ⚠️ **不提供手打 id 的输入框**：32 位 hex 没人记得住，让它可编辑等于让人拼手速。
@@ -314,46 +393,93 @@ export function makeCellEditor(
    * `openRef` 把 mods 原样交给 `openActionOf`（⇧ 右槽／⌘ 新 tab／⌥ 详情），
    * 这里不发明第二套「哪个键去哪儿」。编辑面（面板／表格）的主动作仍是换值——
    * 阅读面（块下行）反过来：点值就跳，见 `props-line.ts`。
+   *
+   * ⚠️ **多值时不换成「换目标」语义**：一串引用里换成「点一下把整串换成一个」
+   *    是破坏性动作。多值时值本身是阅读面（chip 可点），编辑走 `×` 摘除与 `+` 追加，
+   *    每次追加写回**整份数组**。
    */
-  if (kind === 'ref' && deps?.pickRef && owner) {
-    const pick = deps.pickRef
-    const current = row.value === undefined || row.value === null ? '' : String(row.value)
-    const btn = document.createElement('button')
-    btn.type = 'button'
-    btn.className = 'prop-input prop-ref'
-    btn.dataset.refId = current
-    btn.dataset.tip = current === '' ? t('ui.props.pickRef') : t('ui.props.refOpenHint')
-    btn.textContent = current === '' ? t('ui.props.pending') : (deps.refLabel?.(current) ?? current)
-    btn.addEventListener('click', (e) => {
-      const mods = clickModsOf(e)
-      if (current !== '' && deps.openRef && (mods.altKey || mods.metaKey || mods.shiftKey || mods.ctrlKey)) {
-        deps.openRef(current, mods)
-        return
+  if (kind === 'ref') {
+    if (many) {
+      const ids = valueListOf(row.value)
+      const box = document.createElement('div')
+      box.className = 'prop-multi-value'
+      box.dataset.propMulti = '1'
+      box.appendChild(
+        valueChips(
+          ids.map((id) => ({ text: deps?.refLabel?.(id) ?? id, refId: id })),
+          (i) => {
+            const next = ids.filter((_, j) => j !== i)
+            send(next.length === 0 ? undefined : next)
+          },
+        ),
+      )
+      if (deps?.pickRef && owner) {
+        const pick = deps.pickRef
+        box.appendChild(
+          chipAddButton(t('ui.props.refAdd'), (anchor) => {
+            pick(owner, row.propId, '', (targetId) => {
+              if (targetId === '' || ids.includes(targetId)) return
+              send([...ids, targetId])
+            }, anchor)
+          }),
+        )
       }
-      pick(owner, row.propId, current, (targetId) => send(targetId === '' ? undefined : targetId), btn.getBoundingClientRect(), btn)
-    })
-    return btn
-  }
-  if (kind === 'select' && row.cardinality === 'many') {
-    /**
-     * 多值：一个按钮显示当前选中的名字，点开多选浮层（`openChoicePicker`，保持打开逐项勾）。
-     * 写回的是**整份数组**，与单选同一条 `set-value` 命令；每次勾选一次撤销。
-     */
-    const current = valueListOf(row.value)
-    const labels = row.currentChoiceLabels ?? []
-    const btn = document.createElement('button')
-    btn.type = 'button'
-    btn.className = 'prop-input prop-multi'
-    btn.dataset.multi = '1'
-    btn.textContent = labels.length === 0 ? t('ui.props.pending') : labels.join('、')
-    if (deps?.pickChoice && owner) {
-      btn.addEventListener('click', () => {
-        deps.pickChoice?.(owner, row.propId, current, (next) => send(next), btn.getBoundingClientRect(), btn)
-      })
-    } else {
-      btn.disabled = true
+      return box
     }
-    return btn
+    if (deps?.pickRef && owner) {
+      const pick = deps.pickRef
+      const current = row.value === undefined || row.value === null ? '' : String(row.value)
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = 'prop-input prop-ref'
+      btn.dataset.refId = current
+      btn.dataset.tip = current === '' ? t('ui.props.pickRef') : t('ui.props.refOpenHint')
+      btn.textContent = current === '' ? t('ui.props.pending') : (deps.refLabel?.(current) ?? current)
+      btn.addEventListener('click', (e) => {
+        const mods = clickModsOf(e)
+        if (current !== '' && deps.openRef && (mods.altKey || mods.metaKey || mods.shiftKey || mods.ctrlKey)) {
+          deps.openRef(current, mods)
+          return
+        }
+        pick(owner, row.propId, current, (targetId) => send(targetId === '' ? undefined : targetId), btn.getBoundingClientRect(), btn)
+      })
+      return btn
+    }
+  }
+  if (kind === 'select' && many) {
+    /**
+     * 多值：**每一项一枚 chip**，`×` 摘这一项、`+` 开多选浮层。
+     *
+     * 此前是一颗「a、b」按钮：它把「一格有多个值」压成一句话，读者分不清
+     * 哪些是可摘的项、也点不到其中某一个。chips 与 `asset` 的缩略图同一档 —— 都是
+     * 「一格值是一个列表」的露面。
+     *
+     * 写回的是**整份数组**，与单选同一条 `set-value` 命令；每次勾选一次撤销。
+     * 顺序按选项序（`currentChoiceIds`，与标签逐项对齐），摘除按 **id** 而不是按下标猜。
+     */
+    const ids = row.currentChoiceIds ?? valueListOf(row.value)
+    const labels = row.currentChoiceLabels ?? []
+    const box = document.createElement('div')
+    box.className = 'prop-multi-value'
+    box.dataset.propMulti = '1'
+    box.appendChild(
+      valueChips(
+        ids.map((_, i) => ({ text: labels[i] ?? t('ui.props.choice.deleted') })),
+        (i) => {
+          const next = ids.filter((_, j) => j !== i)
+          send(next.length === 0 ? undefined : next)
+        },
+      ),
+    )
+    if (deps?.pickChoice && owner) {
+      const pick = deps.pickChoice
+      box.appendChild(
+        chipAddButton(t('ui.props.pickChoiceMulti'), (anchor) => {
+          pick(owner, row.propId, ids, (next) => send(next.length === 0 ? undefined : next), anchor)
+        }),
+      )
+    }
+    return box
   }
   if (kind === 'select') {
     const sel = document.createElement('select')
@@ -420,10 +546,9 @@ export function makeCellEditor(
    *
    * ⚠️ **单值／多值都从 `assetRefsOf` 读**：定义切成 `many` 后值是数组，
    *    这里追加／摘除都保持数组形状，绝不 `String(value)`（那会把 `a,b` 写回成一个字符串）。
-   *    定义页目前还没有给 asset 开基数开关，但数据层允许，控件不能先把它压坏。
+   *    基数开关在定义页的通用段（`buildDefCardinality`，asset 在注册表里 `many: true`）。
    */
   if (kind === 'asset') {
-    const many = row.cardinality === 'many'
     const refs = assetRefsOf(row.value)
     const box = document.createElement('div')
     box.className = 'prop-asset'
@@ -433,7 +558,11 @@ export function makeCellEditor(
     for (const ref of refs) {
       thumbs.appendChild(
         makeAssetThumb(ref, {
-          onRemove: () => send(many ? refs.filter((x) => x !== ref) : undefined),
+          onRemove: () => {
+            // 多值摘一项仍写数组；摘空了就是「没有这一格」（与 chips 一条口径）
+            const next = refs.filter((x) => x !== ref)
+            send(many ? (next.length === 0 ? undefined : next) : undefined)
+          },
         }),
       )
     }
@@ -470,6 +599,60 @@ export function makeCellEditor(
       )
       box.appendChild(btn)
     }
+    return box
+  }
+  /**
+   * **`text`／`number` 的多值**：chips ＋ 一个「加一个值」的输入框。
+   *
+   * 为什么不用「一行一个输入框」：多值的项数是用户随手长的，行数跟着变会
+   * 让属性区的行高跳（面板与表格都在按「行数 × 行高」估高）；chips 是**一格**。
+   *
+   * 读值走 `valueItemsOf`（不滤类型：`number` 多值存的是数字数组，
+   * 走只认字符串的 `valueListOf` 会读成空列表 ⇒ 有值却显示待填）。
+   */
+  if (many && (kind === 'text' || kind === 'number')) {
+    const values = valueItemsOf(row.value)
+    const box = document.createElement('div')
+    box.className = 'prop-multi-value'
+    box.dataset.propMulti = '1'
+    const commitOne = (raw: string): void => {
+      const text = raw.trim()
+      if (text === '') return
+      if (kind === 'number') {
+        const n = Number(text)
+        // 解析失败 ⇒ 不写（回退，一次 op 都不产），与单值数字同一条
+        if (!Number.isFinite(n)) return
+        send([...values, n])
+        return
+      }
+      send([...values, text])
+    }
+    box.appendChild(
+      valueChips(
+        values.map((v) => ({ text: String(v) })),
+        (i) => {
+          const next = values.filter((_, j) => j !== i)
+          send(next.length === 0 ? undefined : next)
+        },
+      ),
+    )
+    const add = document.createElement('input')
+    add.className = 'prop-input prop-multi-add'
+    add.placeholder = t('ui.props.multiAdd')
+    add.inputMode = kind === 'number' ? 'decimal' : 'text'
+    if (row.format === 'url' || row.format === 'email' || row.format === 'phone') add.spellcheck = false
+    /**
+     * 提交走 `onCommitKeys`（Enter 由它兜住并 `stopPropagation`）：这个输入框可能长在
+     * 表格格里，Enter 冒到命令层会命中「拆块」，也会让属性卡的 Enter 去提交别的行。
+     * 失焦也提交一次 —— 用户打完字直接点别处是最常见的那条路。
+     */
+    const submit = (): void => {
+      commitOne(add.value)
+      add.value = ''
+    }
+    onCommitKeys(add, { commit: submit, stop: true })
+    add.addEventListener('change', submit)
+    box.appendChild(add)
     return box
   }
   const input = document.createElement('input')
@@ -827,6 +1010,8 @@ export class PropertiesPanel {
       hint.textContent = t('ui.props.defValuesHint')
       head.appendChild(hint)
       config.appendChild(head)
+      const card = this.buildDefCardinality(target)
+      if (card) config.appendChild(card)
       const fmt = this.buildDefFormat(target)
       if (fmt) config.appendChild(fmt)
       // `ref` 的候选域：只对 ref 定义出现（别的 kind 没有「候选」这回事）
@@ -841,6 +1026,48 @@ export class PropertiesPanel {
 
     // 系统信息在**最后**：它是这一块的出生与改动记录，不是可编辑的数据
     this.els.body.appendChild(this.buildSystem(target))
+  }
+
+  /**
+   * **基数**（`_cardinality`）：一条属性在**一个块上**能有几个值。
+   *
+   * 它原来只在 `ChoicesEditor` 里（"允许多个值"），于是只有 `select` 定义做得到 ——
+   * 而基数轴早就推广到全 kind（`PROP_KIND_SPECS[kind].many`：text／number／select／ref／asset，
+   * date 先 one、checkbox 永不 many）。同一件事只有一类属性做得到，用户会以为
+   * 「引用不能是列表」；真相是**界面没给入口**。
+   *
+   * 判据与写路径同一份：显隐读 `allowsMany(propKindOf(def))`，闸门在
+   * `core.props/set-choice-cardinality`（切回 `one` 时挡住「库里仍有 >1 个值」）。
+   * 命令拒绝时把控件重画回模型里的那个值 —— 复选框不能停在用户点出来的状态上。
+   */
+  private buildDefCardinality(def: Block): HTMLElement | null {
+    const kind = propKindOf(def)
+    if (!allowsMany(kind)) return null
+    const row = document.createElement('div')
+    row.className = 'prop-row prop-def-multi prop-hug ui-row'
+    const label = document.createElement('label')
+    label.className = 'prop-label'
+    const name = document.createElement('span')
+    name.className = 'prop-name'
+    name.textContent = t('ui.props.cardinality.label')
+    label.append(name)
+    const value = document.createElement('span')
+    value.className = 'prop-value'
+    const box = document.createElement('input')
+    box.type = 'checkbox'
+    box.className = 'prop-check'
+    box.dataset.defMulti = '1'
+    box.checked = cardinalityOf(def) === 'many'
+    box.addEventListener('change', () => {
+      this.deps.choices.setCardinality(def.id, box.checked ? 'many' : 'one')
+      this.render()
+    })
+    const hint = document.createElement('span')
+    hint.className = 'prop-source'
+    hint.textContent = t('ui.props.cardinality.hint')
+    value.append(box, hint)
+    row.append(label, value)
+    return row
   }
 
   /** 定义格式的一段（没有格式轴的 kind 返回 null：不给一个点了没用的下拉） */
