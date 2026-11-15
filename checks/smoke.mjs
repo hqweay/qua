@@ -7704,10 +7704,18 @@ await check(
     })
     assert(fresh.groupHidden === false, `选「新建属性」时应展开新建组：${JSON.stringify(fresh)}`)
     assert(fresh.nameInputs === 1, `新建组里应有属性名输入：${JSON.stringify(fresh)}`)
-    assert(fresh.kinds === 7, `新建组里的类型下拉应有 7 种：${JSON.stringify(fresh)}`)
+    // 目录层是 **7 种 kind ＋ `text` 的三条格式一等入口**（链接／邮箱／电话）＝10 条：
+    // 格式不是 kind（kind 按值的存储形状分，都是字符串），落盘仍是 `text + _format`。
+    const kindLabels = await page.evaluate(() =>
+      [...document.querySelectorAll('.props-form--own .props-new-group select.prop-input option')].map(
+        (o) => o.textContent ?? '',
+      ),
+    )
+    assert(fresh.kinds === 10, `新建组里的类型下拉应有 7 种 kind ＋ 3 条格式入口：${JSON.stringify(fresh)}`)
+    assert(kindLabels.includes('链接'), `目录里应有「链接」这个格式入口：${JSON.stringify(kindLabels)}`)
 
     await ctx.close()
-    return `默认可见 select 1 个；「评分·数字」复用后行出现；选「新建」才展开名字＋7 种类型`
+    return `默认可见 select 1 个；「评分·数字」复用后行出现；选「新建」才展开名字＋7 种 kind（＋3 条格式入口）`
   },
 )
 
@@ -17973,7 +17981,11 @@ await check('T176 悬停有中性反馈：回收站行 hover 出底色（--ui-bg
   assert(target, '前置：应有可删的普通块')
   await page.evaluate((id) => window.__qua.__editor.struct.remove(id), target)
   await page.waitForSelector('[data-card-id="trash"] [data-trash-row]')
-  await page.locator('[data-card-id="trash"] [data-trash-row]').first().hover()
+  // 槽滚到尽头时最后一张卡的下沿会落在**右下角常驻角标**底下（那是 chrome，不是内容）。
+  // 这条断言问的是 hover 有没有底色，不是角标的落点 ⇒ 先把它滚到中间再悬停。
+  const row = page.locator('[data-card-id="trash"] [data-trash-row]').first()
+  await row.evaluate((el) => el.scrollIntoView({ block: 'center' }))
+  await row.hover()
   // 底色有 120ms 的过渡：等它走完再读，读到的才是 hover 稳态
   await page.waitForTimeout(250)
   const bg = await page.evaluate(
@@ -21371,6 +21383,8 @@ await check(
     }, host)
     assert(live, '前置：宿主页上应有一条能解析的引用')
     await page.evaluate((id) => void window.__qua.invoke('core.page/delete', { blockId: id }), live.targetId)
+    await page.waitForTimeout(120)
+    await page.locator('.confirm-ok').click() // 删页弹确认（爆炸半径：整棵子树）
     await page.waitForTimeout(150)
     await page.evaluate((id) => void window.__qua.invoke('core.page/open', { pageId: id }), host)
     await page.waitForTimeout(200)
@@ -26029,9 +26043,11 @@ await check(
     await page.waitForTimeout(200)
     const top2 = await topOf()
     const val = await page.evaluate((id) => {
-      const plain = (b) => (b ? b.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : '')
       const def = window.__qua.propDefs().find((d) => d.label === '任务状态')
-      const want = window.__qua.__editor.store.find(def.id).children.find((c) => plain(c) === '进行中')?.id
+      // 选项住在定义块的 `_choices`（记录数组，数组序＝选项序），不再是定义块的子块。
+      // `propDefs()` 是投影（只有 id/label/kind），原始 `_choices` 要从库里的块读。
+      const raw = window.__qua.__editor.store.find(def.id)
+      const want = (raw?.props?._choices ?? []).find((c) => String(c.label ?? '') === '进行中')?.id
       const got = window.__qua.fields(id).find((x) => x.propId === def.id)?.value
       return { got, want }
     }, fx.host)
@@ -26802,13 +26818,24 @@ await check('T280 回收站清空：口径筛选可见、确认后永久删除�
       }
     })
 
+  /**
+   * 槽滚到尽头时最后一张卡的下沿落在**右下角常驻角标**底下（chrome，不是内容）：
+   * 点之前把它滚到中间——这里验的是回收站的动作，不是角标的落点。
+   */
+  const clickInTrash = async (sel, nth) => {
+    let loc = page.locator(`[data-card-id="trash"] ${sel}`)
+    if (nth !== undefined) loc = loc.nth(nth)
+    await loc.evaluate((el) => el.scrollIntoView({ block: 'center' }))
+    await loc.click()
+  }
+
   // ① 工具行：「清空 2」、两个口径钮（当前口径＝全部）
   const all = await readCard()
   assert(all.rows.length === 2, `前置：回收站应有两条，实际 ${JSON.stringify(all.rows)}`)
   assert(all.clear.includes('2'), `清空钮应带当前口径的条数：${all.clear}`)
 
   // ② 切「空块」口径 ⇒ 只剩空块那一行
-  await page.locator('[data-card-id="trash"] .trash-scope').nth(1).click()
+  await clickInTrash('.trash-scope', 1)
   await page.waitForTimeout(200)
   const blank = await readCard()
   assert(
@@ -26819,7 +26846,7 @@ await check('T280 回收站清空：口径筛选可见、确认后永久删除�
   assert(blank.pressed[1] === 'true', '空块口径钮应是按下态')
 
   // ③ 清空 ⇒ 先出确认框；取消 ⇒ 什么都不动
-  await page.locator('[data-card-id="trash"] .trash-clear').click()
+  await clickInTrash('.trash-clear')
   await page.waitForTimeout(150)
   const confirmBox = await page.evaluate(() => {
     const box = document.querySelector('.confirm')
@@ -26836,7 +26863,7 @@ await check('T280 回收站清空：口径筛选可见、确认后永久删除�
   assert(afterCancel.rows.length === 1, '取消之后条目不该动')
 
   // ④ 确认 ⇒ 永久删除；撤销不回来（purge 不进撤销栈）
-  await page.locator('[data-card-id="trash"] .trash-clear').click()
+  await clickInTrash('.trash-clear')
   await page.waitForTimeout(150)
   await page.locator('.confirm .confirm-ok').click()
   await page.waitForTimeout(250)
@@ -29038,8 +29065,9 @@ await check('T304 图标选择器：选项入口网格化；块配置弹窗（�
     await window.__qua.invoke('core.props/create-def', { blockId: hostId, label: '优先级', kind: 'select', target: 'own' })
     const defId = window.__qua.propDefs().find((d) => d.label === '优先级')?.id ?? ''
     await window.__qua.invoke('core.props/add-choice', { defId, label: '高' })
+    // 选项住在定义块的 `_choices`（记录数组），不再是定义块的子块
     const def = window.__qua.__editor.store.find(defId)
-    return { defId, choiceId: def.children[0].id }
+    return { defId, choiceId: def.props?._choices?.[0]?.id ?? '' }
   }, host.id)
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), choiceId.defId)
   await page.waitForTimeout(200)
@@ -29055,7 +29083,11 @@ await check('T304 图标选择器：选项入口网格化；块配置弹窗（�
   await page.waitForTimeout(120)
   await page.click('.icon-picker .icon-picker-cell[data-icon="lucide:flag"]')
   await page.waitForTimeout(150)
-  const picked = await page.evaluate((id) => window.__qua.__editor.store.find(id)?.props?._icon ?? '', choiceId.choiceId)
+  // 选中的图标写在**选项记录**上（`_choices` 里那条），不在块 props 里
+  const picked = await page.evaluate(({ defId, choiceId }) => {
+    const rec = (window.__qua.__editor.store.find(defId)?.props?._choices ?? []).find((c) => c.id === choiceId)
+    return rec?.icon ?? ''
+  }, choiceId)
   assert(picked === 'lucide:flag', `选中应写 _icon：${JSON.stringify(picked)}`)
 
   // ② 标签配置头：内嵌「图标＋颜色」，选图标与点色都就地生效
@@ -29136,8 +29168,9 @@ await check('T305 emoji：默认 tab、中文搜索命中、分类导航过滤�
     await window.__qua.invoke('core.props/create-def', { blockId: hostId, label: '心情', kind: 'select', target: 'own' })
     const defId = window.__qua.propDefs().find((d) => d.label === '心情')?.id ?? ''
     await window.__qua.invoke('core.props/add-choice', { defId, label: '好' })
+    // 选项住在定义块的 `_choices`（记录数组），不再是定义块的子块
     const def = window.__qua.__editor.store.find(defId)
-    return { defId, choiceId: def.children[0].id }
+    return { defId, choiceId: def.props?._choices?.[0]?.id ?? '' }
   }, host.id)
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), choiceId.defId)
   await page.waitForTimeout(200)
@@ -29183,7 +29216,11 @@ await check('T305 emoji：默认 tab、中文搜索命中、分类导航过滤�
   )
   await page.click('.icon-picker-grid:not(.icon-picker-recent) .icon-picker-cell:nth-child(2)')
   await page.waitForTimeout(150)
-  const picked = await page.evaluate((id) => window.__qua.__editor.store.find(id)?.props?._icon ?? '', choiceId.choiceId)
+  // 同上：emoji 写在选项记录上（`_choices` 里那条），不是块 props
+  const picked = await page.evaluate(({ defId, choiceId }) => {
+    const rec = (window.__qua.__editor.store.find(defId)?.props?._choices ?? []).find((c) => c.id === choiceId)
+    return rec?.icon ?? ''
+  }, choiceId)
   assert(picked === firstEmoji && picked !== '' && !picked.startsWith('lucide:'), `选中应写字面值：${JSON.stringify({ picked, firstEmoji })}`)
   const shown = await page.evaluate(() => document.querySelector('.choice-icon')?.dataset.icon ?? '')
   assert(shown === firstEmoji, `选项行应按字面渲染选中的 emoji：${JSON.stringify(shown)}`)
@@ -29957,11 +29994,12 @@ await check('T312 asset 属性值：外链渲染成真图、块下投影同形�
     { timeout: 5000 },
   )
 
-  // ① 块下属性行：值段是缩略图投影，不再是裸链接文本（且这一枚不改行高）
+  // ① 块下属性行：值段里是缩略图投影，不再是裸链接文本（且这一枚不改行高）
+  //    投影盒是值段里的 `.blk-prop-assets`（多枚时还有计数徽章与它并列，故不再标在值段自己身上）
   const line = await page.evaluate((host) => {
     const val = document.querySelector(`.blk[data-block-id="${host}"] .blk-props-line .blk-prop-value`)
     return {
-      assets: Boolean(val?.classList.contains('blk-prop-assets')),
+      assets: Boolean(val?.querySelector('.blk-prop-assets')),
       imgs: val?.querySelectorAll('img').length ?? 0,
       ref: val?.querySelector('[data-asset-ref]')?.getAttribute('data-asset-ref') ?? '',
       text: val?.textContent ?? '',
