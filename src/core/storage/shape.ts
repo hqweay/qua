@@ -168,8 +168,7 @@ import {
  *            归一成 text＋format url，不迁值。⇒ 作废重 seed；**桌面真机库不吃这个版本号**
  *            （见 `ipc-adapter`），那边按「旧值在场」设计读路径（`legacyChoiceOf`）。
  * v45 → v46：**属性用途的角色名叫 `closure` 不叫 `status`**（机制不该用第一个消费者的词）。
- *            语义一个字不变，只是 `_use` 的值改名；浏览器库作废重 seed，桌面真机库的
- *            `_use:'status'` 仍在盘上 ⇒ 读路径认遗留值（`LEGACY_USE`），写路径只写新值。
+ *            语义一个字不变，只是 `_use` 的值改名 ⇒ 旧值不读、直接作废重 seed，不写迁移。
  */
 export const WORKSPACE_VERSION = 46
 

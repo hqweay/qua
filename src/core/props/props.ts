@@ -73,7 +73,17 @@ import {
  * `ref` 的候选域（`_refTags` 软约束）住 `./ref-target.ts`；本文件再导出，
  * **对外的符号名不变**（`core/index.ts` 只转一手）。
  */
-export { REF_TAGS_PROP, isRefTagIds, refTagIds, refTagNames, refTargetScope } from './ref-target.ts'
+export {
+  REF_TAGS_PROP,
+  REF_VIEW_PROP,
+  isRefTagIds,
+  isRefViewValue,
+  refTagIds,
+  refTagNames,
+  refTargetScope,
+  type RefDefView,
+} from './ref-target.ts'
+import { REF_VIEW_PROP, isRefViewValue, type RefDefView } from './ref-target.ts'
 
 /**
  * 两个属性值是不是同一件事（**结构相等**：属性值可以是数组／对象，`Object.is` 不够）。
@@ -570,23 +580,14 @@ export type PropUse = 'closure'
 
 export const USE_PROP = '_use'
 
-/**
- * 旧库遗留的用途名（`status` 是这次改名之前的写法）。
- *
- * 与 `LEGACY_KINDS` 同一条理由：浏览器库靠版本号作废，**桌面库的旧值仍在盘上**，
- * 冷启动不能把它判成坏形状、也不能静默丢掉关闭态。只在读路径认，写路径只写新值。
- */
-const LEGACY_USE: readonly string[] = ['status']
-
 export function isUseValue(v: unknown): boolean {
-  return typeof v === 'string' && (v === 'closure' || LEGACY_USE.includes(v))
+  return v === 'closure'
 }
 
 /** 定义的用途；不是 `select`／没写／未知值 ⇒ 缺席（普通属性） */
 export function useOf(def: Block | undefined): PropUse | undefined {
   if (!def || propKindOf(def) !== 'select') return undefined
-  const v = prop<string>(def, USE_PROP)
-  return v === 'closure' || (typeof v === 'string' && LEGACY_USE.includes(v)) ? 'closure' : undefined
+  return prop<string>(def, USE_PROP) === 'closure' ? 'closure' : undefined
 }
 
 /**
@@ -621,6 +622,18 @@ export function checkOf(def: Block | undefined): CheckSpec | undefined {
   if (!def || propKindOf(def) !== 'select') return undefined
   if (cardinalityOf(def) === 'many') return undefined
   return parseCheckSpec(prop<unknown>(def, CHECK_PROP)) ?? undefined
+}
+
+/**
+ * ref 定义的**默认看法**：值行画引用 chip（缺省）还是正文岛（就地编辑）。
+ *
+ * 只对 ref 定义有意义——别的 kind 没有这个槽，一律按缺省读；
+ * 坏值也按缺省（手写数据不该让值行失效）。
+ */
+export function refViewOf(def: Block | undefined): RefDefView {
+  if (!def || propKindOf(def) !== 'ref') return 'chip'
+  const v = prop<unknown>(def, REF_VIEW_PROP)
+  return isRefViewValue(v) ? v : 'chip'
 }
 
 /**
