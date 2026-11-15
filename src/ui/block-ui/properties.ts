@@ -537,7 +537,16 @@ export function makeCellEditor(
     return wrap
   }
   /**
-   * `asset`：**缩略图 ＋ 手填链接 ＋ 选本地文件**。
+   * `asset`：**一枚控件框里住三件**——缩略图（前导 adornment）／地址（可编辑文本）／选文件键。
+   *
+   * 为什么不是三个平级的框（真机反馈：检视卡窄槽里缩略图压在地址输入框上）：
+   * 值是**一份**，图与地址只是它的两种投影。三个兄弟在同一行抢宽度时，
+   * flex 会把「装着不可缩内容的盒子」压到比内容还窄，内容溢出盒子画到下一个兄弟上
+   * ⇒ 不是间距问题，是收缩量没有指定去处（视觉纪律 5）。收成**一个框**之后：
+   *   · 框自己就是那个输入控件（边框／底／焦点环只此一份）；
+   *   · 图与选文件键是框内固定件（`flex: none`，值不参与压缩）；
+   *   · 地址是**唯一**吸收收缩量的格（`min-width: 0` ＋ 省略），截断后点进输入框
+   *     还能拿回全文 —— 这正是「可省略的格」该有的性质。
    *
    * 两态值（hash／http(s)）在 `asset-value.ts` 现算成地址，这里只管读写：
    *   · 已有值画成露面（内态缺失／外链腐烂时自己退化成一句实话，值不动）；
@@ -553,6 +562,8 @@ export function makeCellEditor(
     const box = document.createElement('div')
     box.className = 'prop-asset'
     box.dataset.assetEditor = '1'
+    // 单值的图是固定前导件；多值是一列可横向滚的缩略图，允许它先让出宽度给地址
+    box.dataset.assetMany = many ? '1' : '0'
     const thumbs = document.createElement('div')
     thumbs.className = 'prop-asset-thumbs'
     for (const ref of refs) {
@@ -586,10 +597,13 @@ export function makeCellEditor(
       const pick = deps.pickAsset
       const btn = document.createElement('button')
       btn.type = 'button'
+      // 「选择文件」是动作不是数据：窄槽里按视觉纪律 5 先做减法，文字退 tooltip ＋ aria，
+      // 让出宽度给地址（那格才是能省略、能拿回全文的）。
       btn.className = 'prop-asset-pick ghost'
       btn.dataset.assetPick = '1'
       btn.dataset.tip = t('ui.props.assetPickHint')
-      btn.textContent = t('ui.props.assetPick')
+      btn.setAttribute('aria-label', t('ui.props.assetPick'))
+      renderIcon(btn, 'lucide:image-plus', 'image-plus', 'sm')
       btn.addEventListener('click', () =>
         pick((hash) => {
           if (many) {

@@ -342,6 +342,17 @@
   font: inherit;
   color: inherit;
 }
+/* asset 的框同理退成透明：焦点环落在整格，不落在里面那一小段地址上 */
+.tv-editor .prop-asset {
+  padding: 0;
+  border-color: transparent;
+  background: none;
+}
+.tv-editor .prop-asset:focus-within {
+  border-color: transparent;
+  box-shadow: inset 0 0 0 var(--ui-sep) var(--ui-accent);
+}
+.tv-editor .prop-asset .prop-asset-input:focus { box-shadow: none; }
 /* 焦点落点：格子上亮一圈内描边（格子的「框」就是它的边框，焦点必须能看见） */
 .tv-editor .prop-input:focus {
   outline: none;

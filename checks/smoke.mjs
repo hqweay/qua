@@ -30170,6 +30170,81 @@ await check('T316 表格的多值格是 chips：一块两值 ⇒ 两枚 chip；�
   return '表格多值格画 chips；摘一枚写回数组、格子跟着重画'
 })
 
+await check('T317 asset 值控件：检视卡窄槽里缩略图与地址不叠压、地址全文仍在框里', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  /** 宽图（240×40）才复现得出来：正方形小图挤不出「盒被压到比内容还窄」那一下 */
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="40"><rect width="240" height="40" fill="#eee"/><path d="M0 0h240v2H0z" fill="#4c9a6a"/></svg>'
+  const url = 'https://example.com/qua-wide.png'
+  await page.route('**/qua-wide.png', (r) =>
+    r.fulfill({ status: 200, contentType: 'image/svg+xml', body: svg }),
+  )
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  const ids = await page.evaluate((link) => {
+    const host = window.__qua.blocks().find((b) => b.roles.length === 0 && b.text.length > 2)
+    window.__qua.invoke('core.props/create-def', { blockId: host.id, label: '冒烟封面', kind: 'asset', target: 'own' })
+    const def = window.__qua.propDefs().find((d) => d.label === '冒烟封面')
+    window.__qua.invoke('core.props/set-value', { blockId: host.id, propId: def.id, value: link })
+    return { host: host.id, propId: def.id }
+  }, url)
+  await page.evaluate((host) => window.__qua.invoke('core.block/focus-block', { blockId: host }), ids.host)
+  await page.waitForFunction(
+    (link) =>
+      [...document.querySelectorAll('#inspect-card .prop-asset-img')].some(
+        (img) => img.getAttribute('src') === link && img.naturalWidth > 0,
+      ),
+    url,
+    { timeout: 5000 },
+  )
+
+  /**
+   * 判据是**矩形相交**（不是看截图）：缩略图（含它的容器）与地址输入框不许有交集。
+   * 真机现场是 `.prop-asset-thumbs` 的盒被 flex 压到 10px、里面的 63px 图溢出到
+   * 输入框上 —— 只断言「元素都在」是绿的，必须量几何。
+   */
+  const geom = await page.evaluate((propId) => {
+    const row = document.querySelector(`#inspect-card .prop-row[data-prop-id="${propId}"]`)
+    const box = row?.querySelector('[data-asset-editor]')
+    if (!row || !box) return { found: false }
+    const r = (sel) => {
+      const el = box.querySelector(sel)
+      return el ? el.getBoundingClientRect() : null
+    }
+    const overlap = (a, b) =>
+      a && b
+        ? Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) *
+          Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top))
+        : 0
+    const thumbs = r('.prop-asset-thumbs')
+    const thumb = r('.prop-asset-thumb')
+    const input = r('.prop-asset-input')
+    const pick = r('.prop-asset-pick')
+    return {
+      found: true,
+      rowH: Math.round(row.getBoundingClientRect().height),
+      thumbsW: Math.round(thumbs?.width ?? -1),
+      thumbW: Math.round(thumb?.width ?? -1),
+      inputW: Math.round(input?.width ?? -1),
+      hits: Math.round(overlap(thumbs, input) + overlap(thumb, input) + overlap(input, pick)),
+      value: box.querySelector('.prop-asset-input')?.value ?? '',
+      pickLabel: box.querySelector('.prop-asset-pick')?.getAttribute('aria-label') ?? '',
+      pickIcon: Boolean(box.querySelector('.prop-asset-pick .ico')),
+    }
+  }, ids.propId)
+  assert(geom.found, '检视卡里应能找到这一栏的 asset 控件')
+  assert(geom.hits === 0, `缩略图／地址／选文件键三者不许矩形相交：${JSON.stringify(geom)}`)
+  assert(geom.thumbsW >= geom.thumbW, `单值缩略图不许被容器裁掉：${JSON.stringify(geom)}`)
+  assert(geom.inputW > 0, `地址格不能被压到 0 宽：${JSON.stringify(geom)}`)
+  assert(geom.value === url, '收成一个框之后地址仍可编辑，值没丢：' + JSON.stringify(geom))
+  assert(geom.rowH < 44, '常规槽宽下这一栏不该无端折成上下两行：' + JSON.stringify(geom))
+  assert(geom.pickLabel !== '' && geom.pickIcon, '选文件图标键保留可读名与图形：' + JSON.stringify(geom))
+
+  await ctx.close()
+  return `检视卡窄槽：缩略图 ${geom.thumbW}px、地址 ${geom.inputW}px 同框不叠压；选文件退图标键`
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

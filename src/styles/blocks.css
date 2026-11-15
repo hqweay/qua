@@ -837,20 +837,44 @@
   border-color: var(--ui-accent);
 }
 /*
-  **asset 属性值**：缩略图（可摘除）＋ 手填链接 ＋ 选本地文件。
+  **asset 属性值**：一个控件框 ＝ 缩略图（前导）＋ 地址（可编辑）＋ 选文件键（尾动作）。
   面板与表格格子共用这一份；尺寸走 em，跟着字号走，不把表格定高撑破。
+
+  ⚠️ 收缩量归谁是这里唯一要钉死的事（视觉纪律 5）：早先三者是平级兄弟，
+     flex 会把 `.prop-asset-thumbs` 的**盒**压到比里面的图还窄，而图本身
+     `flex: none` 不会跟着缩 ⇒ 图溢出盒外，画到下一个兄弟（地址输入框）上
+     —— 真机报的「图片和图片地址重叠」不是间距问题，是没指定收缩量的去处。
+  ⚠️ `.prop-asset` 自己留 `min-width: 0`：它是一枚**能省略的控件**（地址截断后
+     点进去能拿回全文），不是要跟标签一起折行的「内容」；给这一格留下收缩能力，
+     表单行才不会在常规槽宽下无端折成上下两行、把整列属性的起点拉乱。
 */
 .prop-asset {
   display: flex;
   flex: 1 1 auto;
   align-items: center;
-  gap: var(--ui-gap-2);
+  gap: var(--ui-gap-1);
   min-width: 0;
+  padding: 0 var(--ui-gap-1);
+  background: var(--ui-surface-sunken);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-sm);
+}
+.prop-asset:focus-within {
+  border-color: var(--ui-accent);
 }
 .prop-asset-thumbs {
   display: flex;
   align-items: center;
   gap: var(--ui-gap-1);
+  /* 图是值本身：不可省，不参与压缩。多值时这份容器自己横向滚，也不画到地址上 */
+  flex: 0 0 auto;
+  overflow-x: auto;
+  scrollbar-width: none;
+  white-space: nowrap;
+}
+.prop-asset-thumbs::-webkit-scrollbar { display: none; }
+/* 多值：这一列可以缩（容器自己横向滚、内容被裁在自己里面），地址才有地方落 */
+.prop-asset[data-asset-many='1'] .prop-asset-thumbs {
   flex: 0 1 auto;
   min-width: 0;
 }
@@ -897,8 +921,31 @@
 }
 .prop-asset-thumb:hover .prop-asset-remove,
 .prop-asset-thumb:focus-within .prop-asset-remove { opacity: 1; }
-.prop-asset-input { flex: 1 1 auto; min-width: 4ch; }
-.prop-asset-pick { flex: 0 0 auto; white-space: nowrap; }
+/* 地址＝唯一吸收收缩量的格：框已经画了边与底，这里只留文本与省略几何。
+   截断后点进输入框就能拿回全文（可省略的格该有的性质），所以不用再挂 title。 */
+.prop-asset-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-overflow: ellipsis;
+}
+.prop-asset-input:focus {
+  outline: none;
+  border: 0;
+  box-shadow: none;
+}
+/* 尾动作是图标键：文字退 data-tip ＋ aria-label，窄槽里让出的宽度归地址 */
+.prop-asset-pick {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--ui-gap-1);
+  white-space: nowrap;
+}
 .blk-prop-assets {
   display: inline-flex;
   align-items: center;
