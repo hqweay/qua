@@ -9,8 +9,10 @@
 import {
   blockLabel,
   buildAdjacency,
+  allChoicesOf,
   choiceDisplayLabel,
   choicesFor,
+  legacyChoiceOf,
   danglingOf,
   declaredFieldIds,
   applyQuickFilter,
@@ -1063,6 +1065,15 @@ export function setupPanels(deps: PanelsDeps) {
   /** 一个拥有者「显示的是哪一块」（center 表面：拥有者就是这一块） */
   const blockOf = (owner: ViewOwnerRef): Block | undefined => (owner.kind === 'block' ? blocks.find(owner.blockId) : undefined)
 
+  /**
+   * 选项显示名里 `· #名` 的解析（`select` 单元格、属性区与分组列头同一份口径）：
+   * 作用域后缀里的标签按 id 现读名字。
+   */
+  const tagNameOf = (id: string): string => {
+    const b = kb.get(id)
+    return b ? displayNameOf(b) : id.slice(-6)
+  }
+
   function createView(
     owner: ViewOwnerRef,
     host: Block,
@@ -1131,23 +1142,24 @@ export function setupPanels(deps: PanelsDeps) {
       // 卡上块下属性行里的链接／外态资产：与正文外链同一个落点（白名单在那一层）
       openUrl: (url) => app.openExternal(url),
       // 选项显示名里 `· #名` 的解析（`select` 单元格与属性区同一份口径）
-      tagName: (id) => {
-        const b = kb.get(id)
-        return b ? displayNameOf(b) : id.slice(-6)
-      },
+      tagName: tagNameOf,
       /**
        * 条件树的字段下拉：属性定义 ＋ **有值控件的系统槽**（`core/query-fields.ts` 一处给）。
        * 引擎属性与没有值控件的系统槽不进下拉（它们仍可由 JSON 写成）。
        */
       fields: () => queryFieldsOf(kb.roots()),
       /**
-       * 看板分组列的**选项**：`select` 的选项是定义块的直接子块（顺序＝children 顺序）。
+       * 分组列头／条件 chip 的**选项域**：`select` 的选项是定义块上的记录
+       * （数组序＝选项序，含墓碑——值指向已删选项时名字仍要读得出，与 `choiceById`
+       * 同一口径）；旧形状遗留（选项子块）回落读直接子块。
        * 其余属性没有固定值域 ⇒ 空表，列按「第一次出现」排。
        */
       choices: (propId) => {
         const def = kb.get(propId)
         if (!def) return []
-        return kb.children(propId).map((c) => ({ id: c.id, label: blockLabel(c, (x) => kb.get(x)) }))
+        const records = allChoicesOf(def)
+        const list = records.length > 0 ? records : kb.children(propId).map(legacyChoiceOf)
+        return list.map((c) => ({ id: c.id, label: choiceDisplayLabel(c, def, tagNameOf) }))
       },
       /* 日历的「今天」：由装配层钉住，别让渲染器自己 `new Date()`（截图与断言会漂） */
       today: () => todayISO(),
