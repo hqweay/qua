@@ -35,6 +35,7 @@ import {
   allowsMany,
   assetRefKindOf,
   assetRefsOf,
+  blockLabel,
   cardinalityOf,
   choiceDisplayLabel,
   clockLabel,
@@ -51,7 +52,6 @@ import {
   propLabel,
   refDomainOf,
   refViewOf,
-  SELF,
   valueItemsOf,
   valueListOf,
   type RefDomain,
@@ -260,7 +260,7 @@ export interface PropertiesDeps {
    * 第二次为同一个标签点「＋」不该再多给一条同样的 chip。
    */
   pickRefTag: (exclude: readonly string[], onPick: (tagId: string) => void, anchor: DOMRect) => void
-  pickRefAnchor: (onPick: (blockId: string) => void, anchor: DOMRect) => void
+  pickRefAnchor: (exclude: readonly string[], onPick: (blockId: string) => void, anchor: DOMRect) => void
   pickRefQuery: (onPick: (queryId: string) => void, anchor: DOMRect) => void
   /** 写候选域（`null` ＝ 不限，摘键） */
   setRefDomain: (defId: string, domain: RefDomain | null) => void
@@ -1798,7 +1798,7 @@ export class PropertiesPanel {
     const modes = [
       ['any', 'ui.props.refDomain.any'],
       ['tags', 'ui.props.refDomain.mode.tags'],
-      ['block', 'ui.props.refDomain.mode.block'],
+      ['blocks', 'ui.props.refDomain.mode.blocks'],
       ['query', 'ui.props.refDomain.mode.query'],
     ] as const
     for (const [m, key] of modes) {
@@ -1811,8 +1811,8 @@ export class PropertiesPanel {
     sel.dataset.tip = t(
       mode === 'tags'
         ? 'ui.props.refDomain.hint.tags'
-        : mode === 'block'
-          ? 'ui.props.refDomain.hint.block'
+        : mode === 'blocks'
+          ? 'ui.props.refDomain.hint.blocks'
           : mode === 'query'
             ? 'ui.props.refDomain.hint.query'
             : 'ui.props.refDomain.any',
@@ -1837,26 +1837,47 @@ export class PropertiesPanel {
         )
         return
       }
-      if (next === 'block') {
-        this.deps.pickRefAnchor((id) => this.deps.setRefDomain(def.id, { kind: 'block', id }), rect)
+      if (next === 'blocks') {
+        const ids = domain?.kind === 'blocks' ? [...domain.ids] : []
+        this.deps.pickRefAnchor(
+          ids,
+          (id) => {
+            if (!ids.includes(id)) this.deps.setRefDomain(def.id, { kind: 'blocks', ids: [...ids, id] })
+          },
+          rect,
+        )
         return
       }
       this.deps.pickRefQuery((id) => this.deps.setRefDomain(def.id, { kind: 'query', id }), rect)
     })
     value.appendChild(sel)
 
-    /** 一枚约束 chip：点名字打开它；× 摘掉整条约束（回到不限） */
-    const targetChip = (id: string, text: string): HTMLElement => {
+    /**
+     * **「这一块叫什么」只有一个答案**：`blockLabel`（`relations/ref.ts` 的呈现兜底）。
+     * 不要在这里写 `displayNameOf(...) || shortId` —— 日记块与空块没有别名，
+     * `displayNameOf` 给空串，一兜就露出裸 id（用户认不出这是哪一块）。
+     */
+    const labelOf = (id: string): string => {
+      const b = this.deps.blockById(id)
+      return b
+        ? blockLabel(b, (x) => this.deps.blockById(x))
+        : t('ui.props.refMissing', { id: this.deps.shortId(id) })
+    }
+    /** 一枚约束 chip：点名字打开它；× 摘掉它（最后一个摘掉＝回到不限） */
+    const domainChip = (id: string, onRemove: () => void): HTMLElement => {
+      const live = this.deps.blockById(id)
       const chip = document.createElement('span')
       chip.className = 'props-tag'
       chip.dataset.refDomainTarget = id
       const name = document.createElement('span')
       name.className = 'props-tag-name'
-      name.textContent = text
-      name.dataset.refTo = id
-      name.dataset.tip = t('ui.props.openRef')
-      name.addEventListener('click', (e) => this.deps.openRef(id, clickModsOf(e)))
-      chip.append(name, chipDel(t('ui.props.refDomain.remove'), () => this.deps.setRefDomain(def.id, null)))
+      name.textContent = labelOf(id)
+      if (live) {
+        name.dataset.refTo = id
+        name.dataset.tip = t('ui.props.openRef')
+        name.addEventListener('click', (e) => this.deps.openRef(id, clickModsOf(e)))
+      }
+      chip.append(name, chipDel(t('ui.props.refDomain.remove'), onRemove))
       return chip
     }
     /** 「＋」：切换/补一个目标（标签是追加，锚块与查询是换一个） */
@@ -1883,7 +1904,7 @@ export class PropertiesPanel {
         chip.dataset.refTag = id
         const name = document.createElement('span')
         name.className = 'props-tag-name'
-        name.textContent = tag ? `#${displayNameOf(tag)}` : `#${this.deps.shortId(id)}`
+        name.textContent = tag ? `#${blockLabel(tag, (x) => this.deps.blockById(x))}` : `#${this.deps.shortId(id)}`
         if (tag) {
           name.dataset.refTo = id
           name.dataset.tip = t('ui.props.openTag')
@@ -1906,38 +1927,30 @@ export class PropertiesPanel {
           ),
         ),
       )
-    } else if (domain?.kind === 'block') {
-      const anchor = domain.id === SELF ? undefined : this.deps.blockById(domain.id)
-      const text =
-        domain.id === SELF
-          ? t('ui.props.refDomain.self')
-          : anchor
-            ? displayNameOf(anchor).trim() || this.deps.shortId(domain.id)
-            : t('ui.props.refMissing', { id: this.deps.shortId(domain.id) })
-      if (domain.id === SELF) {
-        const chip = document.createElement('span')
-        chip.className = 'props-tag'
-        chip.dataset.refDomainTarget = SELF
-        const name = document.createElement('span')
-        name.className = 'props-tag-name'
-        name.textContent = text
-        name.dataset.tip = t('ui.props.refDomain.hint.block')
-        chip.append(name, chipDel(t('ui.props.refDomain.remove'), () => this.deps.setRefDomain(def.id, null)))
-        value.appendChild(chip)
-      } else {
-        value.appendChild(targetChip(domain.id, text))
+    } else if (domain?.kind === 'blocks') {
+      for (const id of domain.ids) {
+        const rest = domain.ids.filter((x) => x !== id)
+        value.appendChild(
+          domainChip(id, () =>
+            this.deps.setRefDomain(def.id, rest.length > 0 ? { kind: 'blocks', ids: rest } : null),
+          ),
+        )
       }
       value.appendChild(
         addButton(t('ui.props.refDomain.pickBlock'), (rect) =>
-          this.deps.pickRefAnchor((id) => this.deps.setRefDomain(def.id, { kind: 'block', id }), rect),
+          this.deps.pickRefAnchor(
+            domain.ids,
+            (id) => {
+              if (!domain.ids.includes(id)) {
+                this.deps.setRefDomain(def.id, { kind: 'blocks', ids: [...domain.ids, id] })
+              }
+            },
+            rect,
+          ),
         ),
       )
     } else if (domain?.kind === 'query') {
-      const qb = this.deps.blockById(domain.id)
-      const text = qb
-        ? displayNameOf(qb).trim() || this.deps.shortId(domain.id)
-        : t('ui.props.refMissing', { id: this.deps.shortId(domain.id) })
-      value.appendChild(targetChip(domain.id, text))
+      value.appendChild(domainChip(domain.id, () => this.deps.setRefDomain(def.id, null)))
       value.appendChild(
         addButton(t('ui.props.refDomain.pickQuery'), (rect) =>
           this.deps.pickRefQuery((id) => this.deps.setRefDomain(def.id, { kind: 'query', id }), rect),

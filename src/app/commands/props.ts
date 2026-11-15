@@ -471,14 +471,14 @@ export function propsCommands(
       const def = find(defId)
       if (!def || propKindOf(def) !== 'ref') return
       if (domain !== null && !isRefDomainValue(domain)) return
-      // 去重是写路径的事（读路径只认形状）；标签档保持用户选定的顺序
+      // 去重是写路径的事（读路径只认形状）；两个清单档都保持用户选定的顺序
       const next =
         domain === null
           ? undefined
-          : domain.kind === 'tags'
-            ? { kind: 'tags' as const, ids: [...new Set(domain.ids)] }
+          : domain.kind === 'tags' || domain.kind === 'blocks'
+            ? { kind: domain.kind, ids: [...new Set(domain.ids)] }
             : domain
-      if (next !== undefined && next.kind === 'tags' && next.ids.length === 0) return
+      if (next !== undefined && (next.kind === 'tags' || next.kind === 'blocks') && next.ids.length === 0) return
       d.run((tx) =>
         tx.patch(defId, (b) => {
           patchProp(b, REF_DOMAIN_PROP, next)

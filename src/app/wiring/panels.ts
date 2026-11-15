@@ -285,36 +285,37 @@ export function setupPanels(deps: PanelsDeps) {
         : []
     /**
      * **候选域**（定义块上）：只过滤列表，不校验存量值 ——
-     * 约束改了、标签/锚块/查询变了，已引用的块照常显示（值不在这条路径上）。
+     * 约束改了、标签/手选块/查询变了，已引用的块照常显示（值不在这条路径上）。
      * `ids === null` ＝ 不限（没写，或约束已失效退回）。
      *
-     * `$self` 的宿主＝**值所在块**（打开选择器的这一行），不是定义块。
+     * 查询档的 `$self` 宿主＝**值所在块**（打开选择器的这一行），不是定义块。
      */
     const def = propId === '' ? undefined : kb.get(propId)
     const domain = refDomainIds(def, kb, owner?.id)
-    /** 抬头念出「为什么只有这几行」：类别名／锚块名／查询名，失效就说失效 */
+    /** 抬头念出「为什么只有这几行」：标签名／块名／查询名，失效就说失效（名字一律走 `refLabelOf`） */
     const scopedTitle = (): string => {
       if (domain.dangling !== null) return t('ui.props.pickRefDangling')
       const label = domain.label
       if (!label) return t('ui.props.pickRef')
       if (label.kind === 'tags') {
-        const names = refDomainTagNames(label, (id) => {
+        const names = refDomainNames(label, (id) => {
           const tag = kb.get(id)
-          return tag ? displayNameOf(tag).trim() : ''
+          return tag ? blockLabel(tag, (x) => kb.get(x)) : ''
         })
         return names.length > 0
           ? t('ui.props.pickRefScoped', { tags: names.map((n) => `#${n}`).join('、') })
           : t('ui.props.pickRef')
       }
-      const target = kb.get(label.id)
-      if (label.kind === 'block') {
-        if (label.self) return t('ui.props.pickRefScopedSelf')
-        return target
-          ? t('ui.props.pickRefScopedBlock', { name: displayNameOf(target).trim() || blockLabel(target) })
-          : t('ui.props.pickRefDangling')
+      if (label.kind === 'blocks') {
+        const names = refDomainNames(label, refLabelOf)
+        if (names.length === 0) return t('ui.props.pickRefDangling')
+        // 三个以内念名字（能对上 chip）；再多就只报数量，别拿一串名字把抬头撑爆
+        return names.length <= 3
+          ? t('ui.props.pickRefScopedBlocks', { names: names.join('、') })
+          : t('ui.props.pickRefScopedBlocksCount', { n: String(names.length) })
       }
-      return target
-        ? t('ui.props.pickRefScopedQuery', { name: displayNameOf(target).trim() || blockLabel(target) })
+      return kb.get(label.id)
+        ? t('ui.props.pickRefScopedQuery', { name: refLabelOf(label.id) })
         : t('ui.props.pickRefDangling')
     }
     /**
@@ -772,46 +773,28 @@ export function setupPanels(deps: PanelsDeps) {
         })
       },
       /**
-       * **候选域的锚块档**：选一个块当范围（候选＝它下面的块）。
+       * **候选域的手选块档**：往清单里加一个块（候选就是清单里这几个块本身）。
        *
-       * **不列标签块**：锚在 `#项目` 上得到的是「标签块自己的子块」，不是成员 ——
-       * 读起来像「选同一样东西，意思换了」。标签场景归标签档。
-       *
-       * 第一行是**「这一块（引用处）」**：相对域（每处引用都按自己所在块算）。
-       * 它是虚拟行、不进候选目录——目录只列森林里的块（与条件树的「根块」同一处理）。
+       * **不列标签块**：标签是「分类」不是「内容块」，选了它值就会指向一个标签块；
+       * 标签场景归标签档。`exclude` ＝ 已在清单里的块，不再出现在候选里
+       * （同一块不会出现两枚 chip）。
        */
-      pickRefAnchor: (onPick, anchor) => {
+      pickRefAnchor: (exclude, onPick, anchor) => {
         const notTags = new Set<string>()
         for (const b of flatten({ roots: [...kb.roots()] })) if (!hasList(b, 'tag')) notTags.add(b.id)
-        const choice = createNameChoice(kb.roots(), {
+        openNameChoice({
+          layers,
+          forest: kb.roots(),
           kind: 'ref',
           allowCreate: false,
-          onlyIds: notTags,
-          idPrefix: 'refanchor',
-        })
-        const selfRow = (): Row[] => [
-          {
-            id: 'refanchor/self',
-            label: t('ui.props.refDomain.self'),
-            hint: t('ui.props.refDomain.hint.block'),
-            icon: 'lucide:square',
-          },
-        ]
-        layers.openMenu({
-          rows: [...selfRow(), ...choice.rows('')],
           anchor,
+          onlyIds: notTags,
+          selectedIds: [...exclude],
           title: t('ui.props.refDomain.pickBlock'),
-          searchable: true,
-          focusSearch: true,
           emptyText: t('ui.props.refEmpty'),
-          onQuery: (q) => layers.setRows([...selfRow(), ...choice.rows(q)]),
-          onPick: (row) => {
-            if (row.id === 'refanchor/self') {
-              onPick(SELF)
-              return
-            }
-            const pick = row.pick
-            if (pick?.kind === 'block') onPick(pick.id)
+          idPrefix: 'refanchor',
+          onPick: (pick) => {
+            if (pick.kind === 'block') onPick(pick.id)
           },
         })
       },

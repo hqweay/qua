@@ -128,6 +128,14 @@ test('blockLabel：主名叶子 > 正文；`_display` 不影响引用；journal 
   assert.equal(blockLabel({ ...named('p', '甲', '描述'), props: { _aliases: ['甲'], _display: 'text' } }), '甲')
   // `_date` 为空时没有可显示的投影 ⇒ 退回正文（此时为空 ⇒ 兜底文案）
   assert.equal(blockLabel(b('j', '', { props: { _date: '' } })), '无标题')
+  /**
+   * ⚠️ **日记块有日期时显示日期**：日记的正文恒空、也没有别名，`displayNameOf` 给空串。
+   * 任何「这一块叫什么」都必须用它（`blockLabel`）而不是 `displayNameOf(...) || id` ——
+   * 后者会把日记块显示成裸 id（真实踩过：属性面板的候选 chip）。
+   */
+  const day = b('j2', '', { props: { _date: '2026-11-15' } })
+  assert.ok(/\d{4}/.test(blockLabel(day)), `日记块应显示日期投影：${blockLabel(day)}`)
+  assert.notEqual(blockLabel(day), '无标题')
 })
 
 test('resolveRefs：按 atomId 返回（不是按位置，顺序变了也不会张冠李戴）', () => {
