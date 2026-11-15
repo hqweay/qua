@@ -11,6 +11,7 @@ import {
   ensurePageInTx,
   hasList,
   locate,
+  mkBlock,
   tagIdsOf,
   uuidv7Hex,
   writeBlockContent,
@@ -102,6 +103,7 @@ export class TriggerOps {
       let tagId: string | null = null
       let recordId: string | null = null
       let pageId: string | null = null
+      let newBlockId: string | null = null
 
       const needTag = pick.kind === 'tag' || pick.kind === 'newTag'
       if (needTag) {
@@ -125,6 +127,19 @@ export class TriggerOps {
         if (!page) return false
         pageId = page.id
         // 页落在森林顶层，可能不在当前视图里；整片重画一次，让索引/页数跟上
+        createdBlock = true
+      }
+
+      /**
+       * 以查询词造一个**普通块**：不进地址空间、没有 page 露面（与划选转引用的
+       * 「⌥↵ 强制建块」同一形状——同一动作两个入口必须同形）。落点是宿主的
+       * 下一兄弟位：这段内容多半属于当前上下文，不是档案柜里的新条目。
+       * `locate` 给的下标是模型 children 数组的口径，与 `Tx.insert` 同一空间。
+       */
+      if (pick.kind === 'newBlock') {
+        const made = mkBlock(pick.name)
+        tx.insert(made, loc.parent?.id ?? null, loc.index + 1)
+        newBlockId = made.id
         createdBlock = true
       }
 
@@ -155,6 +170,8 @@ export class TriggerOps {
       } else if (pick.kind === 'newPage') {
         // 页引用不加 `#` 风味：它是页面，不是标签
         inserted = [{ id: uuidv7Hex(), t: 'ref', to: pageId!, label: pick.name }]
+      } else if (pick.kind === 'newBlock') {
+        inserted = [{ id: uuidv7Hex(), t: 'ref', to: newBlockId!, label: pick.name }]
       } else if (pick.kind === 'newObj') {
         inserted = [{ id: uuidv7Hex(), t: 'ref', to: recordId!, flavor: '#', label: pick.name }]
       } else if (pick.kind === 'newTag' && pick.action !== 'assign') {

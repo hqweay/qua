@@ -54,6 +54,8 @@ export interface TriggerDeps {
    *    否则用户会以为「换一行才能换一种落法」。
    */
   shortcutHint: string
+  /** `@` 新建页行的第二落点徽标：`⌥↵` 建普通块（不建页） */
+  newPageAltHint: string
   /**
    * 正在打字的那一块（`@` 源用它把自己排除在候选外）。
    *
@@ -251,6 +253,8 @@ function mentionRows(query: string, deps: TriggerDeps): Row[] {
         hint: existing ? t('ui.retrieval.newPageReuseHint') : t('ui.retrieval.newPageHint'),
         icon: 'lucide:plus',
         group: 'retrieval/3-new',
+        // 第二落点画在行上（↵ 建页是默认，不必说）；⌥↵ 建普通块，与划选转引用同键同义
+        keyHint: deps.newPageAltHint,
         pick: { kind: 'newPage', name: raw },
       })
     }

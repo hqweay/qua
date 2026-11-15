@@ -1262,6 +1262,7 @@ export const MSG = {
   'ui.retrieval.newPage': '新建页面「{name}」',
   'ui.retrieval.newPageHint': '同名地址不存在时新建',
   'ui.retrieval.newPageReuseHint': '同名块已存在：复用它并标记为页',
+  'ui.retrieval.newPageAlt': '{key} 建普通块',
   'ui.selRef.title': '关联到…',
   'ui.selRef.placeholder': '搜索页或块；输入可改写',
   'ui.selRef.empty': '没有匹配的页或块；可新建',

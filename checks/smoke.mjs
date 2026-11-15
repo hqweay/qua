@@ -30959,6 +30959,65 @@ await check('T323 ref inline 看法的多值同样落在 chip：抽屉里两枚�
   return '两枚值两枚 chip；inline 看法在多值上同样不落岛（入口未开）'
 })
 
+await check('T326 `@` 新建页行的第二落点：⌥↵ 建普通块（宿主下一兄弟位），不建页', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  const hostId = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    const id = ed.insert.insertBlockAfter(window.__qua.blocks()[0].id, '')
+    window.__qua.focusBlock(id, 0)
+    return id
+  })
+  await page.waitForTimeout(80)
+  await page.keyboard.type('@没有这个词')
+  await page.waitForTimeout(220)
+
+  // ① 新建页行在列，且带着第二落点的徽标（↵ 建页是默认，不必说）
+  const rows = await layerRows(page)
+  const newRow = rows.find((r) => r.label.includes('新建页面「没有这个词」'))
+  assert(newRow, `新建页行应在列：${JSON.stringify(rows.map((r) => r.label))}`)
+  assert(newRow.key.includes('建普通块'), `新建页行应带 ⌥↵ 徽标：${JSON.stringify(newRow)}`)
+
+  // ② ⌥↵ ⇒ 普通块落账：插在宿主下一兄弟位、正文是查询词、插一枚引用；不建页
+  await page.keyboard.press('Alt+Enter')
+  await page.waitForTimeout(250)
+
+  const after = await page.evaluate((host) => {
+    const atoms = window.__qua.atoms().filter((a) => a.blockId === host).length
+    const stub = window.__qua.allBlocks().find((x) => x.text === '没有这个词' && x.id !== host)
+    // 下一兄弟位：在模型树上找 host，取它后面那一格
+    let nextId = ''
+    const walk = (list) => {
+      for (let i = 0; i < list.length; i++) {
+        if (list[i].id === host) {
+          nextId = list[i + 1]?.id ?? ''
+          return true
+        }
+        if (list[i].children && walk(list[i].children)) return true
+      }
+      return false
+    }
+    walk(window.__qua.__editor.store.blocks)
+    return {
+      atoms,
+      stubId: stub?.id ?? '',
+      nextId,
+      pageMade: window.__qua.pages().some((p) => p.title === '没有这个词'),
+      layerOpen: document.querySelectorAll('.layer').length,
+    }
+  }, hostId)
+  assert(after.atoms === 1, `宿主里应插一枚引用：${JSON.stringify(after)}`)
+  assert(after.stubId !== '', `应有一块正文是查询词的普通块：${JSON.stringify(after)}`)
+  assert(after.nextId === after.stubId, `普通块应落在宿主下一兄弟位：${JSON.stringify(after)}`)
+  assert(!after.pageMade, `⌥↵ 不该建页：${JSON.stringify(after)}`)
+  assert(after.layerOpen === 0, `落账后浮层应关：${JSON.stringify(after)}`)
+
+  await ctx.close()
+  return '⌥↵ ⇒ 普通块落在宿主下一兄弟位＋一枚引用；页没建、浮层关'
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

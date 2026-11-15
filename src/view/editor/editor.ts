@@ -510,6 +510,8 @@ export type AcceptPick =
   | { kind: 'ref'; to: string; label: string; flavor?: '#' }
   | { kind: 'newObj'; name: string; tagId: string }
   | { kind: 'newPage'; name: string }
+  /** ⌥↵ 的另一条路：不建页，以查询词造一个普通块（宿主下一兄弟位）并插引用 */
+  | { kind: 'newBlock'; name: string }
   /** 新标签是**目标**；三种键各给一个落点（`inline` 行内 / `assign` 块标签 / `instance` 新实例） */
   | { kind: 'newTag'; name: string; action: 'inline' | 'assign' | 'instance' }
   | { kind: 'tag'; name: string }

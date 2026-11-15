@@ -696,6 +696,8 @@ const triggerDeps: TriggerDeps = {
   ctx: uiCtx,
   keyHints,
   shortcutHint: `↵ ${isMac() ? '⌥↵' : 'Alt+↵'} ${isMac() ? '⇧↵' : 'Shift+↵'}`,
+  // `@` 新建页行的第二落点徽标：⌥↵ 建普通块（与划选转引用同键同义）
+  newPageAltHint: t('ui.retrieval.newPageAlt', { key: isMac() ? '⌥↵' : 'Alt+↵' }),
   // `@` 候选排除「正在打字的这一块」：它自己的正文含着查询词，点它＝引用自己
   selfBlockId: () => ed.caretBlock() ?? ed.sel?.aBlock ?? null,
 }
@@ -932,7 +934,12 @@ function pickRow(ch: TriggerChar, row: Row, mods: PickMods): void {
     return
   }
 
-  // `@` 无同名页：当场建页（或复用同名地址）并在原位插引用；同一笔事务
+  // `@` 无同名页：当场建页（或复用同名地址）并在原位插引用；同一笔事务。
+  // ⌥↵ 是另一条路：不建页，以查询词造一个普通块——与划选转引用的强制建块同键同义
+  if (pick.kind === 'newPage' && mods.altKey) {
+    ed.triggers.acceptTrigger({ ch, pick: { kind: 'newBlock', name: pick.name } })
+    return
+  }
   if (pick.kind === 'newPage') {
     ed.triggers.acceptTrigger({ ch, pick: { kind: 'newPage', name: pick.name } })
     return
