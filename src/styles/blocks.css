@@ -1224,13 +1224,20 @@
   opacity: 1;
 }
 /*
-  `ref` 定义的候选域（`_refTags`）：chips ＋ 一颗「＋」。它住在定义页而不是值行 ——
-  约束是「谁可以被引用」，不是某一格值指向谁。多枚时自动折行（候选可能好几个）。
+  `ref` 定义的候选域（`_refDomain`）：模式下拉 ＋ 约束 chips ＋ 一颗「＋」。
+  它住在定义页而不是值行 —— 域是「谁可以被引用」，不是某一格值指向谁。
+  容器折行：窄栏里（右槽 320）下拉与 chip 一行放不下，宁可换行也不压碎控件。
 */
-.prop-ref-tags {
+.prop-ref-domain {
+  display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--ui-gap-1);
+}
+.prop-ref-mode {
+  flex: 0 1 auto;
+  max-width: 100%;
+  min-width: 0;
 }
 .prop-ref-add {
   background: none;

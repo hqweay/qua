@@ -19,6 +19,7 @@ import type { ColorAxis, CtxKeys } from '../index.ts'
 import type { UndoKind } from '../model/undo.ts'
 import type { QueryNode, QuerySpec } from '../query/query.ts'
 import type { Cardinality, ChoiceScope, UiPosition } from '../props/props.ts'
+import type { RefDomain } from '../props/ref-domain.ts'
 import type { SecLayout } from '../query/feed.ts'
 import type { MountHost } from '../views/mount.ts'
 import type { TabsDirection, ViewConfig } from '../views/view.ts'
@@ -371,11 +372,11 @@ export interface App {
    */
   setPropFormat(defId: string, format: string): void
   /**
-   * 写/摘 `ref` 定义的**候选标签**（`_refTags`）：候选按这些标签的成员过滤
-   * （含下级标签闭包）。**软约束**——只过滤候选，不校验存量值。
-   * 空数组 ＝ 摘键（摘掉约束）。
+   * 写/摘 `ref` 定义的**候选域**（`_refDomain`）：标签成员／锚块子树／查询块结果。
+   * **软约束**——只过滤候选，不校验存量值；`null` ＝ 摘键（不限）。
+   * 顺带把旧形状 `_refTags` 清掉（一槽一真值）。
    */
-  setPropRefTags(defId: string, tagIds: readonly string[]): void
+  setPropRefDomain(defId: string, domain: RefDomain | null): void
   /**
    * **新建并引用**：物化一个新块（页块，落森林顶层；同名地址已存在则复用）并把它的 id
    * 写进 `blockId` 的这一格。建页与写值同一笔事务。返回 id（空串＝没写）。

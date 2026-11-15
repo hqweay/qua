@@ -6,7 +6,10 @@ import {
   CHECK_PROP,
   FORMAT_PROP,
   PROP_KIND_SPECS,
+  REF_DOMAIN_PROP,
   REF_TAGS_PROP,
+  isRefDomainValue,
+  type RefDomain,
   CHILD_PROPS_PROP,
   UI_POSITION_PROP,
   USE_PROP,
@@ -80,7 +83,7 @@ export function propsCommands(
   | 'deleteChoice'
   | 'restoreChoice'
   | 'setPropFormat'
-  | 'setPropRefTags'
+  | 'setPropRefDomain'
   | 'createPropRefTarget'
 > {
   const find = (id: string): Block | undefined => d.kb.get(id)
@@ -452,18 +455,31 @@ export function propsCommands(
     },
 
     /**
-     * 写/摘 `ref` 定义的**候选标签**（`_refTags`，软约束）。
+     * 写/摘 `ref` 定义的**候选域**（`_refDomain`，软约束）。
      *
-     * 写的是 id 不是名字（标签能改名）；空清单 ＝ 摘键 ——「没有约束」与「约束是空集」
-     * 是两件事，数组在不在场就是那个区别的依据（读侧 `refTargetScope` 据此给 `null`）。
-     * **不去校验标签是否还活着**：悬空是状态不是坏形状，读侧退回无约束。
+     * 一次只写**一个槽**：标签／锚块／查询是同一个判别联合的成员，`null` ＝ 不限（摘键）。
+     * 顺手删掉旧形状 `_refTags` —— 两份同时在场就有「谁赢」的静默规则；
+     * 读侧让 `_refDomain` 赢，写侧负责把旧键清干净（惰性迁移，不做批量搬迁）。
+     * **不校验目标是否还活着**：悬空是状态不是坏形状，读侧退回不限。
      */
-    setPropRefTags: (defId, tagIds) => {
+    setPropRefDomain: (defId: string, domain: RefDomain | null) => {
       const def = find(defId)
       if (!def || propKindOf(def) !== 'ref') return
-      const next: string[] = []
-      for (const id of tagIds) if (typeof id === 'string' && id !== '' && !next.includes(id)) next.push(id)
-      d.run((tx) => tx.patch(defId, (b) => patchProp(b, REF_TAGS_PROP, next.length > 0 ? next : undefined)))
+      if (domain !== null && !isRefDomainValue(domain)) return
+      // 去重是写路径的事（读路径只认形状）；标签档保持用户选定的顺序
+      const next =
+        domain === null
+          ? undefined
+          : domain.kind === 'tags'
+            ? { kind: 'tags' as const, ids: [...new Set(domain.ids)] }
+            : domain
+      if (next !== undefined && next.kind === 'tags' && next.ids.length === 0) return
+      d.run((tx) =>
+        tx.patch(defId, (b) => {
+          patchProp(b, REF_DOMAIN_PROP, next)
+          patchProp(b, REF_TAGS_PROP, undefined)
+        }),
+      )
     },
 
     /**

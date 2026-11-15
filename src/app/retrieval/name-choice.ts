@@ -56,7 +56,7 @@ export interface NameChoiceOpts {
   /** 排除项与 `selectedIds` 合并：不列出 */
   excludeIds?: readonly string[]
   /**
-   * **候选白名单**：只列这些 id 的行（`ref` 的 `_refTags` 软约束从这儿进来）。
+   * **候选白名单**：只列这些 id 的行（`ref` 的候选域从这儿进来）。
    *
    * `undefined` ＝ 不限制；**空集合 ＝ 真的没有候选**——两种答案分开表达，
    * 合成一个「有没有约束」的布尔再用真值判断，就会在「约束存在但一个成员都没有」时

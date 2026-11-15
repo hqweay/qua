@@ -2,6 +2,7 @@
  * 属性 handler：值的写与清、字段定义的新建/加/摘。
  */
 import type { ChoiceScope } from '../../core/props/props.ts'
+import type { RefDomain } from '../../core/props/ref-domain.ts'
 import type { Handler, PropTarget } from '../../core/infra/ports.ts'
 import { curBlock, S } from './shared.ts'
 
@@ -55,11 +56,11 @@ export const PROPS_HANDLERS: Record<string, Handler> = {
     app.setPropFormat(defId, S(a.format))
     return true
   },
-  'core.props/set-ref-tags': (a, app) => {
+  'core.props/set-ref-domain': (a, app) => {
     const defId = S(a.defId)
     if (!defId) return false
-    const ids = Array.isArray(a.tagIds) ? a.tagIds.filter((x): x is string => typeof x === 'string') : []
-    app.setPropRefTags(defId, ids)
+    // 形状由命令层判（`isRefDomainValue`）：坏了就静默拒绝，不往库里写半个约束
+    app.setPropRefDomain(defId, a.domain == null ? null : (a.domain as RefDomain))
     return true
   },
   'core.props/create-ref-target': (a, app) => {
