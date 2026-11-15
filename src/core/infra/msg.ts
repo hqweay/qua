@@ -375,6 +375,7 @@ export const MSG = {
   'ui.props.assetPlaceholder': '资产 id 或 http(s) 链接',
   'ui.props.assetAddPlaceholder': '再加一个资产 id 或 http(s) 链接',
   'ui.props.assetPick': '选择文件',
+  'ui.props.assetAddress': '图片地址',
   'ui.props.assetPickHint': '从本机选一张图，存进资产库后写进这一格',
   'ui.props.assetRemove': '移除这一项',
   'ui.props.assetAlt': '附件图片',

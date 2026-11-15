@@ -482,6 +482,29 @@ await check('T1b 属性区跟「当前对象」走：聚焦换主体、光标移
   assert(onPage.target === onPage.activeId, `主体应等于当前对象：${JSON.stringify(onPage)}`)
 
   /**
+   * 卡内段序：**属性值第一，块配置第二**。
+   *
+   * 判据是「打开这块要干什么」：高频动作是填值；身份/露面/分类是低频的「它是谁」。
+   * 顺序反了会把主工作区推到卡底（这一屏很长时尤其明显）。
+   */
+  const order = await page.evaluate(() => {
+    const body = document.getElementById('properties-body')
+    const sections = [...(body?.querySelectorAll(':scope > .props-section') ?? [])]
+    return {
+      classes: sections.map((s) => s.className),
+      titles: sections.map((s) => s.querySelector('.props-section-title')?.textContent ?? ''),
+    }
+  })
+  assert(
+    order.classes[0]?.includes('prop-fields') === true,
+    `第一段应是属性值：${JSON.stringify(order)}`,
+  )
+  assert(
+    order.titles[0] === '属性' && order.titles[1] === '块配置',
+    `段序应是「属性 → 块配置」：${JSON.stringify(order)}`,
+  )
+
+  /**
    * 给块 A 单加一条属性槽 —— 这样「面板画谁」就有了可测的高度差：
    * 若跟着光标走，A 多一行、B 少一行，面板高度会变；跟当前对象走则一动不动。
    *
@@ -30170,11 +30193,11 @@ await check('T316 表格的多值格是 chips：一块两值 ⇒ 两枚 chip；�
   return '表格多值格画 chips；摘一枚写回数组、格子跟着重画'
 })
 
-await check('T317 asset 值控件：检视卡窄槽里缩略图与地址不叠压、地址全文仍在框里', async () => {
+await check('T317 asset 值控件：预览独立成带、地址在下一行，两者不叠压', async () => {
   const { ctx, page } = await freshPage(browser, base)
-  /** 宽图（240×40）才复现得出来：正方形小图挤不出「盒被压到比内容还窄」那一下 */
+  /** 纵向也有内容（240×160）才量得出「预览是一条带，不是 1.6em 的行内小图」 */
   const svg =
-    '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="40"><rect width="240" height="40" fill="#eee"/><path d="M0 0h240v2H0z" fill="#4c9a6a"/></svg>'
+    '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160"><rect width="240" height="160" fill="#eee"/><path d="M0 0h240v2H0z" fill="#4c9a6a"/></svg>'
   const url = 'https://example.com/qua-wide.png'
   await page.route('**/qua-wide.png', (r) =>
     r.fulfill({ status: 200, contentType: 'image/svg+xml', body: svg }),
@@ -30200,9 +30223,9 @@ await check('T317 asset 值控件：检视卡窄槽里缩略图与地址不叠�
   )
 
   /**
-   * 判据是**矩形相交**（不是看截图）：缩略图（含它的容器）与地址输入框不许有交集。
-   * 真机现场是 `.prop-asset-thumbs` 的盒被 flex 压到 10px、里面的 63px 图溢出到
-   * 输入框上 —— 只断言「元素都在」是绿的，必须量几何。
+   * 判据是**几何**（不是看截图）：预览带在上、地址带在下，两条带不许相交；
+   * 预览必须是「图的值」而不是行内小缩略图（高度足够），地址仍能拿回全文。
+   * 上一版把三者塞进一个框里，真机反馈「图贴着输入框」，读不出哪部分是值。
    */
   const geom = await page.evaluate((propId) => {
     const row = document.querySelector(`#inspect-card .prop-row[data-prop-id="${propId}"]`)
@@ -30219,26 +30242,34 @@ await check('T317 asset 值控件：检视卡窄槽里缩略图与地址不叠�
         : 0
     const thumbs = r('.prop-asset-thumbs')
     const thumb = r('.prop-asset-thumb')
+    const address = r('.prop-asset-address')
     const input = r('.prop-asset-input')
     const pick = r('.prop-asset-pick')
     return {
       found: true,
       rowH: Math.round(row.getBoundingClientRect().height),
       thumbsW: Math.round(thumbs?.width ?? -1),
+      thumbsBottom: Math.round(thumbs?.bottom ?? -1),
       thumbW: Math.round(thumb?.width ?? -1),
+      thumbH: Math.round(thumb?.height ?? -1),
+      addrW: Math.round(address?.width ?? -1),
+      addrTop: Math.round(address?.top ?? -1),
       inputW: Math.round(input?.width ?? -1),
-      hits: Math.round(overlap(thumbs, input) + overlap(thumb, input) + overlap(input, pick)),
+      hits: Math.round(overlap(thumbs, address) + overlap(thumb, input) + overlap(input, pick)),
       value: box.querySelector('.prop-asset-input')?.value ?? '',
       pickLabel: box.querySelector('.prop-asset-pick')?.getAttribute('aria-label') ?? '',
       pickIcon: Boolean(box.querySelector('.prop-asset-pick .ico')),
     }
   }, ids.propId)
   assert(geom.found, '检视卡里应能找到这一栏的 asset 控件')
-  assert(geom.hits === 0, `缩略图／地址／选文件键三者不许矩形相交：${JSON.stringify(geom)}`)
-  assert(geom.thumbsW >= geom.thumbW, `单值缩略图不许被容器裁掉：${JSON.stringify(geom)}`)
+  assert(geom.hits === 0, `预览／地址／选文件键三者不许矩形相交：${JSON.stringify(geom)}`)
+  assert(geom.thumbsW >= geom.thumbW, `单值预览不许被容器裁掉：${JSON.stringify(geom)}`)
+  assert(geom.thumbH >= 60, `预览要是一条带，不是 1.6em 的小缩略图：${JSON.stringify(geom)}`)
+  assert(geom.addrTop >= geom.thumbsBottom + 2, `地址带必须落预览带之下：${JSON.stringify(geom)}`)
+  assert(geom.addrW >= geom.inputW, `地址带容纳输入框：${JSON.stringify(geom)}`)
   assert(geom.inputW > 0, `地址格不能被压到 0 宽：${JSON.stringify(geom)}`)
-  assert(geom.value === url, '收成一个框之后地址仍可编辑，值没丢：' + JSON.stringify(geom))
-  assert(geom.rowH < 44, '常规槽宽下这一栏不该无端折成上下两行：' + JSON.stringify(geom))
+  assert(geom.value === url, '地址仍可编辑，值没丢：' + JSON.stringify(geom))
+  assert(geom.rowH >= 80, '图与地址分两行之后整行该长高：' + JSON.stringify(geom))
   assert(geom.pickLabel !== '' && geom.pickIcon, '选文件图标键保留可读名与图形：' + JSON.stringify(geom))
 
   /**
@@ -30261,7 +30292,7 @@ await check('T317 asset 值控件：检视卡窄槽里缩略图与地址不叠�
   assert(remove.found && remove.shown && remove.inside, `摘除 × 要显形且不被裁切：${JSON.stringify(remove)}`)
 
   await ctx.close()
-  return `检视卡窄槽：缩略图 ${geom.thumbW}px、地址 ${geom.inputW}px 同框不叠压；选文件退图标键`
+  return `检视卡窄槽：预览 ${geom.thumbW}×${geom.thumbH}px 单独成带（距地址 ${geom.addrTop - geom.thumbsBottom}px）、地址 ${geom.inputW}px；选文件退图标键`
 })
 
 const known = results.filter((r) => !r.ok && r.known)

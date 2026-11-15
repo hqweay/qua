@@ -738,6 +738,12 @@
   flex-direction: column;
   gap: var(--ui-gap-2);
 }
+/* 属性段现在是第一段：它上面没有别的内容，分隔线与段间距都不该出现 */
+.properties-body > .props-section:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
 .props-empty {
   margin: 0;
   /* 空态是旁注角色：说明「这里可以有什么」，不与行内容争字号 */
@@ -822,6 +828,39 @@
   flex: 1 1 50%;
   display: flex;
 }
+/*
+  **富值行**：标签占第一行，值整宽落第二行。
+  值的形状决定行形 —— 图、别名清单、多值 chips、两行时间戳都不是「右半边的一格」；
+  塞进半宽值槽只会互相压。单行值（文本／日期／下拉）仍走标签左、值右的紧凑形。
+*/
+.prop-row[data-stack='1'] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: var(--ui-gap-3);
+  row-gap: var(--ui-gap-1);
+}
+.prop-row[data-stack='1'] .prop-label {
+  flex: none;
+  min-width: 0;
+}
+.prop-row[data-stack='1'] .prop-value {
+  grid-column: 1 / -1;
+  flex: none;
+  width: 100%;
+}
+.prop-row[data-stack='1'] .prop-clear {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: start;
+}
+/* 别名清单自带段间距；它现在住在一行的值槽里，段间距归行 */
+.prop-names-value {
+  display: block;
+}
+.prop-names-value .alias-section {
+  margin-top: 0;
+}
 .prop-input {
   width: 100%;
   font: inherit;
@@ -837,20 +876,24 @@
   border-color: var(--ui-accent);
 }
 /*
-  **asset 属性值**：一个控件框 ＝ 缩略图（前导）＋ 地址（可编辑）＋ 选文件键（尾动作）。
-  面板与表格格子共用这一份；尺寸走 em，跟着字号走，不把表格定高撑破。
+  **asset 属性值**：值本身是预览，地址是它的第二种投影。
+  面板/抽屉里两条带：预览整宽在上、地址在下 —— 缩略图贴着输入框时，
+  读者分不出「哪部分是值、哪部分是可改的地址」。表格格定高，仍收成一行。
 
-  ⚠️ 收缩量归谁是这里唯一要钉死的事（视觉纪律 5）：早先三者是平级兄弟，
-     flex 会把 `.prop-asset-thumbs` 的**盒**压到比里面的图还窄，而图本身
-     `flex: none` 不会跟着缩 ⇒ 图溢出盒外，画到下一个兄弟（地址输入框）上
-     —— 真机报的「图片和图片地址重叠」不是间距问题，是没指定收缩量的去处。
-  ⚠️ `.prop-asset` 自己留 `min-width: 0`：它是一枚**能省略的控件**（地址截断后
-     点进去能拿回全文），不是要跟标签一起折行的「内容」；给这一格留下收缩能力，
-     表单行才不会在常规槽宽下无端折成上下两行、把整列属性的起点拉乱。
+  ⚠️ 收缩量归地址（视觉纪律 5）：预览是值本身，`flex: none` 不参与压缩；
+     地址是唯一可省略、点进去能拿回全文的格。
+  ⚠️ `.prop-asset` 自己留 `min-width: 0`：它是一枚**能省略的控件**，不是要跟标签
+     一起折行的「内容」。
 */
 .prop-asset {
   display: flex;
+  flex-direction: column;
   flex: 1 1 auto;
+  gap: var(--ui-gap-2);
+  min-width: 0;
+}
+.prop-asset-address {
+  display: flex;
   align-items: center;
   gap: var(--ui-gap-1);
   min-width: 0;
@@ -859,8 +902,13 @@
   border: 1px solid var(--ui-border-subtle);
   border-radius: var(--ui-radius-sm);
 }
-.prop-asset:focus-within {
+.prop-asset-address:focus-within {
   border-color: var(--ui-accent);
+}
+.prop-asset-lead {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--ui-text-tertiary);
 }
 .prop-asset-thumbs {
   display: flex;
@@ -868,32 +916,45 @@
   gap: var(--ui-gap-1);
   /* 图是值本身：不可省，不参与压缩。多值时这份容器自己横向滚，也不画到地址上 */
   flex: 0 0 auto;
+  min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
   white-space: nowrap;
+  padding: var(--ui-gap-1);
+  background: var(--ui-surface-sunken);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-sm);
 }
 .prop-asset-thumbs::-webkit-scrollbar { display: none; }
-/* 多值：这一列可以缩（容器自己横向滚、内容被裁在自己里面），地址才有地方落 */
-.prop-asset[data-asset-many='1'] .prop-asset-thumbs {
-  flex: 0 1 auto;
-  min-width: 0;
-}
 .prop-asset-thumb {
   position: relative;
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
+  max-width: 100%;
 }
-.prop-asset-thumb--panel { height: 1.6em; }
+/* 值预览：图上到 120px 高，宽度跟着比例走，不裁掉内容 */
+.prop-asset-thumb--panel { max-height: 120px; }
 /* 块下属性行：1em ＝ 一行文字的高度，估高按「行数 × 定高」算，多一行就漏算 */
 .prop-asset-thumb--line { height: 1em; }
 .prop-asset-img {
-  height: 100%;
+  height: auto;
   width: auto;
-  max-width: 8ch;
-  object-fit: cover;
+  max-height: 120px;
+  max-width: 100%;
+  object-fit: contain;
   border: 1px solid var(--ui-border-subtle);
   border-radius: var(--ui-radius-sm);
+}
+.prop-asset-thumb--line .prop-asset-img {
+  height: 100%;
+  max-height: none;
+  max-width: 8ch;
+  object-fit: cover;
+}
+/* 预览带自己已经是一层框；图再画一圈就是双重边框 */
+.prop-asset-thumbs .prop-asset-img {
+  border: 0;
 }
 .prop-asset-chip {
   display: inline-flex;
@@ -939,6 +1000,48 @@
   border: 0;
   box-shadow: none;
 }
+/* 表格格：定高，预览缩回一枚行内缩略图，三条挤在一行 */
+.prop-asset[data-asset-surface='cell'] {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  padding: 0 var(--ui-gap-1);
+  background: var(--ui-surface-sunken);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-sm);
+}
+.prop-asset[data-asset-surface='cell']:focus-within {
+  border-color: var(--ui-accent);
+}
+.prop-asset[data-asset-surface='cell'] .prop-asset-thumbs {
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 0;
+}
+/* 多值时这一列可以让出宽度（自己横向滚），地址才有地方落 */
+.prop-asset[data-asset-surface='cell'][data-asset-many='1'] .prop-asset-thumbs {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.prop-asset[data-asset-surface='cell'] .prop-asset-thumb--panel {
+  height: 1.6em;
+  max-height: none;
+}
+.prop-asset[data-asset-surface='cell'] .prop-asset-thumb--panel .prop-asset-img {
+  height: 100%;
+  max-height: none;
+  max-width: 8ch;
+  object-fit: cover;
+}
+.prop-asset[data-asset-surface='cell'] .prop-asset-address {
+  flex: 1 1 auto;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 0;
+}
+.prop-asset[data-asset-surface='cell'] .prop-asset-lead { display: none; }
 /* 尾动作是图标键：文字退 data-tip ＋ aria-label，窄槽里让出的宽度归地址 */
 .prop-asset-pick {
   flex: 0 0 auto;
@@ -1223,17 +1326,9 @@
 .prop-hug .prop-value {
   flex: 0 1 auto;
 }
-/* 2. 名字段是身份区的一员：不领段的分隔线（上下两线会把身份区切碎）；
- *    它内部的小节也不另起间距（properties-body 的 gap 管节奏）。
+/* 2. 块配置段里，轻动作行（脸／露面／显示）贴着标签；富值行（别名／标签／属于）
+ *    走 `data-stack`，标签单独一行。
  */
-.prop-names {
-  border-top: 0;
-  margin-top: 0;
-  padding-top: 0;
-}
-.prop-names .alias-section {
-  margin-top: 0;
-}
 /* 3. 段的动作住进段头：它是这一段的，不是清单下面又一行字 */
 .props-section-head .props-add {
   width: auto;

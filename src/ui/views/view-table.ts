@@ -631,6 +631,7 @@ export class ViewTable {
         },
         deps,
         block,
+        'cell',
       ),
     )
     return box

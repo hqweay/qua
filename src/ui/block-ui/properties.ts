@@ -5,11 +5,13 @@
  * 某个标签声明了哪些属性，**块属性**是这个块自己有哪些属性的值。
  * 本组件画的是「这个块有哪些属性的值」，顺带把「标签属性」的清单也画出来。
  *
- * 形状是**块属性一段 ＋ 标签属性一段**，段内平铺：
- *   · 块属性：同一 `propId` 只出现一次（被多个标签声明属性时**来源并列**）；
- *   · 每行标来源：`来自 #A、#B`，没有标签声明就标「本块自有」；
- *   · 声明了但没填 ⇒ 仍出现在块属性里，显示「待填」占位（这正是标签属性的意义）；
- *   · 顺序由数据层给（标签正文顺序 × `_fieldDefs` 顺序），本组件不重排。
+ * 段序按**打开这块要干什么**排（不是按模型的字段序）：
+ *   1. **属性值**：高频工作区，同一 `propId` 只出现一次（被多个标签声明时**来源并列**）；
+ *      每行标来源：`来自 #A、#B`，没有标签声明就标「本块自有」；
+ *      声明了但没填 ⇒ 仍出现，显示「待填」占位（这正是标签属性的意义）；行序由数据层给。
+ *   2. **类型专属**：标签的字段声明（`_fieldDefs` 清单）／定义块的值配置（格式／基数／候选域／选项）。
+ *   3. **块配置**：脸／别名／露面／显示／标签／属于——低频的「它是谁」，与块配置弹窗共用段。
+ *   4. **系统信息**：只读的创建／修改时刻。
  *
  * ⚠️ 为什么块属性段内不分节：同一条属性出现在两节里会重复；只放一节又会让来源随标签顺序变化。
  *    平铺 ＋ 多来源标注两个问题都没有（顺序只影响行序）。
@@ -27,6 +29,7 @@ import {
   ICON_PROP,
   aliasesOf,
   allowsMany,
+  assetRefKindOf,
   assetRefsOf,
   cardinalityOf,
   choiceDisplayLabel,
@@ -316,6 +319,9 @@ function chipAddButton(title: string, onClick: (anchor: DOMRect) => void): HTMLB
   return add
 }
 
+/** 值控件画在哪：面板/抽屉给整宽富控件，表格格只给一行（格子定高，不被预览撑破） */
+export type CellEditorSurface = 'panel' | 'cell'
+
 /**
  * 一行值的编辑器（按 kind）。返回控件元素。
  *
@@ -334,6 +340,7 @@ export function makeCellEditor(
   commit: (v: unknown) => void,
   deps?: CellEditorDeps,
   owner?: Block,
+  surface: CellEditorSurface = 'panel',
 ): HTMLElement {
   const kind = row.kind
   /**
@@ -577,25 +584,47 @@ export function makeCellEditor(
     box.dataset.assetEditor = '1'
     // 单值的图是固定前导件；多值是一列可横向滚的缩略图，允许它先让出宽度给地址
     box.dataset.assetMany = many ? '1' : '0'
-    const thumbs = document.createElement('div')
-    thumbs.className = 'prop-asset-thumbs'
-    for (const ref of refs) {
-      thumbs.appendChild(
-        makeAssetThumb(ref, {
-          onRemove: () => {
-            // 多值摘一项仍写数组；摘空了就是「没有这一格」（与 chips 一条口径）
-            const next = refs.filter((x) => x !== ref)
-            send(many ? (next.length === 0 ? undefined : next) : undefined)
-          },
-        }),
-      )
+    box.dataset.assetSurface = surface
+
+    /**
+     * **预览与地址是两份投影，各占一条带**（真机反馈：同一框里图贴着输入框，
+     * 读不出哪部分是「值」、哪部分是可改的地址）。
+     *
+     * 面板里预览整宽在上、地址在下；表格格定高，仍收成一行（`data-asset-surface`）。
+     * 没有值时不留一条空预览带 —— 空态只有地址带，选文件入口就在它尾上。
+     */
+    if (refs.length > 0) {
+      const thumbs = document.createElement('div')
+      thumbs.className = 'prop-asset-thumbs'
+      for (const ref of refs) {
+        thumbs.appendChild(
+          makeAssetThumb(ref, {
+            onRemove: () => {
+              // 多值摘一项仍写数组；摘空了就是「没有这一格」（与 chips 一条口径）
+              const next = refs.filter((x) => x !== ref)
+              send(many ? (next.length === 0 ? undefined : next) : undefined)
+            },
+          }),
+        )
+      }
+      box.appendChild(thumbs)
     }
-    box.appendChild(thumbs)
+
+    const address = document.createElement('div')
+    address.className = 'prop-asset-address'
+    // 地址带的引导图标说明「这一格是引用」：库内 hash 是文件，外链是链接。
+    const lead = document.createElement('span')
+    lead.className = 'prop-asset-lead'
+    lead.setAttribute('aria-hidden', 'true')
+    renderIcon(lead, refs[0] && assetRefKindOf(refs[0]) === 'internal' ? 'lucide:file' : 'lucide:link', 'link', 'sm')
+    address.appendChild(lead)
+
     const input = document.createElement('input')
     input.className = 'prop-input prop-asset-input'
     input.type = 'text'
     input.spellcheck = false
     input.placeholder = t(many ? 'ui.props.assetAddPlaceholder' : 'ui.props.assetPlaceholder')
+    input.setAttribute('aria-label', t('ui.props.assetAddress'))
     input.value = many ? '' : (refs[0] ?? '')
     input.addEventListener('change', () => {
       const next = input.value.trim()
@@ -605,7 +634,7 @@ export function makeCellEditor(
       }
       send(many ? [...refs, next] : next)
     })
-    box.appendChild(input)
+    address.appendChild(input)
     if (deps?.pickAsset) {
       const pick = deps.pickAsset
       const btn = document.createElement('button')
@@ -624,8 +653,9 @@ export function makeCellEditor(
           } else send(hash)
         }),
       )
-      box.appendChild(btn)
+      address.appendChild(btn)
     }
+    box.appendChild(address)
     return box
   }
   /**
@@ -742,6 +772,12 @@ export function makeFieldRow(
   const el = document.createElement('div')
   el.className = 'prop-row ui-row'
   el.dataset.propId = row.propId
+  /**
+   * **值的形状决定行形**：图与多值不是「标签右边的一格」。半宽值槽里，
+   * 预览会贴到地址输入上、chips 会挤成一团；这时标签单占一行，值整宽落下。
+   * 单行值仍保持「标签左、值右」的紧凑形（扫一列字段时更快）。
+   */
+  if (row.kind === 'asset' || (row.cardinality === 'many' && allowsMany(row.kind))) el.dataset.stack = '1'
   if (!row.filled) el.dataset.pending = '1'
 
   const label = document.createElement('label')
@@ -941,59 +977,18 @@ export class PropertiesPanel {
     this.els.root.dataset.targetBlockId = target.id
     this.els.body.replaceChildren()
 
-    // 段序与块配置弹窗同一条（身份 → 归属 → 数据 → 事实）：两个壳是同一个配置体
-    // 脸：一枚入口开块配置弹窗（弹窗里脸面板直接展开）——任意块都有脸，入口不按露面位限流
-    if (this.deps.pickFace) this.els.body.appendChild(this.buildFace(target))
-    // 名字／露面／显示：与弹窗共用的段（判据与写路径只此一份）
-    this.els.body.appendChild(this.buildNames(target))
-    this.els.body.appendChild(this.buildLists(target))
-    const display = this.buildDisplay(target)
-    if (display) this.els.body.appendChild(display)
-    // 标签／归属：**分类**与 filed-under，比「有哪些字段」更先决定这一块是什么
-    this.els.body.appendChild(this.buildTags(target))
-    this.els.body.appendChild(this.buildBelongs(target))
-
     /**
-     * **数据段：这一块自己的值**（弹窗没有的一段）。
+     * **段序按「打开这块要干什么」排，不按模型的字段序排**：
+     * 属性值（高频工作区）→ 类型专属（标签的声明／定义块的值配置）→ 块配置
+     * （低频的「它是谁」）→ 系统信息。
      *
-     * 段头给「属性」一个名字 ＋ 入口——没有段头时它与上面的身份行混成一张平清单，
-     * 「主次」就是从这里丢的：身份行是轻动作行，这里往下是表单区，节奏必须断开。
+     * 为什么不拆成两张卡：卡片的粒度是**一个主体**，不是一类信息。检视卡的主体
+     * 是「这一屏唯一的那一块」，拆开后两张卡共享同一个主体、同一份生命周期、
+     * 同一个标题，却各自要一套收起／关闭状态 —— 用户得先找「值在哪张卡里」。
+     * 职责在卡片内部分段即可，容器不该按字段类别复制。
      */
-    const fields = document.createElement('section')
-    fields.className = 'props-section prop-fields'
-    const fieldsHead = document.createElement('div')
-    fieldsHead.className = 'props-section-head'
-    const fieldsTitle = document.createElement('span')
-    fieldsTitle.className = 'props-section-title'
-    fieldsTitle.textContent = t('ui.block.properties')
-    /**
-     * **入口和表单都紧贴它们写的那一组**。
-     *
-     * `els.add` 原来挂在 body 外面（卡片最下面），结果是：点「＋ 添加属性」以后，
-     * 表单长在「声明给成员」段**下面** —— 看起来像在给声明段加东西。
-     * 现在入口住进段头、own 的行和表单在段里，声明段另起一段（`buildDeclared`）。
-     */
-    fieldsHead.appendChild(fieldsTitle)
-    fieldsHead.appendChild(this.els.add)
-    fields.appendChild(fieldsHead)
-
-    if (rows.length === 0) {
-      const empty = document.createElement('p')
-      empty.className = 'props-empty'
-      empty.textContent = t('ui.props.empty')
-      fields.appendChild(empty)
-    }
-
-    // 同名不同 propId 必须能区分（C4）：两行 label 一样时把来源带进显示名
-    const labelCount = new Map<string, number>()
-    for (const r of rows) labelCount.set(r.label, (labelCount.get(r.label) ?? 0) + 1)
     const labels = this.deps.propLabels()
-
-    for (const row of rows) {
-      fields.appendChild(makeFieldRow(row, target, this.deps, { labelCount, labels }))
-    }
-    if (this.formOpen === 'own') fields.appendChild(this.buildForm(target, labels))
-    this.els.body.appendChild(fields)
+    this.els.body.appendChild(this.buildFields(target, rows, labels))
 
     /**
      * **标签属性**：只有标签有。
@@ -1051,8 +1046,78 @@ export class PropertiesPanel {
       this.els.body.appendChild(config)
     }
 
+    // 块配置是低频的「它是谁」，排在值与其类型专属配置之后
+    this.els.body.appendChild(this.buildConfig(target))
+
     // 系统信息在**最后**：它是这一块的出生与改动记录，不是可编辑的数据
     this.els.body.appendChild(this.buildSystem(target))
+  }
+
+  /**
+   * **属性段：这一块自己的值**。
+   *
+   * 段头给「属性」一个名字 ＋ 入口——没有段头时它与身份行混成一张平清单，
+   * 「主次」就是从这里丢的：身份行是轻动作行，这里往下是表单区，节奏必须断开。
+   *
+   * 入口和表单都紧贴它们写的那一组：`els.add` 原来挂在卡体外面（最下面），
+   * 点开表单会长在「声明给成员」段下面，看起来像在给声明段加东西。
+   */
+  private buildFields(target: Block, rows: readonly FieldRow[], labels: ReadonlyMap<string, string>): HTMLElement {
+    const fields = document.createElement('section')
+    fields.className = 'props-section prop-fields'
+    const fieldsHead = document.createElement('div')
+    fieldsHead.className = 'props-section-head'
+    const fieldsTitle = document.createElement('span')
+    fieldsTitle.className = 'props-section-title'
+    fieldsTitle.textContent = t('ui.block.properties')
+    fieldsHead.appendChild(fieldsTitle)
+    fieldsHead.appendChild(this.els.add)
+    fields.appendChild(fieldsHead)
+
+    if (rows.length === 0) {
+      const empty = document.createElement('p')
+      empty.className = 'props-empty'
+      empty.textContent = t('ui.props.empty')
+      fields.appendChild(empty)
+    }
+
+    // 同名不同 propId 必须能区分（C4）：两行 label 一样时把来源带进显示名
+    const labelCount = new Map<string, number>()
+    for (const r of rows) labelCount.set(r.label, (labelCount.get(r.label) ?? 0) + 1)
+
+    for (const row of rows) {
+      fields.appendChild(makeFieldRow(row, target, this.deps, { labelCount, labels }))
+    }
+    if (this.formOpen === 'own') fields.appendChild(this.buildForm(target, labels))
+    return fields
+  }
+
+  /**
+   * **块配置段**：身份（脸／名字／露面／显示）与分类（标签／属于）。
+   *
+   * 它是低频的「这块是谁」，所以排在属性值之后；段内顺序与块配置弹窗同一条
+   * （两个壳是同一个配置体，段序同一份），只是这一个壳多了一圈段头。
+   */
+  private buildConfig(target: Block): HTMLElement {
+    const section = document.createElement('section')
+    section.className = 'props-section prop-config'
+    const head = document.createElement('div')
+    head.className = 'props-section-head'
+    const title = document.createElement('span')
+    title.className = 'props-section-title'
+    title.textContent = t('ui.blockConfig.title')
+    head.appendChild(title)
+    section.appendChild(head)
+
+    // 脸：一枚入口开块配置弹窗（弹窗里脸面板直接展开）——任意块都有脸，入口不按露面位限流
+    if (this.deps.pickFace) section.appendChild(this.buildFace(target))
+    section.appendChild(this.buildNames(target))
+    section.appendChild(this.buildLists(target))
+    const display = this.buildDisplay(target)
+    if (display) section.appendChild(display)
+    section.appendChild(this.buildTags(target))
+    section.appendChild(this.buildBelongs(target))
+    return section
   }
 
   /**
@@ -1136,6 +1201,7 @@ export class PropertiesPanel {
   private buildSystem(target: Block): HTMLElement {
     const box = document.createElement('div')
     box.className = 'prop-row prop-system ui-row'
+    box.dataset.stack = '1'
     const label = document.createElement('label')
     label.className = 'prop-label'
     const name = document.createElement('span')
@@ -1294,21 +1360,26 @@ export class PropertiesPanel {
   }
 
   /**
+   * 富值行：标签占第一行（与摘除键同排），值整宽落第二行。
+   *
+   * 判据是**值自己的形状**：一串 chips、一列别名、一张图，都不是「标签右边的一格」，
+   * 塞进半宽的值槽只会互相压。单行值（文本／日期／下拉）仍走上一条 `labeledRow`。
+   */
+  private stackedRow(cls: string, title: string, value: HTMLElement): HTMLElement {
+    const row = this.labeledRow(cls, title, value)
+    row.dataset.stack = '1'
+    return row
+  }
+
+  /**
    * **名字段**（别名＋添加）：与块配置弹窗共用同一份段（`config-sections.ts`）。
    * 面板壳是整宽小节（添加表单需要宽度），不是右值行。
    */
   private buildNames(target: Block): HTMLElement {
-    const section = document.createElement('section')
-    section.className = 'props-section prop-names'
-    const head = document.createElement('div')
-    head.className = 'props-section-head'
-    const title = document.createElement('span')
-    title.className = 'props-section-title'
-    title.textContent = t('ui.alias.title')
-    head.appendChild(title)
-    section.appendChild(head)
-    section.appendChild(namesContent(this.cfg(target), this.els.body))
-    return section
+    const value = document.createElement('span')
+    value.className = 'prop-value prop-names-value'
+    value.appendChild(namesContent(this.cfg(target), this.els.body))
+    return this.stackedRow('prop-names', t('ui.alias.title'), value)
   }
 
   /** **露面段**（page/tag 列表位）：与弹窗共用同一份段 */
@@ -1332,7 +1403,7 @@ export class PropertiesPanel {
    * 都画成「已删除」会让人一点清理就把能复活的边清掉。内容与交互在段里（与弹窗共用一份）。
    */
   private buildBelongs(target: Block): HTMLElement {
-    return this.labeledRow('prop-belongs', t('ui.belongs.title'), belongsContent(this.cfg(target)))
+    return this.stackedRow('prop-belongs', t('ui.belongs.title'), belongsContent(this.cfg(target)))
   }
 
   /**
@@ -1368,7 +1439,7 @@ export class PropertiesPanel {
    * 内容与交互在段里（与块配置弹窗共用一份）。
    */
   private buildTags(target: Block): HTMLElement {
-    return this.labeledRow('prop-tags', t('ui.props.tagsTitle'), tagsContent(this.cfg(target)))
+    return this.stackedRow('prop-tags', t('ui.props.tagsTitle'), tagsContent(this.cfg(target)))
   }
 
   /**
