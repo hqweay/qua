@@ -27,6 +27,7 @@ import {
   ACTIVE_VIEW_PROP,
   ALIASES_PROP,
   COLOR_PROP,
+  DEFAULT_DISPLAY_PROPS_PROP,
   DEFAULT_FILTER_PROP,
   DELETED_AT_PROP,
   DISPLAY_PROP,
@@ -93,6 +94,8 @@ export const SYSTEM_PROP_CHECKS: Readonly<Record<string, (value: unknown) => boo
   [VIEWS_PROP]: isViewsValue,
   [ACTIVE_VIEW_PROP]: isActiveViewValue,
   [DEFAULT_FILTER_PROP]: isQueryNode,
+  // 默认看法的显示覆写：白名单（非空字符串数组），空数组＝只标题也合法——同一形状复用 `_childProps` 判据
+  [DEFAULT_DISPLAY_PROPS_PROP]: isChildPropsValue,
   [EMBED_PROP]: (v) => canonicalViewRef(v) !== null,
   // 字段定义（props.ts）
   _kind: isPropKind,

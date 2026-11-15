@@ -15668,13 +15668,16 @@ await check('T157 入口：块菜单「视图…」→ 新建表格 ⇒ _activeV
       viewIds: views.map((v) => v.id),
       kinds: views.map((v) => v.kind),
       rows: document.querySelectorAll('.tv-row').length,
-      cols: (views[0]?.table?.columns ?? []).map((c) => c.key),
+      // 显示清单（displayProps 白名单）：建视图不再 seed 列清单，表格列按计算缺省现算
+      displayProps: views[0]?.displayProps ?? null,
+      headCols: [...document.querySelectorAll('.tv-head .tv-h')].map((el) => el.dataset.col ?? ''),
     }
   }, id)
   assert(after.viewIds.length === 1 && after.kinds[0] === 'table', `新建的是一个表格视图：${JSON.stringify(after)}`)
   assert(after.activeView === after.viewIds[0], `_activeView 指向它：${JSON.stringify(after)}`)
   assert(after.rows > 0, '建完当场就是表格（不用再点一次）')
-  assert(after.cols[0] === 'title' && after.cols.length > 1, `默认列算了一次并写进配置：${JSON.stringify(after.cols)}`)
+  assert(after.displayProps === null, '建视图不 seed 显示白名单（缺省＝计算列，写过才固定）')
+  assert(after.headCols[0] === 'title' && after.headCols.length > 1, `表头仍是标题列打头、带计算列：${JSON.stringify(after.headCols)}`)
 
   // 叶子块（没有子块、不是查询块）不给这一项：点了没有结果的入口比没有更糟
   const leaf = await page.evaluate(() => {
@@ -15699,7 +15702,7 @@ await check('T157 入口：块菜单「视图…」→ 新建表格 ⇒ _activeV
   )
 
   await ctx.close()
-  return `块菜单→视图…→新建表格 ⇒ ${after.viewIds.length} 个视图（${after.kinds.join(',')}），列 ${after.cols.length} 个；叶子块不给入口`
+  return `块菜单→视图…→新建表格 ⇒ ${after.viewIds.length} 个视图（${after.kinds.join(',')}），表头 ${after.headCols.length} 列；叶子块不给入口`
 })
 
 /* ---------------------------------------------------------------- T158 */
@@ -18278,7 +18281,7 @@ await check('T184 表头排序只改显示序：_query.sort 不变、成员不�
     const active = (raw?.props?._views ?? []).find((v) => v.id === raw?.props?._activeView)
     return {
       sort: JSON.stringify(raw?.props?._query?.sort ?? null),
-      viewSort: JSON.stringify(active?.table?.sort ?? null),
+      viewSort: JSON.stringify(active?.sort ?? null),
       rows: [...document.querySelectorAll('.tv-row')].map((r) => r.dataset.blockId ?? ''),
     }
   }, qid)

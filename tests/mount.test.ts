@@ -233,13 +233,13 @@ test('物化模板：条件＝内置 spec，视图带本源默认列；维度不
   const refs = derivedTemplateOf(host, blocks, 'refs')
   assert.deepEqual(refs?.spec, { where: { ref: '$self' } })
   assert.equal(refs?.views.length, 1)
-  assert.ok(refs?.views[0]!.table?.columns.some((c) => c.key === REF_COUNT_COLUMN), '引用模板带次数列')
+  assert.ok(refs?.views[0]!.displayProps?.includes(REF_COUNT_COLUMN), '引用模板带次数列')
   // 提及：物化的是组合条件（文本 ∧ 非引用），带命中列
   const mentions = derivedTemplateOf(host, blocks, 'mentions')
   assert.deepEqual(mentions?.spec, {
     where: { all: [{ text: '$self' }, { not: { ref: '$self' } }] },
   })
-  assert.ok(mentions?.views[0]!.table?.columns.some((c) => c.key === MATCHED_COLUMN), '提及模板带命中列')
+  assert.ok(mentions?.views[0]!.displayProps?.includes(MATCHED_COLUMN), '提及模板带命中列')
   // 成员：条件按标签名现算（物化是快照，改名不追——代价在注释里）
   const members = derivedTemplateOf(tag, blocks, 'members')
   assert.notEqual(members, null, '标签块有成员模板')

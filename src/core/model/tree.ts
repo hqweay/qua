@@ -7,6 +7,7 @@ import { uuidv7Hex } from './ids.ts'
 import {
   ALIASES_PROP,
   ACTIVE_VIEW_PROP,
+  DEFAULT_DISPLAY_PROPS_PROP,
   DEFAULT_FILTER_PROP,
   DELETED_AT_PROP,
   DISPLAY_PROP,
@@ -315,6 +316,8 @@ function contentProps(props: BlockProps): BlockProps | undefined {
     delete out[ACTIVE_VIEW_PROP]
     // 默认看法的切片同理：副本没有条件，那片镜头没有源可叠
     delete out[DEFAULT_FILTER_PROP]
+    // 显示覆写同理：默认看法的两个位都随源走
+    delete out[DEFAULT_DISPLAY_PROPS_PROP]
   }
   /**
    * 挂载区随块走，但**不能共享同一批条目对象**：浅拷 `props` 之后副本与原件

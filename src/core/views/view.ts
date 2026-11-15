@@ -102,6 +102,48 @@ export const STORED_KINDS_BY_SOURCE: Record<Source['kind'], readonly StoredViewK
   children: ['table', 'list-table', 'cards', 'calendar', 'mindmap', 'tabs'],
 }
 
+/** 四个共用轴：一个看法支持哪些位，由这一份矩阵回答 */
+export type ViewAxis = 'filter' | 'sort' | 'group' | 'display'
+
+/**
+ * **轴 × 看法矩阵（唯一一份）**：哪种看法支持哪个位。
+ *
+ * `canonicalViews`（丢死配置）、命令层（拒绝不支持的写）、UI（显示哪几个 section）都读它——
+ * 各判一遍的下场是「写进去了、却永远不生效」。空格是**语义决定**的（大纲的序是内容，
+ * 筛选是遮罩），不是没做完；以后填格是加渲染器，不是加字段。
+ *
+ * 两个有理由的例外不进这份矩阵的键空间：
+ *   · `listTable.sort` 的键是**列位置**（第 k 列），与顶层 `sort`（属性键）刻意分开；
+ *   · `groupByStructure` 是 group 位的第二个来源（`withGroup`／`withStructureGroup` 互斥），
+ *     只接 children 源的卡片。
+ */
+const AXES_BY_KIND: Record<Source['kind'], Record<ViewKind, readonly ViewAxis[]>> = {
+  query: {
+    // 默认看法（大纲）：filter 走 `_defaultFilter`、display 走 `_defaultDisplayProps`；sort/group 不做
+    outline: ['filter', 'display'],
+    table: ['filter', 'sort', 'group', 'display'],
+    'list-table': [],
+    cards: ['filter', 'sort', 'group', 'display'],
+    calendar: ['filter', 'display'],
+    mindmap: [],
+    tabs: [],
+  },
+  children: {
+    outline: ['display'],
+    table: ['filter', 'sort', 'group', 'display'],
+    'list-table': ['sort'],
+    cards: ['filter', 'sort', 'group', 'display'],
+    calendar: ['filter', 'display'],
+    mindmap: [],
+    tabs: ['filter'],
+  },
+}
+
+/** 这一种源 × 看法支持的轴（`''`／默认看法用 `'outline'` 查；唯一读口） */
+export function axesFor(source: Source, kind: ViewKind): readonly ViewAxis[] {
+  return AXES_BY_KIND[source.kind]?.[kind] ?? []
+}
+
 /** 派生栏允许的看法（**唯一一份**：prefs 归一与 UI 的切换器都读它；跟 query 源那张表走） */
 export const DERIVED_VIEW_KINDS: readonly DerivedViewKind[] = ['outline', ...QUERY_SOURCE_KINDS]
 
@@ -156,35 +198,25 @@ export function groupsByStructure(v: ViewConfig | null | undefined): boolean {
 }
 
 /**
- * 一列。
- *
- * `key` 是**属性定义块的 id**，或下面这些保留键：
- * `title`（正文投影）／`tags`（归属）／`children`（子块数）／`created`／`modified`。
- */
-export interface ViewColumn {
-  key: string
-  /** 列宽（px）；缺省按列的种类给 */
-  width?: number
-  /** 隐藏但保留配置（再显示时宽度还在）；数组位仍是列序 */
-  hidden?: boolean
-}
-
-/**
  * 排序键：**与查询的 `SortKey` 是同一个形状**（`by` ＋ `dir`），直接复用那一个。
  *
  * 为什么不另立一个：两者回答的是同一件事（「按哪一列的什么方向排」），
  * 而两份同形的类型会让「表格排序」与「查询排序」看起来需要各自的转换代码。
- * `by` 的取值与列的 `key` 同一套：属性定义 id 或保留键。
+ * `by` 的取值与显示键同一套：属性定义 id 或保留键。
  */
 export type { SortKey } from '../query/query.ts'
 
 export type RowHeight = 'compact' | 'cozy' | 'comfortable'
 
+/**
+ * 表格的**布局元数据**。列的**清单**住在顶层 `displayProps`（显示轴）；这里只留
+ * 「这张表自己长什么样」：行高与列宽。列宽含标题列（键 `'title'`）——
+ * 宽度是「怎么摆」不是「显示什么」，跟清单分开两个位。
+ */
 export interface TableConfig {
-  columns: ViewColumn[]
   rowHeight?: RowHeight
-  /** **显示排序**：只排当前这批成员，不重查（与 `QuerySpec.sort` 是两件事） */
-  sort?: SortKey[]
+  /** 列宽（px，含标题列）；缺省按列的种类给（`defaultWidthOf`） */
+  widths?: Record<string, number>
 }
 
 /**
@@ -244,6 +276,19 @@ export interface ViewConfig {
    * （写进去也只会是死配置）。
    */
   groupByStructure?: true
+  /**
+   * **显示排序**（视图层全局轴）：多键，**数组序即优先级**；只排当前这批成员的显示序，
+   * 不重查、不改 children 顺序（`QuerySpec.sort` 是成员顺序——「取哪些」，两件事）。
+   * 哪些 kind 认它由 `AXES_BY_KIND` 回答，`canonicalViews` 会把不认的丢掉。
+   */
+  sort?: SortKey[]
+  /**
+   * **显示轴（视图层全局）**：每条记录露出哪些属性键。
+   * **在场＝白名单覆写**（空数组＝只标题）；**缺省＝该看法的默认**
+   * （rich 看法＝自己的属性 ∪ `_childProps` 声明链；表格＝计算列；日历＝只标题）。
+   * 键＝属性定义块 id 或保留键；**标题列恒在第一位且不进这里**——它是行身份，不是一条可选属性。
+   */
+  displayProps?: string[]
   table?: TableConfig
   /** 结构映射表：**只有排序**，没有列（列＝一个直接子块，不是配置） */
   listTable?: { sort?: ListSort }
@@ -252,7 +297,7 @@ export interface ViewConfig {
   /** 页签（一次只看一个子块；激活项是视图实例状态，不进这里） */
   tabs?: TabsConfig
   calendar?: { dateBy: string; showUndated?: boolean }
-  mindmap?: { cardFields?: string[]; direction?: 'both' | 'right' }
+  mindmap?: { direction?: 'both' | 'right' }
 }
 
 /** 一个拥有者的视图集：命名视图 ＋ 默认激活的那个（缺省＝ `defaultKindFor`） */
@@ -346,35 +391,6 @@ export function isActiveViewValue(v: unknown): boolean {
   return typeof v === 'string'
 }
 
-function columnOf(raw: unknown): ViewColumn | null {
-  if (!raw || typeof raw !== 'object') return null
-  const c = raw as Partial<ViewColumn>
-  if (!isStr(c.key)) return null
-  const out: ViewColumn = { key: c.key }
-  // 宽度夹到 min/max：坏值不该让整列消失，也不该让表宽成几千像素
-  if (typeof c.width === 'number' && Number.isFinite(c.width)) out.width = Math.max(60, Math.min(480, Math.round(c.width)))
-  if (c.hidden === true) out.hidden = true
-  return out
-}
-
-/**
- * 一份原始列清单 ⇒ 可落盘的列（命令面 `core.view/set-columns` 与读路径共用同一份）。
- *
- * 标题列**永远在且在第一位**：它是块本身，其余每一列都是「这一块的这个方面」——
- * 没有它，一张表就没有行身份可指。其余按传入序去重（同键写两遍是配置 bug，不是两种列）。
- */
-export function columnsOfRaw(raw: unknown): ViewColumn[] {
-  const list = Array.isArray(raw) ? raw.map(columnOf).filter((c): c is ViewColumn => c !== null) : []
-  const out: ViewColumn[] = []
-  const seen = new Set<string>()
-  for (const c of list) {
-    if (c.key === TITLE_COLUMN || seen.has(c.key)) continue
-    seen.add(c.key)
-    out.push(c)
-  }
-  return [{ key: TITLE_COLUMN, width: defaultWidthOf(TITLE_COLUMN) }, ...out]
-}
-
 function sortOf(raw: unknown): SortKey | null {
   if (!raw || typeof raw !== 'object') return null
   const k = raw as Partial<SortKey>
@@ -382,14 +398,40 @@ function sortOf(raw: unknown): SortKey | null {
   return { by: k.by, dir: k.dir === 'desc' ? 'desc' : 'asc' }
 }
 
+/**
+ * 一份原始显示键清单 ⇒ 可落盘的白名单（命令面 `core.view/set-display` 与读路径共用同一份）。
+ *
+ * **标题列不在候选里**（它是行身份，白名单管的是「标题之外还露什么」）；
+ * 其余按传入序去重。**空数组是合法值**（＝只标题），调用方要自己挡「非数组」——
+ * 坏输入给空清单会静默把显示清空，那是写侧的 bug 不是这里的宽容。
+ */
+export function displayPropsOfRaw(raw: unknown): string[] {
+  const list = Array.isArray(raw) ? raw : []
+  const out: string[] = []
+  for (const k of list) {
+    if (isStr(k) && k !== TITLE_COLUMN && !out.includes(k)) out.push(k)
+  }
+  return out
+}
+
+/** 一份原始排序键清单 ⇒ 可落盘的多键（数组序即优先级；坏项丢掉，空数组＝不排序） */
+export function sortKeysOfRaw(raw: unknown): SortKey[] {
+  return (Array.isArray(raw) ? raw : []).map(sortOf).filter((s): s is SortKey => s !== null)
+}
+
 function tableOf(raw: unknown): TableConfig | undefined {
   if (!raw || typeof raw !== 'object') return undefined
   const t = raw as Partial<TableConfig>
-  const columns = Array.isArray(t.columns) ? t.columns.map(columnOf).filter((c): c is ViewColumn => c !== null) : []
-  const out: TableConfig = { columns }
+  const out: TableConfig = {}
   if (t.rowHeight && ROW_HEIGHTS.includes(t.rowHeight)) out.rowHeight = t.rowHeight
-  const sort = Array.isArray(t.sort) ? t.sort.map(sortOf).filter((s): s is SortKey => s !== null) : []
-  if (sort.length > 0) out.sort = sort
+  if (t.widths && typeof t.widths === 'object' && !Array.isArray(t.widths)) {
+    const widths: Record<string, number> = {}
+    for (const [k, v] of Object.entries(t.widths as Record<string, unknown>)) {
+      // 宽度夹到 min/max：坏值不该让整列消失，也不该让表宽成几千像素
+      if (isStr(k) && typeof v === 'number' && Number.isFinite(v)) widths[k] = Math.max(60, Math.min(480, Math.round(v)))
+    }
+    if (Object.keys(widths).length > 0) out.widths = widths
+  }
   return out
 }
 
@@ -461,17 +503,29 @@ export function canonicalViews(raw: unknown, source: Source): ViewConfig[] {
     if (!allowed.includes(kind as StoredViewKind)) continue
     const view: ViewConfig = { id: v.id, kind: kind as StoredViewKind }
     if (isStr(v.name)) view.name = v.name
-    // 切片只对 query 源生效；别的源写进来也丢掉（否则「写进去了、却永远不生效」）
-    if (source.kind === 'query' && isQueryNode(v.filter)) view.filter = canonicalNode(v.filter)
+    // **轴按矩阵收**：不认这一轴的看法，写进来的那一格直接丢（否则「写进去了、却永远不生效」）。
+    // filter 在 query 源是切片、在 children 记录视图是显示掩码——两种语义共用一份 QueryNode。
+    const axes = axesFor(source, kind as StoredViewKind)
+    if (axes.includes('filter') && isQueryNode(v.filter)) view.filter = canonicalNode(v.filter)
+    // 顶层 sort 只给平表与卡片（结构映射表的排序是列位置，走 `listTable.sort` 那条例外）
+    if ((kind === 'table' || kind === 'cards') && axes.includes('sort')) {
+      const sort = Array.isArray(v.sort) ? v.sort.map(sortOf).filter((s): s is SortKey => s !== null) : []
+      if (sort.length > 0) view.sort = sort
+    }
+    // 显示白名单：**空数组是合法值**（＝只标题），只有「根本不是数组」才丢
+    if (axes.includes('display') && Array.isArray(v.displayProps)) {
+      view.displayProps = displayPropsOfRaw(v.displayProps)
+    }
     /**
      * **结构分组只接 children 源的卡片**：组＝直接子块、记录＝它的孩子。
      * 别的组合写进来也丢掉——读路径没有第二个消费者，留着就是死配置。
      */
     const structure = source.kind === 'children' && kind === 'cards' && v.groupByStructure === true
     if (structure) view.groupByStructure = true
-    // 分组键是记录视图共用的顶层位（大纲忽略它；写进去不报错、也不丢——换视图种类键还在）
+    // 分组键是记录视图共用的顶层位；不认 group 轴的看法（页签／日历／映射表）**不再留着**
+    // ——留着就是「切过去时上一份视图的残留」，而没人能说清它该不该生效
     // ⚠️ 结构分组与按值分组**互斥**：组顺序＝children 顺序，没有第二份 groupOrder。
-    if (!structure) {
+    if (axes.includes('group') && !structure) {
       if (isStr(v.groupBy)) view.groupBy = v.groupBy
       if (Array.isArray(v.groupOrder)) {
         const order = v.groupOrder.filter(isStr)
@@ -821,21 +875,18 @@ export function defaultWidthOf(key: string): number {
 }
 
 /**
- * 两列兜底：空表也要有列头，否则用户不知道「这里能放什么」——但只放**真有内容的两列**。
+ * 两键兜底：空源也要有能看的起点，但只放**真有内容的那一键**。
  * 系统元数据（子块数/创建/修改/路径）不默认占位：它们是「什么时候动过」不是「这块是什么」，
  * 而兜底出现的时机恰是「子块还没声明任何字段」——最该引导去声明字段的时候，
- * 摆几列凑数的元数据只会把「＋ 添加列」的那一步往后推。想要它们走列管理（`core.view/set-columns`）。
+ * 摆几键凑数只会把「添加属性」的那一步往后推。想要它们走显示白名单（`core.view/set-display`）。
  */
-function fallbackColumns(): ViewColumn[] {
-  return [
-    { key: TITLE_COLUMN, width: defaultWidthOf(TITLE_COLUMN) },
-    { key: TAGS_COLUMN, width: defaultWidthOf(TAGS_COLUMN) },
-  ]
+function fallbackPropKeys(): string[] {
+  return [TAGS_COLUMN]
 }
 
-/** 一批块「实际拥有的属性」⇒ 列（不逐行扫库，只看前若干个） */
-function columnsFromBlocks(blocks: readonly Block[], kb: KbClient, limit: number): ViewColumn[] {
-  const cols: ViewColumn[] = [{ key: TITLE_COLUMN, width: defaultWidthOf(TITLE_COLUMN) }]
+/** 一批块「实际拥有的属性」⇒ 显示键（不逐行扫库，只看前若干个） */
+function keysFromBlocks(blocks: readonly Block[], kb: KbClient, limit: number): string[] {
+  const keys: string[] = []
   const seen = new Set<string>()
   outer: for (const child of blocks) {
     const ids = [...ownFieldIds(child)]
@@ -843,26 +894,26 @@ function columnsFromBlocks(blocks: readonly Block[], kb: KbClient, limit: number
     for (const id of ids) {
       if (seen.has(id)) continue
       seen.add(id)
-      cols.push({ key: id, width: defaultWidthOf(id) })
-      if (cols.length > limit) break outer
+      keys.push(id)
+      if (keys.length > limit) break outer
     }
   }
-  return cols.length > 1 ? cols : fallbackColumns()
+  return keys.length > 0 ? keys : fallbackPropKeys()
 }
 
 /**
- * 条件里的 `tag`／`prop` 提到哪些列。
+ * 条件里的 `tag`／`prop` 提到哪些键。
  *
- * 为什么先问条件：一个「任务清单」查询的列就该是**它筛的那几个字段**，
- * 而不是命中里碰巧前四条带着的槽 —— 后者会随数据漂移，而列只算一次。
+ * 为什么先问条件：一个「任务清单」查询的显示就该是**它筛的那几个字段**，
+ * 而不是命中里碰巧前四条带着的槽 —— 后者会随数据漂移，而白名单只算一次。
  */
-function columnsFromSpec(spec: QuerySpec, kb: KbClient): ViewColumn[] {
-  const cols: ViewColumn[] = [{ key: TITLE_COLUMN, width: defaultWidthOf(TITLE_COLUMN) }]
-  const seen = new Set<string>([TITLE_COLUMN])
+function keysFromSpec(spec: QuerySpec, kb: KbClient): string[] {
+  const keys: string[] = []
+  const seen = new Set<string>()
   const push = (id: string): void => {
     if (seen.has(id)) return
     seen.add(id)
-    cols.push({ key: id, width: defaultWidthOf(id) })
+    keys.push(id)
   }
   const visit = (n: unknown): void => {
     if (!n || typeof n !== 'object') return
@@ -882,44 +933,40 @@ function columnsFromSpec(spec: QuerySpec, kb: KbClient): ViewColumn[] {
     if (p && typeof p === 'object' && typeof (p as { id?: unknown }).id === 'string') push((p as { id: string }).id)
   }
   visit(spec.where)
-  return cols.length > 1 ? cols : []
+  return keys
 }
 
 /**
- * **第一次切到这张视图时的默认列**（**只算一次**，算完由命令层写进配置）。
+ * **表格缺省时的计算列**（显示轴的缺省答案，**唯一入口**；不在各渲染器里各算一套）。
  *
  * 两份源各有各的问法：
  *   · **query**：先看条件里的标签声明与属性条件，再看前若干条命中的自有属性；
  *   · **children**：看前几个直接子块实际拥有的属性 ＋ 标签声明。
- * 一个都没有 ⇒ 退回 `title`／`tags`／`children`／`modified` 四列。
+ * 一个都没有 ⇒ 退回标签一列。
  *
- * ⚠️ 之后**不随结果自动变**：列宽/列序会随结果漂移，那比列少更烦人。
- * ⚠️ 这是**唯一入口**：不要在各渲染器里各算一套（那会得到两份默认列）。
+ * 返回**不含标题列**的键清单（标题恒在第一位，由渲染器自己放）。
+ * ⚠️ 之后**不随结果自动变**：显示随结果漂移比列少更烦人；一旦写过 `displayProps`
+ *    白名单就稳定（不再算缺省）。
  */
-export function defaultColumnsForSource(
+export function defaultDisplayPropsFor(
   source: Source,
   kb: KbClient,
   opts: { hits?: readonly { blockId: string }[]; limit?: number } = {},
-): ViewColumn[] {
+): string[] {
   const limit = opts.limit ?? 4
   if (source.kind === 'children') {
     const root = kb.get(source.blockId)
-    return columnsFromBlocks(root ? [...kb.children(source.blockId)].filter((b) => !isDeleted(b)) : [], kb, limit)
+    return keysFromBlocks(root ? [...kb.children(source.blockId)].filter((b) => !isDeleted(b)) : [], kb, limit)
   }
   // query：条件优先，命中兜底
-  const fromSpec = columnsFromSpec(source.spec, kb)
-  if (fromSpec.length > 1) return fromSpec
+  const fromSpec = keysFromSpec(source.spec, kb)
+  if (fromSpec.length > 0) return fromSpec
   const hits = opts.hits ?? []
   const blocks = hits
     .slice(0, limit + 1)
     .map((h) => kb.get(h.blockId))
     .filter((b): b is Block => b !== undefined)
-  return blocks.length > 0 ? columnsFromBlocks(blocks, kb, limit) : fallbackColumns()
-}
-
-/** 可见列（`hidden` 的保留配置但不画） */
-export function visibleColumns(columns: readonly ViewColumn[]): ViewColumn[] {
-  return columns.filter((c) => c.hidden !== true)
+  return blocks.length > 0 ? keysFromBlocks(blocks, kb, limit) : fallbackPropKeys()
 }
 
 /** 一条记录在树里的位置：祖先的显示名拼接（空祖先跳过） */
@@ -1065,9 +1112,11 @@ function cloneView(v: ViewConfig): ViewConfig {
   const out: ViewConfig = { ...v }
   // 切片是嵌套结构：浅拷贝会让两处配置共享同一棵条件树（改一处静默影响另一处）
   if (v.filter) out.filter = canonicalNode(v.filter)
+  if (v.sort) out.sort = v.sort.map((s) => ({ ...s }))
+  if (v.displayProps) out.displayProps = [...v.displayProps]
   if (v.table) {
-    const table: TableConfig = { ...v.table, columns: v.table.columns.map((c) => ({ ...c })) }
-    if (v.table.sort) table.sort = v.table.sort.map((s) => ({ ...s }))
+    const table: TableConfig = { ...v.table }
+    if (v.table.widths) table.widths = { ...v.table.widths }
     out.table = table
   }
   if (v.listTable) out.listTable = v.listTable.sort ? { sort: { ...v.listTable.sort } } : {}
@@ -1100,12 +1149,42 @@ export function renameView(views: readonly ViewConfig[], id: string, name: strin
   })
 }
 
-/** 写表格的排序列（`undefined`／空数组 ＝ 不排序，删掉那一格而不是留个空数组） */
+/** 写**显示排序**（顶层轴；`undefined`／空数组 ＝ 不排序，删掉那一格而不是留个空数组） */
 export function withSort(view: ViewConfig, sort: readonly SortKey[] | undefined): ViewConfig {
   const next = cloneView(view)
-  if (!next.table) next.table = { columns: [] }
-  if (!sort || sort.length === 0) delete next.table.sort
-  else next.table.sort = sort.map((s) => ({ ...s }))
+  if (!sort || sort.length === 0) delete next.sort
+  else next.sort = sort.map((s) => ({ ...s }))
+  return next
+}
+
+/**
+ * 写**显示白名单**（`null`／`undefined` ＝ 清掉，回到该看法的缺省）。
+ *
+ * ⚠️ **空数组是合法值**（＝只标题），与「清掉」是两种状态：
+ * 覆写与跟随必须只有一种写法，而「只想看标题」是覆写的空档不是跟随。
+ */
+export function withDisplay(view: ViewConfig, props: readonly string[] | null | undefined): ViewConfig {
+  const next = cloneView(view)
+  if (props === null || props === undefined) {
+    delete next.displayProps
+    return next
+  }
+  next.displayProps = [...props]
+  return next
+}
+
+/** 写**列宽**（含标题列，键 `'title'`；宽度夹档。`null` ＝ 回到缺省宽度，删键） */
+export function withWidth(view: ViewConfig, key: string, width: number | null): ViewConfig {
+  const next = cloneView(view)
+  if (!next.table) next.table = {}
+  if (width === null) {
+    delete next.table.widths?.[key]
+    if (next.table.widths && Object.keys(next.table.widths).length === 0) delete next.table.widths
+    return next
+  }
+  const widths: Record<string, number> = { ...(next.table.widths ?? {}) }
+  widths[key] = Math.max(60, Math.min(480, Math.round(width)))
+  next.table.widths = widths
   return next
 }
 
@@ -1283,14 +1362,6 @@ export function filterOfSpec(spec: QuerySpec): QueryNode | null {
 /** 深拷一组视图（缓存与活值之间不许共享嵌套配置） */
 export function cloneViews(views: readonly ViewConfig[]): ViewConfig[] {
   return views.map(cloneView)
-}
-
-/** 写列（显隐/宽度/顺序）：整组替换，一次一条 `prop.set` */
-export function withColumns(view: ViewConfig, columns: readonly ViewColumn[]): ViewConfig {
-  const next = cloneView(view)
-  if (!next.table) next.table = { columns: [] }
-  next.table.columns = columns.map((c) => ({ ...c }))
-  return next
 }
 
 /**

@@ -25,10 +25,11 @@
  *    不许在各处直接摸 `props._views`／`_mounts`／`Prefs`（`arch-check` 钉住了这一条）。
  * ⚠️ 本文件只有类型与纯函数：读写发生在**装配层**，因为「一次动作一笔事务」在那里才做得到。
  */
-import { ACTIVE_VIEW_PROP, DEFAULT_FILTER_PROP, VIEWS_PROP, isQueryBlock, type Block } from '../model/model.ts'
+import { ACTIVE_VIEW_PROP, DEFAULT_DISPLAY_PROPS_PROP, DEFAULT_FILTER_PROP, VIEWS_PROP, isQueryBlock, type Block } from '../model/model.ts'
 import { readEmbed, type ViewRef } from './embed.ts'
 import { canonicalViews, readViews, resolveView, sourceOf, type Source, type ViewConfig, type ViewSet } from './view.ts'
 import { isQueryNode, type QueryNode, type QuerySpec } from '../query/query.ts'
+import { isChildPropsValue } from '../props/props.ts'
 import type { MountEntry, MountHost } from './mount.ts'
 
 /* ------------------------------------------------------------ 拥有者 */
@@ -54,6 +55,13 @@ export interface ViewOwnerData extends ViewSet {
    * 缺失 ＝ 默认看法没有切片（行为与没有这一格逐字相同）。
    */
   defaultFilter?: QueryNode
+  /**
+   * **默认看法（大纲）的显示覆写**：全局白名单（空数组＝只标题）。
+   *
+   * 缺失 ＝ rich 默认（记录自己的属性 ∪ `_childProps` 声明链）。与 `defaultFilter` 同层：
+   * 默认看法的两个位之一，不是命名视图的继承默认。
+   */
+  defaultDisplayProps?: string[]
   /** tab 的名字（块拥有者的名字是它的地址，不在这里） */
   label?: string
 }
@@ -61,10 +69,14 @@ export interface ViewOwnerData extends ViewSet {
 /**
  * 写补丁：只带要改的字段。
  *
- * `defaultFilter: null` ＝ **清掉**默认看法的切片（视图切片的清空走
- * `withFilter(view, null)`，形状不同：那一份配置本来就允许没有 `filter` 键）。
+ * `defaultFilter: null` ＝ **清掉**默认看法的切片；`defaultDisplayProps: null` ＝ **清掉**
+ * 显示覆写（回到 rich 默认）。视图切片的清空走 `withFilter(view, null)`，形状不同：
+ * 那一份配置本来就允许没有 `filter` 键。
  */
-export type ViewOwnerPatch = Omit<Partial<ViewOwnerData>, 'defaultFilter'> & { defaultFilter?: QueryNode | null }
+export type ViewOwnerPatch = Omit<Partial<ViewOwnerData>, 'defaultFilter' | 'defaultDisplayProps'> & {
+  defaultFilter?: QueryNode | null
+  defaultDisplayProps?: string[] | null
+}
 
 /**
  * 往拥有者上写：**只写给出的字段**。
@@ -82,6 +94,8 @@ export function applyOwnerPatch(data: ViewOwnerData, patch: ViewOwnerPatch): Vie
   if (query !== undefined) out.query = query
   const filter = patch.defaultFilter !== undefined ? patch.defaultFilter : data.defaultFilter
   if (filter !== undefined && filter !== null) out.defaultFilter = filter
+  const display = patch.defaultDisplayProps !== undefined ? patch.defaultDisplayProps : data.defaultDisplayProps
+  if (display !== undefined && display !== null) out.defaultDisplayProps = display
   const label = patch.label !== undefined ? patch.label : data.label
   if (label !== undefined) out.label = label
   return out
@@ -96,6 +110,8 @@ export function ownerDataOfBlock(b: Block | undefined): ViewOwnerData {
   if (isQueryBlock(b)) out.query = b.props?._query as QuerySpec
   const filter = b.props?.[DEFAULT_FILTER_PROP]
   if (isQueryNode(filter)) out.defaultFilter = filter
+  const display = b.props?.[DEFAULT_DISPLAY_PROPS_PROP]
+  if (isChildPropsValue(display)) out.defaultDisplayProps = display as string[]
   return out
 }
 
@@ -105,6 +121,7 @@ export function ownerDataOfTab(entry: MountEntry | undefined): ViewOwnerData | n
   const out: ViewOwnerData = { views: entry.views, query: entry.spec, label: entry.label }
   if (entry.activeView !== undefined && entry.activeView !== '') out.activeView = entry.activeView
   if (isQueryNode(entry.defaultFilter)) out.defaultFilter = entry.defaultFilter
+  if (isChildPropsValue(entry.defaultDisplayProps)) out.defaultDisplayProps = entry.defaultDisplayProps
   return out
 }
 
@@ -120,6 +137,7 @@ export function withTabOwnerData(entry: Extract<MountEntry, { kind: 'local' }>, 
   }
   if (data.activeView !== undefined && data.activeView !== '') out.activeView = data.activeView
   if (data.defaultFilter !== undefined) out.defaultFilter = data.defaultFilter
+  if (data.defaultDisplayProps !== undefined) out.defaultDisplayProps = data.defaultDisplayProps
   return out
 }
 
@@ -138,6 +156,8 @@ export function withBlockOwnerData(
   else out[VIEWS_PROP] = data.views
   if (data.defaultFilter === undefined) delete out[DEFAULT_FILTER_PROP]
   else out[DEFAULT_FILTER_PROP] = data.defaultFilter
+  if (data.defaultDisplayProps === undefined) delete out[DEFAULT_DISPLAY_PROPS_PROP]
+  else out[DEFAULT_DISPLAY_PROPS_PROP] = data.defaultDisplayProps
   if (data.activeView === undefined || data.activeView === '') delete out[ACTIVE_VIEW_PROP]
   else out[ACTIVE_VIEW_PROP] = data.activeView
   return Object.keys(out).length === 0 ? undefined : out

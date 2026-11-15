@@ -24,7 +24,6 @@
 import {
   childrenRecords,
   chipsOfFilter,
-  defaultColumnsForSource,
   EMPTY_QUICK_FILTER,
   evaluateQuerySpec,
   groupChoicesOf,
@@ -51,6 +50,7 @@ import {
   usesToday,
   resolveTodayBase,
   journalDate,
+  defaultDisplayPropsFor,
   viewsBroken,
   viewNameOf,
   droppedFrom,
@@ -73,7 +73,6 @@ import {
   type QuickFilterState,
   type Source,
   type ViewBindingRef,
-  type ViewColumn,
   type DerivedViewKind,
   type SortKey,
   type ViewConfig,
@@ -87,7 +86,6 @@ import {
   CREATED_COLUMN,
   MODIFIED_COLUMN,
   PATH_COLUMN,
-  defaultWidthOf,
 } from '../../core/index.ts'
 import type { KbClient } from '../../core/kb/types.ts'
 import { t } from '../../core/infra/msg.ts'
@@ -268,8 +266,8 @@ export interface DerivedMode {
   kind: DerivedViewKind
   /** 现算的一批记录（已带派生列） */
   records: () => ViewRecord[]
-  /** 表格列：**临时构造**，不落盘 */
-  columns: ViewColumn[]
+  /** 表格的显示白名单：**临时构造**，不落盘（不含标题列） */
+  displayProps: string[]
   /** 这一栏的分组键（设备状态；'' ＝ 没分组）。与看法同层：派生栏没有可写的视图配置 */
   groupBy: string
   /** 切看法写哪（设备状态；由装配层落地） */
@@ -303,7 +301,7 @@ export interface ViewHostEls {
   filterPanel: HTMLElement
   /** **列**按钮（表格视图才有）：就地展开列管理面板，勾选要显示的列 */
   columnsBtn: HTMLButtonElement
-  /** 列管理面板：勾选即落盘（`core.view/set-columns`），整份替换 */
+  /** 显示面板：勾选即落盘（`core.view/set-display`），整份替换 */
   columnsPanel: HTMLElement
   /** 条件 chip 条（查询源才有；收起时只剩一条摘要） */
   filters: HTMLElement
@@ -802,7 +800,9 @@ export class ViewHost {
     return {
       id: 'derived:table',
       kind: 'table',
-      table: { columns: d.columns.map((c) => ({ ...c })), ...(this.derivedSort.length > 0 ? { sort: this.derivedSort } : {}) },
+      // 排序与显示都是顶层轴（派生栏的这两份是设备态，临时构造不落盘）
+      ...(this.derivedSort.length > 0 ? { sort: this.derivedSort } : {}),
+      displayProps: [...d.displayProps],
       ...group,
     }
   }
@@ -1298,7 +1298,8 @@ export class ViewHost {
    *
    * 候选两路：字段（属性定义，`deps.fields()` 与条件树同一份）＋ 保留的系统列
    * （子块数/创建/修改/路径——它们是「什么时候动过、在哪」的投影，不默认占位但随取随有）。
-   * 勾选即落盘（`core.view/set-columns`，整份替换）：没有「应用」一步，勾完表格就地重画。
+   * 勾选即落盘（`core.view/set-display`，整份替换）：没有「应用」一步，勾完表格就地重画。
+   * 写的是**显示白名单**（空勾选＝只标题）；列宽是布局元数据（`table.widths`），不在这里动。
    * ⚠️ 面板**不收**：连续勾选是常态；`current` 每次勾选都现读（`bound` 是活引用）——
    * 用开面板那一刻的快照算下一份，第二次勾会把第一次的修改整个冲掉。
    */
@@ -1317,12 +1318,11 @@ export class ViewHost {
       row.className = 'qcp-row'
       const box = document.createElement('input')
       box.type = 'checkbox'
-      box.checked = (view.table?.columns ?? []).some((c) => c.key === r.key)
+      box.checked = (view.displayProps ?? []).includes(r.key)
       box.addEventListener('change', () => {
-        const current = this.defaultView()?.kind === 'table' ? (this.defaultView()!.table?.columns ?? []) : []
-        const kept = current.filter((c) => c.key !== r.key)
-        const next = box.checked ? [...kept, { key: r.key, width: defaultWidthOf(r.key) }] : kept
-        this.deps.invoke('core.view/set-columns', { owner: this.writeOwner, viewId: view.id, columns: next })
+        const current = this.defaultView()?.kind === 'table' ? (this.defaultView()!.displayProps ?? []) : []
+        const next = box.checked ? [...current, r.key] : current.filter((k) => k !== r.key)
+        this.deps.invoke('core.view/set-display', { owner: this.writeOwner, viewId: view.id, props: next })
         this.refocusBody()
       })
       row.append(box, document.createTextNode(r.label))
@@ -1944,8 +1944,8 @@ export class ViewHost {
       records,
       defs: () => this.deps.kb.propDefs(),
       defaults: () =>
-        this.deps.derived?.columns.map((c) => ({ ...c })) ??
-        defaultColumnsForSource(this.source, this.deps.kb, {
+        this.deps.derived?.displayProps ??
+        defaultDisplayPropsFor(this.source, this.deps.kb, {
           hits: this.frozen?.hits ?? [],
         }),
       setValue: (blockId, propId, value) => this.deps.invoke('core.props/set-value', { blockId, propId, value }),

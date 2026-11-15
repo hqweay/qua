@@ -120,6 +120,34 @@ test('applyOwnerPatch：`activeView: ""` 是**清掉**（回缺省看法），�
   assert.equal(applyOwnerPatch(before, {}).activeView, 'v-1', '`undefined` 才是「没传」')
 })
 
+test('defaultDisplayProps：写/清/null 三态与 `_defaultFilter` 同一纪律（空数组＝只标题，是覆写不是没配）', () => {
+  const before = { views: [{ id: 'v-1', kind: 'table' as const }] }
+  // 写：白名单在场（空数组也是「在场」）
+  const set = applyOwnerPatch(before, { defaultDisplayProps: [] })
+  assert.deepEqual(set.defaultDisplayProps, [], '空数组＝只标题，覆写成立')
+  assert.deepEqual(applyOwnerPatch(before, { defaultDisplayProps: ['p1'] }).defaultDisplayProps, ['p1'])
+  // null ＝ 清掉（回 rich 默认）；undefined ＝ 没传（不动）
+  assert.equal(applyOwnerPatch(set, { defaultDisplayProps: null }).defaultDisplayProps, undefined)
+  assert.deepEqual(applyOwnerPatch(set, {}).defaultDisplayProps, [], '`undefined` 才是「没传」')
+})
+
+test('ownerDataOfBlock / withBlockOwnerData：`_defaultDisplayProps` 往返；坏形状读成「没配」', () => {
+  const props = withBlockOwnerData(
+    { _icon: 'lucide:x' },
+    { views: [], defaultDisplayProps: ['p1'] },
+  )
+  assert.deepEqual(props?._defaultDisplayProps, ['p1'])
+  assert.deepEqual(props?._icon, 'lucide:x', '别的系统属性原样保留')
+  // 空集合删格：清掉覆写后属性袋里不留 `[]`
+  const cleared = withBlockOwnerData({ _defaultDisplayProps: ['p1'] }, { views: [] })
+  assert.equal(cleared?._defaultDisplayProps, undefined)
+  // 读：合法值进 data；不是字符串数组 ⇒ 「没配」（rich 默认）
+  const block = mk('b', '', { _defaultDisplayProps: ['p1'] })
+  assert.deepEqual(ownerDataOfBlock(block).defaultDisplayProps, ['p1'])
+  const bad = mk('b2', '', { _defaultDisplayProps: 'nope' })
+  assert.equal(ownerDataOfBlock(bad).defaultDisplayProps, undefined, '坏形状读作「没配」，不判 corrupt')
+})
+
 test('withBlockOwnerData：空集合一律删掉那一格（不留空数组）', () => {
   const props = withBlockOwnerData({ _icon: 'lucide:x' }, { views: [], query: QUERY })
   assert.equal(props?._views, undefined, '空视图列表不该留一个 `[]`')

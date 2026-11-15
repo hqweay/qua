@@ -329,7 +329,7 @@ export function seedWorkspace(): Workspace {
         id: 'seed-table',
         name: '表格',
         kind: 'table',
-        table: { columns: [{ key: FEATURE_STATUS_PROP_ID }, { key: FEATURE_DATE_PROP_ID }] },
+        displayProps: [FEATURE_STATUS_PROP_ID, FEATURE_DATE_PROP_ID],
       },
       { id: 'seed-gallery', name: '画廊', kind: 'cards' },
       {

@@ -169,8 +169,12 @@ import {
  *            （见 `ipc-adapter`），那边按「旧值在场」设计读路径（`legacyChoiceOf`）。
  * v45 → v46：**属性用途的角色名叫 `closure` 不叫 `status`**（机制不该用第一个消费者的词）。
  *            语义一个字不变，只是 `_use` 的值改名 ⇒ 旧值不读、直接作废重 seed，不写迁移。
+ * v46 → v47：**视图四轴升 `ViewConfig` 顶层**（`sort`／`displayProps`；
+ *            `table.columns` 拆成 `displayProps` + `table.widths`；删死配置 `mindmap.cardFields`；
+ *            新增 `_defaultDisplayProps`）。旧列清单/列宽/列选不迁移：`canonicalViews` 当未知键
+ *            丢弃、显示按计算缺省降级；`WORKSPACE_VERSION` +1 让 localStorage 旧库显式作废重 seed。
  */
-export const WORKSPACE_VERSION = 46
+export const WORKSPACE_VERSION = 47
 
 /** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {

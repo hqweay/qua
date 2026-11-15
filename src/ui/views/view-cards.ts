@@ -224,6 +224,16 @@ export class ViewCards {
     for (const id of [...next.keys()]) {
       if (!this.deps.store.find(id)) next.delete(id)
     }
+    // 显示白名单在场＝覆写（空数组＝只标题）：rich 默认给出的行被白名单筛过——
+    // 「视图只要这几格」优先于声明链；这是 S′6 优先级（视图 > 声明）的落地点
+    const whitelist = this.deps.view?.()?.displayProps
+    if (whitelist !== undefined) {
+      for (const [id, data] of next) {
+        const rows = data.rows.filter((row) => whitelist.includes(row.propId))
+        if (rows.length === 0) next.delete(id)
+        else next.set(id, { ...data, rows })
+      }
+    }
     this.below = next
   }
 
@@ -235,7 +245,7 @@ export class ViewCards {
    */
   private renderGrid(view: ViewConfig | null): void {
     this.root.dataset.size = view?.cards?.size ?? 'm'
-    const records = sortRecords(this.deps.records(), view?.table?.sort)
+    const records = sortRecords(this.deps.records(), view?.sort)
     if (records.length === 0) {
       this.root.appendChild(viewNote(t('ui.cards.empty')))
       return

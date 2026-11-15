@@ -652,17 +652,18 @@ export interface App {
   /** 删除一行＝软删那个子块（可恢复） */
   viewDeleteRow(rowId: string): boolean
   /**
-   * **表头排序＝显示排序**：只写 `view.table.sort`（或结构映射表的 `listTable.sort`）。
+   * **表头排序＝显示排序**：只写视图顶层的 `sort`（或结构映射表的 `listTable.sort` 例外）。
    *
    * ⚠️ 不再写查询的成员顺序（`QuerySpec.sort`）：那是「取哪些、按什么序」，
    *    由构建器编辑。点表头不该换一批行。`dir === ''` ＝ 清掉。
    */
   viewSetSort(owner: ViewOwnerRef, viewId: string, by: string, dir: string): boolean
   /**
-   * 写**表格的列清单**（整份替换，不逐列改）：`columns` 是原始数组，形状校验在读路径那一份
-   * （`columnsOfRaw`）——标题列永远在第一位，其余按 key 去重。只认表格视图。
+   * 写**显示白名单**（显示轴的视图级写口）：`props` 是原始数组，形状校验在读路径那一份
+   * （`displayPropsOfRaw`）——标题列不在清单里，其余按 key 去重；空数组＝只标题。
+   * 只认矩阵上支持 display 的看法。
    */
-  viewSetColumns(owner: ViewOwnerRef, viewId: string, columns: unknown): boolean
+  viewSetDisplay(owner: ViewOwnerRef, viewId: string, props: unknown): boolean
   /**
    * 写**分组键**（记录视图共用的顶层配置位）：`groupBy === ''` ＝ 清掉。
    *

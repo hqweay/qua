@@ -22,8 +22,8 @@ import {
   cardLayoutOf,
   childrenRecords,
   cloneSubtree,
-  columnsOfRaw,
-  defaultColumnsForSource,
+  displayPropsOfRaw,
+  defaultDisplayPropsFor,
   defaultWidthOf,
   fieldTextOf,
   hasChildrenViewBody,
@@ -53,6 +53,7 @@ import {
   viewNameOf,
   visibleRows,
   withCover,
+  withDisplay,
   withFilter,
   withGroup,
   withTabsDirection,
@@ -109,7 +110,7 @@ function kbOf(blocks: Block[]): { kb: MemoryKb; store: BlockStore } {
 test('readViews：逐项校验，坏项只丢这一项（不抛、不连坐）', () => {
   const b = mk('b', '', [], {
     [VIEWS_PROP]: [
-      { id: 'v1', kind: 'table', table: { columns: [{ key: 'title', width: 260 }] } },
+      { id: 'v1', kind: 'table', displayProps: ['p1'], table: { widths: { title: 260 } } },
       { id: 'v2', kind: 'telepathy' }, // 未知 kind
       { id: 'v1', kind: 'table' }, // 重复 id：丢后者
       { kind: 'table' }, // 没有 id
@@ -122,17 +123,18 @@ test('readViews：逐项校验，坏项只丢这一项（不抛、不连坐）',
     ['v1'],
     `只保留能读的那一项：${JSON.stringify(views)}`,
   )
-  assert.deepEqual(views[0]!.table?.columns, [{ key: 'title', width: 260 }], '列配置原样留下')
+  assert.deepEqual(views[0]!.table?.widths, { title: 260 }, '列宽原样留下')
+  assert.deepEqual(views[0]!.displayProps, ['p1'], '显示白名单原样留下')
 })
 
 test('canonicalViews：只保留 kind 对应的那份子配置（table 不把卡片配置带走）', () => {
   const views = canonicalViews(
-    [{ id: 'v', kind: 'table', table: { columns: [{ key: 'title' }] }, cards: { cover: 'none' }, name: '表' }],
+    [{ id: 'v', kind: 'table', displayProps: ['tags'], cards: { cover: 'none' }, name: '表' }],
     { kind: 'children', blockId: 'n' },
   )
   assert.equal(views.length, 1)
   assert.equal(views[0]!.cards, undefined, 'table 视图不该带着卡片配置')
-  assert.deepEqual(views[0]!.table?.columns, [{ key: 'title' }])
+  assert.deepEqual(views[0]!.displayProps, ['tags'], '显示白名单是 table 视图自己的')
   assert.equal(views[0]!.name, '表')
 })
 
@@ -255,33 +257,69 @@ test('resolveRows：每条命中都是一行（父子同时命中不折叠）；
 
 /* ------------------------------------------------------------ 列 */
 
-test('defaultColumnsForSource：children 源看子块实际拥有的属性（只取一次），一个都没有才给两列兜底', () => {
+test('defaultDisplayPropsFor：children 源看子块实际拥有的属性（只取一次），一个都没有才给兜底', () => {
   const { root, defs } = pageWith5()
   const { kb } = kbOf([root, ...defs])
-  const cols = defaultColumnsForSource({ kind: 'children', blockId: 'root' }, kb)
-  assert.equal(cols[0]!.key, 'title', '第一列永远是标题')
-  const keys = cols.map((c) => c.key)
-  assert.ok(keys.includes(defs[0]!.id), `子块的属性要进列：${JSON.stringify(keys)}`)
+  const keys = defaultDisplayPropsFor({ kind: 'children', blockId: 'root' }, kb)
+  assert.ok(!keys.includes('title'), '标题不在清单里——它是行身份，渲染器自己放')
+  assert.ok(keys.includes(defs[0]!.id), `子块的属性要进显示：${JSON.stringify(keys)}`)
   assert.ok(keys.includes(defs[1]!.id))
 
   const empty = mk('e', '空容器', [mk('x', '没有属性')])
   const { kb: kb2 } = kbOf([empty])
-  const fallback = defaultColumnsForSource({ kind: 'children', blockId: 'e' }, kb2).map((c) => c.key)
-  // 兜底只放真有内容的两列：系统元数据（子块数/创建/修改/路径）退成列管理里的可加列
-  assert.deepEqual(fallback, ['title', 'tags'], '没有属性 ⇒ title/tags')
+  const fallback = defaultDisplayPropsFor({ kind: 'children', blockId: 'e' }, kb2)
+  // 兜底只放真有内容的一键：系统元数据（子块数/创建/修改/路径）退成显示面板里的可加项
+  assert.deepEqual(fallback, ['tags'], '没有属性 ⇒ tags')
 })
 
-test('columnsOfRaw：标题列恒在第一位，其余按 key 去重、宽度夹档', () => {
-  assert.deepEqual(
-    columnsOfRaw([{ key: 'modified' }, { key: 'tags' }]).map((c) => c.key),
-    ['title', 'modified', 'tags'],
-    '没写标题也要有——它是行身份',
+test('displayPropsOfRaw：标题不在清单里，其余按 key 去重；坏输入给空清单', () => {
+  assert.deepEqual(displayPropsOfRaw(['modified', 'tags']), ['modified', 'tags'], '按传入序保留')
+  assert.deepEqual(displayPropsOfRaw(['title', 'tags', 'tags']), ['tags'], '标题恒被摘掉（它是行身份）、重复键丢一份')
+  assert.deepEqual(displayPropsOfRaw('not-an-array'), [], '坏输入不炸（调用方要自己挡非数组）')
+})
+
+test('displayProps：白名单在场＝覆写（空数组＝只标题），清掉回到缺省', () => {
+  const view: ViewConfig = { id: 'v', kind: 'table' }
+  const custom = withDisplay(view, ['tags'])
+  assert.deepEqual(custom.displayProps, ['tags'])
+  // 空数组是合法值（只标题），不是「没配」——两种状态必须只有一种写法
+  assert.deepEqual(withDisplay(custom, []).displayProps, [])
+  assert.equal(withDisplay(custom, null).displayProps, undefined, 'null ＝ 清掉，回到缺省')
+  assert.equal(view.displayProps, undefined, '不改原视图')
+})
+
+test('canonicalViews：轴按矩阵收——不认那一轴的看法，写进来的格子被丢', () => {
+  const child = { kind: 'children', blockId: 'x' } as const
+  const query = { kind: 'query', spec: { where: { any: [] } } } as const
+
+  // cards 的 sort／displayProps 存活（220 代价登记的兑现：不再读 table.sort）
+  const [card] = canonicalViews(
+    [{ id: 'a', kind: 'cards', sort: [{ by: 'p1', dir: 'desc' }], displayProps: ['p1'] }],
+    child,
   )
-  assert.deepEqual(columnsOfRaw([{ key: 'title' }, { key: 'tags', width: 9999 }, { key: 'tags' }]), [
-    { key: 'title', width: 260 },
-    { key: 'tags', width: 480 },
-  ], '重复键丢一份、宽度夹到上限、标题宽度取默认')
-  assert.deepEqual(columnsOfRaw('not-an-array').map((c) => c.key), ['title'], '坏输入不炸，只留标题')
+  assert.deepEqual(card!.sort, [{ by: 'p1', dir: 'desc' }], '卡片的显示排序是真配置了')
+  assert.deepEqual(card!.displayProps, ['p1'])
+
+  // 页签不认 group（旧形状「换视图种类键还在」撤掉：残留就是死配置）
+  const [tabs] = canonicalViews([{ id: 'b', kind: 'tabs', groupBy: 'p1', sort: [{ by: 'p1', dir: 'asc' }] }], child)
+  assert.equal(tabs!.groupBy, undefined, '页签不分组')
+  assert.equal(tabs!.sort, undefined, '页签不排序')
+
+  // children 记录视图认 filter（显示掩码语义）；list-table/mindmap 不认
+  const [tbl] = canonicalViews([{ id: 'c', kind: 'table', filter: { any: [] } }], child)
+  assert.ok(tbl!.filter, 'children 记录视图的 filter 是显示掩码')
+  const [list] = canonicalViews([{ id: 'd', kind: 'list-table', filter: { any: [] } }], child)
+  assert.equal(list!.filter, undefined, '结构映射表不筛')
+
+  // query 源的 calendar 认 filter＋display，不认 sort（日期即序）
+  const [cal] = canonicalViews(
+    [{ id: 'e', kind: 'calendar', calendar: { dateBy: '_date' }, filter: { any: [] }, displayProps: ['p1'], sort: [{ by: 'p1', dir: 'asc' }], groupBy: 'p1' }],
+    query,
+  )
+  assert.ok(cal!.filter)
+  assert.deepEqual(cal!.displayProps, ['p1'])
+  assert.equal(cal!.sort, undefined, '日历不排序')
+  assert.equal(cal!.groupBy, undefined, '日历不分组')
 })
 
 test('保留列 path／refCount／matched／sharedTags：文本与排序值都认它们', () => {
@@ -350,12 +388,18 @@ test('sortRecords：相等元素保持来源顺序（稳定），且不产新数
   assert.deepEqual(rows.map((r) => r.block.id), before, '排序不改入参')
 })
 
-test('withSort：写排序列不碰列本身（换序只改一个字段）', () => {
-  const view = { id: 'v', kind: 'table' as const, table: { columns: [{ key: 'title', width: 260 }] } }
-  const next = withSort(view, [{ by: 'title', dir: 'desc' }])
-  assert.deepEqual(next.table?.sort, [{ by: 'title', dir: 'desc' }])
-  assert.deepEqual(next.table?.columns, [{ key: 'title', width: 260 }], '列配置原样')
-  assert.deepEqual(withSort(next, []).table?.sort, undefined, '取消排序＝删掉那一格，不留空数组')
+test('withSort：写顶层显示序，多键数组序即优先级；其余配置原样', () => {
+  const view: ViewConfig = { id: 'v', kind: 'table', table: { widths: { title: 260 } } }
+  const next = withSort(view, [
+    { by: 'p1', dir: 'desc' },
+    { by: 'title', dir: 'asc' },
+  ])
+  assert.deepEqual(next.sort, [
+    { by: 'p1', dir: 'desc' },
+    { by: 'title', dir: 'asc' },
+  ], '多键按数组序')
+  assert.deepEqual(next.table?.widths, { title: 260 }, '布局元数据原样')
+  assert.deepEqual(withSort(next, []).sort, undefined, '取消排序＝删掉那一格，不留空数组')
 })
 
 /* ------------------------------------------------------------ 复制与「让位」 */
@@ -618,14 +662,18 @@ test('切片是 AND 叠加（∩），不是替换：结果 = 基础结果 ∩ �
   assert.deepEqual(ids(kb.query(base, {})), baseHits, '没有切片时结果与基础条件逐条相同')
 })
 
-test('canonicalViews：filter 只对 query 源保留；query 上原样深拷并 canonical 化', () => {
+test('canonicalViews：filter 双语义——query 源是切片、children 记录视图是显示掩码；canonical 化共用一份', () => {
   const q = mk('q', '查询', [], { _query: { where: { any: [] } } })
   const raw = [{ id: 'v', kind: 'table', filter: { ref: { to: 'x', kind: ['embed', 'inline', 'inline'] } } }]
   const kept = canonicalViews(raw, sourceOf(q))
   assert.deepEqual(kept[0]!.filter, { ref: { to: 'x', kind: ['embed', 'inline'] } }, 'kind 去重并排序')
   assert.notEqual(kept[0]!.filter, raw[0]!.filter, '不许共享同一棵条件树')
-  const dropped = canonicalViews(raw, sourceOf(mk('n', '普通')))
-  assert.equal(dropped[0]!.filter, undefined, 'children 源没有可叠加的条件 ⇒ 丢掉（免得「写了却不生效」）')
+  const masked = canonicalViews(raw, sourceOf(mk('n', '普通')))
+  assert.deepEqual(
+    masked[0]!.filter,
+    { ref: { to: 'x', kind: ['embed', 'inline'] } },
+    'children 记录视图的 filter 是显示掩码（280 D8 修订 176.5 的 query-only）：同一份 QueryNode',
+  )
   const invalid = canonicalViews([{ id: 'v', kind: 'table', filter: 'nope' }], sourceOf(q))
   assert.equal(invalid[0]!.filter, undefined, '不是 QueryNode ⇒ 丢掉，不猜')
 })

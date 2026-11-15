@@ -961,7 +961,7 @@ export const MSG = {
   'cmd.view.remove': '删除视图',
   'cmd.view.rename': '重命名视图',
   'cmd.view.set-sort': '按列排序',
-  'cmd.view.set-columns': '设置表格列',
+  'cmd.view.set-display': '设置显示属性',
   'cmd.view.set-group': '设置分组',
   'cmd.view.set-tabs-direction': '切换页签方向',
   'cmd.view.set-cover': '设置封面',

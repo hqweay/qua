@@ -14,7 +14,6 @@
  */
 import {
   canonicalSpec,
-  defaultColumnsForSource,
   isQueryBlock,
   isQueryNode,
   mkBlock,
@@ -36,8 +35,8 @@ import {
   withTabsDirection,
   withListSort,
   withSort,
-  withColumns,
-  columnsOfRaw,
+  withDisplay,
+  displayPropsOfRaw,
   withStructureGroup,
   type Block,
   type ListSort,
@@ -75,9 +74,7 @@ export function buildFreshView(
 ): ViewConfig | null {
   if (!storedKindsFor(source).includes(kind)) return null
   const view: ViewConfig = { id: mkViewId(), kind }
-  if (kind === 'table') {
-    view.table = { columns: defaultColumnsForSource(source, kb) }
-  } else if (kind === 'cards') {
+  if (kind === 'cards') {
     // 卡片默认就是画廊（不分组、封面取正文首图）；要看板是抬头选一个分组列，不是另一种东西
     view.cards = { cover: 'first-asset' }
   } else if (kind === 'calendar') {
@@ -106,7 +103,7 @@ export function viewConfigCommands(
   | 'viewInsertRow'
   | 'viewDeleteRow'
   | 'viewSetSort'
-  | 'viewSetColumns'
+  | 'viewSetDisplay'
   | 'viewSetGroup'
   | 'viewSetCover'
   | 'viewSetTabsDirection'
@@ -307,16 +304,17 @@ export function viewConfigCommands(
     },
 
     /**
-     * 写**表格的整份列清单**（列管理的落点）。形状校验在 `columnsOfRaw`：
-     * 标题列恒在第一位、其余按 key 去重、宽度夹档——坏项丢掉而不是让整表消失。
-     * 只认表格视图：别的 kind 写进去会被 `canonicalViews` 丢掉（那就是「点了没生效」）。
+     * 写**显示白名单**（显示轴的视图级写口）。形状校验在 `displayPropsOfRaw`：
+     * 标题列不在清单里（它是行身份）、其余按 key 去重——坏项丢掉而不是让整表消失。
+     * **空数组是合法值**（＝只标题）；`null` ＝ 清掉白名单，回到该看法的缺省。
+     * 只认矩阵上支持 display 的 kind：别的写进去会被 `canonicalViews` 丢掉（「点了没生效」）。
      */
-    viewSetColumns: (owner, viewId, columns) => {
+    viewSetDisplay: (owner, viewId, props) => {
       const data = d.owners.read(owner)
       if (!data) return false
       const view = resolveView(data, viewId)
-      if (!view || view.kind !== 'table') return false
-      d.owners.write(owner, { views: upsertView(data.views, withColumns(view, columnsOfRaw(columns))) })
+      if (!view) return false
+      d.owners.write(owner, { views: upsertView(data.views, withDisplay(view, displayPropsOfRaw(props))) })
       after()
       return true
     },

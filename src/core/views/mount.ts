@@ -50,11 +50,9 @@ import {
   REL_KINDS_COLUMN,
   resolveRows,
   SHARED_TAGS_COLUMN,
-  TITLE_COLUMN,
   VIA_COLUMN,
   DERIVED_VIEW_KINDS,
   type DerivedViewKind,
-  type ViewColumn,
   type ViewConfig,
   type ViewRecord,
 } from './view.ts'
@@ -106,6 +104,8 @@ export type MountEntry =
        * 与块拥有者的 `_defaultFilter` 同一件事、同一个语义（`slicedSpec` 叠加）。
        */
       defaultFilter?: QueryNode
+      /** **默认看法（大纲）的显示覆写**：全局白名单（空数组＝只标题）；缺失＝rich 默认 */
+      defaultDisplayProps?: string[]
     }
 
 /**
@@ -126,6 +126,9 @@ export function cloneMountEntries(entries: readonly MountEntry[]): MountEntry[] 
           views: cloneViews(e.views),
           // 切片也是配置：复制一栏不能与原件共享同一个对象（改一个动两个）
           ...(e.defaultFilter ? { defaultFilter: JSON.parse(JSON.stringify(e.defaultFilter)) as QueryNode } : {}),
+          ...(e.defaultDisplayProps
+            ? { defaultDisplayProps: [...e.defaultDisplayProps] as string[] }
+            : {}),
         }
       : e,
   )
@@ -523,17 +526,18 @@ export function derivedTemplateOf(
    */
   return {
     spec,
-    views: [{ id: mkViewId(), kind: 'table', table: { columns: derivedColumns(source) } }],
+    views: [{ id: mkViewId(), kind: 'table', displayProps: derivedDisplayProps(source) }],
   }
 }
 
 /**
- * 派生栏切到表格时的**默认列**（临时构造，不落盘：派生栏没有 `_views`）。
+ * 派生栏切到表格时的**默认显示键**（临时构造，不落盘：派生栏没有 `_views`）。
  *
  * 三种来源各自最要紧的那一列不同：引用看次数、提及看命中词、同类看共同标签；
  * 路径与修改时间是它们共有的「这条在哪、什么时候动过」。
+ * **不含标题列**（标题恒在第一位，由渲染器自己放）；宽度不在清单里——宽度是布局元数据，走缺省。
  */
-export function derivedColumns(source: DerivedSource): ViewColumn[] {
+export function derivedDisplayProps(source: DerivedSource): string[] {
   const special =
     source === 'usedBy'
       ? []
@@ -544,16 +548,7 @@ export function derivedColumns(source: DerivedSource): ViewColumn[] {
           : source === 'mentions'
             ? [MATCHED_COLUMN]
             : [SHARED_TAGS_COLUMN]
-  return [
-    { key: TITLE_COLUMN, width: 260 },
-    { key: PATH_COLUMN, width: 220 },
-    ...special.map((key) => ({
-      key,
-      // 命中列画的是片段（要能当正文读），比其它派生列宽一档
-      width: key === MATCHED_COLUMN ? 240 : key === REL_KINDS_COLUMN ? 180 : key === SHARED_TAGS_COLUMN ? 160 : 120,
-    })),
-    { key: MODIFIED_COLUMN, width: 150 },
-  ]
+  return [PATH_COLUMN, ...special, MODIFIED_COLUMN]
 }
 
 /* ------------------------------------------------------------ 读 */

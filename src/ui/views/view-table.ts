@@ -20,7 +20,7 @@
  * 被裁的列缘＋滚动条本身说明「右边还有」，不需要换形态再挂文案解释。
  * 标题列钉在左侧（CSS），滚到多右都知道这一行是谁。不替用户换视图——他在选择器里点的是「表格」。
  */
-import type { Block, BlockStore, OpenAction, ViewColumn, ViewConfig, ViewRecord } from '../../core/index.ts'
+import type { Block, BlockStore, OpenAction, ViewConfig, ViewRecord } from '../../core/index.ts'
 import { clickModsOf, COLOR_PROP, openActionOf } from '../../core/index.ts'
 import {
   cardinalityOf,
@@ -57,7 +57,6 @@ import {
   isSortableColumn,
   sortRecords,
   sortValueOf,
-  visibleColumns,
 } from '../../core/views/view.ts'
 
 export interface ViewTableDeps {
@@ -70,8 +69,8 @@ export interface ViewTableDeps {
   records: () => ViewRecord[]
   /** 属性定义（列头文案与类型） */
   defs: () => readonly Block[]
-  /** 没有显式列时的默认列（由装配层按读门面算：`core/view.ts` 的 `defaultColumns`） */
-  defaults: () => ViewColumn[]
+  /** 白名单缺省时的**计算显示键**（不含标题列；装配层按 `defaultDisplayPropsFor` 给） */
+  defaults: () => string[]
   setValue: (blockId: string, propId: string, value: unknown) => void
   clearValue: (blockId: string, propId: string) => void
   /** 表头排序：`dir === ''` 取消（children 源只改显示序；查询源由装配层转成重查） */
@@ -100,6 +99,12 @@ export interface ViewTableDeps {
   tagName?: (id: string) => string
 }
 
+/** 一列的绘制参数：键 ＋ 宽度（宽度＝布局元数据，住在 `view.table.widths`） */
+interface TableCol {
+  key: string
+  width: number
+}
+
 /** 行高（px）：三档密度；窗口化按它算，所以必须固定 */
 const ROW_H: Record<'compact' | 'cozy' | 'comfortable', number> = { compact: 28, cozy: 36, comfortable: 44 }
 /** 窗口外的缓冲行数：滚动时不留白，也不多挂 */
@@ -119,8 +124,8 @@ export class ViewTable {
   private readonly head: HTMLElement
   private readonly body: HTMLElement
   private readonly deps: ViewTableDeps
-  /** 当前列（可见列） */
-  private cols: ViewColumn[] = []
+  /** 当前列（标题列恒在第一位；其余按显示白名单／计算缺省） */
+  private cols: TableCol[] = []
   /** 当前行（已按视图排序） */
   private rows: ViewRecord[] = []
   private rendered = new Map<string, RowEls>()
@@ -229,8 +234,7 @@ export class ViewTable {
     const host = this.deps.host()
     const view = this.deps.view()
     this.rowH = ROW_H[view.table?.rowHeight ?? 'cozy'] ?? ROW_H.cozy
-    const declared = view.table?.columns ?? []
-    this.cols = visibleColumns(declared.length > 0 ? declared : this.deps.defaults())
+    this.cols = this.colsOf(view)
     this.rebuildChoiceRanks()
     this.rebuildLookups()
     this.rows = this.sorted()
@@ -260,10 +264,9 @@ export class ViewTable {
      * 整库扫只在「没有 ids 的整批修补」与整表重排时做 —— 逐键重扫会把打字变成 O(整库)。
      */
     if (ids === undefined || ids.length === 0) {
-      // **列清单变了**（列管理勾选）：行序没变但列变了，patchAll 会拿旧 `this.cols`
+      // **显示清单变了**（显示面板勾选）：行序没变但列变了，patchAll 会拿旧 `this.cols`
       // 补出一张旧表（配置已写、屏幕不动）——列/行高与上次不同就整表重排
-      const declared = view.table?.columns ?? []
-      const cols = visibleColumns(declared.length > 0 ? declared : this.deps.defaults())
+      const cols = this.colsOf(view)
       const rowH = ROW_H[view.table?.rowHeight ?? 'cozy'] ?? ROW_H.cozy
       if (JSON.stringify([cols, rowH]) !== JSON.stringify([this.cols, this.rowH])) {
         this.render()
@@ -308,12 +311,26 @@ export class ViewTable {
     this.root.dataset.cv = !this.virtual && this.rows.length >= 300 ? '1' : '0'
     this.root.style.setProperty('--tv-row-h', CSS.px(this.rowH).toString())
     this.root.style.setProperty('--tv-gutter-w', CSS.px(22).toString())
-    const widths = this.cols.map((c) => CSS.px(c.width ?? defaultWidthOf(c.key)))
+    const widths = this.cols.map((c) => CSS.px(c.width))
     this.root.style.setProperty('--qv-cols', widths.join(' ') || CSS.px(240).toString())
   }
 
   private sortSignature(view: ViewConfig): string {
-    return JSON.stringify(view.table?.sort ?? [])
+    return JSON.stringify(view.sort ?? [])
+  }
+
+  /**
+   * 这一列从显示配置算出来（**唯一入口**，render 与 sync 共用）：
+   * 白名单在场＝按它（**空数组＝只标题**），缺省＝装配层给的计算显示键。
+   * 宽度是布局元数据（`view.table.widths`），不在白名单里——隐藏过的列再显示，宽度还在。
+   */
+  private colsOf(view: ViewConfig): TableCol[] {
+    const widths = view.table?.widths ?? {}
+    const keys = view.displayProps ?? this.deps.defaults()
+    return [
+      { key: TITLE_COLUMN, width: widths[TITLE_COLUMN] ?? defaultWidthOf(TITLE_COLUMN) },
+      ...keys.map((key) => ({ key, width: widths[key] ?? defaultWidthOf(key) })),
+    ]
   }
 
   /** `select` 列的「选项 id → 兄弟顺序」；别的列不进这张表（排序仍走默认取值） */
@@ -349,7 +366,7 @@ export class ViewTable {
    * 它没有「第几个」可言，硬给它一个位置会让读者以为那是它的顺序。
    */
   private sorted(): ViewRecord[] {
-    const sort = this.deps.view().table?.sort
+    const sort = this.deps.view().sort
     if (this.choiceRanks.size === 0) return sortRecords(this.deps.records(), sort)
     const ranks = this.choiceRanks
     return sortRecords(this.deps.records(), sort, (r, key) => {
@@ -383,7 +400,7 @@ export class ViewTable {
     }
     const gutter = cell('tv-gutter')
     this.head.appendChild(gutter)
-    const sort = this.deps.view().table?.sort ?? []
+    const sort = this.deps.view().sort ?? []
     for (const col of this.cols) {
       const title = col.key === TITLE_COLUMN
       const el = cell(`tv-h ${title ? 'tv-title' : 'tv-prop'}`)
@@ -410,7 +427,7 @@ export class ViewTable {
   }
 
   private paintHeadState(): void {
-    const sort = this.deps.view().table?.sort ?? []
+    const sort = this.deps.view().sort ?? []
     for (const el of this.head.querySelectorAll<HTMLElement>('[data-col]')) {
       const dir = sort.find((s) => s.by === el.dataset.col)?.dir
       delete el.dataset.sort
@@ -426,7 +443,7 @@ export class ViewTable {
 
   /** 点表头：升 → 降 → 取消（第三次点击回到「原样」） */
   private toggleSort(key: string): void {
-    const cur = (this.deps.view().table?.sort ?? []).find((s) => s.by === key)?.dir
+    const cur = (this.deps.view().sort ?? []).find((s) => s.by === key)?.dir
     this.deps.sort(key, cur === undefined ? 'asc' : cur === 'asc' ? 'desc' : '')
   }
 

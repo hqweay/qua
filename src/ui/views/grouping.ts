@@ -117,5 +117,5 @@ export function bucketLabel(b: GroupBucket, key: string, o: BucketizeOptions): s
 
 /** 分组前的显示排序（与看板同一条：按视图配置的显示序排，不改成员集合） */
 export function recordsForGrouping(records: readonly ViewRecord[], view: ViewConfig | null): ViewRecord[] {
-  return sortRecords(records, view?.table?.sort)
+  return sortRecords(records, view?.sort)
 }

@@ -14,7 +14,7 @@ import {
   danglingOf,
   declaredFieldIds,
   applyQuickFilter,
-  derivedColumns,
+  derivedDisplayProps,
   derivedRecordsOf,
   derivedTemplateOf,
   displayNameOf,
@@ -1372,7 +1372,7 @@ export function setupPanels(deps: PanelsDeps) {
                   derivedRecordsOf(blocks.find(mountHostBlock.id) ?? mountHostBlock, kb, entry.source),
                   spec.filterOf(entry.source),
                 ),
-              columns: derivedColumns(entry.source),
+              displayProps: derivedDisplayProps(entry.source),
               // 分组键与看法同层（设备状态）；下拉由挂载区抬头画，这里只带渲染用的键
               groupBy: deps.prefs().mountGroups[mountViewKey(mountHost, entry.source)] ?? '',
               setKind: (k) => setDerivedKind(mountHostBlock, entry.source, k),

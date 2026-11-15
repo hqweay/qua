@@ -142,6 +142,17 @@ export const ACTIVE_VIEW_PROP = '_activeView' as const
  */
 export const DEFAULT_FILTER_PROP = '_defaultFilter' as const
 
+/**
+ * **默认看法（大纲）的显示覆写**：没有激活视图时，这一张看法的全局显示白名单。
+ *
+ * 为什么需要单独一格：显示的缺省是「自己的属性 ∪ `_childProps` 声明链」，而声明
+ * 逐记录生效——「默认看法整体只要这几格」没有落点（要么改每个声明、要么没地方写）。
+ * 在场＝白名单覆写（空数组＝只标题）；缺失＝rich 默认。与 `_defaultFilter` 同一层：
+ * 都是**默认看法的位**，不是「所有命名视图的继承默认」——命名视图的显示各自独立
+ * （唯一继承是记录自己的 `_childProps` 声明链）。
+ */
+export const DEFAULT_DISPLAY_PROPS_PROP = '_defaultDisplayProps' as const
+
 /** 这一块被删了吗（只看它自己；整棵子树不可见由遍历的跳过规则保证） */
 export function isDeleted(b: Block): boolean {
   return b.props !== undefined && DELETED_AT_PROP in b.props
@@ -185,6 +196,7 @@ export type SystemPropId =
   | typeof VIEWS_PROP
   | typeof ACTIVE_VIEW_PROP
   | typeof DEFAULT_FILTER_PROP
+  | typeof DEFAULT_DISPLAY_PROPS_PROP
   // 露面指针（见 `core/embed.ts`）：同一块在别处再出现一次
   | '_embed'
   // 字段定义（prop-def）：kind / 格式 / 声明列表 / 选项记录域

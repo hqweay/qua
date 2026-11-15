@@ -50,7 +50,7 @@ export class ViewCalendar {
 
     const today = this.deps.today()
     if (this.month === '') this.month = today.slice(0, 7)
-    const records = sortRecords(this.deps.records(), view?.table?.sort)
+    const records = sortRecords(this.deps.records(), view?.sort)
 
     /** 按日期分格；没有日期的单独一列（不静默消失） */
     const byDay = new Map<string, ViewRecord[]>()
