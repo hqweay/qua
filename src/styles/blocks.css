@@ -1481,10 +1481,12 @@
 .props-section--primary .props-section-count {
   color: var(--ui-accent);
 }
-.props-section-hint {
-  font-size: var(--ui-fs-2xs);
-  line-height: 1.4;
+/* 段头上的 ⓘ：解释不占正文宽度——图标在带里、话在 tip 里（悬停/键盘聚焦出） */
+.props-section-info {
+  display: inline-flex;
+  flex: none;
   color: var(--ui-text-tertiary);
+  cursor: help;
 }
 /* 字段行之间画分隔线：一列「标签＋值」靠线扫，不靠留白猜 */
 .prop-fields .prop-row[data-prop-id] {
@@ -1492,6 +1494,19 @@
 }
 .prop-fields .prop-row[data-prop-id] + .prop-row[data-prop-id] {
   border-top: 1px solid var(--ui-border-subtle);
+}
+/* 块配置段同一条语言：六个字段行靠线扫，不靠留白猜 */
+.prop-config .prop-row {
+  padding-block: var(--ui-gap-2);
+}
+.prop-config .prop-row + .prop-row {
+  border-top: 1px solid var(--ui-border-subtle);
+}
+/* 字段行头的小图标：段头图标同一语言小一档——段头回答「这是哪一段」，行头回答「这是哪一行」 */
+.prop-field-ico {
+  display: inline-flex;
+  flex: none;
+  color: var(--ui-text-tertiary);
 }
 .props-declared-list {
   display: flex;
@@ -1534,10 +1549,6 @@
   width: auto;
   margin: 0 0 0 auto;
   padding: 2px var(--ui-gap-2);
-}
-/* 声明段的说明折到标题下一整行：标题与动作同排，说明是旁注 */
-.props-section-head .props-section-hint {
-  flex: 1 1 100%;
 }
 /* 系统信息：记录不是待填的数据，段头与值同处三级灰（不抢属性段的注意力） */
 .prop-system .props-section-title,

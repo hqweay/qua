@@ -13116,7 +13116,7 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
   const tagSection = await page.evaluate(() => ({
     role: document.querySelector('.props-declared')?.dataset.declaredSection,
     title: document.querySelector('.props-declared .props-section-title')?.textContent ?? '',
-    hint: document.querySelector('.props-declared .props-section-hint')?.textContent ?? '',
+    hint: document.querySelector('.props-declared .props-section-info')?.getAttribute('aria-label') ?? '',
     declaredRows: [...document.querySelectorAll('.prop-declared [data-declared-prop-id]')].length,
   }))
   assert(tagSection.role === 'tag', `标签块上的声明段应标成 tag：${JSON.stringify(tagSection)}`)

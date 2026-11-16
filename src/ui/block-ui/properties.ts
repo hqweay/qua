@@ -115,6 +115,21 @@ function sectionHead(icon: string, title: string, count?: number): HTMLElement {
   return head
 }
 
+/**
+ * 段头上的 ⓘ：解释没有操作权，就不占正文宽度——段头带里一枚小图标，
+ * hover / 键盘聚焦出 tip（tip 委托在 overlay），读屏经 `aria-label` 拿到同文。
+ * 约束与后果不许走这里：tip 不接「阻止动作」的那类话。
+ */
+function sectionInfo(text: string): HTMLElement {
+  const info = document.createElement('span')
+  info.className = 'props-section-info'
+  info.dataset.tip = text
+  info.setAttribute('aria-label', text)
+  info.tabIndex = 0
+  renderIcon(info, 'lucide:info', 'info', 'sm')
+  return info
+}
+
 export interface PropertiesDeps {
   /**
    * 属性区画在哪个块上 —— **这一屏唯一的主体**（中心槽的当前对象）。
@@ -627,10 +642,8 @@ export class PropertiesPanel {
       const config = document.createElement('section')
       config.className = 'props-section prop-def-config'
       const head = sectionHead('lucide:sliders-horizontal', t('ui.props.defValuesTitle'))
-      const hint = document.createElement('span')
-      hint.className = 'props-section-hint'
-      hint.textContent = t('ui.props.defValuesHint')
-      head.appendChild(hint)
+      // 同标签属性段：说明退成段头 ⓘ（解释没有操作权，不占正文宽度）
+      head.appendChild(sectionInfo(t('ui.props.defValuesHint')))
       config.appendChild(head)
       const card = this.buildDefCardinality(target)
       if (card) config.appendChild(card)
@@ -891,13 +904,10 @@ export class PropertiesPanel {
       this.formOpen = this.formOpen === 'declared' ? null : 'declared'
       this.render()
     })
+    // 说明退成段头上的 ⓘ：解释不占正文宽度，悬停/聚焦可读（文案同 `ui.props.tagPropsHint`）
+    head.appendChild(sectionInfo(t('ui.props.tagPropsHint')))
     head.appendChild(add)
 
-    // 说明折到标题下一整行：标题与动作同排，说明是这一段「为什么存在」的旁注
-    const hint = document.createElement('span')
-    hint.className = 'props-section-hint'
-    hint.textContent = t('ui.props.tagPropsHint')
-    head.appendChild(hint)
     section.appendChild(head)
 
     const list = document.createElement('div')
@@ -967,12 +977,21 @@ export class PropertiesPanel {
    * 身份/归属段的行 chrome：左标签 ＋ 轻值贴着标签（`prop-hug`）。
    * 这些行的值是轻动作（勾选/按钮/chips），铺满右半会把「一行一个字段」读成
    * 「标签在左、答案在很远的右边」；铺满只属于要填的值（字段行、系统信息）。
+   * `icon` 给了就画行头小图标：给「这是哪个字段」一个可扫的形状——
+   * 与段头图标同一语言小一档（段头回答「这是哪一段」，行头回答「这是哪一行」）。
    */
-  private labeledRow(cls: string, title: string, value: HTMLElement): HTMLElement {
+  private labeledRow(cls: string, title: string, value: HTMLElement, icon?: string): HTMLElement {
     const row = document.createElement('div')
     row.className = `prop-row prop-hug ${cls} ui-row`
     const label = document.createElement('label')
     label.className = 'prop-label'
+    if (icon) {
+      const ico = document.createElement('span')
+      ico.className = 'prop-field-ico'
+      ico.setAttribute('aria-hidden', 'true')
+      renderIcon(ico, icon, 'list', 'sm')
+      label.appendChild(ico)
+    }
     const name = document.createElement('span')
     name.className = 'prop-name'
     name.textContent = title
@@ -987,8 +1006,8 @@ export class PropertiesPanel {
    * 判据是**值自己的形状**：一串 chips、一列别名、一张图，都不是「标签右边的一格」，
    * 塞进半宽的值槽只会互相压。单行值（文本／日期／下拉）仍走上一条 `labeledRow`。
    */
-  private stackedRow(cls: string, title: string, value: HTMLElement): HTMLElement {
-    const row = this.labeledRow(cls, title, value)
+  private stackedRow(cls: string, title: string, value: HTMLElement, icon?: string): HTMLElement {
+    const row = this.labeledRow(cls, title, value, icon)
     row.dataset.stack = '1'
     return row
   }
@@ -1001,18 +1020,18 @@ export class PropertiesPanel {
     const value = document.createElement('span')
     value.className = 'prop-value prop-names-value'
     value.appendChild(namesContent(this.cfg(target), this.els.body))
-    return this.stackedRow('prop-names', t('ui.alias.title'), value)
+    return this.stackedRow('prop-names', t('ui.alias.title'), value, 'lucide:at-sign')
   }
 
   /** **露面段**（page/tag 列表位）：与弹窗共用同一份段 */
   private buildLists(target: Block): HTMLElement {
-    return this.labeledRow('prop-lists', t('ui.alias.lists'), listsContent(this.cfg(target)))
+    return this.labeledRow('prop-lists', t('ui.alias.lists'), listsContent(this.cfg(target)), 'lucide:layers')
   }
 
   /** **显示模式段**：有别名才画（「这一行的头显示什么」没有名字就没有答案） */
   private buildDisplay(target: Block): HTMLElement | null {
     if (aliasesOf(target).length === 0) return null
-    return this.labeledRow('prop-display', t('ui.alias.display'), displayContent(this.cfg(target)))
+    return this.labeledRow('prop-display', t('ui.alias.display'), displayContent(this.cfg(target)), 'lucide:eye')
   }
 
   /**
@@ -1025,7 +1044,7 @@ export class PropertiesPanel {
    * 都画成「已删除」会让人一点清理就把能复活的边清掉。内容与交互在段里（与弹窗共用一份）。
    */
   private buildBelongs(target: Block): HTMLElement {
-    return this.stackedRow('prop-belongs', t('ui.belongs.title'), belongsContent(this.cfg(target)))
+    return this.stackedRow('prop-belongs', t('ui.belongs.title'), belongsContent(this.cfg(target)), 'lucide:folder-tree')
   }
 
   /**
@@ -1049,7 +1068,7 @@ export class PropertiesPanel {
       btn.appendChild(dot)
     }
     btn.addEventListener('click', () => this.deps.pickFace?.(target, btn.getBoundingClientRect()))
-    return this.labeledRow('prop-face', t('ui.iconPicker.faceEntry'), btn)
+    return this.labeledRow('prop-face', t('ui.iconPicker.faceEntry'), btn, 'lucide:palette')
   }
 
   /**
@@ -1061,7 +1080,7 @@ export class PropertiesPanel {
    * 内容与交互在段里（与块配置弹窗共用一份）。
    */
   private buildTags(target: Block): HTMLElement {
-    return this.stackedRow('prop-tags', t('ui.props.tagsTitle'), tagsContent(this.cfg(target)))
+    return this.stackedRow('prop-tags', t('ui.props.tagsTitle'), tagsContent(this.cfg(target)), 'lucide:tag')
   }
 
   /**
