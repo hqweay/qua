@@ -325,12 +325,13 @@ export function setupDocks(deps: DocksDeps) {
    *
    * 同一个块全局最多一个窗口：已在另一侧 ⇒ 移过来（状态按 id 跟着走，pin 也在内）；
    * 已在本侧 ⇒ 不改顺序，只滚到它。
-   * 打开会把这一侧的单卡退出——单卡是「只看一张」，加一张与它矛盾。
+   * 打开会把这一侧的单卡退出——单卡是「只看一张」，加一张与它矛盾；
+   * 显式 `solo` 是用户 fresh 的意图，覆盖这个缺省：新卡成为这一槽唯一要看的。
    *
    * pin 的缺省由**进入动作**决定（`pinDefaultFor`）：拖进来＝钉住（常驻），
    * 打开来看＝重启即清。组件块是家具，两种入口都常驻。
    */
-  function openWindow(side: 'left' | 'right', blockId: string, action: WindowEntryAction = 'view', at?: CardDrop): void {
+  function openWindow(side: 'left' | 'right', blockId: string, action: WindowEntryAction = 'view', at?: CardDrop, solo?: boolean): void {
     if (!findInForest(deps.getWs().blocks, blockId)) return
     const dock = deps.prefs().dock
     const other = side === 'left' ? 'right' : 'left'
@@ -356,7 +357,8 @@ export function setupDocks(deps: DocksDeps) {
       deps.noteSlotChanged(side)
       deps.applyChrome()
     }
-    if (dock.solo[side] !== null && dock.solo[side] !== key) dock.solo[side] = null
+    if (solo) dock.solo[side] = key
+    else if (dock.solo[side] !== null && dock.solo[side] !== key) dock.solo[side] = null
     renderDocks()
     reveal(side, blockId)
     deps.scheduleDeviceSave()

@@ -10,10 +10,14 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { clickModsOf, openActionOf, openAxisOf, openPlaceOf } from '../src/core/views/open.ts'
 
-test('动作优先级：⌥ 最高；⌘/Ctrl+Shift 是唯一被承认的两键组合', () => {
-  assert.equal(openActionOf({ altKey: true, shiftKey: true }), 'inspect')
+test('动作优先级：组合只承认「加强」——⇧⌥ 是右槽单卡，⇧⌘ 是宽屏；⌥⌘⇧ 仍归看第二层', () => {
+  assert.equal(openActionOf({ shiftKey: true, altKey: true }), 'dockSolo')
+  assert.equal(
+    openActionOf({ shiftKey: true, altKey: true, metaKey: true }),
+    'inspect',
+    '带 ⌘ 不认加强，仍归 ⌥',
+  )
   assert.equal(openActionOf({ altKey: true, metaKey: true }), 'inspect')
-  assert.equal(openActionOf({ altKey: true, metaKey: true, shiftKey: true }), 'inspect', '⌥ 压过 ⌘⇧')
   assert.equal(openActionOf({ shiftKey: true, metaKey: true }), 'tabWide')
   assert.equal(openActionOf({ shiftKey: true, ctrlKey: true }), 'tabWide')
 })
@@ -27,9 +31,11 @@ test('动作：⌥ 看第二层、Shift 右槽、⌘/Ctrl 新页签、普通点�
   assert.equal(openActionOf(clickModsOf({})), 'center')
 })
 
-test('tabWide 归一成 tab；只有它带一次性宽屏（档位仍住窗口）', () => {
+test('加强组合归一回原落点：tabWide→tab、dockSolo→dock；都不碰档位', () => {
   assert.equal(openPlaceOf('tabWide'), 'tab')
   assert.equal(openAxisOf('tabWide'), 'wide')
+  assert.equal(openPlaceOf('dockSolo'), 'dock')
+  assert.equal(openAxisOf('dockSolo'), null)
   for (const action of ['center', 'dock', 'tab', 'inspect'] as const) {
     assert.equal(openPlaceOf(action), action, `${action} 归一后不变`)
     assert.equal(openAxisOf(action), null, `${action} 不碰窗口`)

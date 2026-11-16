@@ -618,8 +618,11 @@ export interface App {
    * **常驻**一张窗口（确保槽开着、入 `cards`）；
    * 与 `zoomTo` 的区别：zoom 是导航，这个是视图配置。
    * 同一个块全局最多一个窗口（已在另一侧则移过来）。
+   *
+   * `solo` ＝ 打开并单卡（「只看这张」）。打开的缺省是**退出单卡**（单卡是「只看一张」，
+   * 加一张与它矛盾）；显式要求单卡是用户 fresh 的意图，覆盖这个缺省——新卡成为这一槽唯一要看的。
    */
-  openInDock(id: string, side?: 'left' | 'right'): void
+  openInDock(id: string, side?: 'left' | 'right', solo?: boolean): void
   /**
    * **把一个块已打开的窗口置顶**（移到它那一槽窗口组的最前，并滚到它）。
    *

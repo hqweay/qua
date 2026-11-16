@@ -1230,15 +1230,15 @@ const app: App = {
     shortId: (id) => shortId(id),
   }),
   removeAtom: (runId) => ed.removeRun(runId),
-  openInDock: (id, side) => openWindow(side === 'left' ? 'left' : 'right', id),
+  openInDock: (id, side, solo) => openWindow(side === 'left' ? 'left' : 'right', id, 'view', undefined, solo),
   /**
    * **所有「点一下就打开」的入口共用这一条路由**（`action` 由 `openActionOf` 算）。
    *
-   * 它不新增导航语义，只把四档动作组合起来：
-   *   · inspect → `openPropertiesDrawer`（看这一块自己的第二层；不改中心、不动槽、不入历史）
-   *   · dock    → `openInDock`（不换中心、不入历史）
-   *   · tab     → `openInNewTab`（`tabWide` 同一落点，另外一次性进宽屏）
-   *   · center  → 内容面 `zoomTo`（聚焦）；导航面 `openPage`（不抢焦点）
+   * 它不新增导航语义，只把六档动作组合起来：
+   *   · inspect  → `openPropertiesDrawer`（看这一块自己的第二层；不改中心、不动槽、不入历史）
+   *   · dock     → `openInDock`（不换中心、不入历史；`dockSolo` 同一落点，另外进入单卡）
+   *   · tab      → `openInNewTab`（`tabWide` 同一落点，另外一次性进宽屏）
+   *   · center   → 内容面 `zoomTo`（聚焦）；导航面 `openPage`（不抢焦点）
    *
    * ⚠️ `inspect` 放在最前：它是**目标自己的面**，不是「去哪」，先分流掉才不会落进导航。
    */
@@ -1247,8 +1247,8 @@ const app: App = {
       app.openPropertiesDrawer(id)
       return
     }
-    if (action === 'dock') {
-      app.openInDock(id, 'right')
+    if (action === 'dock' || action === 'dockSolo') {
+      app.openInDock(id, 'right', action === 'dockSolo')
       return
     }
     if (action === 'tab' || action === 'tabWide') {
