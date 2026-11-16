@@ -1528,6 +1528,40 @@ export class BlockEditor {
   }
 
   /**
+   * **原子边缘 6px 带的点击吸附**（editor-events 的 mousedown 先于原生放置调它）。
+   *
+   * 行内原子是 `contenteditable=false` 的整格：它的左右缝隙没有文本几何，
+   * 原生点击放置会把光标吸到**另一侧**（点左缘落原子后——真机实测）。
+   * 光标锚（行首/行尾的空文本节点）接得住**键盘**导航，接不住点击——锚零宽，
+   * Chrome 的命中测不到它。⇒ 点击带内由编辑器自己放光标：`offsetIn` 把带内
+   * 任意位置换算成原子前的模型偏移（原子占 1 格），`placeCaret` 走 `posAt`
+   * 落进锚/文本节点——竖线画得出、按键落得进（行尾锚的同一条证据）。
+   *
+   * 带含原子盒**两端各 4px**：结构线款与正文齐平后，「点引用左侧」落的就是
+   * 原子盒自己的左边缘（外面已经没有缝可点）。原子**内部**的点击照旧走
+   * 原生放置＋click 导航——只有贴边 4px 例外，那已经是「点边缘放光标」的意图。
+   * 返回认领原子的 run id（调用方用它豁免紧随的 click 导航）；不在带内 ⇒ null
+   * （调用方照常走原生放置与拖选起手）。
+   */
+  caretAtAtomEdge(blockId: string, tx: HTMLElement, x: number, y: number): string | null {
+    const BAND = 6
+    const EDGE = 4
+    for (const atom of tx.querySelectorAll<HTMLElement>('[data-atom-id]')) {
+      const r = atom.getBoundingClientRect()
+      if (y < r.top || y > r.bottom) continue
+      const before = this.offsetIn(tx, atom, 0)
+      let off: number | null = null
+      if (x >= r.left - BAND && x < r.left + EDGE) off = before
+      else if (x > r.right - EDGE && x <= r.right + BAND) off = before + 1
+      if (off === null) continue
+      this.container.focus()
+      this.placeCaret(blockId, off)
+      return atom.dataset.atomId ?? null
+    }
+    return null
+  }
+
+  /**
    * **⌘A：全选这一屏的块**（要求的「必须接管」之一，2026-10-20 落地）。
    *
    * 为什么必须自己接管、而不是留给浏览器：
@@ -2776,6 +2810,7 @@ export class BlockEditor {
       },
       collapseSelection: () => this.collapseSelection(),
       syncFromDom: (id, re) => this.syncFromDom(id, re),
+      caretAtAtomEdge: (blockId, tx, x, y) => this.caretAtAtomEdge(blockId, tx, x, y),
       beginMouseSelect: (id, x, y, shift) => this.bsel.beginMouseSelect(id, x, y, shift),
       updateMouseSelect: (x, y) => this.bsel.updateMouseSelect(x, y),
       endMouseSelect: () => this.bsel.endMouseSelect(),

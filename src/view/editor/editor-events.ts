@@ -355,6 +355,16 @@ export interface EditorBridge {
    */
   onBlockMenu: (blockId: string, rect: DOMRect, appearanceHost?: string, trigger?: HTMLElement) => void
   /**
+   * **原子边缘 6px 带的点击吸附**：点击落在行内原子左右缝隙带时，把光标放到原子的
+   * 模型边界上（左缘 ⇒ 原子前，右缘 ⇒ 原子后），返回是否吸附成功。
+   * 为什么在编辑器里判：带内换算要用 `offsetIn`（DOM→模型偏移），只有它认识
+   * 「原子占 1 格、锚占 0 格」的读法；原生放置救不了——CE=false 原子的左右缝隙
+   * 没有文本几何，Chrome 会把点击吸到原子**另一侧**（真机实测：点左缘落 offset 1）。
+   * 返回认领原子的 run id ⇒ 调用方 preventDefault（原生放置不再发生）、不走拖选
+   * 起手、并豁免这枚原子紧随的 click 导航；null ⇒ 不在带内，照常走原生路径。
+   */
+  caretAtAtomEdge: (blockId: string, tx: HTMLElement, x: number, y: number) => string | null
+  /**
    * **跨块拖选**：在 `.tx` 内按下 / 移动 / 松开。
    * 事件层只报坐标；「是否切成块选区」的判定在编辑器里（单块内仍是原生文本选择）。
    */
@@ -565,6 +575,12 @@ export function bindEditorEvents(br: EditorBridge): () => void {
   })
 
   /* ── 跨块拖选：单块内仍是文本；拖过块边界才切块选区 ── */
+  /**
+   * **原子边缘的最近一次认领**：mousedown 被吸附带认领后，紧随的 click（同一枚
+   * 原子）是「放光标」的收尾，不是「打开」——600ms 内命中同一枚就豁免导航。
+   * 未被认领的 mousedown 清掉它，陈年认领不拦新点击。
+   */
+  let atomEdgeClaim: { runId: string; at: number } | null = null
   on(c, 'mousedown', (e: MouseEvent) => {
     if (e.button !== 0) return
     const target = e.target as HTMLElement
@@ -572,6 +588,17 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     if (!tx || tx.closest('[data-readonly]')) return
     const blk = tx.closest<HTMLElement>('[data-block-id]')
     if (!blk?.dataset.blockId) return
+    /**
+     * **原子边缘吸附先于一切**：吸附成功 ⇒ 光标已放好，原生放置（会吸到原子
+     * 另一侧）必须挡掉；这条缝里拖选起手也放弃——6px 带不构成拖选的起手位。
+     */
+    const claimed = br.caretAtAtomEdge(blk.dataset.blockId, tx, e.clientX, e.clientY)
+    if (claimed) {
+      e.preventDefault()
+      atomEdgeClaim = { runId: claimed, at: performance.now() }
+      return
+    }
+    atomEdgeClaim = null
     br.beginMouseSelect(blk.dataset.blockId, e.clientX, e.clientY, e.shiftKey)
   })
   on(document, 'mousemove', (e: MouseEvent) => {
@@ -905,6 +932,15 @@ export function bindEditorEvents(br: EditorBridge): () => void {
      * 只认 `.atom` 的话，每多一种露面就要在这里多一条分支，而漏掉的那一种会静默不响应。
      */
     const refEl = path.find((n): n is HTMLElement => n instanceof HTMLElement && n.dataset.refTo !== undefined)
+    // 边缘点击豁免：这次 click 是「在原子边缘放光标」的收尾，不是「打开」
+    if (
+      atomEdgeClaim &&
+      performance.now() - atomEdgeClaim.at < 600 &&
+      path.some((n) => n instanceof HTMLElement && n.dataset.atomId === atomEdgeClaim!.runId)
+    ) {
+      e.preventDefault()
+      return
+    }
     if (refEl?.dataset.refTo) {
       br.onRefClick(
         { to: refEl.dataset.refTo, ...(refEl.dataset.atomId ? { runId: refEl.dataset.atomId } : {}) },
