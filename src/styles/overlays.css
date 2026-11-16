@@ -513,18 +513,19 @@
   /* 形状由 `.ui-btn` 给；这里只剩「它在这行里不许被压扁」 */
   flex: 0 0 auto;
 }
+/* 开关芯片的形状与按下态走 `.ui-btn`（在列＝accent，不在＝中性），这里只留排布 */
 .alias-check {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: var(--ui-gap-2);
-  padding: var(--ui-gap-1) 0;
-  color: var(--ui-text-secondary);
 }
-/* 露面段的壳（两个列表位）：段在弹窗里竖排；面板的行里也竖排（同一份内容） */
+.alias-check-ico {
+  display: inline-flex;
+}
+/* 露面段的壳（两个列表位）：一行两枚开关芯片——状态由按下态与图标承担，不竖排占两行 */
 .alias-checks {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
+  gap: var(--ui-gap-2);
 }
 .alias-display {
   display: flex;

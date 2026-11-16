@@ -33,6 +33,7 @@ import {
 } from '../../core/index.ts'
 import type { KbClient } from '../../core/kb/types.ts'
 import { t } from '../../core/infra/msg.ts'
+import { renderIcon } from '../../view/icons.ts'
 import type { Layers } from '../overlay/layers.ts'
 
 export interface ConfigSectionsCtx {
@@ -199,36 +200,47 @@ export function focusNamesInput(root: HTMLElement): void {
   root.querySelector<HTMLInputElement>('.alias-input')?.focus()
 }
 
-/** **露面段内容**：page／tag 两个列表位的勾选。不变量：在列表里 ⇒ 至少有一个名字。 */
+/**
+ * **露面段内容**：page／tag 两个列表位，一行两枚**开关芯片**。
+ *
+ * 为什么不是勾选框竖排：这是两个**独立的两态**（这块作为页／作为标签），不是多选集合
+ * ——一行放得下，状态交给形状与颜色（图标用全库同一份信号词汇：页=file、标签=hash；
+ * 在列＝accent 按下态，不在＝中性），竖排勾选框是两行只装两个比特。
+ * 不变量：在列表里 ⇒ 至少有一个名字。没有名字的打开请求在点击处拒绝，
+ * 芯片自己没有本地态（active 永远从模型现读），被拒绝的点击不会留下假亮。
+ */
 export function listsContent(ctx: ConfigSectionsCtx): HTMLElement {
   const box = document.createElement('div')
   box.className = 'alias-checks'
   const b = ctx.block()
   if (!b) return box
   for (const list of ['page', 'tag'] as const) {
-    const label = document.createElement('label')
-    label.className = 'alias-check'
-    const box2 = document.createElement('input')
-    box2.type = 'checkbox'
-    box2.dataset.aliasList = list
-    box2.checked = hasList(b, list)
-    box2.addEventListener('change', () => {
-      if (box2.checked && aliasesOf(b).length === 0) {
+    const chip = document.createElement('button')
+    chip.type = 'button'
+    chip.className = 'alias-check ui-btn'
+    chip.dataset.aliasList = list
+    // 切换语义交给可访问性：按钮＋aria-pressed，读屏拿到的是状态不是死文本
+    chip.setAttribute('aria-pressed', hasList(b, list) ? 'true' : 'false')
+    if (hasList(b, list)) chip.dataset.active = '1'
+    const ico = document.createElement('span')
+    ico.className = 'alias-check-ico'
+    renderIcon(ico, list === 'page' ? 'lucide:file' : 'lucide:hash', 'circle-help', 'sm')
+    const text = document.createElement('span')
+    text.textContent = t(list === 'page' ? 'ui.alias.pageList' : 'ui.alias.tagList')
+    chip.append(ico, text)
+    chip.addEventListener('click', () => {
+      const turnOn = !hasList(b, list)
+      if (turnOn && aliasesOf(b).length === 0) {
         // 不变量：在列表里 ⇒ 至少有一个名字。没有名字就拒绝进列表。
-        box2.checked = false
         ctx.toast?.(t('ui.alias.needName'), 'warn')
         return
       }
-      const turnOn = box2.checked
       ctx.write(() => {
         if (turnOn) addList(b, list)
         else removeList(b, list)
       })
     })
-    const text = document.createElement('span')
-    text.textContent = t(list === 'page' ? 'ui.alias.pageList' : 'ui.alias.tagList')
-    label.append(box2, text)
-    box.appendChild(label)
+    box.appendChild(chip)
   }
   return box
 }
