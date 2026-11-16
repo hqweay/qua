@@ -682,7 +682,8 @@ const {
   blocks,
   kb,
   kbGet,
-  openMenu: layers.openMenu,
+  // 类方法脱手调用会丢 this（openMenu 第一行读 this.open 就炸）——包一层闭包保住绑定
+  openMenu: (o) => layers.openMenu(o),
   prefs,
   txRun,
   scheduleSave,
