@@ -3546,7 +3546,9 @@ await check('T238 查询块标题的行内编辑与普通块同档：划选加�
   assert(titleHtml.includes('mk-bold') && bodyHtml.includes('mk-bold'), `抬头加粗后，正文行与抬头两处同时变（一份正文，不是两份名字）：${JSON.stringify({ titleHtml, bodyHtml })}`)
 
   /* ── 结构边界不动：直接编辑这一档放行，不等于拆块放行 ── */
-  await page.locator(titleTx).first().click()
+  // ⚠️ 点击落点要靠**行首文字**（x:10），不能点行中心：此刻标题中段是引用原子，
+  //    点到原子上会走原子点击的路（导航走人），后面的 ⌘A／↵ 就全落在别的页面上了
+  await page.locator(titleTx).first().click({ position: { x: 10, y: 10 } })
   await page.waitForTimeout(120)
   await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.press('ArrowRight')
