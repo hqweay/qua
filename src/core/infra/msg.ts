@@ -711,7 +711,7 @@ export const MSG = {
   'ui.query.tree.presetUnderDay': '在某一天之下',
   'ui.query.tree.selfHint': '锚在宿主上（挂载栏＝这一栏挂在谁底下；正文＝所在的页）',
   'ui.query.kind.is': '这一块',
-  'ui.query.kind.role': '日记／页面／标签',
+  'ui.query.kind.role': '块身份',
   'ui.query.kind.ref': '引用了',
   'ui.query.kind.mark': '格式',
   'ui.query.kind.link': '外链',
