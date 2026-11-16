@@ -231,7 +231,7 @@ core ← view ← ui ← app ← host
 > **node 必须是 26.x**（`.node-version` 钉住；旧版会让 rollup 原生模块 dlopen 失败）。
 
 ```bash
-pnpm gate           # ★ 收工门禁（全量）：静态 + 单测 + 构建 + 冒烟 + 布局 + 真 Electron（~190s）
+pnpm gate           # ★ 收工门禁（全量）：lint + 静态 + 单测 + 构建 + 冒烟 + 布局 + 真 Electron
 pnpm gate:queued    # 同 gate，但**排队的**：文件锁串行 + 隔离 worktree 构建已提交的 HEAD（多人/多任务共用一台机器用这个）
 pnpm gate:fast      # 按 git 改动跳到「碰得到的那几支」，并逐条列出跳过了什么
 pnpm gate:fast --plan   # 只打「这次会跑哪些 / 跳过哪些」，不真跑
@@ -241,6 +241,7 @@ pnpm gate:web       # 同 gate，但不含 Electron（CI 的 Linux job 用这个
 pnpm dev            # vite + electron 一起起（src/** 热更新；electron/*.ts 改动要重跑）
 pnpm dev:web        # 只起 vite → http://127.0.0.1:5180/
 pnpm arch:check     # 只跑架构静态断言（秒级）
+pnpm lint           # oxlint correctness，只扫 tsc 不看的三个目录（tests/checks/scripts，~0.1s）
 pnpm test:core      # 只跑纯 core 单测
 pnpm check          # 浏览器级冒烟（真 Chrome、真按键、真鼠标）
 pnpm check:dock     # 槽与排版形状的布局断言（真量尺寸）
@@ -271,8 +272,8 @@ pnpm gate:bundle    # gate ＋ 打包产物冒烟（慢，单列）
   gate 验的是 commit；② 绿的是「锁内拿到的那个 HEAD」，绿了那个 commit 就可发布；③ 排队不阻塞写代码，
   但**一个逻辑单元一笔 commit**——攒一大坨再排队，红了照样归不了账。
 
-**收工必须 `pnpm gate` 全绿**（当前基线：arch **32/32** · test:core **1251/1251** ·
-浏览器冒烟 **330/330** · dock **27/27** · electron **19/19**）。
+**收工必须 `pnpm gate` 全绿**（当前基线：lint **0/0** · arch **32/32** · test:core **1405/1405** ·
+浏览器冒烟 **360/360** · dock **27/27** · electron **19/19**）。
 
 - **`gate` 是编排出来的，不是一条 `&&` 链**（`scripts/gate.mjs`）：彼此独立的检查按产物依赖分三段、
   段内**并发**，冒烟那些用例**按序切片**成几片同时跑。快的来源是并发，不是少跑——断言一条没动。
