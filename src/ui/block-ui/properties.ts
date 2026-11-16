@@ -744,19 +744,20 @@ export class PropertiesPanel {
   }
 
   /**
-   * **块配置段**：身份（脸／名字／露面／显示）与分类（标签／属于）。
+   * **块配置段**：身份（名字／脸／露面／显示）与分类（标签／属于）。
    *
    * 它是低频的「这块是谁」，所以排在属性值之后；段内顺序与块配置弹窗同一条
    * （两个壳是同一个配置体，段序同一份），只是这一个壳多了一圈段头。
+   * 名字排在脸之前：别名是这块的地址（改名的频度高于换脸），脸是识别的装饰。
    */
   private buildConfig(target: Block): HTMLElement {
     const section = document.createElement('section')
     section.className = 'props-section prop-config'
     section.appendChild(sectionHead('lucide:sliders-horizontal', t('ui.blockConfig.title')))
 
+    section.appendChild(this.buildNames(target))
     // 脸：一枚入口开块配置弹窗（弹窗里脸面板直接展开）——任意块都有脸，入口不按露面位限流
     if (this.deps.pickFace) section.appendChild(this.buildFace(target))
-    section.appendChild(this.buildNames(target))
     section.appendChild(this.buildLists(target))
     const display = this.buildDisplay(target)
     if (display) section.appendChild(display)
