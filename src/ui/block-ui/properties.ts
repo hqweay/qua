@@ -1006,9 +1006,20 @@ export class PropertiesPanel {
    * 判据是**值自己的形状**：一串 chips、一列别名、一张图，都不是「标签右边的一格」，
    * 塞进半宽的值槽只会互相压。单行值（文本／日期／下拉）仍走上一条 `labeledRow`。
    */
-  private stackedRow(cls: string, title: string, value: HTMLElement, icon?: string): HTMLElement {
+  private stackedRow(
+    cls: string,
+    title: string,
+    value: HTMLElement,
+    icon?: string,
+    action?: HTMLElement,
+  ): HTMLElement {
     const row = this.labeledRow(cls, title, value, icon)
     row.dataset.stack = '1'
+    if (action) {
+      // 行头的动作位：与段头「动作住进段头」同一句判据，小一号——值行留给值
+      action.classList.add('prop-row-action')
+      row.appendChild(action)
+    }
     return row
   }
 
@@ -1044,7 +1055,11 @@ export class PropertiesPanel {
    * 都画成「已删除」会让人一点清理就把能复活的边清掉。内容与交互在段里（与弹窗共用一份）。
    */
   private buildBelongs(target: Block): HTMLElement {
-    return this.stackedRow('prop-belongs', t('ui.belongs.title'), belongsContent(this.cfg(target)), 'lucide:folder-tree')
+    const value = belongsContent(this.cfg(target))
+    // 同标签行：「＋」住进行头；悬空清理仍跟着值走（那是值自己的动作）
+    const add = value.querySelector<HTMLElement>('.props-belong-add')
+    add?.remove()
+    return this.stackedRow('prop-belongs', t('ui.belongs.title'), value, 'lucide:folder-tree', add ?? undefined)
   }
 
   /**
@@ -1080,7 +1095,12 @@ export class PropertiesPanel {
    * 内容与交互在段里（与块配置弹窗共用一份）。
    */
   private buildTags(target: Block): HTMLElement {
-    return this.stackedRow('prop-tags', t('ui.props.tagsTitle'), tagsContent(this.cfg(target)), 'lucide:tag')
+    const value = tagsContent(this.cfg(target))
+    // 「＋」住进行头（面板壳的 chrome 重排；共享段里它跟着值走，弹窗仍那样）：
+    // 空态时它独占一行读作「标签下面又一行字」，有 chips 时动作也总在同一个位置
+    const add = value.querySelector<HTMLElement>('.props-tag-add')
+    add?.remove()
+    return this.stackedRow('prop-tags', t('ui.props.tagsTitle'), value, 'lucide:tag', add ?? undefined)
   }
 
   /**

@@ -1502,11 +1502,25 @@
 .prop-config .prop-row + .prop-row {
   border-top: 1px solid var(--ui-border-subtle);
 }
-/* 字段行头的小图标：段头图标同一语言小一档——段头回答「这是哪一段」，行头回答「这是哪一行」 */
+/* 有分隔线圈出行的边界后，轻动作行读成「一行一个字段」的表单行：
+   标签居左、控件居右，中缝是行自己的呼吸位 */
+.prop-config .prop-hug {
+  justify-content: space-between;
+}
+/* 字段行头的小图标：段头图标同一语言小一档——段头回答「这是哪一段」，行头回答「这是哪一行」。
+   `align-self: center`：行头标签按基线对齐，SVG 没有基线（底边贴基线），跟着基线走会浮起来 */
 .prop-field-ico {
   display: inline-flex;
   flex: none;
+  align-self: center;
   color: var(--ui-text-tertiary);
+}
+/* 行头的动作位（标签/属于的「＋」）：占富值行首行右列（与 prop-clear 同一格），
+   空态时不再在标签下面独占一行 */
+.prop-row[data-stack='1'] .prop-row-action {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: center;
 }
 .props-declared-list {
   display: flex;
@@ -2440,18 +2454,25 @@
   border-color: transparent;
 }
 /*
-  **页引用**：`[[名]]` 指向普通块。结构线款——无底无胶囊，字色随正文
-  （有身份色时 inline style 染），`[[ ]]` 装饰 ＋ 一条低强度下划线说「这是链接」。
-  下划线画在 `.atom-label` 上：原子是 inline-flex，画在容器上会跨过原子内部不渲染。
-  悬停把线加重（底色反馈照旧）。行内露面靠形状分清：纯文字（标签）/ 空心（实例）/
-  结构线（页引用）/ 实底胶囊（外链、文件）。
+  **页引用**：`[[名]]` 指向普通块。结构线款——无底无胶囊，`[[ ]]` 装饰 ＋ 一条低强度
+  下划线说「这是链接」，悬停把线加重。**排版度量与正文同一套**（display:inline、字号
+  行高继承、零边距）：它是正文里最轻的替身，任何独立的盒几何（inline-flex 居中、
+  0.93em 缩字、内外边距）都会读成「没对齐／有缝」——三条真机反馈同一根。
+  下划线留在 `.atom-label` 上（图标不带线）；图标间距用 margin 补（inline 没有 flex gap）。
+  行内露面靠形状分清：纯文字（标签）/ 空心（实例）/ 结构线（页引用）/ 实底胶囊（外链、文件）。
 */
 .atom-page {
-  padding: 0 1px;
-  margin: 0 1px;
+  display: inline;
+  padding: 0;
+  margin: 0;
   background: transparent;
   border-radius: 0;
   color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+.atom-page .atom-ico {
+  margin-inline-end: 3px;
 }
 .atom-page .atom-label {
   text-decoration: underline;
