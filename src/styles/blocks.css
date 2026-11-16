@@ -1520,7 +1520,15 @@
 }
 /* 2. 块配置段里，轻动作行（脸／露面／显示）贴着标签；富值行（别名／标签／属于）
  *    走 `data-stack`，标签单独一行。
+ *    字段标签走「小节标题」角色（fs-xs ＋ secondary，与弹窗的段标题同一份——
+ *    一个角色一种样子）：标签是 chrome 不是内容，和值同字号同色时，
+ *    六个字段名会和值抢同一个视觉档，「图标与颜色」「别名」读不出是字段名。
+ *    属性段的行名不动——那是属性自己的名字，是内容。
  */
+.prop-config .prop-name {
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-secondary);
+}
 /* 3. 段的动作住进段头：它是这一段的，不是清单下面又一行字 */
 .props-section-head .props-add {
   width: auto;

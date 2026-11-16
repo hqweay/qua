@@ -513,7 +513,14 @@
   /* 形状由 `.ui-btn` 给；这里只剩「它在这行里不许被压扁」 */
   flex: 0 0 auto;
 }
-/* 开关芯片的形状与按下态走 `.ui-btn`（在列＝accent，不在＝中性），这里只留排布 */
+/* 开关芯片的形状与按下态走 `.ui-btn`（在列＝accent，不在＝中性），这里只留排布与密度：
+ * 它们是状态标记不是主按钮，比 `.ui-btn` 默认小一档（padding ＋ fs-xs），
+ * 与字段标签同一档；露面与显示模式两组切换用同一份密度——同一颗芯片语言。 */
+.alias-check,
+.alias-display .ui-btn {
+  padding: var(--ui-gap-1) var(--ui-gap-2);
+  font-size: var(--ui-fs-xs);
+}
 .alias-check {
   display: inline-flex;
   align-items: center;
