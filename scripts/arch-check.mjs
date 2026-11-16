@@ -1918,6 +1918,20 @@ if (hardRed) {
 }
 console.log('')
 
+/* 大文件报告（**不拦门，只送信号**）：判据是「缝」——消费方／生命周期／领域语义——不是长度。
+ * 长了自己先问「这段代码的家对吗」；给行数上限反而会把单一职责的正经体量逼成假拆
+ * （「按职责切，不按行数切」）。这份清单的作用是让「巨头回涨」出现在**每次交付的眼前**，
+ * 而不是等开工前的盘点才知道。 */
+{
+  const sizes = [...srcFiles, ...electronFiles]
+    .map((f) => ({ f: relative(ROOT, f).split(sep).join('/'), n: readFileSync(f, 'utf8').split('\n').length }))
+    .sort((a, b) => b.n - a.n)
+    .slice(0, 5)
+  console.log(C.cyan(`${C.bold('大文件 top-5')}（判据是缝不是长度；长了自己先问「家对吗」）`))
+  for (const s of sizes) console.log(`  ${String(s.n).padStart(5)}  ${s.f}`)
+  console.log('')
+}
+
 /* 顺带当作一次「文件真的存在」的体检：这三个是 msg / 主题 / token 段的落点 */
 for (const p of ['src/core/infra/msg.ts', 'src/styles.css', 'index.html']) {
   if (!existsSync(join(ROOT, p))) {
