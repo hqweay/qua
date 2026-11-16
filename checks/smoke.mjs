@@ -7594,7 +7594,7 @@ await check('T53 列表露面：输入名字建标签、同名页兼作标签、
 })
 
 await check(
-  'T61 「添加块属性」的形态不撒谎：类型下拉只跟「新建定义」一起出现，选已有属性时只露「用这个」',
+  'T61 「添加块属性」是草稿行：打开即聚焦名字、类型目录常开；浏览已有定义收在次级，复用后行出现',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await openFirstPage(page)
@@ -7618,28 +7618,43 @@ await check(
     const open = async () => {
       await page.click('#properties-add')
       await page.waitForSelector('.props-form--own')
+      await page.waitForTimeout(100)
     }
     const shape = () =>
       page.evaluate(() => {
         const form = document.querySelector('.props-form--own')
-        const group = form?.querySelector('.props-new-group')
+        const name = form?.querySelector('.props-new-group input.prop-input')
         const visible = (el) => el.getClientRects().length > 0
         return {
           form: Boolean(form),
-          groupHidden: group?.hidden ?? null,
-          groupVisible: group ? visible(group) : false,
-          visibleSelects: [...(form?.querySelectorAll('select') ?? [])].filter(visible).length,
-          useVisible: [...(form?.querySelectorAll('.props-use') ?? [])].some(visible),
+          nameInputs: form ? form.querySelectorAll('.props-new-group input.prop-input').length : 0,
+          kinds: form ? form.querySelectorAll('.props-new-group select.prop-input option').length : 0,
+          browseHidden: form?.querySelector('.props-browse')?.hidden ?? null,
+          pickVisible: [...(form?.querySelectorAll('.props-pick') ?? [])].some(visible),
+          nameFocused: Boolean(name) && name === document.activeElement,
         }
       })
 
-    // ① 默认形态：选已有属性那一行不带类型下拉（新建组收着）
+    // ① 打开即草稿行：名字输入（自动聚焦）＋类型目录在场；浏览收在次级
     await open()
-    const before = await shape()
-    assert(before.form, '点「添加块属性」应打开表单')
-    assert(before.groupHidden === true, `默认新建组应收起：${JSON.stringify(before)}`)
-    assert(before.visibleSelects === 1, `默认表单里可见的 select 只能有 picker 一个（类型下拉不许露出来）：${JSON.stringify(before)}`)
+    const draft = await shape()
+    assert(draft.form, '点「添加块属性」应打开草稿行')
+    assert(draft.nameInputs === 1, `草稿行里应有属性名输入：${JSON.stringify(draft)}`)
+    // 目录层是 **7 种 kind ＋ `text` 的三条格式一等入口**（链接／邮箱／电话）＝10 条：
+    // 格式不是 kind（kind 按值的存储形状分，都是字符串），落盘仍是 `text + _format`。
+    assert(draft.kinds === 10, `草稿行的类型下拉应有 7 种 kind ＋ 3 条格式入口：${JSON.stringify(draft)}`)
+    assert(draft.browseHidden === true, `浏览已有定义应收在次级：${JSON.stringify(draft)}`)
+    assert(draft.pickVisible === false, `次级收起时分组下拉不该露出来：${JSON.stringify(draft)}`)
+    assert(draft.nameFocused, `打开后名字输入应自动聚焦（反馈可见）：${JSON.stringify(draft)}`)
 
+    // Esc 收起草稿行
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(100)
+    assert(await page.evaluate(() => !document.querySelector('.props-form--own')), 'Esc 应收起草稿行')
+
+    // ② 次级「从已有属性选」展开分组 picker；复用「评分」⇒ 行出现、草稿行关闭
+    await open()
+    await page.evaluate(() => document.querySelector('.props-form--own .props-browse-toggle')?.click())
     const option = await page.evaluate((id) => {
       const o = [...document.querySelectorAll('.props-form--own .props-pick option')].find((x) => x.value === id)
       return o ? o.textContent : null
@@ -7648,19 +7663,12 @@ await check(
     assert(option.includes('数字'), `已有定义的项要本地化类型（应含「数字」）：${option}`)
     assert(!option.includes('number'), `已有定义的项不该露裸类型名 number：${option}`)
 
-    // ② 选真实定义 ⇒ 只露「用这个」，新建组仍收着
+    // 直接派发 DOM click：面板会随焦点变化重建，Playwright 的「等元素稳定」会撞上那次重建
     await page.evaluate((id) => {
       const sel = document.querySelector('.props-form--own .props-pick')
       sel.value = id
-      sel.dispatchEvent(new Event('change', { bubbles: true }))
+      document.querySelector('.props-form--own .props-use')?.click()
     }, defId)
-    const picked = await shape()
-    assert(picked.groupHidden === true && !picked.groupVisible, `选已有属性时新建组仍应收起：${JSON.stringify(picked)}`)
-    assert(picked.useVisible, `选已有属性时应露出「用这个」：${JSON.stringify(picked)}`)
-    assert(picked.visibleSelects === 1, `选已有属性时类型下拉仍不该出现：${JSON.stringify(picked)}`)
-
-    // 直接派发 DOM click：面板会随焦点变化重建，Playwright 的「等元素稳定」会撞上那次重建
-    await page.evaluate(() => document.querySelector('.props-form--own .props-use')?.click())
     await page.waitForTimeout(150)
     // 点按钮后焦点在面板里；把光标放回刚才那块，面板目标仍是它
     await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), hostId)
@@ -7669,41 +7677,11 @@ await check(
       form: Boolean(document.querySelector('.props-form--own')),
       row: Boolean(document.querySelector(`.prop-row[data-prop-id="${id}"]`)),
     }), defId)
-    assert(!used.form, `点「用这个」后表单应关闭：${JSON.stringify(used)}`)
+    assert(!used.form, `点「用这个」后草稿行应关闭：${JSON.stringify(used)}`)
     assert(used.row, `面板里应出现「评分」这一行：${JSON.stringify(used)}`)
 
-    // ③ 选哨兵「＋ 新建属性…」⇒ 第二行整组露出来（名字输入 ＋ 7 种类型）
-    await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), hostId)
-    await page.waitForTimeout(100)
-    await open()
-    await page.evaluate(() => {
-      const sel = document.querySelector('.props-form--own .props-pick')
-      sel.value = '__new__'
-      sel.dispatchEvent(new Event('change', { bubbles: true }))
-    })
-    const fresh = await page.evaluate(() => {
-      const form = document.querySelector('.props-form--own')
-      const group = form?.querySelector('.props-new-group')
-      return {
-        groupHidden: group?.hidden ?? null,
-        nameInputs: group ? group.querySelectorAll('input.prop-input').length : 0,
-        kinds: group ? group.querySelectorAll('select.prop-input option').length : 0,
-      }
-    })
-    assert(fresh.groupHidden === false, `选「新建属性」时应展开新建组：${JSON.stringify(fresh)}`)
-    assert(fresh.nameInputs === 1, `新建组里应有属性名输入：${JSON.stringify(fresh)}`)
-    // 目录层是 **7 种 kind ＋ `text` 的三条格式一等入口**（链接／邮箱／电话）＝10 条：
-    // 格式不是 kind（kind 按值的存储形状分，都是字符串），落盘仍是 `text + _format`。
-    const kindLabels = await page.evaluate(() =>
-      [...document.querySelectorAll('.props-form--own .props-new-group select.prop-input option')].map(
-        (o) => o.textContent ?? '',
-      ),
-    )
-    assert(fresh.kinds === 10, `新建组里的类型下拉应有 7 种 kind ＋ 3 条格式入口：${JSON.stringify(fresh)}`)
-    assert(kindLabels.includes('链接'), `目录里应有「链接」这个格式入口：${JSON.stringify(kindLabels)}`)
-
     await ctx.close()
-    return `默认可见 select 1 个；「评分·数字」复用后行出现；选「新建」才展开名字＋7 种 kind（＋3 条格式入口）`
+    return `打开即聚焦名字＋类型目录 10 条；Esc 收起；「评分·数字」从次级 picker 复用后行出现`
   },
 )
 
@@ -7770,6 +7748,7 @@ await check(
 
     await page.click('#properties-add')
     await page.waitForSelector('.props-form--own')
+    await page.evaluate(() => document.querySelector('.props-form--own .props-browse-toggle')?.click())
     const option = await page.evaluate((propId) => {
       const o = [...document.querySelectorAll('.props-form--own .props-pick option')].find((x) => x.value === propId)
       return o ? { text: o.textContent, disabled: o.disabled } : null
@@ -12927,12 +12906,7 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
   const before = await page.evaluate(() => window.__qua.propDefs().map((d) => d.label))
   await page.click('#properties-add')
   await page.waitForSelector('.props-form')
-  // 选「＋ 新建属性…」⇒ 展开名字＋类型那一组
-  await page.evaluate(() => {
-    const sel = document.querySelector('.props-form .props-pick')
-    sel.value = '__new__'
-    sel.dispatchEvent(new Event('change', { bubbles: true }))
-  })
+  // 草稿行常开「新建」形态：名字＋类型直接可填（不再经过「选已有 → 新建」的切换）
   await page.waitForTimeout(80)
   await page.fill('.props-new-group input.prop-input', '冒烟新属性')
   await page.evaluate(() => document.querySelector('.props-create')?.click())
@@ -13013,6 +12987,8 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
   // ① 自己的入口 ⇒ 这一页**自己**多一行值（不是声明）
   await page.click('#properties-add')
   await page.waitForSelector('.props-form--own')
+  // 复用走次级浏览：草稿行常开新建形态，分组下拉收在「从已有属性选」后面
+  await page.evaluate(() => document.querySelector('.props-form--own .props-browse-toggle')?.click())
   await page.selectOption('.props-form--own .props-pick', pickId)
   await page.waitForTimeout(80)
   await page.evaluate(() => document.querySelector('.props-form--own .props-use')?.click())
@@ -13031,6 +13007,16 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
   // ② 声明段自己的入口 ⇒ 只写声明，不给自己加行
   await page.evaluate(() => document.querySelector('[data-declare-add]')?.click())
   await page.waitForSelector('.props-form--declared')
+  const dbg = await page.evaluate(() => {
+    document.querySelector('.props-form--declared .props-browse-toggle')?.click()
+    return {
+      toggle: Boolean(document.querySelector('.props-form--declared .props-browse-toggle')),
+      browseHidden: document.querySelector('.props-form--declared .props-browse')?.hidden ?? null,
+      optCount: document.querySelectorAll('.props-form--declared .props-pick option').length,
+    }
+  })
+  assert(dbg.toggle, '声明草稿行应有「从已有属性选」次级开关')
+  assert(dbg.browseHidden === false, `点开关应展开浏览：${JSON.stringify(dbg)}`)
   await page.selectOption('.props-form--declared .props-pick', pickId)
   await page.waitForTimeout(80)
   await page.evaluate(() => document.querySelector('.props-form--declared .props-use')?.click())
@@ -13078,6 +13064,7 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
     return { disabled: opt?.disabled ?? null, text: opt?.textContent ?? '' }
   }, pickId)
   assert(reversePick.disabled === false, `本块自己有值也要能声明给成员（选项不能灰）：${JSON.stringify(reversePick)}`)
+  await page.evaluate(() => document.querySelector('.props-form--declared .props-browse-toggle')?.click())
   await page.selectOption('.props-form--declared .props-pick', pickId)
   await page.waitForTimeout(80)
   await page.evaluate(() => document.querySelector('.props-form--declared .props-use')?.click())
@@ -13136,14 +13123,15 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
       addInSection: Boolean(document.querySelector('#properties-add')?.closest('.prop-fields')),
     }
   })
-  assert(ownPlacement.formBeforeSection, `自己的表单要长在「标签属性」段前面（否则像在给声明段加东西）：${JSON.stringify(ownPlacement)}`)
-  assert(ownPlacement.addInSection, `「＋ 添加属性」要住进「属性」段头（段的动作跟段走）：${JSON.stringify(ownPlacement)}`)
+  assert(ownPlacement.formBeforeSection, `自己的草稿行要长在「标签属性」段前面（否则像在给声明段加东西）：${JSON.stringify(ownPlacement)}`)
+  assert(ownPlacement.addInSection, `「＋ 添加属性」要住进「属性」段内（段的动作跟段走，落点在段尾）：${JSON.stringify(ownPlacement)}`)
   const ownPick = await page.evaluate((id) => {
     const sel = document.querySelector('.props-form--own .props-pick')
     const opt = [...sel.options].find((o) => o.value === id)
     return { disabled: opt?.disabled ?? null, text: opt?.textContent ?? '' }
   }, ownDefId)
   assert(ownPick.disabled === false, `标签属性也要能给自己加（选项不能灰）：${JSON.stringify(ownPick)}`)
+  await page.evaluate(() => document.querySelector('.props-form--own .props-browse-toggle')?.click())
   await page.selectOption('.props-form--own .props-pick', ownDefId)
   await page.waitForTimeout(80)
   await page.evaluate(() => document.querySelector('.props-form--own .props-use')?.click())
@@ -17141,11 +17129,6 @@ await check(
     await page.evaluate(() => {
       if (!document.querySelector('.props-form--own')) document.getElementById('properties-add')?.click()
       const form = document.querySelector('.props-form--own')
-      const pick = form?.querySelector('.props-pick')
-      if (pick instanceof HTMLSelectElement) {
-        pick.value = '__new__'
-        pick.dispatchEvent(new Event('change', { bubbles: true }))
-      }
       const name = form?.querySelector('.props-new-group input.prop-input')
       if (name instanceof HTMLInputElement) {
         name.value = '冒烟导航'
@@ -17771,11 +17754,6 @@ await check(
     await page.waitForSelector('.props-form--declared')
     await page.evaluate(() => {
       const form = document.querySelector('.props-form--declared')
-      const pick = form?.querySelector('.props-pick')
-      if (pick instanceof HTMLSelectElement) {
-        pick.value = '__new__'
-        pick.dispatchEvent(new Event('change', { bubbles: true }))
-      }
       const name = form?.querySelector('.props-new-group input.prop-input')
       if (name instanceof HTMLInputElement) {
         name.value = '冒烟评分'

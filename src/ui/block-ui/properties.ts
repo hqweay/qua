@@ -523,7 +523,10 @@ export class PropertiesPanel {
     this.els.add.textContent = t('ui.props.addShort')
     this.els.add.dataset.tip = t('ui.props.add')
     this.els.add.addEventListener('click', () => {
-      this.formOpen = this.formOpen === 'own' ? null : 'own'
+      const opening = this.formOpen !== 'own'
+      this.formOpen = opening ? 'own' : null
+      // 只有「这一次打开」才抢焦点：别的路径触发的重画不许把焦点拽回草稿行
+      this.draftFocusPending = opening
       this.render()
     })
   }
@@ -533,6 +536,19 @@ export class PropertiesPanel {
     const target = this.deps.target()
     return target && isPropDef(target) && propKindOf(target) === 'select' ? target : undefined
   }
+
+  /**
+   * 「这一次打开草稿行才聚焦」的旗：添加入口点下时置位，草稿行构造时消费
+   * （聚焦＋滚进视口），别的路径触发的重画不许抢焦点。
+   */
+  private draftFocusPending = false
+
+  /**
+   * 草稿行次级「浏览已有定义」的开合。**跨重建保留**：面板会随焦点变化整卡重建，
+   * 开合若只写在 DOM 上，一次重建就把展开的下拉收回去（用户刚点到一半）；
+   * 与 `formOpen` 同一待遇——状态住面板，重建时照着摆。
+   */
+  private browseOpen = false
 
   /** chip 尾上的删除粒：标签/归属的粒住在段里（`config-sections.ts`）；这里只剩声明段用 */
   private tagDel(title: string, onClick: () => void): HTMLButtonElement {
@@ -709,17 +725,17 @@ export class PropertiesPanel {
   /**
    * **属性段：这一块自己的值**。
    *
-   * 段头给「属性」一个名字 ＋ 入口——没有段头时它与身份行混成一张平清单，
+   * 段头给「属性」一个名字——没有段头时它与身份行混成一张平清单，
    * 「主次」就是从这里丢的：身份行是轻动作行，这里往下是表单区，节奏必须断开。
    *
-   * 入口和表单都紧贴它们写的那一组：`els.add` 原来挂在卡体外面（最下面），
-   * 点开表单会长在「声明给成员」段下面，看起来像在给声明段加东西。
+   * 添加入口与草稿行都**长在段尾**：行清单的追加位就是新行落点（行序＝声明顺序，
+   * 新行落末尾），点 ＋ 后草稿行在原位出现，反馈不跳变；入口本身也跟着落点走
+   * （它不是卡级控件，卡体底部的旧位置看起来像在给别的段加东西）。
    */
   private buildFields(target: Block, rows: readonly FieldRow[], labels: ReadonlyMap<string, string>): HTMLElement {
     const fields = document.createElement('section')
     fields.className = 'props-section prop-fields props-section--primary'
     const fieldsHead = sectionHead('lucide:list', t('ui.block.properties'), rows.length)
-    fieldsHead.appendChild(this.els.add)
     fields.appendChild(fieldsHead)
 
     if (rows.length === 0) {
@@ -739,7 +755,9 @@ export class PropertiesPanel {
     for (const row of rows) {
       fields.appendChild(makeFieldRow(row, target, rowDeps, { labelCount, labels }))
     }
+    // 草稿行在行清单末尾（新行落点）与追加入口之间；收起时入口独占段尾
     if (this.formOpen === 'own') fields.appendChild(this.buildForm(target, labels))
+    fields.appendChild(this.els.add)
     return fields
   }
 
@@ -892,7 +910,8 @@ export class PropertiesPanel {
     const head = sectionHead('lucide:tag', t('ui.props.tagPropsTitle'), defs.length)
 
     /**
-     * 这一段的添加入口住进段头：它是这一段的动作，不是清单下面的又一行字。
+     * 这一段的添加入口与草稿行同 own 段一条口径：长在段尾（清单的追加位），
+     * 不在段头——「往这列清单加一条」的动作跟着落点走。
      * `data-declare-add` 是给断言认「这是声明那一个，不是自己的值那一个」的。
      */
     const add = document.createElement('button')
@@ -902,12 +921,13 @@ export class PropertiesPanel {
     add.textContent = t('ui.props.addTagProp')
     add.dataset.tip = t('ui.props.addTagPropTitle')
     add.addEventListener('click', () => {
-      this.formOpen = this.formOpen === 'declared' ? null : 'declared'
+      const opening = this.formOpen !== 'declared'
+      this.formOpen = opening ? 'declared' : null
+      this.draftFocusPending = opening
       this.render()
     })
     // 说明退成段头上的 ⓘ：解释不占正文宽度，悬停/聚焦可读（文案同 `ui.props.tagPropsHint`）
     head.appendChild(sectionInfo(t('ui.props.tagPropsHint')))
-    head.appendChild(add)
 
     section.appendChild(head)
 
@@ -965,7 +985,9 @@ export class PropertiesPanel {
       section.appendChild(this.choicesTag.root)
     }
 
+    // 草稿行贴着清单（新声明的落点），追加入口收段尾
     if (this.formOpen === 'declared') section.appendChild(this.buildDeclareForm(target, labels))
+    section.appendChild(add)
     return section
   }
 
@@ -1335,10 +1357,10 @@ export class PropertiesPanel {
   }
 
   /**
-   * 两个添加入口共用的表单形状。
+   * 两个添加入口共用的**草稿行**形状。
    *
    * 差异只有四处（槽 / 外层类名 / 两条按钮文案 / 两个回调），所以收成一份：
-   * 「选已有 → 用这个」「新建 → 名字＋类型」这两个形态是同一个交互，
+   * 创建是主路径（名字＋类型，Enter 提交），浏览已有定义收在次级开关后面——
    * 分两份写就会出现「一个表单 Enter 能用、另一个不能」。
    *
    * **同名不是错**：输入已有同名同 kind 时，两个动作同时可见 ——
@@ -1360,9 +1382,6 @@ export class PropertiesPanel {
     const form = document.createElement('form')
     form.className = opts.className
     form.addEventListener('submit', (e) => e.preventDefault())
-
-    /** 「新建定义」的哨兵值：它不是任何真实定义的 id，只用来把下拉切到第二行 */
-    const NEW_OPTION = '__new__'
 
     const pick = document.createElement('select')
     pick.className = 'prop-input props-pick'
@@ -1432,17 +1451,13 @@ export class PropertiesPanel {
       groups[groupOf(def)]!.appendChild(o)
     }
     for (const g of groups) if (g.childElementCount > 0) pick.appendChild(g)
-    const newOption = document.createElement('option')
-    newOption.value = NEW_OPTION
-    newOption.textContent = t('ui.props.newOption')
-    pick.appendChild(newOption)
 
     const pickBtn = document.createElement('button')
     pickBtn.type = 'button'
     pickBtn.className = 'props-use'
     pickBtn.textContent = opts.use
     pickBtn.addEventListener('click', () => {
-      if (!pick.value || pick.value === NEW_OPTION) return
+      if (!pick.value) return
       opts.onUse(pick.value)
       this.closeForm()
     })
@@ -1553,40 +1568,67 @@ export class PropertiesPanel {
     kind.addEventListener('change', syncAo4)
     onCommitKeys(label, { commit: () => commit('auto') })
 
-    // 新建组整块占一行：它的三个控件只一起出现，不能和第一行的「用这个」混排
+    // 新建组整块占一行：名字、类型与提交是创建的主路径，草稿行常开这一形态
     const newGroup = document.createElement('div')
     newGroup.className = 'props-new-group'
-    newGroup.hidden = true
     newGroup.append(label, kind, create, ao4)
+    form.appendChild(newGroup)
 
-    /** 形态跟着下拉走：占位空值两者都藏，选哨兵露新建组，选真实定义露「用这个」 */
-    const syncShape = (): void => {
-      const isNew = pick.value === NEW_OPTION
-      newGroup.hidden = !isNew
-      pickBtn.hidden = !pick.value || isNew
+    /**
+     * **浏览已有定义收进次级**：AO4 只做精确的同名同 kind 匹配，覆盖不了
+     * 「不记得确切名字、想翻一遍库里有什么」——分组下拉（含禁用标记）原样
+     * 保留在这道开关后面。库里一条定义都没有时次级区整个不画（空下拉是死路；
+     * 「定义都在本块上」不算——那些灰掉的项正是用户要的答案）。
+     */
+    const secondary = document.createElement('div')
+    secondary.className = 'props-secondary'
+    if (defs.length > 0) {
+      const browseToggle = document.createElement('button')
+      browseToggle.type = 'button'
+      browseToggle.className = 'props-browse-toggle'
+      browseToggle.textContent = t('ui.props.browseExisting')
+      const browse = document.createElement('div')
+      browse.className = 'props-browse'
+      browse.hidden = !this.browseOpen
+      browseToggle.addEventListener('click', () => {
+        this.browseOpen = !this.browseOpen
+        browse.hidden = !this.browseOpen
+        if (!browse.hidden) pick.focus()
+      })
+
+      const cancel = document.createElement('button')
+      cancel.type = 'button'
+      cancel.className = 'ghost'
+      cancel.textContent = t('ui.props.cancel')
+      cancel.addEventListener('click', () => this.closeForm())
+
+      browse.append(pick, pickBtn, cancel)
+      secondary.append(browseToggle, browse)
+      form.appendChild(secondary)
     }
-    pick.addEventListener('change', syncShape)
 
-    const cancel = document.createElement('button')
-    cancel.type = 'button'
-    cancel.className = 'ghost'
-    cancel.textContent = t('ui.props.cancel')
-    cancel.addEventListener('click', () => this.closeForm())
+    // Esc 收起草稿行：焦点在行内任何控件上都生效（名字输入/类型/浏览下拉）
+    form.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') this.closeForm()
+    })
 
-    // 库里一条定义都没有时，空下拉是死路：直接切到「新建」并展开第二行。
-    // ⚠️ 只有「没有定义」才算死路；「定义都在本块上」不是 —— 下拉里那些灰掉的项
-    //    正是用户要的答案（本块已经有它，只是入口不在这个面板）。
-    if (defs.length === 0) pick.value = NEW_OPTION
-    syncShape()
     syncAo4()
 
-    for (const el of [pick, pickBtn, cancel, newGroup]) form.appendChild(el)
+    // 打开的那一次：名字输入聚焦＋滚进视口（构造时表单还没挂进文档，等一帧）
+    if (this.draftFocusPending) {
+      this.draftFocusPending = false
+      requestAnimationFrame(() => {
+        label.focus()
+        form.scrollIntoView({ block: 'nearest' })
+      })
+    }
     return form
   }
 
   /** 关掉当前打开的那个添加表单并重画（两个入口共用一份状态） */
   private closeForm(): void {
     this.formOpen = null
+    this.browseOpen = false
     this.render()
   }
 }

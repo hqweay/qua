@@ -248,6 +248,8 @@ export const MSG = {
   'ui.props.unknown': '未知属性 {id}',
   'ui.props.pick': '选择已有属性…',
   'ui.props.use': '用这个',
+  /* 草稿行的次级开关：浏览已有定义（AO4 只做精确同名匹配，浏览管「不记得名字」） */
+  'ui.props.browseExisting': '从已有属性选…',
   /* 定义已经在本块的行里（标签声明来的／自己的值）：留在下拉里但不可选，
      否则小库的下拉会变成空的，用户分不清「库里没有」与「本块已经有」 */
   'ui.props.alreadyOn': '已在块上',
@@ -270,7 +272,6 @@ export const MSG = {
   'ui.props.pickTagProp': '选择要添加的标签属性…',
   'ui.props.pickPageField': '选择要声明的字段…',
   'ui.props.useDeclared': '添加',
-  'ui.props.newOption': '＋ 新建属性…',
   'ui.props.newLabel': '属性名',
   'ui.props.create': '新建',
   'ui.props.cancel': '取消',
