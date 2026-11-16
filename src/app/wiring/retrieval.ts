@@ -264,7 +264,9 @@ function openTrigger(ch: TriggerChar, query: string, anchor: DOMRect | null, tit
     onPick: (row, mods) => pickRow(ch, row, mods),
     onClose: () => {
       // Esc／点外关掉而字还留着 ⇒ 否决这次出现：继续打字不复活（97 的 Esc 口径）。
-      // 选中一行的路径也先走这里：词马上被引用替换，下一发上报是 null，记录自然失效。
+      // 选中一行的路径也会先走这里，但 pickRow 当场清掉否决——抹词之后留否决
+      // 会误伤「在同一位置重新敲触发字符」；别靠「下一发上报是 null」来失效它，
+      // 下一次输入往往直接就是新命中，中间没有 null 上报。
       dismissCurrent()
       triggerCh = null
     },
@@ -318,6 +320,10 @@ function pickRow(ch: TriggerChar, row: Row, mods: PickMods): void {
   const pick = row.pick
   // 浮层已关：从这里往后「现在开着的是谁」一律清掉（同一笔动作只发生一次）
   triggerCh = null
+  // 选中即落笔：除进入第二段成员搜索外，触发字符这一路马上被抹掉——
+  // 「否决这一次出现」只服务 Esc／点外关掉而字还留着的路径；字没了还留着否决，
+  // 下一次在同一位置敲同一个触发字符就会被误伤（浮层死）
+  dismissed = null
   if (!pick) return
 
   // 命令行：先把 `/查询词` 让出来，再走命令 —— 命令自己决定落在哪一格（与原来同形）
