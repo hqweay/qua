@@ -68,7 +68,6 @@ test('身份＝命令＋参数：同一条命令的多个动作各改各的', ()
 
 test('键位速查与设置清单都按生效值报（同一身份覆盖后只念一行）', () => {
   setUserKeys({})
-  const undo = keyOf('core.history/undo')!
   const redo = keyOf('core.history/redo')! // 表里两条：⌘⇧Z 与 ⌘Y，同一身份
   const rows0 = keymapRows().filter((r) => r.command === 'core.history/redo')
   assert.equal(rows0.length, 2, '前置：redo 在表里就是两条')

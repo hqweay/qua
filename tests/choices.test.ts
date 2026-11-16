@@ -39,7 +39,7 @@ import {
   type ChoiceScope,
   type PropChoice,
 } from '../src/core/index.ts'
-import { plainText, textRuns } from '../src/core/model/runs.ts'
+import { textRuns } from '../src/core/model/runs.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
 import { BlockStore } from '../src/core/model/store.ts'
 import { propsCommands } from '../src/app/commands/props.ts'

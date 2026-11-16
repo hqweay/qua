@@ -27,7 +27,7 @@ function fixture(): { kb: MemoryKb; store: BlockStore; ids: string[] } {
   const store = new BlockStore([a, b])
   const kb = new MemoryKb(store)
   // 先让索引建起来（第一次读就是重建；之后的写不该再触发重建）
-  store.index
+  void store.index
   return { kb, store, ids: [a.id, b.id] }
 }
 
@@ -178,7 +178,7 @@ test('真实按键链路：撤销条目字节在 100 块与 10,000 块的库上*
     const target = blocks[Math.floor(n / 2)]!
     const t0 = 1_000_000
     // 预热：索引先建起来（首次重建不算进被测那一笔）
-    store.index
+    void store.index
 
     const first = kb.tx((tx) => tx.patch(target.id, (b) => writeBlockContent(b, textRuns('一'))))
     store.record(first.undo, null, 'insert', t0)

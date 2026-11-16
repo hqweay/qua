@@ -8,8 +8,6 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   applyOps,
-  backrefBlocks,
-  backrefsOf,
   fingerprint,
   findJournalDay,
   incomingCount,
@@ -59,9 +57,6 @@ function fixture() {
   const forest = [journal, p1, p2, todo, design]
   return { forest }
 }
-
-/** 全量重建的指纹（唯一基准） */
-const full = (forest: readonly Block[]): string => fingerprint(rebuild(forest))
 
 /**
  * **op 驱动的等式断言**：在真 `MemoryKb` 上跑一笔 tx，把这批 op 喂给 `applyOps`，

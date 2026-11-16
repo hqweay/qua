@@ -152,17 +152,7 @@ await sleep(150)
 await page.keyboard.press('Enter')
 await sleep(600)
 
-const dumpMount = () =>
-  page.evaluate(() => {
-    const mount = document.querySelector('.sec .sec-mount')
-    return Array.from(mount?.querySelectorAll('.mount-editor .blk') ?? []).map((b) => ({
-      id: b.dataset.blockId?.slice(-6),
-      depth: b.dataset.depth,
-      text: b.querySelector('.tx')?.textContent ?? '',
-    }))
-  })
-
-const after = await page.evaluate((rowsBeforeIds) => {
+const after = await page.evaluate(() => {
   const a = document.activeElement
   const mounted = document.querySelector('.sec .sec-mount .mount-editor')
   return {
@@ -179,7 +169,7 @@ const after = await page.evaluate((rowsBeforeIds) => {
       text: b.querySelector('.tx')?.textContent ?? '',
     })),
   }
-}, [])
+})
 log(`\n按 ↵ 后焦点：${JSON.stringify(after.active)}`)
 log(`按 ↵ 后挂载区里的行（含 depth）：${JSON.stringify(after.mountRows)}`)
 
@@ -228,10 +218,10 @@ const kinship = await page.evaluate(() => {
 log(`新块的祖先链（自己→根）：${JSON.stringify(kinship.chain)}`)
 
 /** 库里多出来的块挂在哪 */
-const tree = await page.evaluate((childId) => {
+const tree = await page.evaluate(() => {
   const found = window.__qua.blocks().filter((b) => !b.text || b.text === '')
   return found.slice(0, 6).map((b) => ({ id: b.id.slice(-8), text: b.text }))
-}, made.childId)
+})
 log(`库里的空块（新建的那块应当在这里）：${JSON.stringify(tree)}`)
 
 await app.close()

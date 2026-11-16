@@ -31,7 +31,7 @@ const cdp = await page.context().newCDPSession(page)
 
 await page.evaluate(() => {
   window.__ev = []
-  for (const ty of ['compositionstart', 'compositionend']) window.addEventListener(ty, (e) => window.__ev.push(ty), { capture: true })
+  for (const ty of ['compositionstart', 'compositionend']) window.addEventListener(ty, () => window.__ev.push(ty), { capture: true })
 })
 
 /** 在编辑容器里造一个假块并落光标；返回是否断组合 */

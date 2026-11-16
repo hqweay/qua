@@ -27,7 +27,6 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { META_KEYS } from '../src/core/identity/library.ts'
 import { workspaceToRowWrites, type StoredWorkspace } from '../src/core/storage/db-rows.ts'
 import type { Block } from '../src/core/model/model.ts'
 import {

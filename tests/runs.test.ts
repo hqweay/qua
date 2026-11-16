@@ -32,7 +32,6 @@ import {
   runAtCell,
   runById,
   sameRuns,
-  sliceRuns,
   spliceRuns,
   splitRuns,
   textRuns,

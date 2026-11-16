@@ -204,6 +204,8 @@ test('patch 只改时刻（换位置/缩进）⇒ 一条 upsert{modified}，不�
 
 test('patch 什么都没变 ⇒ 零 op（幂等的边界不该产账）', () => {
   const { kb } = fixture()
+  // 写回同一个值本身就是这条用例要构造的输入，不是笔误
+  // oxlint-disable-next-line no-self-assign
   const r = kb.tx((tx) => tx.patch('c1', (x) => (x.modified = x.modified)))
   assert.deepEqual(bare(r.ops), [])
 })

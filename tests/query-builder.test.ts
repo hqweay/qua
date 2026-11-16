@@ -13,11 +13,6 @@ import { dayStartMs, type QuerySpec } from '../src/core/index.ts'
 
 const fields = [{ id: 'p', label: '状态' }]
 const chips = (where: QuerySpec['where']): string[] => queryChips({ where }, fields)
-const one = (where: QuerySpec['where']): string => {
-  const out = chips(where)
-  assert.equal(out.length, 1, `应合成一条：${JSON.stringify(out)}`)
-  return out[0]!
-}
 
 test('普通叶子：标签／正文／属性按人话读', () => {
   assert.deepEqual(chips({ tag: '任务' }), ['#任务'])

@@ -84,7 +84,7 @@ test('buildAdjacency 对森林只走一遍（注入的 walker 计数 = 1）', ()
 })
 
 test('建表：活块表、反向索引、以及「解析得到」的集合（含被删的）', () => {
-  const { forest, people, actor, director } = tree()
+  const { forest, people, actor } = tree()
   const adj = buildAdjacency(forest)
   assert.equal(adj.blocks.length, 4)
   assert.equal(adj.byId.get('actor'), actor)

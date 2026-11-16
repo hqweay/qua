@@ -7,7 +7,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkBlock, type Block } from '../src/core/index.ts'
+import { mkBlock } from '../src/core/index.ts'
 import { createRowBodyCache } from '../src/app/wiring/row-bodies.ts'
 
 /** 假容器：只记 appendChild 收到过哪些 root */

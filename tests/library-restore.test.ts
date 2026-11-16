@@ -15,7 +15,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -60,7 +60,7 @@ function markerOf(dir: string): string | undefined {
 
 test('restoreFromBackup：把旧快照放回去之后，内容真的回到那一刻', () => {
   const root = tmpRoot()
-  const { dir, id } = makeLibrary(root, 'a'.repeat(32), 'v1')
+  const { dir } = makeLibrary(root, 'a'.repeat(32), 'v1')
   // 拍一份「v1 时刻」的快照（此时 marker=v1）
   const snap = join(dir, BACKUPS_DIR, '1000-manual.db')
   const live = new DatabaseSync(join(dir, DB_FILE))
@@ -78,7 +78,7 @@ test('restoreFromBackup：把旧快照放回去之后，内容真的回到那一
 
 test('restoreFromBackup：恢复**先拍当前态**——恢复本身也要有回退面', () => {
   const root = tmpRoot()
-  const { dir, id } = makeLibrary(root, 'b'.repeat(32), 'old')
+  const { dir } = makeLibrary(root, 'b'.repeat(32), 'old')
   const snap = join(dir, BACKUPS_DIR, '1000-manual.db')
   const live = new DatabaseSync(join(dir, DB_FILE))
   live.exec(`vacuum into '${snap.replace(/'/g, "''")}'`)
@@ -122,7 +122,7 @@ test('restoreFromBackup：**不改库身份**——manifest 与 meta.library_id 
   // 重新打开仍然过身份三方对照（manifest vs meta vs 目录名）
   const reopened = openSession(dir, { expectId: id, deviceId: 'dev-test' })
   assert.equal(reopened.status, 'ok', `恢复后应能正常打开：${JSON.stringify(reopened)}`)
-  reopened.status === 'ok' && reopened.session.close()
+  if (reopened.status === 'ok') reopened.session.close()
 })
 
 /* ------------------------------------------------------------ ④ 版本偏大拒绝 */

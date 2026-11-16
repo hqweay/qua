@@ -9,12 +9,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkBlock } from '../src/core/index.ts'
-import type { Atom, Block } from '../src/core/index.ts'
+import type { Block } from '../src/core/index.ts'
 import {
   canonicalSpec,
   contextKey,
   dayStartMs,
-  shiftISO,
   findJournalDay,
   findTagByName,
   declareField,
@@ -450,7 +449,6 @@ test('runQuery：属性条件按 propId 取值、Object.is 比较（未填与 fa
     c: {},
   }
   const forest: Block[] = [def, ...Object.entries(props).map(([id, p]) => b(id, id, { props: p }))]
-  const atoms: Atom[] = []
   assert.deepEqual(
     runQuery({ where: { prop: { id: 'task', eq: true } } }, { blocks: forest }).map((h) => h.blockId),
     ['a'],
@@ -1159,7 +1157,7 @@ test('role 条件按值分发：tag 问「露面里有没有 tag」——与 pag
   assert.deepEqual(queryByIndex(rebuild(blocks), blocks, spec, {}), runQuery(spec, { blocks }), '两条路径同解')
   const viaAny = runQuery({ where: { any: [{ role: 'page' }, { role: 'tag' }] } }, { blocks }).map((h) => h.blockId)
   assert.deepEqual(
-    [...new Set([...direct, ...viaAny])].length,
+    new Set([...direct, ...viaAny]).size,
     viaAny.length,
     'any(page, tag) 的并集不重不漏',
   )

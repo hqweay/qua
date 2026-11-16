@@ -10,7 +10,6 @@ import {
   flatten,
   isDeleted,
   mkBlock,
-  type Block,
   type Doc,
 } from '../../src/core/index.ts'
 import { recentBlocks } from '../../src/app/search/recents.ts'

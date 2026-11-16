@@ -58,7 +58,6 @@ const metrics = () => {
 
   const blk = pick('#editor .blk[data-depth="0"]')
   const deep = pick('#editor .blk[data-depth="2"]')
-  const p1 = pick('#editor .blk[data-block-id="typo-p1"]')
   const p2 = pick('#editor .blk[data-block-id="typo-p2"]')
   const p3 = pick('#editor .blk[data-block-id="typo-p3"]')
   const l2 = pick('#editor .blk[data-block-id="typo-l2"]')
@@ -93,7 +92,7 @@ const metrics = () => {
 const main = async () => {
   const browser = await launch()
   const { base } = await resolveBase()
-  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
+  const { page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
   await page.evaluate(seed, { para: PARAGRAPH })
   await page.evaluate(() => window.__qua.invoke('core.page/open', { pageId: 'typo-page' }))
   await page.waitForSelector('#editor .blk[data-block-id="typo-p1"]', { timeout: 5000 })

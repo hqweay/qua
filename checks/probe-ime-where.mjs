@@ -29,7 +29,7 @@ await sleep(700)
 const cdp = await page.context().newCDPSession(page)
 await page.evaluate(() => {
   window.__ev = []
-  for (const ty of ['compositionstart', 'compositionend']) window.addEventListener(ty, (e) => window.__ev.push(ty), { capture: true })
+  for (const ty of ['compositionstart', 'compositionend']) window.addEventListener(ty, () => window.__ev.push(ty), { capture: true })
 })
 
 const target = await page.evaluate(() => {

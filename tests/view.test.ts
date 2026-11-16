@@ -36,7 +36,6 @@ import {
   isViewRoot,
   isViewsValue,
   listTableOf,
-  mkBlock,
   mkPropDef,
   ownFieldIds,
   readViews,

@@ -17,8 +17,6 @@ import {
   rowWritesFor,
   rowsToWorkspace,
   workspaceToRowWrites,
-  type RawLibraryRows,
-  type RowWrite,
 } from '../../src/core/storage/db-rows.ts'
 import { applyRowWrites, openLibraryDb, readContentRows, replaceContentRows } from '../../electron/library/sqlite.ts'
 import { mkdtempSync, rmSync } from 'node:fs'

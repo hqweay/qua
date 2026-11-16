@@ -167,7 +167,7 @@ test('撤销条目：序列化字节与库体量无关（100 与 10,000 块相�
     const blocks: Block[] = Array.from({ length: n }, (_, i) => mkBlock(i === mid ? '目标块' : `块${i}`))
     const store = new BlockStore(blocks)
     const kb = new MemoryKb(store)
-    store.index
+    void store.index
     const target = blocks[mid]!
     const r = kb.tx((tx) => tx.patch(target.id, (b) => writeBlockContent(b, textRuns('改过'))))
     return JSON.stringify(r.undo).length

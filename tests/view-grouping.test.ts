@@ -8,7 +8,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkBlock, type Block, type ViewRecord } from '../src/core/index.ts'
+import { mkBlock, type ViewRecord } from '../src/core/index.ts'
 import { bucketize, bucketLabel, orderBuckets, GROUP_UNSET } from '../src/ui/views/grouping.ts'
 
 const rec = (id: string, values: Record<string, unknown> = {}): ViewRecord => ({

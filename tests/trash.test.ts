@@ -20,7 +20,7 @@ import { BlockStore } from '../src/core/model/store.ts'
 import { mkBlock, isDeleted, type Block } from '../src/core/model/model.ts'
 import { isBlankTrashEntry } from '../src/core/index.ts'
 import { trashOf } from '../src/core/model/tree.ts'
-import { textRuns, type Run } from '../src/core/model/runs.ts'
+import { type Run } from '../src/core/model/runs.ts'
 import { diff, forestFingerprint, replay } from '../src/core/kb/diff.ts'
 import type { Op } from '../src/core/kb/types.ts'
 

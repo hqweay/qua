@@ -627,7 +627,7 @@ function commandDecls() {
    ╚═══════════════════════════════════════════════════════ */
 
 {
-  const { sf, decls } = commandDecls()
+  const { decls } = commandDecls()
   const seen = new Map()
   const dups = []
   for (const d of decls) {

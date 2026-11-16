@@ -1,0 +1,11 @@
+{
+  "categories": {
+    "correctness": "error"
+  },
+  "rules": {
+    "no-useless-fallback-in-spread": "off",
+    "no-useless-spread": "off",
+    "unicorn/prefer-string-starts-ends-with": "off"
+  },
+  "ignorePatterns": ["dist/**", "dist-electron/**", "node_modules/**", "release/**"]
+}

@@ -34,6 +34,7 @@ const OUT = flag('--out') ?? join(ROOT, 'dist', 'arch.html')
 const JSON_ONLY = argv.includes('--json')
 
 /** 门禁那两条命令的输出带颜色；解析前先剥掉，别让转义序列钻进正则 */
+// oxlint-disable-next-line no-control-regex -- 控制字符就是要剥的对象，这里必须字面写出
 const strip = (s) => s.replace(/\u001b\[[0-9;]*m/g, '')
 
 function run(cmd, args) {

@@ -8,7 +8,6 @@
  */
 import { launch, freshPage, resolveBase } from '../scripts/harness.mjs'
 
-const log = (...a) => console.error('[probe]', ...a)
 const { base, mode, server } = await resolveBase()
 const browser = await launch()
 const { ctx, page } = await freshPage(browser, base)

@@ -233,7 +233,7 @@ test('日记宿主不挂「当日新建」之外的序列变化：普通块四�
 })
 
 test('普通块：四栏常驻（有标签、有可读文本都不再决定 tab 出不出）', () => {
-  const { host, blocks } = fixture()
+  const { host } = fixture()
   assert.deepEqual(SOURCES(mountEntriesOf(host, { now: NOW })), ['refs', 'notes', 'same', 'mentions'])
   const bare = b('bare', '   ')
   assert.deepEqual(
@@ -275,7 +275,7 @@ test('物化模板：条件＝内置 spec，视图带本源默认列；维度不
 })
 
 test('内置栏的 id 是派生的：同一个宿主、同一个来源 ⇒ 同一个 id（刷新不漂）', () => {
-  const { host, blocks } = fixture()
+  const { host } = fixture()
   const a = derivedEntriesOf(host).map((e) => e.id)
   const b2 = derivedEntriesOf(host).map((e) => e.id)
   assert.deepEqual(a, b2, '内置栏的 id 不能每次现造')
@@ -570,7 +570,7 @@ test('U18 摘栏只认 local：派生标记不可摘（不是偷偷实现「隐�
 /* ------------------------------------------------------------ 原地物化与分组候选 */
 
 test('原地物化：local 栏占用内置栏稳定 id ⇒ 替换那一栏，不是一栏变两栏', () => {
-  const { host, blocks } = fixture()
+  const { host } = fixture()
   // 物化「引用」：id 用内置栏的稳定 id
   const localRefs = local(derivedTabId('refs'), '反链')
   host.props = { ...(host.props ?? {}), _mounts: [localRefs] }

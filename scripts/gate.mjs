@@ -6,7 +6,7 @@
  *   —— 串行等于多核里只用一个核。这里快的原因是**并发**，不是少跑：断言口径一条没改。
  *
  * 只按**产物依赖**分三段，段内互相独立：
- *   ① typecheck · arch:check · test:core   静态／纯内存，零依赖，也最便宜 ⇒ 先跑，红了就别构建
+ *   ① lint · typecheck · arch:check · test:core   静态／纯内存，零依赖，也最便宜 ⇒ 先跑，红了就别构建
  *   ② build:test · build:electron          ③ 的两个输入
  *   ③ 浏览器冒烟（用例切片并发）· check:dock · check:electron
  *
@@ -120,6 +120,8 @@ const BROWSER = { QUA_NO_DEV: '1' }
  */
 const FAILURES_FILE = join(ROOT, 'checks/.smoke-failures.json')
 const STEPS = {
+  // lint 只扫 tsc 不看的三个目录（tests/checks/scripts）：那三处才是它独占的地盘
+  lint: step('lint', 'lint'),
   typecheck: step('typecheck', 'typecheck'),
   'arch:check': step('arch:check', 'arch:check'),
   'test:core': step('test:core', 'test:core'),
@@ -348,7 +350,7 @@ const AREA = {
 
 /** 全量的组成 —— 也是 `--fast` 算「跳过了什么」的参照 */
 const FULL = {
-  base: ['typecheck', 'arch:check', 'test:core'],
+  base: ['lint', 'typecheck', 'arch:check', 'test:core'],
   build: ['build:test', 'build:electron'],
   after: ['smoke', 'check:dock', 'check:electron'],
 }
@@ -443,7 +445,7 @@ if (FAST) {
   console.log(`\n${C.bold('门禁 · 全量')}${C.dim(`（${CPUS} 核 · load ${loadavg()[0].toFixed(1)} ⇒ 冒烟切 ${SHARDS} 片）`)}`)
 }
 
-const baseKeys = plan ? plan.base : ['typecheck', 'arch:check', 'test:core']
+const baseKeys = plan ? plan.base : ['lint', 'typecheck', 'arch:check', 'test:core']
 let buildKeys = plan ? plan.build : ['build:test', 'build:electron']
 let afterKeys = plan ? plan.after : ['smoke', 'check:dock', 'check:electron']
 // `--no-electron`：`build:electron` 的唯一读者是 `check:electron`，不跑它就不必构建壳

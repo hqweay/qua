@@ -26,6 +26,7 @@
     "check:dock": "node checks/dock-smoke.mjs",
     "check:bundle": "node checks/bundle-smoke.mjs",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.electron.json",
+    "lint": "oxlint -c .oxlintrc.json tests checks scripts",
     "arch:check": "node scripts/arch-check.mjs",
     "test:core": "node --test 'tests/**/*.test.ts'",
     "test:one": "node --test",
@@ -43,6 +44,7 @@
     "emojibase-data": "^18.0.0",
     "esbuild": "^0.28.2",
     "lucide-static": "^1.72.0",
+    "oxlint": "^1.93.0",
     "playwright-core": "^1.49.0",
     "typescript": "^5.7.0",
     "vite": "^6.0.0"

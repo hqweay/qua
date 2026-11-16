@@ -13,7 +13,6 @@ import { ensureTaskStatusInTx } from '../src/core/kb/ensure-task.ts'
 import { BlockStore } from '../src/core/model/store.ts'
 import { walkForest } from '../src/core/model/walk.ts'
 import { isDeleted, mkBlock } from '../src/core/index.ts'
-import { plainText, textRuns } from '../src/core/model/runs.ts'
 import { taskStatusVocabulary } from '../src/core/fixtures/task-vocabulary.ts'
 import {
   choicesOf,

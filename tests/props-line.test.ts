@@ -217,7 +217,6 @@ test('传递型引用：正文只有一枚引用的块，其子块沿目标解�
   assert.deepEqual(viaLoop, [], '环上没有声明 ⇒ 空且终止')
 
   // 传递链中间带正文即断（A 传 B，B 有正文 + 引用 C）
-  const c = blk('tag-c', 'C', { _aliases: ['C'], _lists: ['tag'], [CHILD_PROPS_PROP]: [ENGINE_CREATED] })
   const mid = blk('mid', '正文')
   mid.content = [...textRuns('正文'), { id: 'r5', t: 'ref', to: 'tag-c' }]
   const viaBroken = (belowFieldsFor([child], forest, (id) => (id === 'c1' ? mid : null)).get('c1')?.rows ?? []).map((r) => r.propId)

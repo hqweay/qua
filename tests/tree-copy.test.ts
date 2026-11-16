@@ -81,7 +81,7 @@ test('视图配置：查询块副本**一起剥**（没有源的视图没有意�
     [ACTIVE_VIEW_PROP]: 'v-1',
   })
   const pCopy = copyOf(plain)
-  assert.equal((pCopy.props?.[VIEWS_PROP] as unknown[]).length, 1, '普通块的子块跟着复制 ⇒ 视图仍然成立')
+  assert.equal((pCopy.props?.[VIEWS_PROP] as unknown[] | undefined)?.length, 1, '普通块的子块跟着复制 ⇒ 视图仍然成立')
   assert.equal(pCopy.props?.[ACTIVE_VIEW_PROP], 'v-1')
 })
 

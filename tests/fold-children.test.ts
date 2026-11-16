@@ -110,7 +110,6 @@ test('no children => null (caller must refuse; no undo entry)', () => {
 test('叶子块写不进折叠态：一组子块里混合有子块/叶子时，只有有子块的那些被折', () => {
   const a11 = mk('a11', 'a11')
   const a12 = mk('a12', 'a12')
-  const a13 = mk('a13', 'a13')
   const a1 = mk('a1', 'a1', [a11, a12]) // 有子块
   const a2 = mk('a2', 'a2') // 叶子
   const a3 = mk('a3', 'a3') // 叶子

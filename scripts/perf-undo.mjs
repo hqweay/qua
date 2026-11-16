@@ -99,7 +99,7 @@ function measure(n, label) {
   writeBlockContent(target, textRuns('目标块'))
   const sel = { aBlock: target.id, aOff: 0, hBlock: target.id, hOff: 0 }
   // 索引是懒建的：先叫醒它（真实路径里它早建好了）
-  store.index
+  void store.index
 
   const keySamples = []
   const undoMs = []
@@ -135,7 +135,7 @@ function measureDepth(n, depth) {
   const store = new BlockStore(buildForest(n))
   const kb = new MemoryKb(store)
   const sel = null
-  store.index
+  void store.index
   const roots = store.blocks
   gc()
   const base = process.memoryUsage().heapUsed

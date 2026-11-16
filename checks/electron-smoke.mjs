@@ -652,7 +652,6 @@ await check('E7 窗口缩放：改窗口尺寸，renderer 的布局跟着变（�
   const small = await setSize(760, 560)
   const big = await setSize(1400, 900)
   const zoom = await page.evaluate(() => {
-    const web = window.__qua.__registry ? null : null
     return { dpr: window.devicePixelRatio }
   })
   // ⌘+ / ⌘- 缩放（Chromium 的 zoomFactor）——Electron 里由「视图」菜单的 role 管
@@ -734,7 +733,6 @@ await check('E9 虚拟化下选区投影与组合期两段式的 Electron 现状
   await page.evaluate(() => window.__qua.quiet(true))
   // 造足够多的块，好让虚拟化真的卸载东西
   await page.evaluate(() => {
-    const ed = window.__qua.__editor
     const first = window.__qua.blocks()[0].id
     window.__qua.focusBlock(first, 0)
     for (let i = 0; i < 40; i++) window.__qua.invoke('core.editor/split-block')
@@ -1682,7 +1680,6 @@ await check('E18 系统标题栏交给网页顶栏：整窗＝内容区、壳给
   const dom = await page.evaluate(() => {
     const bar = document.getElementById('topbar')
     const first = document.querySelector('#topbar button')
-    const cs = getComputedStyle(bar)
     const region = (el) => {
       const v = getComputedStyle(el)
       return v.getPropertyValue('-webkit-app-region').trim() || v.getPropertyValue('app-region').trim()
