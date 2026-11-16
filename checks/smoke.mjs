@@ -29721,8 +29721,21 @@ await check('T329 行内替身染目标身份色：有色 #名 染字；无色�
   assert(!inked.identityLeft, `身份色应退出（inline style 清空）：${JSON.stringify(inked)}`)
   assert(inked.wrapColor && inked.atomColor === inked.wrapColor && inked.atomColor !== dyed.color, `字色归 ink（继承包装层的槽色）：${JSON.stringify(inked)}`)
 
+  // ⑤ 前置目标图标走 renderIcon 分发：字面脸（emoji）显示字面本身，
+  //    不允许出现「塞着 undefined 的隐形 SVG」占位把名字顶歪（真机实测过的错法）
+  await page.evaluate((tagId) => window.__qua.invoke('core.block/set-icon', { blockId: tagId, icon: '🚀' }), info.tag)
+  await page.waitForTimeout(150)
+  const faced = await page.evaluate((blockId) => {
+    const tx = document.querySelector(`.blk[data-block-id="${blockId}"] > .tx`)
+    const atom = [...tx.querySelectorAll('.atom')].find((a) => a.textContent.includes('染字签'))
+    const ico = atom.querySelector('.atom-ico')
+    return { icoText: ico?.textContent ?? '', bodyHasUndefined: (tx.textContent ?? '').includes('undefined') }
+  }, info.blockId)
+  assert(faced.icoText === '🚀', `字面脸应显示字面本身：${JSON.stringify(faced)}`)
+  assert(!faced.bodyHasUndefined, `正文里不许有 undefined 残字：${JSON.stringify(faced)}`)
+
   await ctx.close()
-  return '有色 #名 染字、无色中性、`[[ ]]` 同判据、显式 ink 赢字且身份色退出'
+  return '有色 #名 染字、无色中性、`[[ ]]` 同判据、显式 ink 赢字且身份色退出、字面脸显示字面本身'
 })
 
 /**

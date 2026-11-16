@@ -11,7 +11,7 @@ import { identityColorCss, type RefView } from '../../core/index.ts'
 import { isHexColor, type AssetRun, type MarkKind, type RunWithId } from '../../core/model/runs.ts'
 import type { AssetView } from '../../core/infra/assets.ts'
 import { t } from '../../core/infra/msg.ts'
-import { createIcon, renderIcon, type IconName } from '../icons.ts'
+import { createIcon, renderIcon } from '../icons.ts'
 import type { RefSummary } from '../../core/views/ref-sources.ts'
 /**
  * 格式键 → 语义标签：core 五种用语义标签（复制出去也是对的），带值两种用 `span`。
@@ -184,12 +184,15 @@ export function makeRunEl(r: RunWithId, view?: RefView, asset?: AssetView, onAss
  * 目标块标的**前置图标**（脸的形半，与替身染色的色半同一资格）：
  * 解析不到（dangling）或目标无脸 ⇒ 不占位——图标是加分项，不是必需件。
  * 三种行内引用共用一份：`#名`／实例／`[[ ]]` 哪里都一样，不按形状再分叉。
+ * ⚠️ 必须走 `renderIcon`（前缀分发：`lucide:` ⇒ SVG，**字面值（emoji 等）⇒ 字就是脸**，
+ * 未知名 ⇒ help 占位）。直接调 `createIcon` 会把字面值喂进 path 表查不到，
+ * 造出一枚塞着 "undefined" 的隐形 SVG——不显示但占位，把整个名字顶歪（真机实测）。
  */
 function prependIcon(view: RefView | undefined): Node[] {
   if (view?.state !== 'resolved' || !view.icon) return []
   const ico = document.createElement('span')
   ico.className = 'atom-ico'
-  ico.appendChild(createIcon(view.icon as IconName, 'sm'))
+  renderIcon(ico, view.icon, 'circle-help', 'sm')
   return [ico]
 }
 
