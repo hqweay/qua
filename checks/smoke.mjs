@@ -121,11 +121,17 @@ async function check(name, fn) {
   // 失败名单过滤：only-failed 模式只跑名单里的用例（护栏③：不扩成整片）
   if (ONLY_FAILED && !failedMatchedOf(name)) return
   if (SHARD && idx % SHARD.n !== SHARD.i) return
+  /**
+   * 记下每条自己的耗时：切片是**按声明序号取模**（等条数，不等于等时长），
+   *   而门禁墙钟由**最慢那一片**决定 ⇒ 「要不要按耗时装箱」只能由这份数据回答，
+   *   不能凭「应该不均」去改分配。失败的也记（排查时那几条的耗时同样有用）。
+   */
+  const t0 = Date.now()
   try {
     const msg = await fn()
-    results.push({ idx, name, ok: true, msg: msg ?? '' })
+    results.push({ idx, name, ok: true, msg: msg ?? '', ms: Date.now() - t0 })
   } catch (e) {
-    results.push({ idx, name, ok: false, msg: e?.message ?? String(e), known: knownOf(name)?.why ?? '' })
+    results.push({ idx, name, ok: false, msg: e?.message ?? String(e), known: knownOf(name)?.why ?? '', ms: Date.now() - t0 })
   }
 }
 

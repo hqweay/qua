@@ -182,6 +182,28 @@ async function runSmoke() {
   cases.sort((a, b) => a.idx - b.idx)
   await rm(dir, { recursive: true, force: true })
 
+  /**
+   * **分片均衡度（只测量，不改分配）**：切片按声明序号取模 ⇒ 等条数不等于等时长，
+   *   而门禁的墙钟由最慢那一片决定。这里把账摆出来：每片的条数与用例耗时合计、
+   *   最长／均值。要不要按耗时装箱，由这份数据决定——凭「应该不均」去改分配
+   *   是拿稳定性换猜测。
+   *   按 `idx % SHARDS` 归片与切片的判据同源；耗时由 `check()` 自己记。
+   */
+  const perShard = Array.from({ length: SHARDS }, () => ({ count: 0, ms: 0 }))
+  for (const c of cases) {
+    const s = perShard[c.idx % SHARDS]
+    s.count += 1
+    s.ms += c.ms ?? 0
+  }
+  const meanMs = perShard.reduce((a, s) => a + s.ms, 0) / Math.max(1, perShard.length)
+  const worstMs = Math.max(...perShard.map((s) => s.ms), 0)
+  if (cases.length) {
+    console.log(
+      `    用例耗时：${perShard.map((s, i) => `${i + 1}=${secs(s.ms)}（${s.count} 条）`).join(' · ')}` +
+        (meanMs > 0 ? ` · 最长/均值 ${(worstMs / meanMs).toFixed(2)}` : ''),
+    )
+  }
+
   let failures = cases.filter((c) => !c.ok && !c.known)
   const knownFailures = cases.filter((c) => !c.ok && c.known)
 
