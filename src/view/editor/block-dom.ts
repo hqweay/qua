@@ -856,12 +856,12 @@ export function makeBlockEl(
       const picked = field.picked ?? []
       const cap = 3
       if (picked.length === 0) {
-        renderIcon(mark, prop<string>(field.def, '_icon'), 'square-dashed', 'sm')
+        renderIcon(mark, prop<string>(field.def, '_icon'), 'square-dashed', 'md')
       } else {
         for (const c of picked.slice(0, cap)) {
           const ico = document.createElement('span')
           ico.className = 'prop-multi-ico'
-          renderIcon(ico, c.icon ?? prop<string>(field.def, '_icon'), 'square-dashed', 'sm')
+          renderIcon(ico, c.icon ?? prop<string>(field.def, '_icon'), 'square-dashed', 'md')
           mark.appendChild(ico)
         }
         if (picked.length > cap) {
@@ -889,7 +889,7 @@ export function makeBlockEl(
         // 右键／⌥+点＝取值菜单（`data-prop-for`）——两个属性同一处，事件按顺序分派。
         mark.dataset.closureFor = b.id
         mark.dataset.propFor = b.id
-        renderIcon(mark, field.icon, closure === 'closed' ? 'circle-check' : 'circle', 'sm')
+        renderIcon(mark, field.icon, closure === 'closed' ? 'circle-check' : 'circle', 'md')
         mark.dataset.tip = t('ui.closure.toggle')
         left?.appendChild(mark)
         continue
@@ -900,7 +900,7 @@ export function makeBlockEl(
         mark.className = 'identity check-box'
         mark.dataset.propId = field.propId
         mark.dataset.checkFor = b.id
-        renderIcon(mark, field.icon, field.value === field.check.on ? 'square-check' : 'square', 'sm')
+        renderIcon(mark, field.icon, field.value === field.check.on ? 'square-check' : 'square', 'md')
         const value = field.choice ? field.choice.label.trim() : ''
         mark.dataset.tip = t('ui.props.gutterTitle', {
           prop: blockLabel(field.def),
@@ -913,7 +913,7 @@ export function makeBlockEl(
       mark.className = 'identity prop-mark'
       mark.dataset.propId = field.propId
       mark.dataset.propFor = b.id
-      renderIcon(mark, field.icon, 'square-dashed', 'sm')
+      renderIcon(mark, field.icon, 'square-dashed', 'md')
       const value = field.choice ? field.choice.label.trim() : ''
       mark.dataset.tip = t('ui.props.gutterTitle', {
         prop: blockLabel(field.def),
@@ -930,7 +930,7 @@ export function makeBlockEl(
       mark.className = 'identity check-box check-mark'
       mark.dataset.closureFor = b.id
       mark.dataset.propId = field.propId
-      mark.appendChild(createIcon(field.value === true ? 'square-check' : 'square', 'sm'))
+      mark.appendChild(createIcon(field.value === true ? 'square-check' : 'square', 'md'))
       mark.dataset.tip = t('ui.props.gutterToggle', { prop: blockLabel(field.def) })
       left?.appendChild(mark)
     }

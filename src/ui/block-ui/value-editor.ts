@@ -158,7 +158,7 @@ function valueChips(
       const ico = document.createElement('span')
       ico.className = 'prop-chip-ico'
       ico.setAttribute('aria-hidden', 'true')
-      renderIcon(ico, item.icon, 'circle', 'sm')
+      renderIcon(ico, item.icon, 'circle', 'md')
       body.appendChild(ico)
     }
     const text = document.createElement('span')
@@ -406,7 +406,7 @@ export function makeCellEditor(
           const ico = document.createElement('span')
           ico.className = 'prop-ref-ico'
           ico.setAttribute('aria-hidden', 'true')
-          renderIcon(ico, icon, 'circle', 'sm')
+          renderIcon(ico, icon, 'circle', 'md')
           btn.appendChild(ico)
         }
         const name = document.createElement('span')
@@ -513,7 +513,7 @@ export function makeCellEditor(
     wrap.className = 'prop-select'
     const ico = document.createElement('span')
     ico.className = 'prop-select-ico'
-    renderIcon(ico, icon, 'square-dashed', 'sm')
+    renderIcon(ico, icon, 'square-dashed', 'md')
     wrap.append(ico, sel)
     return wrap
   }

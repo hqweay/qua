@@ -107,7 +107,7 @@ export function renderBlockConfig(host: HTMLElement, deps: BlockConfigDeps): voi
     faceBtn.dataset.tip = t('ui.iconPicker.faceEntry')
     const faceIco = document.createElement('span')
     faceIco.className = 'alias-face-ico'
-    renderIcon(faceIco, prop<string>(b, ICON_PROP), 'circle-help', 'sm')
+    renderIcon(faceIco, prop<string>(b, ICON_PROP), 'circle-help', 'md')
     faceBtn.appendChild(faceIco)
     const faceColor = prop<string>(b, COLOR_PROP)
     if (faceColor !== undefined) {

@@ -244,7 +244,7 @@ export class ChoicesEditor {
         ico,
         which === 'on' ? 'lucide:circle-check' : 'lucide:circle',
         which === 'on' ? 'circle-check' : 'circle',
-        'sm',
+        'md',
       )
       const text = document.createElement('span')
       text.className = 'cc-label'

@@ -101,7 +101,7 @@ function sectionHead(icon: string, title: string, count?: number): HTMLElement {
   const ico = document.createElement('span')
   ico.className = 'props-section-ico'
   ico.setAttribute('aria-hidden', 'true')
-  renderIcon(ico, icon, 'list', 'sm')
+  renderIcon(ico, icon, 'list', 'md')
   const label = document.createElement('span')
   label.className = 'props-section-title'
   label.textContent = title
@@ -1039,7 +1039,7 @@ export class PropertiesPanel {
     btn.dataset.tip = t('ui.iconPicker.faceEntry')
     const ico = document.createElement('span')
     ico.className = 'prop-face-ico'
-    renderIcon(ico, prop<string>(target, '_icon'), 'circle-help', 'sm')
+    renderIcon(ico, prop<string>(target, '_icon'), 'circle-help', 'md')
     btn.appendChild(ico)
     const color = prop<string>(target, '_color')
     if (color !== undefined) {

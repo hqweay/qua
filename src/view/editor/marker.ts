@@ -63,7 +63,9 @@ export function buildMarker(b: Block, o: MarkerOpts): HTMLElement {
     marker.classList.add(isPropDefBlock(b) ? 'marker-schema' : isQueryBlock(b) ? 'marker-query' : 'marker-face')
     const ico = document.createElement('span')
     ico.className = 'marker-ico'
-    renderIcon(ico, face, 'circle-help', 'sm')
+    // 脸画 md（15px）：它是用户挑的数据，不吃发丝线的亏（24 网格 2px 描边缩到 sm 的 12px
+    // 只剩 1px，抗锯齿后发灰）——与页/日记脸、查询标记菜单同档；铬件（抓手/折叠箭头）才用 sm
+    renderIcon(ico, face, 'circle-help', 'md')
     marker.appendChild(ico)
     // 属性定义的正文是定义名，行内改不了；悬停块标时把「它是什么」说清
     if (isPropDefBlock(b)) marker.dataset.tip = t('ui.block.schemaHint')
