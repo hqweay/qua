@@ -606,7 +606,7 @@ function openQueryBuilder(owner: ViewOwnerRef): void {
 }
 
   /**
-   * **插入外链的输入框**（斜杠菜单／⌘K ⇒ 命令不带 `url` ⇒ 走这里）。
+   * **插入外链的输入框**（斜杠菜单／块菜单 ⇒ 命令不带 `url` ⇒ 走这里）。
    *
    * 与「选图片」同一条理由：要跟用户要**一句话**，而命令 handler 不许碰 DOM。
    */

@@ -1183,7 +1183,7 @@ export const MSG = {
   'ui.link.rejectEmpty': '链接是空的',
   'ui.link.rejectMalformed': '这不是一个完整的网址（要带 http:// 或 https://）',
   'ui.link.rejectScheme': '只打开 http / https 链接：「{scheme}」不允许',
-  /* 插入外链的输入框（斜杠菜单／⌘K 的那条路） */
+  /* 插入外链的输入框（斜杠菜单／块菜单的那条路） */
   'ui.link.composerTitle': '插入外链',
   'ui.link.urlPlaceholder': 'https://…',
   'ui.link.textPlaceholder': '显示的名字（可留空）',

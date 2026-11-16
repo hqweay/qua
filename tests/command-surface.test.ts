@@ -48,16 +48,14 @@ test('键位：⌘P 只开命令面板，⌘K 只开全局搜索，⌘F 留给�
   assert.deepEqual(onF, [], '⌘F 预留给就地查找，全局键位表里不该有人占它')
 })
 
-test('一键两义：编辑器态的身份必须排在全局态之后（⌘K＝搜索/插链接）', () => {
-  // 同一个键可以按状态做两件事，但解析是**反向遍历、后出现者优先**——
-  // 特异的（编辑器态）绑定必须排在一般的（when 空）之后，否则永远轮不到。
-  // 表序就是裁决序：这不是风格，是键位能不能用的分界（⌘⇧D 同款手法）。
-  const withIndex = BINDINGS.map((b, i) => ({ b, i })).filter((x) => x.b.kind === 'keymap' && x.b.key === 'mod+k')
-  const link = withIndex.find((x) => x.b.command === 'core.editor/insert-link')
-  const search = withIndex.find((x) => x.b.command === 'core.search/open')
-  assert.ok(link && search, '⌘K 的两个身份（插链接/全局搜索）都应在表上')
-  assert.ok(link!.b.when === 'editorTextFocus' && search!.b.when === '', '两个身份的 when：编辑器态/全局态')
-  assert.ok(link!.i > search!.i, '插链接必须排在搜索之后，否则编辑器里 ⌘K 永远开搜索')
+test('⌘K 唯一归属全局搜索：编辑器态也不让路，插链接没有键位', () => {
+  // ⌘K 必须是「任何时刻都开搜索」：一键两义（编辑器态让给插链接）会让打字路径上的
+  // ⌘K 读作「有时搜索有时插链接」，肌肉记忆立不住——插链接的入口在斜杠菜单与块菜单。
+  const onK = BINDINGS.filter((b) => b.kind === 'keymap' && b.key === 'mod+k')
+  assert.deepEqual(onK.map((b) => b.command), ['core.search/open'], '⌘K 上只能有全局搜索这一条键位')
+  assert.equal(onK[0].when, '', '全局搜索的 ⌘K 必须无条件可用（编辑器态不让路）')
+  const linkKeys = BINDINGS.filter((b) => b.command === 'core.editor/insert-link' && b.kind === 'keymap')
+  assert.deepEqual(linkKeys, [], '插链接不占键位：入口是斜杠菜单与块菜单')
 })
 
 test('绑定表只有四个渲染面（keymap/menu/slash/selection），面板枚举命令表不经绑定表', () => {

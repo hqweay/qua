@@ -83,12 +83,11 @@ export const BINDINGS: Binding[] = [
   { command: 'core.tab/close', kind: 'keymap', key: 'mod+shift+w', when: '', layer: 'core' },
   // `when` 为空 ⇒ 总是可用：命令面板是键盘可达性的兜底。`⌘P` 是命令面板的行业默认键位。
   { command: 'core.command-palette/show', kind: 'keymap', key: 'mod+p', when: '', layer: 'core' },
-  // 全文检索：`⌘K`（同为行业默认）；菜单没有原生 Find／Print role，不会抢
+  // 全文检索：`⌘K`（同为行业默认）；菜单没有原生 Find／Print role，不会抢。
+  // `when` 为空 ⇒ 编辑器里也让路给搜索：⌘K 必须是「任何时刻都开搜索」的一个键，一键两义
+  // 会让打字路径上的 ⌘K 变成「有时插链接有时搜索」，没法形成肌肉记忆。
+  // 插入外链不占键位：斜杠菜单（`slash/2-inline`）与块菜单（`blockInsert/1`）是它的入口。
   { command: 'core.search/open', kind: 'keymap', key: 'mod+k', when: '', layer: 'core' },
-  // 外链：⌘K（与「引用 ⌘⇧K」同族，差一个修饰键）；开了输入框之后由浮层接手，不在这里绑第二下。
-  // ⚠️ 必须**排在搜索那条之后**：一键两义靠反向求值「后出现者优先」分离（⌘⇧D 同款手法）——
-  // 排在前面，编辑器态的这条永远轮不到（键位表序就是裁决序，不是装饰）。
-  { command: 'core.editor/insert-link', kind: 'keymap', key: 'mod+k', when: 'editorTextFocus', layer: 'core' },
   // 设置：⌘,（macOS 同一条直觉）。设置是中心工具面，按 kind 去重（再按＝切过去）
   { command: 'core.settings/open', kind: 'keymap', key: 'mod+,', when: '', layer: 'core' },
   // `⌘F` 预留给就地查找（块内查找/替换）：**故意不绑定**，别把这条还给全局搜索——
