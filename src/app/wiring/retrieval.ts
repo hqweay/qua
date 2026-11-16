@@ -60,7 +60,7 @@ export function setupRetrieval(deps: RetrievalDeps) {
   let dismissed: TriggerDismissed | null = null
 
   /**
-   * **否决此刻的触发出现**：Esc／点外关掉浮层时字还留着（97 的 Esc 口径——那段字
+   * **否决此刻的触发出现**：Esc／点外关掉浮层时字还留着（Esc 的口径——那段字
    * 就是纯文本），继续打字不该把浮层弹回来。判定是纯文本的，它认不出「已被否掉」，
    * 所以这里记下「哪一块的哪个偏移上那次触发被否了」；词没了（删了／被选中替换）
    * 自然失效，不专门清。
@@ -263,7 +263,7 @@ function openTrigger(ch: TriggerChar, query: string, anchor: DOMRect | null, tit
     //    读全局就会读到「已经没开着了」，于是这次选中什么都不做（真实踩过）。
     onPick: (row, mods) => pickRow(ch, row, mods),
     onClose: () => {
-      // Esc／点外关掉而字还留着 ⇒ 否决这次出现：继续打字不复活（97 的 Esc 口径）。
+      // Esc／点外关掉而字还留着 ⇒ 否决这次出现：继续打字不复活（Esc 的口径）。
       // 选中一行的路径也会先走这里，但 pickRow 当场清掉否决——抹词之后留否决
       // 会误伤「在同一位置重新敲触发字符」；别靠「下一发上报是 null」来失效它，
       // 下一次输入往往直接就是新命中，中间没有 null 上报。
