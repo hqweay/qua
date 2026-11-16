@@ -261,16 +261,18 @@ export function renderIconPicker(host: HTMLElement, o: IconPickerOpts): void {
     b.type = 'button'
     b.className = 'icon-picker-cell'
     b.dataset.tip = tip
+    // 图标画 lg（18px）：这套矢量是 24 网格 2px 描边，缩到 sm（12px）描边只剩 1px，
+    // 落在半像素上读成抗锯齿发丝线；18px 描边 1.5px，且与 emoji 格的 18px 字号同光学尺寸
     if (value === '') {
       b.dataset.none = '1'
-      b.appendChild(createIcon('ban', 'sm'))
+      b.appendChild(createIcon('ban', 'lg'))
     } else {
       const host = document.createElement('span')
       b.dataset.icon = value
       if (isIconRef(value)) {
         const name = value.slice('lucide:'.length)
-        if (name in ICON_PATHS) host.appendChild(createIcon(name as keyof typeof ICON_PATHS, 'sm'))
-        else host.appendChild(createIcon('circle-help', 'sm'))
+        if (name in ICON_PATHS) host.appendChild(createIcon(name as keyof typeof ICON_PATHS, 'lg'))
+        else host.appendChild(createIcon('circle-help', 'lg'))
       } else {
         host.textContent = value
       }
