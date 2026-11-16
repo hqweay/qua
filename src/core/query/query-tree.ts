@@ -16,7 +16,7 @@
  */
 import { literalOf, type DraftOp } from './query-draft.ts'
 import { normMarks, type Marks } from '../model/runs.ts'
-import { SELF, isEmptyWhere, type QueryNode, type QuerySpec, type SortKey } from './query.ts'
+import { isRoleKind, SELF, isEmptyWhere, type QueryNode, type QuerySpec, type RoleKind, type SortKey } from './query.ts'
 import type { RefKind } from '../relations/relations.ts'
 import { canonicalSpec } from './query-view.ts'
 import { ENGINE_CREATED, ENGINE_MODIFIED } from '../props/props.ts'
@@ -47,7 +47,7 @@ export type TreeRow =
   /** **有子级**（直接子块 ≥1；`{children:true}`）。无值位：「叶子块」＝ 挂「非」 */
   | { kind: 'children' }
   | { kind: 'is'; target: string }
-  | { kind: 'role'; role: 'journal' | 'page' | 'tag' }
+  | { kind: 'role'; role: RoleKind }
   /**
    * **正文里有一段带这组 marks 的内容**（`{mark}` 原子，子集匹配）。
    *
@@ -310,9 +310,7 @@ export function treeRowOf(node: QueryNode): TreeRow | null {
   }
   if ('link' in node) return { kind: 'link', url: node.link.url ?? '' }
   if ('role' in node) {
-    return node.role === 'journal' || node.role === 'page' || node.role === 'tag'
-      ? { kind: 'role', role: node.role }
-      : null
+    return isRoleKind(node.role) ? { kind: 'role', role: node.role } : null
   }
   if (!('prop' in node)) return null
 

@@ -718,6 +718,7 @@ export const MSG = {
   'ui.query.role.journal': '日记',
   'ui.query.role.page': '页',
   'ui.query.role.tag': '标签',
+  'ui.query.role.note': '备注',
   'ui.query.tree.summary': '条件 · {count} 条',
   'ui.query.tree.count': '{count} 条',
   'ui.query.tree.regroup': '组合',

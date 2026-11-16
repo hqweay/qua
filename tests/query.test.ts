@@ -49,7 +49,9 @@ import {
   type QuerySpec,
 } from '../src/core/index.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
-import { plainText, textRuns } from '../src/core/model/runs.ts'
+import { plainText, textRuns, mkAnno } from '../src/core/model/runs.ts'
+import { DELETED_AT_PROP } from '../src/core/model/model.ts'
+import { ANNOTATES_PROP } from '../src/core/relations/annotates.ts'
 import { journalDateLabel } from '../src/core/identity/journal.ts'
 
 const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({
@@ -221,6 +223,25 @@ test('runQuery：role 成员条件把**天当结果**（不触发「journal 不�
   // 嵌在组合里的 role 是普通谓词，逐块判定，结果同形
   const inAny = runQuery({ where: { any: [{ role: 'journal' }] } }, { blocks })
   assert.deepEqual(inAny.map((h) => h.blockId), ['j1'])
+})
+
+test('runQuery：role note 命中备注（身份只看 `_annotates`），旧类型标记与软删都不算', () => {
+  const host = b('h1', '被评论的一句')
+  const anno = mkAnno(host.content, 0, 2)
+  assert.ok(anno, '有文本的区间才能物化 anno')
+  host.annos = [anno]
+  const note = b('n1', '评论', { props: { [ANNOTATES_PROP]: [{ block: host.id, anno: anno.id }] } })
+  const typeOnly = b('n2', '旧块', { props: { _type: 'core/note' } })
+  const plain = b('p1', '普通块')
+  const deleted = b('n3', '删掉的评论', {
+    props: { [ANNOTATES_PROP]: [{ block: host.id, anno: anno.id }], [DELETED_AT_PROP]: 1 },
+  })
+  const blocks = [host, note, typeOnly, plain, deleted]
+
+  assert.deepEqual(runQuery({ where: { role: 'note' } }, { blocks }).map((h) => h.blockId), ['n1'])
+  assertSameHits({ where: { role: 'note' } }, blocks)
+  // 身份只看槽：只带旧类型标记的块不算（类型已退役）
+  assert.deepEqual(runQuery({ where: { role: 'note' } }, { blocks: [typeOnly] }), [])
 })
 
 test('runQuery：sort 按 spec 排序（先排序后 limit），稳定 ＋ 缺槽最后', () => {

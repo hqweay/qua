@@ -28617,6 +28617,72 @@ await check('T327 备注当装载根：行首说明它评论谁；点它回宿�
 })
 
 /**
+ * T328 「所有备注」＝条件语言的身份值 `{role:'note'}`。
+ *
+ * 钉三件事：① 身份行的值下拉里有「备注」，条件树拆得动；② 结果收到备注，
+ * 且结果行带来源格（装载根来源在查询结果里同样成立）；③ 换成「日记」真的换判据
+ * ——没有静默落回默认值。
+ */
+await check('T328 查询所有备注：身份行选「备注」收到备注；改回日记即换判据', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const noteId = await page.evaluate(() => {
+    const walk = (list) => {
+      for (const b of list) {
+        if ((b.props?._annotates ?? []).length > 0) return b.id
+        const r = walk(b.children ?? [])
+        if (r) return r
+      }
+      return ''
+    }
+    return walk(window.__qua.__editor.store.blocks)
+  })
+  assert(noteId, '前置：种子里应有一条示例备注')
+
+  const qid = await page.evaluate(() => {
+    window.__qua.invoke('core.query/create', { name: '所有备注', spec: { where: { role: 'note' } } })
+    return String(window.__qua.snapshot().activeId)
+  })
+  assert(qid !== '', '应能建出一条查询')
+  await page.waitForTimeout(600)
+  await ensureTree(page)
+
+  const roleRow = '.queryview-tree .qt-row[data-qt-row="role"]'
+  const row = await page.evaluate((sel) => {
+    const el = document.querySelector(sel)
+    if (!el) return null
+    const value = el.querySelector('[data-qt="role"]')
+    return {
+      value: value?.value ?? '',
+      options: [...(value?.querySelectorAll('option') ?? [])].map((o) => o.textContent ?? ''),
+    }
+  }, roleRow)
+  assert(row, '条件树应把「是备注」拆成一行身份行')
+  assert(row.value === 'note', `值位应是 note：${JSON.stringify(row)}`)
+  assert(row.options.includes('备注'), `身份值下拉应含「备注」：${JSON.stringify(row.options)}`)
+
+  const hit = await page.evaluate((nid) => {
+    const el = document.querySelector(`.queryview .blk[data-block-id="${nid}"]`)
+    return { present: Boolean(el), src: el?.querySelector('[data-note-host]')?.textContent ?? '' }
+  }, noteId)
+  assert(hit.present, '查询结果应收到那条示例备注')
+  assert(hit.src.includes('第一次见面'), `结果行应带来源格：${JSON.stringify(hit)}`)
+
+  // 换值：真的换判据（不是静默兜底、也不是点了没反应）
+  await page.selectOption(`${roleRow} [data-qt="role"]`, 'journal')
+  await page.locator('.queryview-tree [data-qt="apply"]').click()
+  await page.waitForTimeout(450)
+  const after = await page.evaluate((nid) => ({
+    note: Boolean(document.querySelector(`.queryview .blk[data-block-id="${nid}"]`)),
+    where: JSON.stringify(window.__qua.__editor.store.find(window.__qua.snapshot().activeId)?.props?._query?.where),
+  }), noteId)
+  assert(!after.note && after.where.includes('journal'), `改成「日记」后结果不该再有备注：${JSON.stringify(after)}`)
+
+  await ctx.close()
+  return '身份行可选「备注」；结果收到备注且带来源；改值即换判据'
+})
+
+/**
  * T299 划选「关联到…」逃逸口。
  *
  * 钉四组：① 一键仍是主路径（默认项预选，↵ 与那颗按钮等价）；② Esc ＝ 零写入

@@ -22,6 +22,8 @@ import {
   treeOfSpec,
   treeNodeOfRow,
   TREE_ROW_KINDS,
+  ROLE_KINDS,
+  isRoleKind,
   isQueryableSystemProp,
   systemQueryFieldLabel,
   batchSpecOfDraft,
@@ -42,7 +44,7 @@ import {
   isJournalDate,
 } from '../../core/index.ts'
 import { t, type MsgId } from '../../core/infra/msg.ts'
-import { typeValueLabel } from './query-builder.ts'
+import { roleText, typeValueLabel } from './query-builder.ts'
 import { markPicker } from './mark-picker.ts'
 
 export interface QueryTreeDeps {
@@ -584,14 +586,13 @@ export class QueryTree {
       case 'role':
         el.append(
           selectEl(
-            [
-              { value: 'journal', label: t('ui.query.role.journal') },
-              { value: 'page', label: t('ui.query.role.page') },
-              { value: 'tag', label: t('ui.query.role.tag') },
-            ],
+            // 值域与文案都问同一份（`ROLE_KINDS`／`roleText`）：加一个身份值只改判据，
+            // 不在下拉里另抄一张清单——漏抄的表现是「这个值选不出来」
+            ROLE_KINDS.map((role) => ({ value: role, label: roleText(role) })),
             row.role,
             (next) => {
-              row.role = next === 'page' ? 'page' : next === 'tag' ? 'tag' : 'journal'
+              // 未知值不静默落回「日记」：选择器给不出未知值，真给了就是接缝坏了
+              row.role = isRoleKind(next) ? next : 'journal'
               this.paint()
             },
             'qt-value',

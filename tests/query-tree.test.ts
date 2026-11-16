@@ -37,6 +37,7 @@ test('条件树往返：组／非／算子／待办预设／路径与方向／�
     { where: { is: 'x' } },
     { where: { role: 'journal' } },
     { where: { role: 'page' } },
+    { where: { role: 'note' } },
     { where: { prop: { id: 'p-1', eq: 1 } } },
     { where: { prop: { id: 'p-1', eq: '' } } },
     { where: { prop: { id: 'p-1', eq: '42' } } },

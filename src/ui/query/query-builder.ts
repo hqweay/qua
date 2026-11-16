@@ -23,12 +23,30 @@ import {
   type Marks,
   type PropKind,
   type QuerySpec,
+  type RoleKind,
   type TreeRow,
   type TreeNode,
   propValueText,
 } from '../../core/index.ts'
 import { t, type MsgId } from '../../core/infra/msg.ts'
 import type { DraftOp } from '../../core/query/query-draft.ts'
+
+/**
+ * **身份值的人话**（`ROLE_KINDS` 的封闭值域）：条件树的身份行与 chip 共用这一份。
+ *
+ * 身份值用名词直出（「日记」），不垫系动词——「是」是给模型看的区分，
+ * 人话里「日记」已经是完整的一句。
+ */
+const ROLE_TEXT: Record<RoleKind, MsgId> = {
+  journal: 'ui.query.role.journal',
+  page: 'ui.query.role.page',
+  tag: 'ui.query.role.tag',
+  note: 'ui.query.role.note',
+}
+
+export function roleText(role: RoleKind): string {
+  return t(ROLE_TEXT[role])
+}
 
 /**
  * 块类型的值 → 人话（`TYPE_DECLS` 的封闭值域，条件树下拉与 chip 共用这一份；
@@ -162,8 +180,8 @@ function rowSentence(row: TreeRow, deps: ConditionTextDeps): string {
     case 'is':
       return `${t('ui.query.prefix.is')} ${targetText(row.target, deps)}`
     case 'role':
-      // 身份用名词直出（「日记」），不垫系动词——「是」是给模型看的区分
-      return t(row.role === 'page' ? 'ui.query.role.page' : row.role === 'tag' ? 'ui.query.role.tag' : 'ui.query.role.journal')
+      // 身份用名词直出（「日记」「备注」）；文案表在上方，与值下拉同源
+      return roleText(row.role)
     case 'mark':
       return t('ui.query.chip.mark', { marks: markPhrase(row.value) })
     case 'link':

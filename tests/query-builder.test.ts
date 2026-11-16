@@ -55,6 +55,7 @@ test('引用／这一块／角色：这些形状以前一律是「复合条件�
   assert.deepEqual(queryChips({ where: { ref: 'x' } }, fields, undefined, label), ['引用了 目标块'])
   assert.deepEqual(queryChips({ where: { is: 'x' } }, fields, undefined, label), ['这一块 目标块'])
   assert.deepEqual(queryChips({ where: { role: 'journal' } }, fields), ['日记'])
+  assert.deepEqual(queryChips({ where: { role: 'note' } }, fields), ['备注'])
   assert.deepEqual(queryChips({ where: { up: { is: '$self' } } }, fields), ['在 所在块 之下'])
 })
 

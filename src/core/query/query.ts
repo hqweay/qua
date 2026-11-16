@@ -19,6 +19,7 @@ import { dayStartMs, journalDate, journalDays, shiftISO } from '../identity/jour
 import { displayTextOf } from '../identity/alias.ts'
 import { fieldTableOf, isQueryableField, readField, type FieldTable } from '../props/props.ts'
 import { isRefKind, relationEdgesOfForest, REFERENCE_KINDS, type RefKind, type RelationKind } from '../relations/relations.ts'
+import { annotatesPairsOf } from '../relations/annotates.ts'
 import type { KbClient } from '../kb/types.ts'
 
 /* ------------------------------------------------------------ 条件形状 */
@@ -67,6 +68,21 @@ export function refKindsOf(ref: string | RefTarget): readonly RefKind[] {
   if (ref.kind === undefined) return REFERENCE_KINDS
   if (typeof ref.kind === 'string') return [ref.kind]
   return ref.kind
+}
+
+/**
+ * **身份值域**（`{role}` 的封闭值域）。
+ *
+ * 一份常量，五处消费（AST 联合、`roleMatches`、条件树解析守卫、`TreeRow`、值下拉）
+ * ——加一个值时要改的是**判据**，不是五张清单。缺一份的表现各不相同：少了守卫，
+ * 条件树拆不动新值（退化成只读 JSON）；少了判据，行选得出来但恒不命中（更糟：不报错）。
+ */
+export const ROLE_KINDS = ['journal', 'page', 'tag', 'note'] as const
+export type RoleKind = (typeof ROLE_KINDS)[number]
+
+/** 是不是一个已知身份值（读侧对未知值降级成只读 JSON，不猜着拆） */
+export function isRoleKind(v: unknown): v is RoleKind {
+  return typeof v === 'string' && (ROLE_KINDS as readonly string[]).includes(v)
 }
 
 export type QueryNode =
@@ -156,8 +172,9 @@ export type QueryNode =
    * ⚠️ 逐值分发到**既有唯一判据**，不另设第二份答案：journal 的判据只有「`_date` 在不在」，
    *    page／tag 的判据只有「`_lists` 里有没有对应露面」——身份由数据推出，查询问的就是这份判据。
    *    `tag` 的续支由日记的内置栏「当日新建」兑现（它要问「今天开的页或标签」）。
+   *    `note`（备注）的判据只有「`_annotates` 在不在」——与日记同构，不认类型标记。
    */
-  | { role: 'journal' | 'page' | 'tag' }
+  | { role: RoleKind }
   /**
    * **正文里存在一段带这组 marks 的内容**（run.marks ⊇ 给定键值，子集匹配）。
    *
@@ -828,10 +845,11 @@ export function createMatcher(forest: readonly Block[], env: QueryEnv): Matcher 
 }
 
 /** role 逐值分发到**既有唯一判据**，不另设第二份答案；进新值域时在此续支 */
-function roleMatches(role: 'journal' | 'page' | 'tag', b: Block): boolean {
+function roleMatches(role: RoleKind, b: Block): boolean {
   if (role === 'journal') return isJournalBlock(b)
   if (role === 'page') return hasList(b, 'page')
   if (role === 'tag') return hasList(b, 'tag')
+  if (role === 'note') return annotatesPairsOf(b).length > 0
   return false
 }
 
