@@ -15,15 +15,23 @@ import { type MenuRequest, type Registry } from '../../core/commands/index.ts'
 import { inboundRefCount, type ColorAxis, type CtxKeys, type TriggerChar } from '../../core/index.ts'
 import { Layers } from '../../ui/overlay/layers.ts'
 import type { BlockEditor } from '../../view/editor/editor.ts'
+import type { TriggerQuery } from '../../view/editor/editor-events.ts'
 import type { Prefs, Workspace } from '../../core/infra/workspace.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
 import { t } from '../../core/infra/msg.ts'
+
+/** 被否掉的触发出现：Esc／点外关掉浮层后字还留着，判定再认出这一次就不弹 */
+type TriggerDismissed = Pick<TriggerQuery, 'blockId' | 'ch' | 'from'>
 
 /** 划选气泡与触发浮层的「此刻」状态：编辑器事件表（triggerQuery）与 closeLayers 经它读写 */
 export interface TriggerState {
   triggerCh: TriggerChar | null
   readonly stageTag: MemberTagRef | null
   lastQuery: string
+  /** 最近一次上报的触发（关浮层时要靠它认出「否掉的是哪一次」；词没了 ⇒ null） */
+  lastHit: TriggerQuery | null
+  /** 被否掉的出现；`null` ＝ 没有有效的否决（词删了／另起了一次触发都会清掉） */
+  dismissed: TriggerDismissed | null
 }
 
 export interface RetrievalDeps {
@@ -48,6 +56,20 @@ export function setupRetrieval(deps: RetrievalDeps) {
   let triggerCh: TriggerChar | null = null
   let stageTag: MemberTagRef | null = null
   let lastQuery = ''
+  let lastHit: TriggerQuery | null = null
+  let dismissed: TriggerDismissed | null = null
+
+  /**
+   * **否决此刻的触发出现**：Esc／点外关掉浮层时字还留着（97 的 Esc 口径——那段字
+   * 就是纯文本），继续打字不该把浮层弹回来。判定是纯文本的，它认不出「已被否掉」，
+   * 所以这里记下「哪一块的哪个偏移上那次触发被否了」；词没了（删了／被选中替换）
+   * 自然失效，不专门清。
+   */
+  function dismissCurrent(): void {
+    if (!lastHit) return
+    const { blockId, ch, from } = lastHit
+    dismissed = { blockId, ch, from }
+  }
 /* ------------------------------------------------------------ 浮层渲染 */
 
 /**
@@ -241,6 +263,9 @@ function openTrigger(ch: TriggerChar, query: string, anchor: DOMRect | null, tit
     //    读全局就会读到「已经没开着了」，于是这次选中什么都不做（真实踩过）。
     onPick: (row, mods) => pickRow(ch, row, mods),
     onClose: () => {
+      // Esc／点外关掉而字还留着 ⇒ 否决这次出现：继续打字不复活（97 的 Esc 口径）。
+      // 选中一行的路径也先走这里：词马上被引用替换，下一发上报是 null，记录自然失效。
+      dismissCurrent()
       triggerCh = null
     },
   })
@@ -272,6 +297,8 @@ function openMemberStage(tag: MemberTagRef): void {
     },
     onQuery: (q) => layers.setRows(memberRows(tag, q, triggerDeps)),
     onClose: () => {
+      // 第二段 Esc 时第一段那串 `#名` 还在正文里：同样否决，回到正文继续打字不复活
+      dismissCurrent()
       stageTag = null
     },
   })
@@ -446,6 +473,10 @@ function showMenu(req: MenuRequest): void {
     get stageTag() { return stageTag },
     get lastQuery() { return lastQuery },
     set lastQuery(v) { lastQuery = v },
+    get lastHit() { return lastHit },
+    set lastHit(v) { lastHit = v },
+    get dismissed() { return dismissed },
+    set dismissed(v) { dismissed = v },
   }
 
   return { triggers, triggerState, showMenu, openTrigger, refreshSelectionBar, showSelectionRefPicker, toggleColorAxis }

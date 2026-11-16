@@ -165,12 +165,28 @@ function viewEvents(
       //（此刻焦点在浮层，正文不该有输入；这条守卫防的是浮层被阶段一的状态机夺走）
       if (triggerState.stageTag) return
       if (hit === null) {
+        // 触发词没了（删了／光标挪到没有触发词的地方）：否决记录随之失效——
+        // 那次出现已经不存在，留着它反而会误伤「在同一位置重新敲触发字符」
+        triggerState.lastHit = null
+        triggerState.dismissed = null
         if (triggerState.triggerCh) {
           triggerState.triggerCh = null
           layers.closeMenu()
         }
         return
       }
+      triggerState.lastHit = hit
+      const d = triggerState.dismissed
+      if (d && d.blockId === hit.blockId && d.ch === hit.ch && d.from === hit.from) {
+        // 被否掉的这一次（Esc／点外关掉、字留着当纯文本）：继续打字不复活浮层
+        if (triggerState.triggerCh) {
+          triggerState.triggerCh = null
+          layers.closeMenu()
+        }
+        return
+      }
+      // 另起了一次触发（不同块／不同字符／不同位置）：旧否决不再有效
+      triggerState.dismissed = null
       const trigger = triggers.get(hit.ch)
       if (!trigger) return
       if (triggerState.triggerCh === hit.ch && layers.open) {

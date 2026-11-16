@@ -57,7 +57,7 @@ export class TriggerOps {
       this.ed.events.triggerQuery(null, new DOMRect())
       return
     }
-    this.ed.events.triggerQuery({ ch: hit.ch, query: hit.query }, this.ed.caretRect() ?? new DOMRect())
+    this.ed.events.triggerQuery({ ch: hit.ch, query: hit.query, blockId: id, from: hit.from }, this.ed.caretRect() ?? new DOMRect())
   }
 
   /**

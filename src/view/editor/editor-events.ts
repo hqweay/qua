@@ -123,12 +123,17 @@ export interface AtomMenuHit {
 /**
  * 浮层要的「此刻在敲什么」。
  *
- * ⚠️ 只报**触发字符与查询词**，不带偏移：抹掉这段字的偏移由编辑器自己算
- *    （投影坐标 ↔ plain 坐标的换算在 runs 层，事件层不需要认识）。
+ * ⚠️ 抹掉这段字的偏移由编辑器自己算（投影坐标 ↔ plain 坐标的换算在 runs 层，
+ *    事件层不需要认识）；`from`（触发字符的 plain 偏移）与 `blockId` 只服务
+ *    「否决这一次出现」：Esc／点外关掉后字还留着，浮层用它认出「还是刚才那次」，
+ *    继续打字不再弹（97 的 Esc 口径）。
  */
 export interface TriggerQuery {
   ch: TriggerChar
   query: string
+  blockId: string
+  /** 触发字符在这块正文投影里的 plain 偏移 */
+  from: number
 }
 
 /**
