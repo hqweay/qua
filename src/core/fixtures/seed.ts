@@ -47,7 +47,7 @@ import {
   type MountEntry,
   type PropChoice,
 } from '../index.ts'
-import { ANNOTATES_PROP, NOTE_TYPE } from '../relations/annotates.ts'
+import { ANNOTATES_PROP } from '../relations/annotates.ts'
 import { taskStatusVocabulary } from './task-vocabulary.ts'
 import { t } from '../infra/msg.ts'
 import type { Workspace } from '../infra/workspace.ts'
@@ -386,7 +386,7 @@ export function seedWorkspace(): Workspace {
     }
     annotated.annos = [anno]
     const note = mkBlock(textRuns('示例备注：批注跟着字走——字改了，它还认得自己标的是哪段。'), {
-      props: { _type: NOTE_TYPE, [ANNOTATES_PROP]: [{ block: annotated.id, anno: anno.id }] },
+      props: { [ANNOTATES_PROP]: [{ block: annotated.id, anno: anno.id }] },
       created: SEED_AT,
       modified: SEED_AT,
     })

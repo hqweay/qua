@@ -28,7 +28,6 @@ import {
   propValueText,
 } from '../../core/index.ts'
 import { t, type MsgId } from '../../core/infra/msg.ts'
-import { NOTE_TYPE } from '../../core/relations/annotates.ts'
 import type { DraftOp } from '../../core/query/query-draft.ts'
 
 /**
@@ -39,7 +38,6 @@ const TYPE_VALUE_TEXT: Record<string, MsgId> = {
   [DEFAULT_BLOCK_TYPE]: 'ui.query.type.outline',
   [DIVIDER_TYPE]: 'ui.query.type.divider',
   [EMBED_TYPE]: 'ui.query.type.embed',
-  [NOTE_TYPE]: 'ui.query.type.note',
 }
 
 export function typeValueLabel(id: string): string {

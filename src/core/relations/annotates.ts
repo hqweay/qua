@@ -1,20 +1,22 @@
 /**
  * **备注边**：块之间「谁在评论谁的一段字」。
  *
- * 备注不是一个实体，是「块」的另一种用法（`_type: 'core/note'`）：它自己住森林顶层
- * （身份不占位置，与 tag/journal 同纪律），身上带 `_annotates` 槽回答「我评论谁的哪一段」。
+ * 备注不是一个实体，也不是一种块类型，是「块」的另一种用法：有非空 `_annotates` 槽的块
+ * 就是备注。它自己住森林顶层（身份不占位置，与 tag/journal 同纪律），槽回答
+ * 「我评论谁的哪一段」。
  * 每对 `{block, anno}` 指向宿主块上的一枚区间锚（anno 住**宿主块**上——维护点在被编辑的
  * 那一块自己身上，一条与十条备注的成本相同；住备注块上就要扫全库找「谁备注我」）。
  * 边在这里派生：槽是唯一真相，边不落盘。
+ *
+ * 为什么身份用槽、不用 `_type`：类型轴回答「这一行长什么样」——备注的骨架与普通块
+ * 逐字相同（还是一行可写正文），给它一个类型等于同一个问题有两个答案，而且能互相漂。
+ * 日记只有 `_date`、查询视图只有 `_query`，备注只有 `_annotates`。
  *
  * 为什么指向是槽不是内容 ref run：指向是**元数据**不是正文——用户写的是评论，
  * 「评论附在哪段」不是他打的字。放进正文既会混进他写的内容，也会被拆块／合并
  * 当货物搬走、被清除格式顺手清掉。
  */
-import { blockTypeOf, type Block } from '../model/model.ts'
-
-/** 备注块的类型 id（类型声明表与建块共用这一份） */
-export const NOTE_TYPE = 'core/note'
+import type { Block } from '../model/model.ts'
 
 /** 备注块身上的系统槽：这一条备注标了哪些（宿主块，区间锚）对 */
 export const ANNOTATES_PROP = '_annotates'
@@ -57,9 +59,4 @@ export function annotatesPairsOf(b: Block): NotePair[] {
   const raw = b.props?.[ANNOTATES_PROP]
   if (!isAnnotatesPairs(raw)) return []
   return raw.map((x) => ({ block: x.block, anno: x.anno }))
-}
-
-/** 是不是备注块（读 `_type`，与 `blockTypeOf` 同一条判据——没有第二份答案） */
-export function isNoteBlock(b: Block): boolean {
-  return blockTypeOf(b) === NOTE_TYPE
 }

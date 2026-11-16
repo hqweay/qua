@@ -73,4 +73,7 @@ test('noteSourceCellsOf：不是备注 ⇒ 空数组（普通块行首不多一�
   // 坏形状同样读成空：形状判据在写侧拦，读侧不抛（与 annotatesPairsOf 同口径）
   const broken = mkBlock('', { props: { [ANNOTATES_PROP]: [] } })
   assert.deepEqual(noteSourceCellsOf(broken, rebuild([broken])), [])
+  // 只带着旧类型标记、没有槽的块不是备注（备注的身份只看槽，不看 `_type`）
+  const typeOnly = mkBlock('', { props: { _type: 'core/note' } })
+  assert.deepEqual(noteSourceCellsOf(typeOnly, rebuild([typeOnly])), [])
 })

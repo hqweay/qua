@@ -10,7 +10,7 @@
  *    （所有读路径都按 id 找它，与 tag/schema/journal 同一条纪律）。
  */
 import { uuidv7Hex } from '../model/ids.ts'
-import { ANNOTATES_PROP, NOTE_TYPE, isAnnotatesPairs, type NotePair } from '../relations/annotates.ts'
+import { ANNOTATES_PROP, isAnnotatesPairs, type NotePair } from '../relations/annotates.ts'
 import type { Block } from '../model/model.ts'
 import type { Tx } from './types.ts'
 
@@ -23,7 +23,8 @@ export function mkNoteBlock(pairs: readonly NotePair[]): Block {
     children: [],
     created: now,
     modified: now,
-    props: { _type: NOTE_TYPE, [ANNOTATES_PROP]: pairs.map((p) => ({ ...p })) },
+    // 身份就是这一格：有它才是备注（与日记只有 `_date` 同构），不写类型标记
+    props: { [ANNOTATES_PROP]: pairs.map((p) => ({ ...p })) },
   }
 }
 

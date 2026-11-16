@@ -28040,7 +28040,7 @@ await check('T292 完成态任务块：点块下属性行空白，正文槽不�
   return `完成态块点属性行空白：正文槽与正文都在（白名单按类名集合认，不按 className 全等）`
 })
 
-/* ------------------------------------------------------------- 备注（core/note） */
+/* ------------------------------------------------------------- 备注（_annotates） */
 
 const noteFx = async (page, texts) => {
   await page.evaluate(() => window.__qua.quiet(true))
@@ -28075,7 +28075,7 @@ const notesState = (page, kidId) =>
       }
       return null
     }
-    const note = blocks.find((b) => b.props?._type === 'core/note' && (b.props?._annotates ?? []).some((p) => p.block === kid))
+    const note = blocks.find((b) => (b.props?._annotates ?? []).some((p) => p.block === kid))
     const host = find(blocks, kid)
     return {
       noteId: note?.id ?? null,
@@ -28122,7 +28122,7 @@ await check('T293 写备注：划选一段 → 就地浮窗写备注（锚＋淡
   assert(tabNow !== 'notes', '创建不该把注意力搬到段尾收集栏（写作面在浮窗）')
 
   const st = await notesState(page, fx.ids[0])
-  assert(st.noteId, '应有一条备注块（_type core/note）')
+  assert(st.noteId, '应有一条备注块（_annotates）')
   assert(st.pairs?.length === 1 && st.pairs[0].block === fx.ids[0], `备注应指向宿主块：${JSON.stringify(st.pairs)}`)
   assert(st.hostAnnos?.length === 1 && st.hostAnnos[0].range.start === 4 && st.hostAnnos[0].range.end === 6,
     `区间锚应对准划选段：${JSON.stringify(st.hostAnnos)}`)
@@ -28164,7 +28164,7 @@ await check('T294 跨块备注：块选区拖过两块 → 一条备注带走全
     const blocks = window.__qua.__editor.store.blocks
     // 按宿主认备注（种子自带一枚示例备注，全局 find 会撞上它）
     const note = blocks.find(
-      (b) => b.props?._type === 'core/note' && (b.props?._annotates ?? []).some((p) => p.block === hosts[0]),
+      (b) => (b.props?._annotates ?? []).some((p) => p.block === hosts[0]),
     )
     let hostAnnoCount = 0
     const walk = (list) => {
@@ -28342,7 +28342,7 @@ await check('T297 标记字＝正文手势不劫持：Shift 延伸选区／修�
   const noteId = await page.evaluate(
     (host) =>
       window.__qua.__editor.store.blocks.find(
-        (b) => b.props?._type === 'core/note' && (b.props?._annotates ?? []).some((p) => p.block === host),
+        (b) => (b.props?._annotates ?? []).some((p) => p.block === host),
       )?.id ?? '',
     fx.ids[0],
   )
@@ -28434,7 +28434,7 @@ await check('T298 右键备注标记：三行菜单；删除＝软删（标记�
   const noteId = await page.evaluate(
     (host) =>
       window.__qua.__editor.store.blocks.find(
-        (b) => b.props?._type === 'core/note' && (b.props?._annotates ?? []).some((p) => p.block === host),
+        (b) => (b.props?._annotates ?? []).some((p) => p.block === host),
       )?.id ?? '',
     fx.ids[0],
   )
@@ -28509,6 +28509,111 @@ await check('T298 右键备注标记：三行菜单；删除＝软删（标记�
 
   await ctx.close()
   return '右键标记 → 三行菜单；删除＝软删（标记消失、⌘Z 恢复）'
+})
+
+/**
+ * T327 备注当装载根时要自己说明「在评论谁」。
+ *
+ * 钉三件事：① 离开宿主页面（新页签）后，行首给出页名＋引文；② 点它回到宿主；
+ * ③ 备注栏那一行**不重复**来源（它本来就在这个宿主的上下文里）。
+ */
+await check('T327 备注当装载根：行首说明它评论谁；点它回宿主；备注栏行不重复', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  const fx = await noteFx(page, ['红句子在这里'])
+  await page.waitForTimeout(150)
+  // 划选「这里」两个字写一条备注（与 T293 同一个入口）
+  await page.evaluate((id) => window.__qua.focusBlock(id, 6), fx.ids[0])
+  await page.keyboard.press('Shift+ArrowLeft')
+  await page.keyboard.press('Shift+ArrowLeft')
+  await page.waitForFunction(() => document.querySelectorAll('.selbar').length === 1, null, { timeout: 2000 })
+  await page.evaluate(() => {
+    document
+      .querySelector('.selbar .sel-btn[data-command="core.notes/create"]')
+      .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+  })
+  await page.waitForSelector('.popover .note-popover-body', { timeout: 3000 })
+  await page.keyboard.type('这是备注')
+  await page.waitForTimeout(200)
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !document.querySelector('.note-popover-body'), null, { timeout: 3000 })
+
+  const noteId = await page.evaluate(
+    (host) =>
+      window.__qua.__editor.store.blocks.find((b) => (b.props?._annotates ?? []).some((p) => p.block === host))?.id ?? '',
+    fx.ids[0],
+  )
+  assert(noteId, '前置：备注块应已存在')
+
+  // 备注栏那一行：本来就是这个宿主的备注，行首不该再画来源
+  await mountTab(page, 'notes')
+  await page.waitForFunction(
+    (nid) => Boolean(document.querySelector(`#editor .mount .blk[data-block-id="${nid}"]`)),
+    noteId,
+    { timeout: 3000 },
+  )
+  const bar = await page.evaluate(
+    (nid) => {
+      const row = document.querySelector(`#editor .mount .blk[data-block-id="${nid}"]`)
+      return { mounted: Boolean(row), dup: Boolean(row?.querySelector('[data-note-host]')) }
+    },
+    noteId,
+  )
+  assert(bar.mounted, '前置：备注栏应收到这条备注')
+  assert(!bar.dup, '备注栏的行已经在这个宿主的上下文里，不该再画来源格')
+
+  // 右键标记 → 在新页签打开（备注成为装载根）
+  const hit = await page.evaluate((bid) => {
+    const key = [...(CSS.highlights?.keys() ?? [])].find((k) => k.startsWith('anno-mark-'))
+    const set = key ? CSS.highlights.get(key) : null
+    if (!set) return null
+    for (const r of set) {
+      const blk = r.startContainer.parentElement?.closest?.('.blk')
+      if (blk?.dataset?.blockId !== bid) continue
+      const rect = r.getBoundingClientRect()
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+    }
+    return null
+  }, fx.ids[0])
+  assert(hit, '前置：标记应仍在')
+  await page.mouse.click(hit.x, hit.y, { button: 'right' })
+  await page.waitForTimeout(300)
+  await page.locator('.layer-item', { hasText: '在新页签打开' }).first().click()
+  await page.waitForFunction(
+    (nid) => Boolean(document.querySelector(`#editor .blk[data-block-id="${nid}"][data-depth="0"]`)),
+    noteId,
+    { timeout: 3000 },
+  )
+
+  const src = await page.evaluate((nid) => {
+    const cell = document.querySelector(`#editor .blk[data-block-id="${nid}"] [data-note-host]`)
+    return cell
+      ? { host: cell.dataset.noteHost ?? '', text: cell.textContent ?? '', tip: cell.dataset.tip ?? '' }
+      : null
+  }, noteId)
+  assert(src, '备注当装载根时，行首应说明它在评论谁')
+  assert(src.host === fx.ids[0], `来源格应指向宿主：${src.host}`)
+  assert(src.text.includes('这里'), `来源格应带出引文快照：${src.text}`)
+  assert(src.tip.includes('打开'), `来源格应有去处提示：${src.tip}`)
+
+  // 点来源格：回到宿主那一屏，备注行退出
+  const box = await page.evaluate((nid) => {
+    const cell = document.querySelector(`#editor .blk[data-block-id="${nid}"] [data-note-host]`)
+    if (!cell) return null
+    const r = cell.getBoundingClientRect()
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
+  }, noteId)
+  assert(box, '来源格应可点')
+  await page.mouse.click(box.x, box.y)
+  await page.waitForFunction(
+    (hid) => Boolean(document.querySelector(`#editor .blk[data-block-id="${hid}"][data-depth="0"]`)),
+    fx.ids[0],
+    { timeout: 3000 },
+  )
+  const noteGone = await page.evaluate((nid) => !document.querySelector(`#editor .blk[data-block-id="${nid}"]`), noteId)
+  assert(noteGone, '点来源格应离开备注那一屏')
+
+  await ctx.close()
+  return '装载根行首说明来源；点击回宿主；备注栏不重复'
 })
 
 /**

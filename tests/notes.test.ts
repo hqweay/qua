@@ -25,7 +25,7 @@ import { MemoryKb } from '../src/core/kb/memory.ts'
 import { mkAnno, textRuns, type Run } from '../src/core/model/runs.ts'
 import { mkBlock } from '../src/core/model/model.ts'
 import { queryByIndex } from '../src/core/infra/index-port.ts'
-import { ANNOTATES_PROP, NOTE_TYPE, annotatesPairsOf, isAnnotatesPairs } from '../src/core/relations/annotates.ts'
+import { ANNOTATES_PROP, annotatesPairsOf, isAnnotatesPairs } from '../src/core/relations/annotates.ts'
 import { relationEdgesOfBlock } from '../src/core/relations/relations.ts'
 import { ensureNoteInTx, mkNoteBlock } from '../src/core/kb/ensure-note.ts'
 import { systemPropViolation } from '../src/core/props/system-props.ts'
@@ -69,7 +69,7 @@ test('isAnnotatesPairs：非空列表、每对两个非空键、对不重复', (
 })
 
 test('annotatesPairsOf：从块上读对；坏形状读成空（不抛——形状判据在写侧拦）', () => {
-  const b = mkBlock(textRuns('x'), { props: { _type: NOTE_TYPE, [ANNOTATES_PROP]: [{ block: 'h1', anno: 'a1' }] } })
+  const b = mkBlock(textRuns('x'), { props: { [ANNOTATES_PROP]: [{ block: 'h1', anno: 'a1' }] } })
   assert.deepEqual(annotatesPairsOf(b), [{ block: 'h1', anno: 'a1' }])
   const broken = mkBlock(textRuns('x'), { props: { [ANNOTATES_PROP]: [] } })
   assert.deepEqual(annotatesPairsOf(broken), [])
@@ -109,7 +109,7 @@ test('ensureNoteInTx：空对当场抛、事务回滚（坏形状进不了内存
   const store = new BlockStore(JSON.parse(JSON.stringify([hostA])))
   const kb = new MemoryKb(store)
   assert.throws(() => kb.tx((tx) => ensureNoteInTx(store.blocks, [], tx), {}))
-  assert.equal(store.blocks.some((b) => b.props?._type === NOTE_TYPE), false)
+  assert.equal(store.blocks.some((b) => b.props?.[ANNOTATES_PROP] !== undefined), false)
 })
 
 /* ------------------------------------------------------- 备注边与 {ref} 的分工 */

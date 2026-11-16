@@ -762,7 +762,6 @@ export const MSG = {
   'ui.query.type.outline': '大纲（默认）',
   'ui.query.type.divider': '分割线',
   'ui.query.type.embed': '露面',
-  'ui.query.type.note': '备注',
   /* 字段下拉的两节：「属性」留给用户自己配的定义块；系统槽是块自带的问法，不借它的名字 */
   'ui.query.fieldGroup.props': '属性',
   'ui.query.fieldGroup.system': '系统',
