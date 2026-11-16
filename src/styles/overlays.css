@@ -1054,7 +1054,8 @@
   cursor: pointer;
   color: var(--ui-text);
   padding: 0;
-  font-size: 18px;
+  /* 与图标的 lg 档同光学尺寸（--ui-icon-lg）——两个 tab 饱满度一致 */
+  font-size: 20px;
   line-height: 1;
 }
 .popover .icon-picker-cell:hover {

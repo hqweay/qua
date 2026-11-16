@@ -198,11 +198,11 @@
    *   · 旁注       fs-2xs text-tertiary 说明/空态/来源/系统时间戳——能不读也不影响操作
    *   · 主体名     fs-lg  600           弹窗头部那一块的名字——全界面唯一的大字
    * 新组件先答「这一行字是什么角色」，再取字号；往阶梯里加档先过准则（见主档 UI 准则）。 */
-  --ui-fs-2xs: 10.5px;
-  --ui-fs-xs: 11.5px;
-  --ui-fs-sm: 12.5px;
-  --ui-fs-md: 13.5px;
-  --ui-fs-lg: 15.5px;
+  --ui-fs-2xs: 11px;
+  --ui-fs-xs: 12px;
+  --ui-fs-sm: 13px;
+  --ui-fs-md: 14.5px;
+  --ui-fs-lg: 16.5px;
   --ui-fs-xl: 19px;
   --ui-fs-2xl: 24px;
   /* 行高 */
@@ -319,14 +319,16 @@
     圆盘只加一层底色，点仍是那颗点。取值口径是「看得见、但退到点后面」：
     1em 见方（正好铺满块标槽的可用宽度）、三级文字的 12%。
   */
-  --ui-marker-halo-size: 16px;
+  --ui-marker-halo-size: 18px;
   --ui-marker-halo: color-mix(in srgb, var(--ui-text-tertiary) 12%, transparent);
   --ui-font-body: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
   --ui-font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
-  /* 图标尺寸（view/icons.ts 的内联 SVG 只认这三档；颜色一律 currentColor） */
-  --ui-icon-sm: 12px;
-  --ui-icon-md: 15px;
-  --ui-icon-lg: 18px;
+  /* 图标尺寸（view/icons.ts 的内联 SVG 只认这三档；颜色一律 currentColor）。
+     与字阶同拍长大：24 网格 2px 描边缩到 12px 只剩 1px（发丝线），
+     14/16/20 下描边 1.17/1.33/1.67px，配 11/12/13/14.5/16.5 的字阶不再偏细 */
+  --ui-icon-sm: 14px;
+  --ui-icon-md: 16px;
+  --ui-icon-lg: 20px;
   /*
     ══════ ③ 层叠层级 --ui-z-* ══════
 
