@@ -74,7 +74,7 @@ console.log(`\n截图：${base}（${mode}）\n`)
 await scene(
   'readme-hero',
   async (p) => {
-    const id = await blockByText(p, '相 / Qua 是一个块级大纲笔记')
+    const id = await blockByText(p, '欢迎来到相 ——')
     await p.evaluate((bid) => window.__qua.focusBlock(bid, 2), id)
   },
   { theme: 'light' },
@@ -86,7 +86,7 @@ await scene(
   async (p) => {
     await openPage(p, '欢迎使用相')
     await p.waitForTimeout(120)
-    const id = await blockByText(p, '行内图片也走这一层')
+    const id = await blockByText(p, '同一块内容可以出现在多处')
     await p.evaluate((bid) => window.__qua.focusBlock(bid, 0), id)
   },
   { theme: 'light' },
@@ -194,7 +194,7 @@ await scene(
   async (p) => {
     await openPage(p, '写作示范')
     await p.waitForTimeout(150)
-    const at = await blockByText(p, '一行里塞满行内原子')
+    const at = await blockByText(p, '一段带四种格式的句子')
     const target = await p.evaluate(() => window.__qua.pages().find((x) => (x.title ?? '').startsWith('欢迎使用相')).id)
     await p.evaluate(
       ([blockId, targetId]) =>
@@ -205,7 +205,7 @@ await scene(
     await p.evaluate(() => window.__qua.invoke('core.dock/toggle-right', {}))
     await p.waitForTimeout(150)
     await p.evaluate(() => {
-      const b = window.__qua.blocks().find((x) => x.text.startsWith('一行里塞满行内原子'))
+      const b = window.__qua.blocks().find((x) => x.text.startsWith('一段带四种格式的句子'))
       window.__qua.focusBlock(b.id, 0)
     })
     await p.waitForTimeout(150)
@@ -221,10 +221,10 @@ await scene(
   async (p) => {
     await openPage(p, '欢迎使用相')
     await p.waitForTimeout(150)
-    const sub = await blockByText(p, '交付层：槽里只有块')
+    const sub = await blockByText(p, '删除是可恢复的')
     await p.evaluate((bid) => window.__qua.invoke('core.dock/open-block', { blockId: bid, side: 'right' }), sub)
     await p.waitForTimeout(200)
-    const line = await blockByText(p, '组件第二处就抽出来')
+    const line = await blockByText(p, '还没写的页面也能先引用')
     await p.evaluate((bid) => window.__qua.focusBlock(bid, 0), line)
     await p.waitForTimeout(150)
   },
