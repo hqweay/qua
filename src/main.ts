@@ -18,7 +18,6 @@ import type { Op } from './core/kb/types.ts'
 import { BlockEditor, type ViewEvents } from './view/editor/editor.ts'
 import { inputSession } from './view/editor/input-session.ts'
 import { editorRun } from './view/editor/editor-run.ts'
-import { refsFromHtml } from './view/editor/clipboard-flavor.ts'
 import { fillBlockText } from './view/editor/block-dom.ts'
 import {
   resolveBindings,
@@ -47,6 +46,7 @@ import { devCommands, dropIdentity, journalCommands, mentionCommands, mountComma
 import type { TxRun } from './app/commands/types.ts'
 import { setupPersistence } from './app/wiring/persistence.ts'
 import { setupAssets } from './app/wiring/assets.ts'
+import { setupClipboard } from './app/wiring/clipboard.ts'
 import { setupAxis } from './app/wiring/axis.ts'
 import { installTooltips } from './ui/overlay/tip.ts'
 import { setupSurface } from './app/wiring/surface.ts'
@@ -1500,23 +1500,6 @@ function swapWorkspace(next: Workspace, save: boolean): void {
  *
  * ⚠️ 这里仍然是**唯一**拼装点：本文件持有 `ws`／`ed`／`registry`，工厂只拿到「能做什么」。
  */
-/**
- * **同会话里「刚才复制的是哪一块」**：`copy` 事件报告，`粘贴为…` 用。
- *
- * 为什么不放剪贴板：自定义 MIME 在 Chromium 的 copy 事件里写不进去（实测读回只有
- * text/plain + text/html）；改纯文本又会让外部应用看到协议串。文本对得上才用，
- * 对不上就退回纯文本——宁可给一句实话，也不插错块。
- *
- * 块复制（⌘C／⌘X）的正式通道是 `text/html` 尾部的载荷注释（跨窗口、跨应用都在），
- * 这份会话账是 clipboard.read() 不可用时的兜底对账。
- */
-let copiedClip: { ids: string[]; text: string; move?: boolean; anchor?: string } | null = null
-
-const clipToRefs = (c: NonNullable<typeof copiedClip>): { ids: string[]; move?: boolean; anchor?: string } => ({
-  ids: [...c.ids],
-  ...(c.move ? { move: true } : {}),
-  ...(c.anchor ? { anchor: c.anchor } : {}),
-})
 
 /**
  * **视图配置的唯一接缝**（`ViewOwnerStore`）。
@@ -1665,6 +1648,11 @@ function openSpecPopover(opts: {
     tree.render(true)
   }, opts.anchor)
 }
+
+const clipboard = setupClipboard({
+  toast: (text, kind) => app.toast(text, kind),
+  getEd: () => ed,
+})
 
 const app: App = {
   get ed() {
@@ -2616,76 +2604,9 @@ const app: App = {
     layers.closeAll()
   },
   showPanel: (kind) => popovers.openDrawerFor(kind),
-  copy: (text, label) => {
-    void navigator.clipboard?.writeText(text).then(
-      () => app.toast(label ?? t('ui.toast.copied')),
-      () => app.toast(t('err.clipboardFailed'), 'warn'),
-    )
-  },
-  /**
-   * 多味载体：`text` 给外部应用，`html` 尾部的注释载荷给本应用；`clip` 同时更新会话账
-   * （「粘贴为…」的对账仍然成立）。`ClipboardItem` 不可用 ⇒ 退回纯文本——
-   * 软内软外都拿到正文，只损失引用味，不损失数据。
-   */
-  copyFlavors: (f, label) => {
-    if (f.clip) copiedClip = { ids: [...f.clip.ids], text: f.text, ...(f.clip.move ? { move: true } : {}), ...(f.clip.anchor ? { anchor: f.clip.anchor } : {}) }
-    const write = typeof ClipboardItem !== 'undefined' && f.html ? navigator.clipboard?.write?.([new ClipboardItem({
-      'text/plain': new Blob([f.text], { type: 'text/plain' }),
-      'text/html': new Blob([f.html], { type: 'text/html' }),
-    })]) : undefined
-    const done = () => {
-      // label 为 null ⇒ 调用方已另给画面反馈（如剪切抖动），不叠一句重复的话
-      if (label !== null) app.toast(label ?? t('ui.toast.copied'))
-    }
-    if (!write) {
-      void navigator.clipboard?.writeText(f.text).then(done, () => app.toast(t('err.clipboardFailed'), 'warn'))
-      return
-    }
-    void write.then(done, () => app.toast(t('err.clipboardFailed'), 'warn'))
-  },
-  confirmGrab: (ids, label) => {
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      app.toast(label)
-      return
-    }
-    ed.pulseBlocks(ids)
-  },
-  /**
-   * 读剪贴板的引用味＋正文味（块选区态的 ⌘V：那边没有 paste 事件可读）。
-   * 解析链与 paste 事件同序：HTML 注释载荷 → 会话对账 →（都没有就）纯文本。
-   * `clipboard.read()` 不可用（权限／旧 webview）⇒ 退回 readText 那条会话对账。
-   */
-  readFlavors: async () => {
-    let refs: { ids: string[]; move?: boolean; anchor?: string } | null = null
-    let text = ''
-    let got = false
-    try {
-      const item = (await navigator.clipboard?.read?.())?.[0]
-      if (item) {
-        got = true
-        if (item.types.includes('text/html')) refs = refsFromHtml(await (await item.getType('text/html')).text())
-        if (item.types.includes('text/plain')) text = await (await item.getType('text/plain')).text()
-      }
-    } catch {
-      got = false
-    }
-    if (!got) text = (await navigator.clipboard?.readText?.().catch(() => '')) ?? ''
-    if (!refs && copiedClip && copiedClip.text === text) refs = clipToRefs(copiedClip)
-    return { refs, text }
-  },
-  /**
-   * 读剪贴板文本：命令层不直接碰浏览器全局（与 `copy` 对称）。
-   *
-   * **同会话里复制过一块时**，把那段文本对一遍：对得上就补回 `((id))`，
-   * 「粘贴为…」不必要求用户先点「复制为块引用」。对不上（在别处复制过）就只给纯文本，
-   * 命令层会给一句「剪贴板里没有这一库的块」——不猜、不插错块。
-   */
-  readText: async () => {
-    const text = (await navigator.clipboard?.readText?.().catch(() => '')) ?? ''
-    if (text === '') return ''
-    if (copiedClip && copiedClip.text === text) return copiedClip.ids.map((id) => `((${id}))`).join('\n')
-    return text
-  },
+  /* —— 剪贴板五件住 `wiring/clipboard.ts`：多味载体与会话账的产地 —— */
+  ...clipboard,
+
   // 结构动作落在中心编辑器上：焦点可能在一面镜像的岛里，而露面块在正文里
   insertEmbed: (at, targetId, view) => mainEd.insert.insertEmbedAfter(at, targetId, view),
   /** 改一次露面选的视图（看法住在源块的命名视图上，这里只动指针） */
@@ -3078,7 +2999,7 @@ function viewEvents(
     /** 右键被备注的文本：打开（浮窗）／侧栏／删除——「对这一处做什么」 */
     annoMenu: (hit, rect) => popovers.handleAnnoMenu(hit, rect),
     onCopy: (ids, text) => {
-      copiedClip = { ids: [...ids], text }
+      clipboard.remember({ ids: [...ids], text })
     },
     /**
      * 粘贴图片：落点在事件里已经捕获，这里只管校验 → 入库 → 插 run。
