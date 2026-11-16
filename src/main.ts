@@ -11,7 +11,6 @@ import { addAlias, addList, blockLabel, blockTypeOf, buildAdjacency, checkEdge, 
 import { belowFieldsRows, childrenRecords, choiceDisplayLabel, defaultDisplayPropsFor, evaluateQuerySpec, fieldCoverageOf, TAGS_COLUMN, cardinalityOf, queryFieldsOf, resolveRows, singleValueOf, valueListOf, type BelowFields, type FieldCoverage } from './core/index.ts'
 import { openChoicePicker } from './app/choice-picker.ts'
 import { plainText } from './core/model/runs.ts'
-import { checkExternalUrl, rejectText } from './core/relations/link.ts'
 import { BlockStore } from './core/model/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
 import { dockKey, openAxisOf, validSurfaceRef } from './core/index.ts'
@@ -47,6 +46,7 @@ import { renderLinkComposer, renderNamePrompt, type ObjFieldDeps } from './ui/ov
 import { devCommands, dropIdentity, journalCommands, mentionCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, takenWhere, viewCommands, viewConfigCommands, buildFreshView, zoomCommands } from './app/commands-impl.ts'
 import type { TxRun } from './app/commands/types.ts'
 import { setupPersistence } from './app/wiring/persistence.ts'
+import { setupAssets } from './app/wiring/assets.ts'
 import { setupAxis } from './app/wiring/axis.ts'
 import { installTooltips } from './ui/overlay/tip.ts'
 import { setupSurface } from './app/wiring/surface.ts'
@@ -79,12 +79,8 @@ import { blankWorkspace } from './core/fixtures/states.ts'
 import { createIdbAssetStore } from './core/storage/asset-idb.ts'
 import { createIpcAssetStore } from './core/storage/asset-ipc.ts'
 import { ensureSeedAssets } from './core/storage/seed-assets.ts'
-import { assetViewOf, assetsAvailable, loadAssetIndex, markAssetMissing, onAssetChange, primeAsset, useAssetStore } from './view/asset-views.ts'
+import { assetViewOf, loadAssetIndex, markAssetMissing, useAssetStore } from './view/asset-views.ts'
 import {
-  IMAGE_MIME_ALLOWLIST,
-  MAX_IMAGE_BYTES,
-  sniffImageMime,
-  type AssetMeta,
 } from './core/infra/assets.ts'
 import { createIpcAdapter, type LibraryBridge } from './core/storage/ipc-adapter.ts'
 import type { FtsCommitSource } from './core/storage/fts-port.ts'
@@ -356,6 +352,17 @@ if (boot.status !== 'ok' || !activeStillExists) ws.activeId = todayId
 const bootActive = findInForest(ws.blocks, ws.activeId) ?? ws.blocks[0]
 const bootDays = bootActive && isJournal(bootActive) ? feedDays(ws.blocks, FEED_INITIAL) : []
 const bootRoots: Block[] = bootDays.length > 0 ? rootsForMany(bootDays) : bootActive ? rootsFor(bootActive) : []
+
+const assets = setupAssets({
+  assetStore,
+  getEd: () => ed,
+  // 面板与角标都晚于本片装配：闭包现取（订阅回调只在运行期触发）
+  scheduleProperties: () => panels.scheduleProperties(),
+  scheduleBadge: () => scheduleBadge(),
+  toast: (text, kind) => app.toast(text, kind),
+  blocks,
+  repaintBlock,
+})
 
 const layers = new Layers(() => isMac())
 let ed: BlockEditor
@@ -1428,140 +1435,6 @@ const runTx: TxRun = (fn) => {
   return r
 }
 
-/**
- * **字节入库的公共段**（正文粘贴／选文件／属性值选文件共用）。
- *
- * 顺序不能换（「字节先落、引用后落」）：
- *   ① 校验字节（嗅 MIME、allowlist、上限）——不合格就一句明确文案，**不写引用**；
- *   ② `assetStore.put` 入库（算 hash、去重、读尺寸）＋ `primeAsset` 登记索引。
- *
- * 只有正文那条路还有第 ③ 步：按**捕获到的落点**插 `AssetRun`（块被删/越界 ⇒ no-op）；
- * 属性值那条路到 ② 就结束，hash 交给调用方写进 `props[propId]`。
- * 两段放在一处，是因为「哪种文件能进这个库」只该有一个答案。
- *
- * 为什么校验在入库之前：`put` 会把字节写进库。先入库再校验等于让不合格的字节占了地方
- * （还拿到一个 hash），而 v1 没有 GC——那些字节会一直躺着。
- *
- * 失败一律走 toast，不静默：用户刚按了粘贴/选了文件，「什么都没发生」是最糟的反馈。
- */
-async function putAssetBlob(blob: Blob): Promise<AssetMeta | null> {
-  if (!assetsAvailable()) {
-    app.toast(t('ui.asset.storeUnavailable'), 'warn')
-    return null
-  }
-  if (blob.size > MAX_IMAGE_BYTES) {
-    app.toast(t('ui.asset.tooLarge', { mb: String(Math.round(MAX_IMAGE_BYTES / (1024 * 1024))) }), 'warn')
-    return null
-  }
-  try {
-    // 嗅探要在 put 之前判：不让不合格的字节先进库（v1 没有 GC）
-    const head = new Uint8Array(await blob.slice(0, 32).arrayBuffer())
-    if (!sniffImageMime(head)) {
-      app.toast(t('ui.asset.unsupported'), 'warn')
-      return null
-    }
-    const meta = await assetStore.put(blob)
-    // 入库成功 ⇒ 立刻登记：正文 run 与属性值这一格的首帧都能画出图
-    primeAsset(meta)
-    return meta
-  } catch (e) {
-    // 解码失败（createImageBitmap 读不出尺寸）与配额/权限失败都走这里
-    console.warn('[assets] put failed:', e)
-    app.toast(t('ui.asset.putFailed'), 'warn')
-    return null
-  }
-}
-
-async function insertAssetBlob(
-  blob: Blob,
-  label: string,
-  point?: { blockId: string; offset: number },
-): Promise<boolean> {
-  const where = point ?? ed.insert.caretPoint()
-  if (!where) {
-    app.toast(t('ui.asset.needCaret'), 'warn')
-    return false
-  }
-  const meta = await putAssetBlob(blob)
-  if (!meta) return false
-  // 尺寸不进 run：它是那份字节的属性，从索引里读（见 `AssetRun`）
-  const runId = ed.insert.insertAssetAt(where.blockId, where.offset, meta.hash, { label })
-  if (!runId) {
-    // 块在入库期间被删 / 光标越界：字节已经落库（孤儿，无害），引用不落
-    app.toast(t('ui.asset.caretGone'), 'warn')
-    return false
-  }
-  return true
-}
-
-/**
- * **选图片文件的唯一入口**：临时 `<input type=file>`，用完即摘。
- *
- * 为什么临时建而不是常驻一个：这个元素只在这一刻有意义，常驻会让 `index.html`
- * 多一个谁都不认识的空控件。Electron 与 web 是同一个入口，不给主进程加第二条桥。
- * 两条去处（正文插入／属性值）只差拿到文件之后做什么，accept 白名单不能分家。
- */
-function openImageFileInput(onFile: (file: File) => void): void {
-  const input = document.createElement('input')
-  input.type = 'file'
-  input.accept = IMAGE_MIME_ALLOWLIST.join(',')
-  input.addEventListener('change', () => {
-    const file = input.files?.[0]
-    input.remove()
-    if (file) onFile(file)
-  })
-  // 取消选择不派发 change：用 cancel 事件把临时节点收掉（新浏览器都有；没有也不泄漏，只是留一个游离节点）
-  input.addEventListener('cancel', () => input.remove())
-  input.click()
-}
-
-/**
- * **属性值的选文件入口**：只入库，不碰正文光标。
- *
- * 与正文那条路共用 `putAssetBlob`（同一份大小／MIME／像素炸弹判据），差别只在拿到
- * hash 之后：这里交回调去写 `props[propId]`，那边插 `AssetRun`。
- */
-function pickAssetValue(onPick: (hash: string) => void): void {
-  openImageFileInput((file) => {
-    void putAssetBlob(file).then((meta) => {
-      if (meta) onPick(meta.hash)
-    })
-  })
-}
-
-/** 正文的选文件入口：先捕获光标落点，入库期间光标会动，不能等到写完再取 */
-function pickImageViaFileInput(): void {
-  const point = ed.insert.caretPoint()
-  if (!point) {
-    app.toast(t('ui.asset.needCaret'), 'warn')
-    return
-  }
-  openImageFileInput((file) => {
-    void insertAssetBlob(file, file.name, point)
-  })
-}
-
-/**
- * **把地址交给系统浏览器**（`App.openExternal` 的实现）。
- *
- * 为什么这里只调 `window.open`：壳已经在那头等着了——`electron/main.ts` 的
- * `setWindowOpenHandler` 把 `_blank` 拦下来转成 `shell.openExternal`，只放行 http(s)；
- * web 下就是一次普通的新标签。渲染层因此不需要知道「我现在跑在哪个宿主里」。
- *
- * ⚠️ 白名单一律走 `core/link.ts`：**与主进程那一份取值相同**（`/^https?:/`）。
- *    两处分叉的表现是「界面上看着能开、点下去毫无反应」，而它不报错。
- *
- * @returns 真的发出去了才 `true`（被拦下时已经给了文案，调用方不必再说一遍）
- */
-function openExternalUrl(raw: string): boolean {
-  const chk = checkExternalUrl(raw)
-  if (!chk.ok) {
-    app.toast(rejectText(chk), 'warn')
-    return false
-  }
-  window.open(chk.url, '_blank', 'noopener,noreferrer')
-  return true
-}
 
 /**
  * **换库的唯一落地点**：内容 + 落点 + 各视图重画。
@@ -2428,9 +2301,9 @@ const app: App = {
    * 选文件：隐藏的 `<input type=file>`。Electron 与 web 同一个入口——
    * 原生对话框只在主进程有，而这条路浏览器里也能走通，没必要分两套。
    */
-  pickImage: () => pickImageViaFileInput(),
-  pickAssetValue: (onPick) => pickAssetValue(onPick),
-  insertAssetBlob: (blob, label, point) => insertAssetBlob(blob, label, point),
+  pickImage: () => assets.pickImageViaFileInput(),
+  pickAssetValue: (onPick) => assets.pickAssetValue(onPick),
+  insertAssetBlob: (blob, label, point) => assets.insertAssetBlob(blob, label, point),
 
   /**
    * **打开外链**：协议白名单一过，就把地址交给壳。
@@ -2439,7 +2312,7 @@ const app: App = {
    * `shell.openExternal`（那份判据在 `electron/main.ts`，与主进程同侧，是信任边界上的那一道）；
    * web 下就是浏览器的新标签。两处都不在 app 里开一个裸窗口。
    */
-  openExternal: (url) => openExternalUrl(url),
+  openExternal: (url) => assets.openExternalUrl(url),
 
   /**
    * **插入外链的输入框**（斜杠菜单／⌘K ⇒ 命令不带 `url` ⇒ 走这里）。
@@ -3250,7 +3123,7 @@ function viewEvents(
         inspect: (id, propId) => app.openPropertiesDrawer(id, propId),
         refLabel: refLabelOf,
         openUrl: (url) => {
-          openExternalUrl(url)
+          assets.openExternalUrl(url)
         },
         density: mode.effective,
         onSetMode: (id, next) => app.setPropsLineMode(id, next),
@@ -3468,35 +3341,6 @@ ed.events.undoOps = (ops) => {
   scheduleSave()
 }
 
-/**
- * **某个资产地址变了（就绪 / 判定缺失）时，重画引用了它的那几行**。
- *
- * 桌面版地址是常量，这一段平时不会响；浏览器端字节从 IndexedDB 读出来才会有一次
- * 「地址就绪」，以及 `<img>` 报错时的「判定缺失」。
- *
- * 只重画**引用了这个 hash 的块**（不是 `renderAll`）：重排整页会打断正在输入的那一行。
- */
-onAssetChange((hash) => {
-  const hit = new Set<string>()
-  for (const b of flatten({ roots: blocks.blocks })) {
-    /** 正文的一枚资产 run，或**属性值**（单值／多值）指向这个 hash */
-    const inContent = b.content.some((r) => r.t === 'asset' && r.asset === hash)
-    const inProps = Object.values(b.props ?? {}).some((v) =>
-      typeof v === 'string' ? v === hash : Array.isArray(v) && v.includes(hash),
-    )
-    if (inContent || inProps) hit.add(b.id)
-  }
-  for (const id of hit) repaintBlock(id)
-  /**
-   * 属性面板／抽屉／检视卡是「当前主体」的投影，不在块 DOM 里：地址就绪要单独排一次重画。
-   * 漏了这一行的症状：刚选完本地文件，那一格停在「图片不可用」，直到用户下一次交互才变真图
-   * （web 的 Blob URL 是异步就绪的，写值时它还没到）。
-   */
-  scheduleProperties()
-  // 重画换了节点（文件占位 → 真图）⇒ 角标里的 DOM 读数是**派生量**，也要跟着排一次刷新。
-  // 漏了这一行的症状：首屏图是最先出现的东西，角标却会停在占位那一帧的数上，直到下一次交互。
-  scheduleBadge()
-})
 
 let diag: ReturnType<typeof setupDiagnostics>
 const {
