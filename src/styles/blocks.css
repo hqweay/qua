@@ -1408,7 +1408,7 @@
   font: inherit;
   font-size: var(--ui-fs-xs);
 }
-/* 「新建定义」独占一行：名字与类型只跟新建一起出现，和第一行的「用这个」不能混排 */
+/* 「新建定义」整块占一行：名字＋类型＋提交是创建的主路径，草稿行常开这一形态 */
 .props-new-group {
   flex: 1 1 100%;
   display: flex;
@@ -1417,6 +1417,36 @@
 }
 /* 作者样式会覆盖 UA 的 [hidden]，所以收起必须显式写 */
 .props-new-group[hidden] {
+  display: none;
+}
+/* 草稿行的次级区：浏览已有定义。创建是主路径，浏览收一档——
+   开关一行轻链接，展开后下拉＋「用这个」＋取消占整行 */
+.props-secondary {
+  flex: 1 1 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-2);
+}
+.props-browse-toggle {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--ui-fs-2xs);
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+}
+.props-browse-toggle:hover {
+  color: var(--ui-text);
+}
+.props-browse {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ui-gap-2);
+}
+.props-browse[hidden] {
   display: none;
 }
 /*
@@ -1522,6 +1552,12 @@
   grid-row: 1;
   align-self: center;
 }
+/* 行头两端共用一条中线：动作是带 padding 的按钮（比标签高一截），
+   只居中按钮、标签仍顶对齐时，两截文字错开半档——标签也居中，
+   两边文字落在同一条中线上 */
+.prop-row[data-stack='1'] .prop-label {
+  align-self: center;
+}
 .props-declared-list {
   display: flex;
   flex-wrap: wrap;
@@ -1557,12 +1593,6 @@
 .prop-config .prop-name {
   font-size: var(--ui-fs-xs);
   color: var(--ui-text-secondary);
-}
-/* 3. 段的动作住进段头：它是这一段的，不是清单下面又一行字 */
-.props-section-head .props-add {
-  width: auto;
-  margin: 0 0 0 auto;
-  padding: 2px var(--ui-gap-2);
 }
 /* 系统信息：记录不是待填的数据，段头与值同处三级灰（不抢属性段的注意力） */
 .prop-system .props-section-title,
