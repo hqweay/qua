@@ -231,6 +231,11 @@ export function renderIconPicker(host: HTMLElement, o: IconPickerOpts): void {
     }
     manualBox.hidden = tab !== 'manual'
     search.hidden = tab === 'manual'
+    // 计数进占位符：全量目录有多大、搜索是过滤入口——一条字带两个信息增量，不加新 chrome
+    search.placeholder =
+      tab === 'vector'
+        ? t('ui.iconPicker.searchVectorPlaceholder', { n: String(Object.keys(ICON_PATHS).length) })
+        : t('ui.iconPicker.searchPlaceholder')
     catsRow.hidden = tab !== 'emoji'
     const hasRecent = recentOf().length > 0
     recentRow.hidden = !hasRecent
@@ -298,9 +303,10 @@ export function renderIconPicker(host: HTMLElement, o: IconPickerOpts): void {
         grid.appendChild(cell.el)
       }
     } else {
+      // catalog 本来就是全量，截断只是把「浏览」砍成了「翻不到底的字母序前几十个」；
+      // 全量铺开 ⇒ 视口外的布局/绘制成本由 content-visibility 兜住（CSS 侧），搜索仍是过滤入口
       const names = Object.keys(ICON_PATHS).filter((n) => n.includes(query))
-      // 集合大 ⇒ 上限不是砍功能，是把「翻不到底」变成「打字就有」（搜索是主入口）
-      for (const n of names.slice(0, 96)) {
+      for (const n of names) {
         const cell = mkCell(`lucide:${n}`, n)
         cells.push(cell)
         grid.appendChild(cell.el)

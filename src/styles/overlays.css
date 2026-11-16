@@ -1041,6 +1041,10 @@
   width: auto;
   height: auto;
   aspect-ratio: 1;
+  /* 全量目录直铺（两千多格）：视口外的格子跳过布局与绘制，长网格不付全量税；
+     intrinsic-size 给跳过态一个估高（一行约 36px），滚动不跳动 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 36px;
   display: inline-flex;
   align-items: center;
   justify-content: center;

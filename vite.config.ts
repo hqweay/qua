@@ -24,7 +24,23 @@ function inlineWasm(): Plugin {
 export default defineConfig({
   base: './',
   plugins: [inlineWasm()],
-  build: { target: 'es2022', outDir: 'dist', emptyOutDir: true },
+  build: {
+    target: 'es2022',
+    outDir: 'dist',
+    emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        /**
+         * 图标 path 数据（纯数据、约 1M 源文本）拆成独立 chunk：
+         * 仍是静态 import，代码与类型安全零改动，只是让浏览器把「数据」和「代码」
+         * 两条下载并行起来（主 chunk 因此小一半，桌面本地盘无感，web 端首屏受益）。
+         * emoji 数据的懒加载走的是另一条路（动态 import，见 emoji-catalog）——
+         * 它可以懒（只有选择器用）；图标 catalog 被 view 层同步查表，拆离不了主图。
+         */
+        manualChunks: { 'icon-catalog': ['src/view/icon-catalog.ts'] },
+      },
+    },
+  },
   /**
    * 构建期常量：`true` ⇒ 带测试面（夹具命令 ＋ `window.__qua`）。
    *

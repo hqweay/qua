@@ -333,6 +333,7 @@ export const MSG = {
   'ui.iconPicker.tabManual': '手动',
   'ui.iconPicker.catAll': '全部',
   'ui.iconPicker.searchPlaceholder': '搜图标名…',
+  'ui.iconPicker.searchVectorPlaceholder': '搜图标名（共 {n} 个）…',
   'ui.iconPicker.recent': '最近使用',
   'ui.iconPicker.noIcon': '无图标（摘掉，回落默认）',
   'ui.iconPicker.noColor': '无颜色（中性）',
