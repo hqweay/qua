@@ -47,7 +47,7 @@ import {
   type NoteSourceCell,
   type VisibleRow,
 } from '../../core/index.ts'
-import { MARK_KINDS, isEmptyContent, plainText, refRunsOf } from '../../core/model/runs.ts'
+import { MARK_KINDS, isEmptyContent, plainText, refRunsOf, type Marks } from '../../core/model/runs.ts'
 import type { AssetView } from '../../core/infra/assets.ts'
 import { t } from '../../core/infra/msg.ts'
 import { blockLabel, danglingView, resolveRefs } from '../../core/relations/ref.ts'
@@ -177,8 +177,31 @@ export function isReadonlyBlock(b: Block): boolean {
 }
 
 /**
- * 把一个块的行内内容装进 `.tx`：run 依序画——文本段按自己的 marks 套语义标签，
- * 原子画成不可分元素。
+ * 一份 marks → 一棵语义包装（按 MARK_KINDS 序固定嵌套：同一 run 每次渲染出同一棵 DOM，
+ * 读回按 class 集合解析，不依赖顺序）。文本段与**原子**共用这一份——格式操作对原子是
+ * 整枚改（不可分），只对文本段包装会让原子上的格式存得进、画不出。
+ * 值轴：值住在 data-slot 上。板槽名的颜色由 CSS 按槽名给（token 链）；
+ * hex（自由色）没有槽规则，由 applyMarkColor 落 inline style。
+ */
+function wrapMarks(node: Node, marks: Marks | undefined): Node {
+  for (const k of MARK_KINDS) {
+    const v = marks?.[k]
+    if (v === undefined) continue
+    const wrap = document.createElement(tagForMark(k))
+    wrap.className = `mk mk-${k}`
+    if (v !== true) {
+      wrap.dataset.slot = v
+      applyMarkColor(wrap, k, v)
+    }
+    wrap.appendChild(node)
+    node = wrap
+  }
+  return node
+}
+
+/**
+ * 把一个块的行内内容装进 `.tx`：run 依序画——文本段与原子都按自己的 marks 套语义标签，
+ * 原子是不可分元素（包装整枚套在外面，读回按已知 run 原样带回）。
  *
  * ⚠️ 空块必须留一个可落光标的锚点（`<br>`）：Chrome 里空的 inline span 不接受插入，
  *   会把输入落到上一个文本节点（实测：Enter 拆出空块后紧接着打字会跑进前一块）。
@@ -210,35 +233,19 @@ export function fillBlockText(
 
   for (const r of b.content) {
     if (r.t === 'text') {
-      // 格式的嵌套顺序固定（按 MARK_KINDS 序）：同一 run 每次渲染出同一棵 DOM，
-      // 读回时按 class 集合解析，不依赖顺序
-      let node: Node = document.createTextNode(r.v)
-      for (const k of MARK_KINDS) {
-        const v = r.marks?.[k]
-        if (v === undefined) continue
-        const wrap = document.createElement(tagForMark(k))
-        wrap.className = `mk mk-${k}`
-        // 值轴：值住在 data-slot 上。板槽名的颜色由 CSS 按槽名给（token 链）；
-        // hex（自由色）没有槽规则，由 applyMarkColor 落 inline style
-        if (v !== true) {
-          wrap.dataset.slot = v
-          applyMarkColor(wrap, k, v)
-        }
-        wrap.appendChild(node)
-        node = wrap
-      }
-      tx.appendChild(node)
+      tx.appendChild(wrapMarks(document.createTextNode(r.v), r.marks))
       continue
     }
     if (r.t === 'ref') {
-      tx.appendChild(makeRunEl(r, views?.get(r.id) ?? danglingView(r.anchor ?? r.label ?? t('ui.atom.unknown'))))
+      tx.appendChild(wrapMarks(makeRunEl(r, views?.get(r.id) ?? danglingView(r.anchor ?? r.label ?? t('ui.atom.unknown'))), r.marks))
       continue
     }
     if (r.t === 'asset') {
-      tx.appendChild(makeRunEl(r, undefined, assetView?.(r.asset), onAssetError))
+      // 资产 run 永不携带 marks（模型归一化的形状保证），包装只是走同一入口
+      tx.appendChild(wrapMarks(makeRunEl(r, undefined, assetView?.(r.asset), onAssetError), undefined))
       continue
     }
-    tx.appendChild(makeRunEl(r))
+    tx.appendChild(wrapMarks(makeRunEl(r), r.marks))
   }
 
   if (tx.childNodes.length === 0) tx.appendChild(document.createElement('br'))

@@ -29629,6 +29629,103 @@ await check('T306 自定义色：色盘选 hex 写入并进最近色；chip soft
 })
 
 /**
+ * T329 行内替身染目标身份色。
+ *
+ * 钉三态：① 目标配了色 ⇒ 行内 `#名` 染字（solid）；② 无色目标 ⇒ 中性（「无颜色」是
+ * 合法态）；③ 用户对这一格的**显式 ink 让不了位也没关系——身份色要先让**：run 带
+ * ink mark 时字色归 marks，身份色退出（显式 > 派生）。普通引用（`[[ ]]`）同一份
+ * 判据，顺手验一处。走真写路径（`core.block/set-color`／`core.anno/set-ink`）。
+ */
+await check('T329 行内替身染目标身份色：有色 #名 染字；无色中性；显式 ink 赢字；`[[ ]]` 同判据', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  // 前置：一行里插两枚行内 `#名`（一染色一不染）＋ 一枚指向新建页的 `[[ ]]`——
+  // 都走触发词真写路径（acceptTrigger），不用带外改模型
+  const info = await page.evaluate(() => {
+    const root = window.__qua.__editor.doc.roots[0]
+    const b = window.__qua.blocks().find((x) => x.id !== root.id && !x.roles?.includes('journal') && x.text.length > 2)
+    const ed = window.__qua.__editor
+    const endOf = () => ed.store.find(b.id).content.reduce((n, r) => n + (r.t === 'text' ? r.v.length : 1), 0)
+    const insertInline = (ch, pick) => {
+      const len = endOf()
+      ed.editBlock(b.id, len, len, ch)
+      ed.placeCaret(b.id, len + 1)
+      return ed.triggers.acceptTrigger({ ch, pick })
+    }
+    insertInline('#', { kind: 'newTag', name: '染字签', action: 'inline' })
+    insertInline('#', { kind: 'newTag', name: '素签', action: 'inline' })
+    insertInline('@', { kind: 'newPage', name: '染字引用页' })
+    const byName = (name) => window.__qua.allBlocks().find((x) => x.aliases.includes(name))?.id ?? ''
+    return { blockId: b.id, tag: byName('染字签'), pageTarget: byName('染字引用页') }
+  })
+  assert(info.tag && info.pageTarget, `前置应建出来：${JSON.stringify(info)}`)
+
+  const atomEl = (sel) =>
+    page.evaluate(({ blockId, text }) => {
+      const tx = document.querySelector(`.blk[data-block-id="${blockId}"] > .tx`)
+      const atoms = [...tx.querySelectorAll('.atom')]
+      const el = text ? atoms.find((a) => a.textContent.includes(text)) : atoms[atoms.length - 1]
+      return { cls: el?.className ?? '', color: el ? getComputedStyle(el).color : '' }
+    }, sel)
+
+  // 基线：两枚 #名 都中性（同色）
+  const baseColor = await atomEl({ blockId: info.blockId, text: '染字签' })
+  assert(baseColor.color && baseColor.color !== '', `行内标签应画出来：${JSON.stringify(baseColor)}`)
+
+  // ① 目标配色 ⇒ #名 染字（solid），另一枚维持中性
+  await page.evaluate((tagId) => window.__qua.invoke('core.block/set-color', { blockId: tagId, color: 'red' }), info.tag)
+  await page.waitForTimeout(150)
+  const dyed = await atomEl({ blockId: info.blockId, text: '染字签' })
+  const plain = await atomEl({ blockId: info.blockId, text: '素签' })
+  assert(dyed.color !== baseColor.color, `有色目标的 #名 应染字：${JSON.stringify({ dyed, baseColor })}`)
+  assert(plain.color === baseColor.color, `无色目标维持中性：${JSON.stringify({ plain, baseColor })}`)
+
+  // ④ 普通引用（`[[ ]]`）同一份判据：目标配色后跟着染
+  await page.evaluate((id) => window.__qua.invoke('core.block/set-color', { blockId: id, color: 'blue' }), info.pageTarget)
+  await page.waitForTimeout(150)
+  const ref = await atomEl({ blockId: info.blockId, text: '' })
+  assert(ref.cls.includes('atom-page'), `最后一枚应是普通引用：${JSON.stringify(ref)}`)
+  assert(ref.color !== baseColor.color, `普通引用也染目标身份色：${JSON.stringify({ ref, baseColor })}`)
+
+  // ③ 显式 ink 赢字：框选染字签那枚原子 → set-ink → 字色归 marks，身份色退出
+  await page.evaluate(({ blockId, slot }) => {
+    const tx = document.querySelector(`.blk[data-block-id="${blockId}"] > .tx`)
+    const atom = [...tx.querySelectorAll('.atom')].find((a) => a.textContent.includes('染字签'))
+    const kids = [...tx.childNodes]
+    const wrap = atom.parentElement.classList.contains('mk') ? atom.parentElement : atom
+    const i = kids.indexOf(wrap)
+    const range = document.createRange()
+    range.setStart(tx, i)
+    range.setEnd(tx, i + 1)
+    const sel = document.getSelection()
+    sel.removeAllRanges()
+    sel.addRange(range)
+    document.dispatchEvent(new Event('selectionchange', { bubbles: true }))
+    window.__qua.invoke('core.anno/set-ink', { slot })
+  }, { blockId: info.blockId, slot: 'blue' })
+  await page.waitForTimeout(200)
+  const inked = await page.evaluate((blockId) => {
+    const tx = document.querySelector(`.blk[data-block-id="${blockId}"] > .tx`)
+    const atom = [...tx.querySelectorAll('.atom')].find((a) => a.textContent.includes('染字签'))
+    const wrap = atom.closest('.mk-ink')
+    return {
+      runMarks: window.__qua.__editor.store.find(blockId).content.find((r) => r.t === 'ref' && (r.label ?? '').includes('染字签'))?.marks ?? null,
+      atomColor: getComputedStyle(atom).color,
+      wrapColor: wrap ? getComputedStyle(wrap).color : '',
+      identityLeft: atom.style.color ?? '',
+    }
+  }, info.blockId)
+  assert(inked.runMarks && inked.runMarks.ink === 'blue', `ink 应写进 ref run：${JSON.stringify(inked.runMarks)}`)
+  assert(!inked.identityLeft, `身份色应退出（inline style 清空）：${JSON.stringify(inked)}`)
+  assert(inked.wrapColor && inked.atomColor === inked.wrapColor && inked.atomColor !== dyed.color, `字色归 ink（继承包装层的槽色）：${JSON.stringify(inked)}`)
+
+  await ctx.close()
+  return '有色 #名 染字、无色中性、`[[ ]]` 同判据、显式 ink 赢字且身份色退出'
+})
+
+/**
  * **`ref` 的候选域（`_refDomain` 软约束 ＋ 新建并引用）**。
  *
  * 一条故事走完：定义页把默认候选切到「按标签」并选 #演员 → 值选择器默认只剩那些成员，

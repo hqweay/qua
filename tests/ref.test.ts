@@ -327,3 +327,32 @@ test('S4b 互引环不炸：A 引 B、B 引 A，块标签在预算内落回快�
   // 没有 find：全部走快照，同一答案
   assert.equal(blockLabel(a), '乙行')
 })
+
+test('C1 替身染目标的身份色：显式 `_color` 带进 RefView；无色与非法值不带；dangling 不带', () => {
+  // 显式色（板 key 与 hex 同一值域）
+  const red = named('red', '红块', '', { props: { _color: 'red' } })
+  const hex = named('hex', '自色', '', { props: { _color: '#ff0000' } })
+  const plain = named('plain', '无色')
+  const bad = named('bad', '坏值', '', { props: { _color: 'not-a-color' } })
+  const find = finder([red, hex, plain, bad])
+  assert.equal(resolveRef(find, ref({ to: 'red' })).color, 'red')
+  assert.equal(resolveRef(find, ref({ to: 'hex' })).color, '#ff0000')
+  assert.equal(resolveRef(find, ref({ to: 'plain' })).color, undefined)
+  // 非法值按缺席处理（「无颜色」是合法态，渲染回落中性）
+  assert.equal(resolveRef(find, ref({ to: 'bad' })).color, undefined)
+  assert.equal(resolveRef(find, ref({ to: 'gone' })).color, undefined)
+})
+
+test('C2 借色同一资格：目标自己的色缺席、恰一个有色标签 ⇒ 替身借到那格色', () => {
+  const tag = named('tg', '蓝签', '', { props: { _color: 'blue' } })
+  // 成员：归属指向有色标签（_tags 存标签块 id），自己不配色
+  const member = named('m', '成员', '', { props: { _tags: ['tg'] } })
+  const find = finder([tag, member])
+  // 块标借色同一份判据：脸染蓝，替身也染蓝
+  assert.equal(resolveRef(find, ref({ to: 'm' })).color, 'blue')
+  // 两个有色标签 ⇒ 环：替身取第一色（与块标内点同）
+  const tag2 = named('tg2', '红签', '', { props: { _color: 'red' } })
+  const multi = named('mm', '多签', '', { props: { _tags: ['tg', 'tg2'] } })
+  const find2 = finder([tag, tag2, multi])
+  assert.equal(resolveRef(find2, ref({ to: 'mm' })).color, 'blue')
+})

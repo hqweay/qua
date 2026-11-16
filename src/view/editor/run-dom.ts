@@ -110,6 +110,16 @@ export function makeRunEl(r: RunWithId, view?: RefView, asset?: AssetView, onAss
    *    「点了一个指向 X 的露面」在每一处都是同一句话，不用为每种形状再写一条分支。
    */
   if (r.t === 'ref' && r.to) el.dataset.refTo = r.to
+  /**
+   * **替身染目标的身份色**（solid，字）：chip 染目标色是同一信号在块级替身上的发言，
+   * 行内替身同一资格——色跟着块走，不跟着露面位置走。染字不染底／边框：三种行内
+   * 露面靠形状分清（无框／空心／`[[ ]]`），色是叠加维度不抢形状。
+   * **用户对这一格的显式 ink 让位**（显式 > 派生）：run 带 ink mark 时不染，
+   * 字色归 marks 的包装层。dangling 目标没有色，自然回落中性。
+   */
+  if (r.t === 'ref' && view?.state === 'resolved' && view.color && !r.marks?.ink) {
+    el.style.color = identityColorCss(view.color)
+  }
   // ⚠️ 解析后的显示名**另存一份到 `data-ref-label`**：`.atom-label` 里带 `[[ ]]`／`#` 装饰，
   //    而 run 上的名字快照是过期的 —— 给探针一个「此刻真的在显示什么」的读点。
   if (r.t === 'ref' || r.t === 'link' || r.t === 'asset') el.dataset.refLabel = label

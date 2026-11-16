@@ -2296,6 +2296,11 @@
 .mk-ink[data-slot='blue'] { color: var(--ui-ink-blue); }
 .mk-ink[data-slot='violet'] { color: var(--ui-ink-violet); }
 .mk-ink[data-slot='gray'] { color: var(--ui-ink-gray); }
+/* 原子被 ink 包装时字色归用户显式格式：chrome 的 accent 让位（显式 > 派生）——
+   不让位的话包装层的色永远进不来（类规则压过继承） */
+.tx .mk-ink .atom {
+  color: inherit;
+}
 .mk-bg {
   border-radius: 2px;
   padding: 0 1px;

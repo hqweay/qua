@@ -22,6 +22,7 @@
  */
 import { t } from '../infra/msg.ts'
 import { aliasLeaf, primaryAliasOf } from '../identity/alias.ts'
+import { colorOfByFind } from '../identity/faces.ts'
 import { isJournal, journalDate, journalDateLabel } from '../identity/journal.ts'
 import { hasList, type Block } from '../model/model.ts'
 import { tagIdsOf } from '../identity/tags.ts'
@@ -36,6 +37,13 @@ export interface RefView {
    * 省略 ⇒ 按普通引用处理；它不是落盘字段，也不是判定「能不能点开」的依据。
    */
   kind?: 'tag' | 'obj' | 'page'
+  /**
+   * 目标身份色的 solid 值，只给**替身染色**用：chip 染目标色的同一信号，
+   * 行内替身同一资格。取的是**脸的色半**（`colorOfByFind`，与块标点同一份判据
+   * ——自己的显式 `_color`，或恰一个有色标签的借色；多色环取第一色，与点同）。
+   * 省略 ＝ 目标中性 ⇒ 替身也中性（「无颜色」是合法态，不是错误态）。
+   */
+  color?: string
 }
 
 /** 按 id 找块（整片森林；zoom 后引用目标可能在任意深度） */
@@ -160,7 +168,15 @@ export function resolveRef(
   if (!b) return { label: refSnapshot(a), state: 'dangling', kind: fallback }
   // 标签的显示名＝**不带 `#` 的正文**；`#` 是呈现时加的装饰（`makeAtomEl`），不进正文，
   // 否则「标签块的正文」与「它在引用里显示的字」就成了两个需要同步的东西。
-  return { label: anchor ?? blockLabel(b, find, budget), state: 'resolved', kind: refKindOf(b) }
+  // 色存**原始值**（板 key ∪ hex，与 `_color` 同一值域）：CSS 化是渲染层的事
+  // （`identityColorCss` 过一次），core 存 CSS 串会让渲染层没法再判「这是槽名还是 hex」。
+  const c = colorOfByFind(b, find)
+  return {
+    label: anchor ?? blockLabel(b, find, budget),
+    state: 'resolved',
+    kind: refKindOf(b),
+    color: c.kind === 'solid' ? c.color : c.kind === 'ring' ? c.colors[0] : undefined,
+  }
 }
 
 /**
