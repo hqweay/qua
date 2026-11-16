@@ -3523,10 +3523,12 @@ await check('T238 查询块标题的行内编辑与普通块同档：划选加�
     dt.items.add(new File([bytes], '抬头贴图.png', { type: 'image/png' }))
     tx.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
   }, titleTx)
-  // 贴图落库（hash＋行写入）偶发超过 4s；等待窗给足负载余量（8s 起），
-  // 否则断言的两次求值之间状态追上——红的是等窗，不是行为
+  // 贴图落库（hash＋行写入）偶发超过 4s；等待窗给足负载余量（8s 起）。
+  // ⚠️ 等窗要盯**断言同一份判据**（内容里的 asset run 数），不能盯原子快照：
+  //    抬头里 `#任务` 落成的 ref 原子会把「原子数 ≥2」的判据提前喂饱，
+  //    等窗空转、断言读内容时资产 run 还没插进去——红的是等窗，不是行为
   for (let i = 0; i < 160; i++) {
-    if ((await page.evaluate(() => window.__qua.snapshot().atoms)) > atoms0 + 1) break
+    if ((await contentOf()).filter((r) => r.t === 'asset').length >= 2) break
     await page.waitForTimeout(50)
   }
   assert((await contentOf()).filter((r) => r.t === 'asset').length >= 2, `抬头里也能粘贴图（同一份内容，两个表面同档）：${JSON.stringify(await contentOf())}`)
@@ -5967,7 +5969,8 @@ await check('T43 待办是块标之后的身份图标：块标仍是圆点、仍
   assert(deepRow.focusFor === deep, `待办行的块标仍要点＝聚焦：${deepRow.focusFor}`)
   assert(deepRow.before !== 'none', `待办行的块标仍应画圆点（::before content=${deepRow.before}）`)
   assert(deepRow.boxClasses.includes('closure-box'), `方框应在身份图标上：${deepRow.boxClasses}`)
-  assert(deepRow.boxW === '12px', `方框应正常画出来：${deepRow.boxW}`)
+  // 方框是内容脸，尺寸走调用点的 md 档（CSS 不钉死一档）——这里钉住当前档位的实测值
+  assert(deepRow.boxW === '16px', `方框应正常画出来：${deepRow.boxW}`)
 
   /**
    * **方框站在「内容列」的起点上**（2026-11-01 用户给的参考图：方框左缘 ＝ 普通块正文左缘）。
@@ -6012,14 +6015,14 @@ await check('T43 待办是块标之后的身份图标：块标仍是圆点、仍
       ['bullet', 'handle', 'marker'].every((c) => r.classes.split(' ').includes(c)),
       `待办（${r.closure}）的块标不该换形状：${JSON.stringify(r)}`,
     )
-    assert(r.boxClasses.includes('closure-box') && r.boxW === '12px', `待办（${r.closure}）的方框应在：${JSON.stringify(r)}`)
+    assert(r.boxClasses.includes('closure-box') && r.boxW === '16px', `待办（${r.closure}）的方框应在：${JSON.stringify(r)}`)
   }
 
   // hover 只改块标的可见度（点换 grip），身份图标不该跟着动
   await page.locator(`#editor > .sec > .blk[data-block-id="${deep}"] > .left > .marker`).hover()
   const hovered = await readRow(deep)
   assert(
-    hovered.boxW === '12px' && hovered.focusFor === deep,
+    hovered.boxW === '16px' && hovered.focusFor === deep,
     `悬停块标不该动身份图标：${JSON.stringify(hovered)}`,
   )
 
@@ -20884,11 +20887,18 @@ await check('T208 两段式实例选择：⇧↵ 进成员搜索，新实例的�
   assert(esc.closed, 'Esc 应关掉第二段')
   assert(esc.text.includes('#玩具'), `Esc 后触发词原样保留：${JSON.stringify(esc)}`)
 
-  // ⑤ 选中已有成员：↵ 直接插那条记录的提及（第二段的成员行落点与第一段同形）
+  // ⑤ Esc 的口径是「关面板、字留着当纯文本」：那次出现被否决，继续打字不把浮层弹回来；
+  //    把词删掉再重敲才是新的一次出现，浮层照常开（否决只认「同一次出现」）
   await page.keyboard.type('x')
   await page.waitForTimeout(200)
   const reopened = await page.evaluate(() => document.querySelectorAll('.layer-item').length)
-  assert(reopened > 0, '继续打字应重开第一段（触发判据还活着）')
+  assert(reopened === 0, 'Esc 否决的那次出现：继续打字不复活浮层')
+  for (let i = 0; i < 4; i++) await page.keyboard.press('Backspace')
+  await page.waitForTimeout(100)
+  await page.keyboard.type('#玩具')
+  await page.waitForTimeout(250)
+  const fresh = await page.evaluate(() => document.querySelectorAll('.layer-item').length)
+  assert(fresh > 0, '删掉被否的词重敲 ⇒ 新的一次出现，浮层照常开')
   await page.keyboard.press('Escape')
   await page.waitForTimeout(150)
 
