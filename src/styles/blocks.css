@@ -2382,32 +2382,36 @@
   padding: 0 4px;
 }
 
-/* 行内原子：引用 chip / 图片 */
+/*
+  行内原子：引用 chip / 图片。**度量与正文同一套**（display:inline、字号行高继承）：
+  光标贴着原子时，竖线的几何取相邻行内盒——原子一旦是独立盒（inline-flex 居中、
+  缩字、独立行高），贴上去的光标就变高／下沉，左右两侧读起来不一致。
+  胶囊底色与圆角是**画出来的**（inline 的横向 padding 参与布局、纵向只是涂色），
+  不撑盒子。`.atom-page` 的注释里有同一结论的三条真机反馈。
+*/
 .atom {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+  display: inline;
   padding: 0 7px;
   margin: 0 2px;
   border-radius: var(--ui-radius-pill);
   background: var(--ui-accent-soft);
   color: var(--ui-accent);
-  font-size: 0.93em;
-  line-height: 1.5;
+  font-size: inherit;
+  line-height: inherit;
   cursor: pointer;
   user-select: none;
-  vertical-align: baseline;
   white-space: nowrap;
 }
 .atom:hover {
   filter: var(--atom-hover);
 }
 .atom .atom-ico {
-  display: inline-flex;
-  align-items: center;
+  display: inline-block;
   vertical-align: -0.14em;
   opacity: 0.7;
   font-size: 0.9em;
+  /* inline 原子没有 flex gap：图标与名字的间距用 margin 补 */
+  margin-inline-end: 4px;
 }
 .atom-image {
   padding: 0 4px 0 2px;
@@ -2433,18 +2437,16 @@
   color: var(--ui-text-tertiary);
 }
 .asset-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  vertical-align: baseline;
+  display: inline;
 }
 .asset-chip-ico {
-  display: inline-flex;
-  align-items: center;
+  display: inline-block;
+  vertical-align: -0.14em;
   opacity: 0.8;
+  margin-inline-end: 4px;
 }
 .asset-chip-label {
-  font-size: 0.93em;
+  font-size: inherit;
 }
 /* 缩略图：**行高不变**（1.35em、随基线），宽按原比例 —— 行内层的契约是一个点，不是一张画 */
 .asset-thumb {
