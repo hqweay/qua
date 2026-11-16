@@ -864,6 +864,22 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     }
 
     /**
+     * **备注根的来源格**：这一格说「这条备注在评论哪里」，点它＝去那里。
+     *
+     * 与面包屑不同：宿主不是这一行的祖先（备注住森林顶层），所以没有「就地展开上下文」
+     * 这一档——三个落点都由装配层分流（普通＝中心，⌘/Ctrl＝新 tab，Shift＝右槽）。
+     * 评审口径：宿主块此刻在哪儿、要不要露出整页上下文，是导航层的决定。
+     */
+    const noteHostEl = path.find((n): n is HTMLElement => n instanceof HTMLElement && n.dataset.noteHost !== undefined)
+    if (noteHostEl?.dataset.noteHost) {
+      const host = noteHostEl.dataset.noteHost
+      if (br.openBlock) br.openBlock(host, openActionOf(e))
+      else br.focusBlock(host)
+      e.preventDefault()
+      return
+    }
+
+    /**
      * **行尾引用数徽标**：只认 `data-ref-count-for`，自己不带 `data-ref-to`。
      *
      * 为什么单独一支：露面那一支的语义是「去 X」，这一枚的语义是「就地展开关于本块的列表」。

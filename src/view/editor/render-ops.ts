@@ -22,12 +22,14 @@ import {
   isFolded,
   journalDateLabel,
   locate,
+  noteSourceCellsOf,
   refSourcesOf,
   relationsTo,
   walkForest,
   type Block,
   type BelowFields,
   type GutterField,
+  type NoteSourceCell,
   type ShellCol,
   type VisibleRow,
 } from '../../core/index.ts'
@@ -397,6 +399,8 @@ export class RenderOps {
         context: r.depth === 0 ? this.ed.doc.contexts?.get(r.block.id) : undefined,
         // 来源说明与面包屑同一格：都在说明「这一行为什么在这一屏里」
         note: r.depth === 0 ? this.ed.doc.rootNotes?.get(r.block.id) : undefined,
+        // 备注根说明「在评论谁」；这一屏已经说明了宿主时（备注栏／浮窗）Doc 关掉它
+        noteSource: this.noteSourceOf(r.block, r.depth),
         // 展开出来的根才有「收起上下文」；没接回调就不画一个点了没反应的按钮
         contextBack: Boolean(this.ed.onContextBack) && r.depth === 0 && (this.ed.doc.expandedRoots?.has(r.block.id) ?? false),
         // 露面块的身体：这一层只认「有没有展开」；画什么由装配层给（见 `ViewEvents.embedBody`）
@@ -615,9 +619,24 @@ export class RenderOps {
     if (r.depth !== 0) return 0
     const hasTrail = (this.ed.doc.contexts?.get(r.block.id)?.length ?? 0) > 0
     const hasBack = Boolean(this.ed.onContextBack) && (this.ed.doc.expandedRoots?.has(r.block.id) ?? false)
-    // 来源说明与面包屑同住 `.blk-context` 那一行：两者都在时仍是**一条**头，不是两条
+    // 来源说明与面包屑同住 `.blk-context` 那一行：都在时仍是**一条**头，不是两条
     const hasNote = (this.ed.doc.rootNotes?.get(r.block.id) ?? '') !== ''
-    return hasTrail || hasBack || hasNote ? 1 : 0
+    // 备注来源与它们同一个槽：有它也一样只多一条头
+    const hasSource = this.noteSourceOf(r.block, r.depth) !== undefined
+    return hasTrail || hasBack || hasNote || hasSource ? 1 : 0
+  }
+
+  /**
+   * 备注根的来源格：`Doc.noteSource === false` 的屏（备注栏／浮窗）已经说明了宿主，
+   * 不再重复；其余装载（中心／页签／侧栏／查询列）都带着来路。
+   *
+   * 每次渲染现算（与行尾引用徽标同一条口径）：它是块上的事实派生出来的，
+   * 宿主或锚一删、下一次重画就该变样，没有第二份缓存要失效。
+   */
+  private noteSourceOf(b: Block, depth: number): NoteSourceCell[] | undefined {
+    if (depth !== 0 || this.ed.doc.noteSource === false) return undefined
+    const cells = noteSourceCellsOf(b, this.ed.store.index)
+    return cells.length > 0 ? cells : undefined
   }
 
   private placeholder(count: number, which: string, height = count * LINE_H): HTMLElement {

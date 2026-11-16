@@ -1161,7 +1161,14 @@ export class MountArea {
       ed.doc.folded = seeded
     }
     const folded = unfoldForContext(ed.doc.folded, plan.covers, (id) => this.deps.kb.pathOf(id))
-    ed.loadPage({ roots: plan.roots, folded, contexts: plan.contexts, expandedRoots: plan.contextRoots })
+    ed.loadPage({
+      roots: plan.roots,
+      folded,
+      contexts: plan.contexts,
+      expandedRoots: plan.contextRoots,
+      // 备注栏的每一行本来就是这个宿主的备注：行首再写一遍「评论 · 本页」是同义反复
+      ...(entry.kind === 'derived' && entry.source === 'notes' ? { noteSource: false } : {}),
+    })
     // 装载刚换了整片 DOM：立刻画一次（不等观测器那一帧，避免「先无高亮再补上」的闪动）
     this.paintMentionHits()
     // 编辑器第一次建出来才可能设命中（旧的一台已经在 `load` 里清过了）

@@ -86,6 +86,8 @@ export function mountNotePopover(deps: NotePopoverDeps): NotePopoverHandle {
         roots: b ? [b] : [],
         folded: ed.doc.folded,
         ...(b ? { viewRootId: b.id } : {}),
+        // 抬头已经有引文：行首再画一遍来源是同一条信息说两次
+        noteSource: false,
       })
     },
     wire: deps.wire,

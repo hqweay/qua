@@ -44,6 +44,7 @@ import {
   type FindBlock,
   type FoldState,
   type GutterField,
+  type NoteSourceCell,
   type VisibleRow,
 } from '../../core/index.ts'
 import { MARK_KINDS, isEmptyContent, plainText, refRunsOf } from '../../core/model/runs.ts'
@@ -430,6 +431,14 @@ export function makeBlockEl(
     context?: readonly Block[]
     /** 这一行为什么出现在这一屏里（`Doc.rootNotes`）；省略 ＝ 不画那一格 */
     note?: string
+    /**
+     * **备注根在评论谁**（`core/views/note-source.ts` 现算）：每个宿主一格。
+     *
+     * 备注住森林顶层，离开宿主页面就没有上下文 ⇒ 装载到哪儿都得自己说明来路。
+     * 点击由装配层接（`data-note-host`）：`view` 不认识导航。
+     * 省略 ＝ 不是备注，或这一屏已经说明了宿主（备注栏／浮窗）。
+     */
+    noteSource?: readonly NoteSourceCell[]
     /** 这是一个「展开出来的上下文根」：行首给「收起上下文」 */
     contextBack?: boolean
     /**
@@ -551,9 +560,13 @@ export function makeBlockEl(
    * 与面包屑同一条布局（`.blk-context` 那一行、`.tx` 外）：它描述**来路**而不是内容，
    * 落进 `.tx` 就会被 `readRuns` 当字读回去。
    * 只在**有**说明时才多挂这一格：绝大多数装载没有它，不该为此多一个空节点。
+   *
+   * ⚠️ 这一行现在住三类东西，顺序＝**先在哪，再是什么，最后为什么**：
+   *    面包屑（位置）→ 备注来源（身份）→ `rootNotes`（为什么这次装载选它）。
    */
   const note = opts.note ?? ''
-  if (trail.length > 0 || opts.contextBack || note !== '') {
+  const noteSrc = opts.noteSource ?? []
+  if (trail.length > 0 || opts.contextBack || note !== '' || noteSrc.length > 0) {
     el.dataset.context = '1'
     const ctx = document.createElement('span')
     ctx.className = 'blk-context'
@@ -591,6 +604,34 @@ export function makeBlockEl(
       back.dataset.contextBackFor = b.id
       back.textContent = `↩ ${t('ui.context.collapse')}`
       ctx.appendChild(back)
+    }
+    if (noteSrc.length > 0) {
+      /**
+       * **备注在评论谁**：这是它的身份，不是「这次为什么被选中」——
+       * 所以排在面包屑之后、`rootNotes` 之前。
+       * 宿主被删时留一句「原文已删除」而不是隐去：备注在库里还在，
+       * 它「评过谁」的事实也还在，只是去处没了。
+       */
+      const prefix = document.createElement('span')
+      prefix.className = 'blk-context-note'
+      prefix.textContent = t('ui.note.sourcePrefix')
+      ctx.appendChild(prefix)
+      for (const cell of noteSrc) {
+        if (cell.dangling) continue
+        const src = document.createElement('button')
+        src.type = 'button'
+        src.className = 'blk-context-cell ui-ellipsis'
+        src.dataset.noteHost = cell.hostId
+        src.dataset.tip = t('ui.note.sourceTip', { label: cell.label })
+        src.textContent = cell.quote === '' ? cell.label : `「${cell.quote}」· ${cell.label}`
+        ctx.appendChild(src)
+      }
+      if (noteSrc.some((c) => c.dangling)) {
+        const gone = document.createElement('span')
+        gone.className = 'blk-context-note ui-ellipsis'
+        gone.textContent = t('ui.note.sourceGone')
+        ctx.appendChild(gone)
+      }
     }
     if (note !== '') {
       // 只读的说明，不是可点的面包屑格：它回答「为什么」，不提供去处
