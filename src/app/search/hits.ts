@@ -6,7 +6,7 @@
  */
 import { blockLabel, type Block } from '../../core/index.ts'
 import type { KbClient } from '../../core/kb/types.ts'
-import { matchSourcesOf } from '../../core/search/match-source.ts'
+import { matchedNameOf, matchSourcesOf } from '../../core/search/match-source.ts'
 import { highlightSnippet } from '../../core/search/query.ts'
 import type { FtsSource } from '../../core/search/sources.ts'
 import { plainText } from '../../core/model/runs.ts'
@@ -14,7 +14,10 @@ import type { SearchHit } from './service.ts'
 
 export interface HitView {
   blockId: string
-  /** 高亮片段（正文为空 ⇒ 整行用块名——顶层块没有正文，否则看起来像坏了） */
+  /**
+   * 高亮片段。正文命中 ⇒ 正文片段；**别名命中** ⇒ 命中的那个名字（正文里没有查询词，
+   * 片段不换行就高亮落空）；正文为空 ⇒ 整行用块名——顶层块没有正文，否则看起来像坏了。
+   */
   parts: { text: string; mark?: boolean }[]
   /** 住哪：祖先链；顶层块没有祖先，用它自己的名字（否则行里只剩一段正文，认不出出处） */
   hint: string
@@ -33,8 +36,18 @@ export function describeHit(kb: KbClient, hit: SearchHit, term: string): HitView
   if (!b) return null
   const kbGet = (id: string) => kb.get(id)
   const text = plainText(b.content)
-  const parts =
-    text.trim() === ''
+  /**
+   * 来路：FTS 命中时索引已经告诉我们哪一行命中了；扫描降级没有这一格 ⇒ **按同一份
+   * 来源投影现算**（走读门面的 id 查表，不遍历森林）。
+   */
+  const source =
+    hit.source ?? (term.trim() !== '' ? matchSourcesOf((id) => kb.get(id), b.id, term)[0]?.source : undefined)
+  // 别名命中 ⇒ 行显**命中的名字**（高亮落在它上面），不是不含词的正文片段——
+  // 用户搜的是这个名字，正文里没有它；「住哪」一栏仍给主名（块名的唯一现算处）。
+  const named = source === 'alias' ? matchedNameOf(b, term) : null
+  const parts = named
+    ? highlightSnippet(named.text, term)
+    : text.trim() === ''
       ? [{ text: blockLabel(b, kbGet) }]
       : highlightSnippet(text, term)
   const trail = kb
@@ -43,11 +56,5 @@ export function describeHit(kb: KbClient, hit: SearchHit, term: string): HitView
     .map((x) => blockLabel(x, kbGet))
     .filter((x) => x !== '')
   const hint = trail.length > 0 ? trail.join(' › ') : blockLabel(b, kbGet)
-  /**
-   * 来路：FTS 命中时索引已经告诉我们哪一行命中了；扫描降级没有这一格 ⇒ **按同一份
-   * 来源投影现算**（走读门面的 id 查表，不遍历森林）。
-   */
-  const source =
-    hit.source ?? (term.trim() !== '' ? matchSourcesOf((id) => kb.get(id), b.id, term)[0]?.source : undefined)
   return { blockId: b.id, parts, hint, ...(source ? { source } : {}) }
 }

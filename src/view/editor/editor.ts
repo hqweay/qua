@@ -489,7 +489,8 @@ interface EditBase {
  * · `tag`：**只归类**——抹掉触发词、把标签写进本块的 `_tags`（行尾出 chip）。
  */
 export type AcceptPick =
-  | { kind: 'ref'; to: string; label: string; flavor?: '#' }
+  /** `anchor` 只在别名点名时由浮层带上（见 `RowPick.page.anchor`）；主名路径不带，改名跟随 */
+  | { kind: 'ref'; to: string; label: string; flavor?: '#'; anchor?: string }
   | { kind: 'newObj'; name: string; tagId: string }
   | { kind: 'newPage'; name: string }
   /** ⌥↵ 的另一条路：不建页，以查询词造一个普通块（宿主下一兄弟位）并插引用 */

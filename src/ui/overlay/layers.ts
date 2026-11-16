@@ -52,7 +52,12 @@ export interface Row {
   axis?: ColorAxis
 }
 
-/** 一行的选中对象。`fresh` 的那两种还没有块 id（要在落点里当场建出来）。 */
+/**
+ * 一行的选中对象。`fresh` 的那两种还没有块 id（要在落点里当场建出来）。
+ *
+ * `page.anchor` 只在**别名点名**时带上：行显的是命中的别名，落点把同一句写进
+ * `RefRun.anchor`（「这一处叫什么」）；主名命中不带——引用继续跟随块名。
+ */
 export type RowPick =
   | { kind: 'command'; command: string; args?: unknown }
   | { kind: 'tag'; id: string; name: string }
@@ -60,7 +65,7 @@ export type RowPick =
   | { kind: 'newPage'; name: string }
   | { kind: 'instance'; id: string; name: string; tag: string; tagId: string }
   | { kind: 'newObj'; name: string; tagId?: string; tag: string }
-  | { kind: 'page'; id: string; name: string }
+  | { kind: 'page'; id: string; name: string; anchor?: string }
   | { kind: 'block'; id: string; name: string }
 
 /**

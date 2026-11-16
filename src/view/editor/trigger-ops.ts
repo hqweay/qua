@@ -164,6 +164,8 @@ export class TriggerOps {
             t: 'ref',
             to: pick.to,
             ...(pick.flavor ? { flavor: pick.flavor } : {}),
+            // 别名点名 ⇒ 这一处就读点名的字（覆盖层）；缺席时显示仍现算，改名跟随
+            ...(pick.anchor ? { anchor: pick.anchor } : {}),
             label: pick.label,
           },
         ]

@@ -300,7 +300,12 @@ function pickRow(ch: TriggerChar, row: Row, mods: PickMods): void {
   }
 
   if (pick.kind === 'page' || pick.kind === 'block') {
-    getEd().triggers.acceptTrigger({ ch, pick: { kind: 'ref', to: pick.id, label: pick.name } })
+    // 页行被别名点名时带 `anchor`（行显的就是它，落进正文读同一个名字）；
+    // 主名与块行（正文命中）不带——引用继续跟随块名，不冻快照。
+    getEd().triggers.acceptTrigger({
+      ch,
+      pick: { kind: 'ref', to: pick.id, label: pick.name, ...(pick.kind === 'page' && pick.anchor ? { anchor: pick.anchor } : {}) },
+    })
     return
   }
 

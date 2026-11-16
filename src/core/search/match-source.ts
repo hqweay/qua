@@ -23,6 +23,8 @@
  *    扫描搜不到别名，于是它也不会说「经由 别名」（不假装命中过）。
  */
 import type { Block } from '../model/model.ts'
+import { aliasesOf } from '../model/model.ts'
+import { aliasLeaf, displayNameOf, normalizeAlias } from '../identity/alias.ts'
 import { sourceTextsOf } from './rows.ts'
 import { parseFtsRowKey, type FtsSource } from './sources.ts'
 
@@ -30,6 +32,37 @@ export interface MatchSource {
   source: FtsSource
   /** 那个来源里含这个词的那一段文本（已按来源拼好，可直接显示或再截） */
   text: string
+}
+
+/**
+ * 名字搜索的「命中名」：查询词点中了这块的**哪个名字**。
+ *
+ * 主名优先：主名叶子自己命中 ⇒ `isPrimary:true`——显示仍是主名，也没有人点名别名；
+ * 否则取**第一条**命中查询词的别名（原始大小写保留，`aliasesOf` 不归一化；
+ * 归一化只用于比较）。别名带 `/` 时显示取叶子，叶子不含查询词（命中落在
+ * 路径段上）退全名——别让高亮落空。
+ *
+ * 「点过名的地方用点名的字读出来」两个消费者共用这一份判据：
+ * `@` 浮层的页行（命中别名 ⇒ 行显别名、插入写 `anchor` 覆盖层）与
+ * 搜索面的别名命中行（行显命中的名字而不是不含词的正文片段）。
+ * `null` ＝ 名字（主名或别名）都没命中——调用方按自己的来源判据继续。
+ */
+export interface MatchedName {
+  /** 展示用的名字（主名叶子 / 命中别名的叶子或全名） */
+  text: string
+  /** 主名自己命中（⇒ 显示主名、插入**不写**覆盖层，改名继续跟随） */
+  isPrimary: boolean
+}
+
+export function matchedNameOf(b: Block, term: string): MatchedName | null {
+  const q = term.trim().toLowerCase()
+  if (q === '') return null
+  const primary = displayNameOf(b)
+  if (primary !== '' && primary.toLowerCase().includes(q)) return { text: primary, isPrimary: true }
+  const hit = aliasesOf(b).find((a) => normalizeAlias(a).includes(q))
+  if (!hit) return null
+  const leaf = aliasLeaf(hit)
+  return { text: leaf.toLowerCase().includes(q) ? leaf : hit.trim(), isPrimary: false }
 }
 
 /** 按 id 找块：`kb.get` 走索引表（O(1)），不要传「遍历森林」的实现 */

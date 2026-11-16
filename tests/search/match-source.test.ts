@@ -96,3 +96,57 @@ test('按 id 查表：100k 库、命中在末尾时，查表次数不随库规�
   // O(这一块)：正文 + 别名各判一次，外加少量辅助查表；与 100k 无关
   assert.ok(lookups <= 10, `查表次数应是常数级（这一块自己的来源），实际 ${lookups} 次（≈ 库规模 ⇒ 退化成遍历）`)
 })
+
+/* ------------------------------------------------------------ 命中名 */
+
+/**
+ * **名字搜索的「命中名」**：查询词点中了这块的哪个名字。
+ *
+ * 「点过名的地方用点名的字读出来」共用这一份判据——`@` 浮层的页行与
+ * 搜索面的别名命中行。钉五件事：主名优先、别名命中带原始大小写、
+ * 路径别名显示取叶子（叶子不含词退全名）、都不命中给 null、空词给 null。
+ */
+import { matchedNameOf } from '../../src/core/search/match-source.ts'
+
+test('命中名：主名自己命中 ⇒ isPrimary，显示主名叶子', () => {
+  const b = withAlias('正文', ['AI', '人工智能入口'])
+  const m = matchedNameOf(b, 'ai')
+  assert.deepEqual(m, { text: 'AI', isPrimary: true })
+})
+
+test('命中名：别名命中（主名不含词）⇒ 显示别名叶子、isPrimary 为假', () => {
+  const b = withAlias('正文', ['AI', '测试我的别名AI'])
+  const m = matchedNameOf(b, '测试我的别名')
+  assert.deepEqual(m, { text: '测试我的别名AI', isPrimary: false })
+})
+
+test('命中名：别名原始大小写保留（比较归一化，显示不归一化）', () => {
+  const b = withAlias('正文', ['AI', 'MyAlias'])
+  const m = matchedNameOf(b, 'myalias')
+  assert.equal(m?.text, 'MyAlias')
+  assert.equal(m?.isPrimary, false)
+})
+
+test('命中名：路径别名命中落在叶子上 ⇒ 显示叶子', () => {
+  const b = withAlias('正文', ['AI', 'project/ai-notes'])
+  const m = matchedNameOf(b, 'ai-notes')
+  assert.deepEqual(m, { text: 'ai-notes', isPrimary: false })
+})
+
+test('命中名：路径别名命中落在路径段上 ⇒ 退全名（叶子不含词，高亮不能落空）', () => {
+  const b = withAlias('正文', ['AI', 'project/ai-notes'])
+  const m = matchedNameOf(b, 'project')
+  assert.deepEqual(m, { text: 'project/ai-notes', isPrimary: false })
+})
+
+test('命中名：主名与别名都命中 ⇒ 主名赢（没人点名别名）', () => {
+  const b = withAlias('正文', ['AI', '测试我的别名AI'])
+  const m = matchedNameOf(b, 'ai')
+  assert.deepEqual(m, { text: 'AI', isPrimary: true })
+})
+
+test('命中名：名字都没命中 ⇒ null；空词 ⇒ null', () => {
+  const b = withAlias('正文', ['AI'])
+  assert.equal(matchedNameOf(b, '不存在的名字'), null)
+  assert.equal(matchedNameOf(b, '  '), null)
+})

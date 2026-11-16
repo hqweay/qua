@@ -31,6 +31,7 @@ import {
   type CtxKeys,
 } from '../../core/index.ts'
 import { resolveBindings } from '../../core/infra/bindings.ts'
+import { matchedNameOf } from '../../core/search/match-source.ts'
 import { t } from '../../core/infra/msg.ts'
 import { TRIGGER_QUERY_MAX, type TriggerChar } from '../../core/infra/trigger.ts'
 import { rowsFromBindings, type Row } from '../../ui/overlay/layers.ts'
@@ -185,7 +186,8 @@ function snippet(text: string): string {
 /**
  * `@` 源：**页** ＋ **块**。
  *
- * 页 ＝ `_lists` 里有 `page` 的块；块 ＝ 正文命中查询词的块。
+ * 页 ＝ `_lists` 里有 `page` 的块，按**名字**命中（主名或任一别名，`matchedNameOf`）；
+ * 块 ＝ 正文命中查询词的块。
  * 「正文」是投影（`plainText`）：行内标签那一格不进正文，也就不会被 `@` 搜出来
  * （引用一枚标签该走 `#`，不走这里）。
  *
@@ -205,17 +207,20 @@ function mentionRows(query: string, deps: TriggerDeps): Row[] {
     // 正在打字的这一块不进候选：它的正文里还留着 `@查询词`，而且「引用自己」没有意义
     if (b.id === selfId) return
     const text = plainText(b.content)
-    if (hasList(b, 'page') && matchesName(b, q)) {
+    const named = hasList(b, 'page') ? matchedNameOf(b, q) : null
+    if (named) {
       if (pages.length < MENTION_CAP) {
-        // 呈现摘要 ＋ 唯一兜底：页恒有地址（在列表里 ⇒ 至少有一个名字），这条兜底是防形状坏的
-        const name = blockLabel(b, (id) => findInForest(deps.forest(), id))
+        // 行显**命中的名字**：主名命中仍是主名（blockLabel 兜底防形状坏——页恒有地址）；
+        // 别名命中显别名——用户是用这个名字把它找出来的，选中之后落进正文的那一格
+        // 也该读这个名字（`anchor` 覆盖层由落点写入，主名路径不带、改名继续跟随）。
+        const name = named.isPrimary ? blockLabel(b, (id) => findInForest(deps.forest(), id)) : named.text
         pages.push({
           id: `retrieval/page/${b.id}`,
           label: name,
           hint: addressesOf(b).find((a) => a.includes('/')) ?? '',
           icon: 'lucide:file',
           group: 'retrieval/1-page',
-          pick: { kind: 'page', id: b.id, name },
+          pick: { kind: 'page', id: b.id, name, ...(named.isPrimary ? {} : { anchor: named.text }) },
         })
       }
       return
