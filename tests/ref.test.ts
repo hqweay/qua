@@ -343,13 +343,26 @@ test('C1 替身染目标的身份色：显式 `_color` 带进 RefView；无色�
   assert.equal(resolveRef(find, ref({ to: 'gone' })).color, undefined)
 })
 
-test('C2 借色同一资格：目标自己的色缺席、恰一个有色标签 ⇒ 替身借到那格色', () => {
-  const tag = named('tg', '蓝签', '', { props: { _color: 'blue' } })
-  // 成员：归属指向有色标签（_tags 存标签块 id），自己不配色
+test('C1b 替身前置目标图标：显式 `_icon` 带进 RefView；结构旗 hash 不带（`#` 装饰已是那个信号）；dangling 不带', () => {
+  const star = named('st', '有脸', '', { props: { _icon: 'lucide:star' } })
+  const tag = named('tg', '有脸签', '', { props: { _lists: { tag: ['self'] } } })
+  const plain = named('pl', '无脸')
+  const find = finder([star, tag, plain])
+  assert.equal(resolveRef(find, ref({ to: 'st' })).icon, 'lucide:star')
+  // 标签块的结构旗脸是 hash：行内 `#名` 已经画出 #，再画一枚是同一句话说两遍
+  assert.equal(resolveRef(find, ref({ to: 'tg' })).icon, undefined)
+  assert.equal(resolveRef(find, ref({ to: 'pl' })).icon, undefined)
+  assert.equal(resolveRef(find, ref({ to: 'gone' })).icon, undefined)
+})
+
+test('C2 借色借形同一资格：目标自己的缺席、恰一个有显式脸色的标签 ⇒ 替身借到', () => {
+  const tag = named('tg', '蓝签', '', { props: { _color: 'blue', _icon: 'lucide:star' } })
+  // 成员：归属指向有色标签（_tags 存标签块 id），自己不配色不配脸
   const member = named('m', '成员', '', { props: { _tags: ['tg'] } })
   const find = finder([tag, member])
-  // 块标借色同一份判据：脸染蓝，替身也染蓝
+  // 块标借色借形同一份判据：脸染蓝带星，替身也染蓝带星
   assert.equal(resolveRef(find, ref({ to: 'm' })).color, 'blue')
+  assert.equal(resolveRef(find, ref({ to: 'm' })).icon, 'lucide:star')
   // 两个有色标签 ⇒ 环：替身取第一色（与块标内点同）
   const tag2 = named('tg2', '红签', '', { props: { _color: 'red' } })
   const multi = named('mm', '多签', '', { props: { _tags: ['tg', 'tg2'] } })

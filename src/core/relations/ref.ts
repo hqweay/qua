@@ -22,7 +22,7 @@
  */
 import { t } from '../infra/msg.ts'
 import { aliasLeaf, primaryAliasOf } from '../identity/alias.ts'
-import { colorOfByFind } from '../identity/faces.ts'
+import { colorOfByFind, faceOfByFind } from '../identity/faces.ts'
 import { isJournal, journalDate, journalDateLabel } from '../identity/journal.ts'
 import { hasList, type Block } from '../model/model.ts'
 import { tagIdsOf } from '../identity/tags.ts'
@@ -44,6 +44,12 @@ export interface RefView {
    * 省略 ＝ 目标中性 ⇒ 替身也中性（「无颜色」是合法态，不是错误态）。
    */
   color?: string
+  /**
+   * 目标块标的图标（脸的形半，与色同一资格），只给**替身前置图标**用。
+   * 结构旗里的 `hash` 不带：行内标签的 `#` 装饰本身就是那个信号，再画一枚是同一句话说两遍。
+   * 省略 ＝ 目标无脸 ⇒ 替身不占位（图标是加分项，不是必需件）。
+   */
+  icon?: string
 }
 
 /** 按 id 找块（整片森林；zoom 后引用目标可能在任意深度） */
@@ -171,11 +177,13 @@ export function resolveRef(
   // 色存**原始值**（板 key ∪ hex，与 `_color` 同一值域）：CSS 化是渲染层的事
   // （`identityColorCss` 过一次），core 存 CSS 串会让渲染层没法再判「这是槽名还是 hex」。
   const c = colorOfByFind(b, find)
+  const icon = faceOfByFind(b, find)
   return {
     label: anchor ?? blockLabel(b, find, budget),
     state: 'resolved',
     kind: refKindOf(b),
     color: c.kind === 'solid' ? c.color : c.kind === 'ring' ? c.colors[0] : undefined,
+    icon: icon === 'lucide:hash' ? undefined : icon,
   }
 }
 

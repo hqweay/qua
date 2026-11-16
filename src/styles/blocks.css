@@ -2420,6 +2420,28 @@
   background: var(--ui-accent-soft);
   border-color: transparent;
 }
+/*
+  **页引用**：`[[名]]` 指向普通块。结构线款——无底无胶囊，字色随正文
+  （有身份色时 inline style 染），`[[ ]]` 装饰 ＋ 一条低强度下划线说「这是链接」。
+  下划线画在 `.atom-label` 上：原子是 inline-flex，画在容器上会跨过原子内部不渲染。
+  悬停把线加重（底色反馈照旧）。行内露面靠形状分清：纯文字（标签）/ 空心（实例）/
+  结构线（页引用）/ 实底胶囊（外链、文件）。
+*/
+.atom-page {
+  padding: 0 1px;
+  margin: 0 1px;
+  background: transparent;
+  border-radius: 0;
+  color: inherit;
+}
+.atom-page .atom-label {
+  text-decoration: underline;
+  text-decoration-color: var(--ui-sep);
+  text-underline-offset: 2px;
+}
+.atom-page:hover .atom-label {
+  text-decoration-color: var(--ui-accent);
+}
 .atom.dangling {
   background: transparent;
   border: 1px dashed var(--ui-accent);

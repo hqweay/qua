@@ -251,20 +251,24 @@ export function fillBlockText(
   if (tx.childNodes.length === 0) tx.appendChild(document.createElement('br'))
 
   /**
-   * **光标锚**：正文以原子收尾时（引用/资产是行内唯一或最后内容），`.tx` 里原子之后
-   * 没有文本节点——光标的唯一候选位是「原子与行末之间的元素缝隙」，Chrome 不认
-   * （竖线不画、按键前把光标挪走，退格会把整行可编辑根摘掉，见 `posAt` 的注）。
-   * 在原子后补一个**空文本节点**给光标站位：它是真文本节点，竖线画得出、按键落得进，
-   * 但长度为 0 ⇒ 读数（`readRuns` 的空段跳过／`nodeLen`／`offsetIn`）天然把它当不存在，
-   * 模型一个字节不多。把零宽字符塞进模型是把渲染层的代价转嫁给数据，这里不这么做。
+   * **光标锚**：正文以原子**开头或收尾**时（引用/资产是行内唯一、最前或最后内容），
+   * `.tx` 里那一侧没有文本节点——光标的唯一候选位是「原子与行缘之间的元素缝隙」，
+   * Chrome 不认（竖线画歪/画到行框外沿、按键前把光标挪走，退格会把整行可编辑根
+   * 摘掉，见 `posAt` 的注）。在那一侧补一个**空文本节点**给光标站位：它是真文本
+   * 节点，竖线画得出、按键落得进，但长度为 0 ⇒ 读数（`readRuns` 的空段跳过／
+   * `nodeLen`／`offsetIn`）天然把它当不存在，模型一个字节不多。把零宽字符塞进
+   * 模型是把渲染层的代价转嫁给数据，这里不这么做。
+   * 两端各一个：只有行尾锚时，「一行只有一枚引用」的光标落行首仍然是缝隙。
    */
-  if (b.content.length > 0 && b.content[b.content.length - 1]!.t !== 'text') {
+  const caretAnchor = (): HTMLElement => {
     const anchor = document.createElement('span')
     anchor.className = 'tx-caret-anchor'
     anchor.dataset.caretAnchor = '1'
     anchor.appendChild(document.createTextNode(''))
-    tx.appendChild(anchor)
+    return anchor
   }
+  if (b.content.length > 0 && b.content[0]!.t !== 'text') tx.prepend(caretAnchor())
+  if (b.content.length > 0 && b.content[b.content.length - 1]!.t !== 'text') tx.appendChild(caretAnchor())
 }
 
 /**
