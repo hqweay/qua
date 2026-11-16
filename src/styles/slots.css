@@ -209,7 +209,8 @@
 .dock-tile-glyph {
   max-width: 100%;
   padding: 0 2px;
-  font-size: 11px;
+  /* 旁注角色走字阶（2xs），不写 px——口径只住 tokens 一处 */
+  font-size: var(--ui-fs-2xs);
   line-height: 1.1;
 }
 .dock-tile-main:focus-visible,

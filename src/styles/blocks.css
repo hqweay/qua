@@ -543,9 +543,10 @@
   user-select: none;
   -webkit-user-select: none;
 }
+/* 槽内图标尺寸**不在这里钉**：值图标是内容脸（调用点给 md），铬件给 sm——
+   钉死一档会让调用点的档位失语，两处事实源必有一处说谎 */
 .blk .identity .ico {
-  inline-size: var(--ui-icon-sm);
-  block-size: var(--ui-icon-sm);
+  flex: 0 0 auto;
 }
 .blk .identity.closure-box {
   cursor: pointer;
