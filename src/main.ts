@@ -7,8 +7,8 @@
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
-import { blockLabel, buildAdjacency, checkEdge, cyclePathLabels, danglingOf, declaredFieldIds, displayNameOf,  embedBodyOf, findInForest, flatten, FEED_INITIAL, hasList,  feedDays, hasLiveChildren, isDeleted, isJournal, journalId, listTableOf,  mkBlock, mkJournalBlock, pruneGone, resolveEmbed, tagMemberIds,  todayISO, viewNameOf, readViewSet, readEmbed, isEmbedBlock, OUTLINE_VIEW, sourceOfOwner, storedKindsFor, cardLayoutOf, DERIVED_VIEW_KINDS, propKindOf, propLabel, choicesOf, choicesFor, childDisplayProps, enginePropDefs, type Block, type QuerySpec, type ViewOwnerRef, trashOf, filterOfSpec, withBlockOwnerData, VIEW_KIND_ICON, type StoredViewKind, type UndoKind } from './core/index.ts'
-import { belowFieldsRows, childrenRecords, choiceDisplayLabel, defaultDisplayPropsFor, evaluateQuerySpec, fieldCoverageOf, TAGS_COLUMN, cardinalityOf, queryFieldsOf, resolveRows, singleValueOf, valueListOf, type BelowFields, type FieldCoverage } from './core/index.ts'
+import { blockLabel, buildAdjacency, checkEdge, cyclePathLabels, danglingOf, embedBodyOf, findInForest, flatten, FEED_INITIAL, feedDays, hasLiveChildren, isDeleted, isJournal, journalId, mkBlock, mkJournalBlock, pruneGone, resolveEmbed, todayISO, readEmbed, choicesFor, type Block, trashOf, withBlockOwnerData, type StoredViewKind, type UndoKind } from './core/index.ts'
+import { belowFieldsRows, choiceDisplayLabel, cardinalityOf, singleValueOf, valueListOf, type BelowFields } from './core/index.ts'
 import { openChoicePicker } from './app/choice-picker.ts'
 import { plainText } from './core/model/runs.ts'
 import { BlockStore } from './core/model/store.ts'
@@ -27,8 +27,7 @@ import {
   Registry,
   type App,
 } from './core/commands/index.ts'
-import { Layers, type Row } from './ui/overlay/layers.ts'
-import { openTagChoice } from './app/retrieval/name-choice.ts'
+import { Layers } from './ui/overlay/layers.ts'
 import { DockWindows } from './ui/dock/dock-windows.ts'
 import { DockMountCard } from './ui/cards/mount-card.ts'
 import { SearchCard } from './ui/cards/search-card.ts'
@@ -37,13 +36,14 @@ import { createIcon } from './view/icons.ts'
 import { mountEmbedBody } from './ui/block-ui/embed-body.ts'
 import { mountNotePopover, type NotePopoverHandle } from './ui/block-ui/note-popover.ts'
 import { renderPropsLine } from './ui/block-ui/props-line.ts'
-import { renderLinkComposer, renderNamePrompt, type ObjFieldDeps } from './ui/overlay/panels.ts'
-import { devCommands, dropIdentity, journalCommands, mentionCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, takenWhere, viewCommands, viewConfigCommands, buildFreshView, zoomCommands } from './app/commands-impl.ts'
+import { type ObjFieldDeps } from './ui/overlay/panels.ts'
+import { devCommands, journalCommands, mentionCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, takenWhere, viewCommands, viewConfigCommands, buildFreshView, zoomCommands } from './app/commands-impl.ts'
 import type { TxRun } from './app/commands/types.ts'
 import { setupPersistence } from './app/wiring/persistence.ts'
 import { setupAssets } from './app/wiring/assets.ts'
 import { setupBlockProps } from './app/wiring/block-props.ts'
 import { setupRetrieval } from './app/wiring/retrieval.ts'
+import { setupViewMenus } from './app/wiring/view-menus.ts'
 import { setupClipboard } from './app/wiring/clipboard.ts'
 import { setupAxis } from './app/wiring/axis.ts'
 import { installTooltips } from './ui/overlay/tip.ts'
@@ -59,8 +59,6 @@ import { setupFeed } from './app/wiring/feed.ts'
 import { installDispatch, setupKeys } from './app/wiring/keys.ts'
 import { dispatchKey } from './core/infra/dispatch.ts'
 import { setupOwners } from './app/wiring/owners.ts'
-import { ViewOptionsPanel } from './ui/views/view-options.ts'
-import { QueryTree } from './ui/query/query-tree.ts'
 import { SearchFace, type SearchFaceDeps } from './ui/search/search-face.ts'
 import type { SettingsFaceDeps } from './ui/settings/settings-face.ts'
 import { setupChrome } from './app/wiring/chrome.ts'
@@ -995,131 +993,27 @@ const owners = setupOwners({
   },
 })
 
-/**
- * **露面的「视图…」菜单**：编辑的是**这一次露面的指针**（`_embed.view`），不是源块的配置。
- *
- * 三格直译 `core/embed.ts` 的三个取值：
- *   · **跟随源**（`''`）—— 源换默认看法，这里跟着换；菜单上写明「当前：表格」，
- *     否则它和「固定为大纲」在界面上分不出差别；
- *   · **固定为大纲**（`'outline'`）—— 源换看法时这一处不变；
- *   · **源上的某张命名视图**（视图 id）—— 要「这一次特别一点」就建一张命名视图并指过去。
- *
- * ⚠️ 露面块**没有自己的 `_views`**：写进它身上没有任何读路径会看到（`isViewRoot` 排除露面块），
- *    那就是「点了没生效」。所以同一个「视图…」入口在露面块上必须走这里。
- */
-function openEmbedViewMenu(host: Block): void {
-  const ref = readEmbed(host)
-  const target = ref ? blocks.find(ref.block) : undefined
-  if (!ref || !target) return
-  const data = owners.read({ kind: 'block', blockId: target.id })
-  const active = data ? readViewSet(data).active : null
-  const curLabel = active ? viewNameOf(active, (k) => t(`ui.view.kind.${k}`)) : t('ui.view.outline')
-  const rows: Row[] = [
-    {
-      id: 'embed/follow',
-      label: t('ui.embed.followSource', { name: curLabel }),
-      icon: 'lucide:link',
-      ...(ref.view === '' ? { keyHint: t('ui.view.current') } : {}),
-    },
-    {
-      id: 'embed/outline',
-      label: t('ui.embed.pinOutline'),
-      icon: 'lucide:list',
-      ...(ref.view === OUTLINE_VIEW ? { keyHint: t('ui.view.current') } : {}),
-    },
-  ]
-  for (const v of data?.views ?? []) {
-    rows.push({
-      id: `embed/view/${v.id}`,
-      label: viewNameOf(v, (k) => t(`ui.view.kind.${k}`)),
-      icon: v.kind === 'list-table' ? 'lucide:table-properties' : 'lucide:table',
-      group: 'embed/views',
-      ...(ref.view === v.id ? { keyHint: t('ui.view.current') } : {}),
-    })
-  }
-  rows.push({ id: 'embed/new', label: t('ui.embed.newView'), icon: 'lucide:plus', group: 'embed/9-new' })
-  rows.push({ id: 'embed/open', label: t('ui.embed.openSource'), icon: 'lucide:external-link', group: 'embed/9-new' })
-  layers.openMenu({
-    rows,
-    anchor: app.ed.blockEl(host.id)?.getBoundingClientRect() ?? null,
-    title: t('menu.label.views'),
-    searchable: false,
-    onPick: (row) => {
-      const id = String(row.id)
-      if (id === 'embed/follow') void registry.invoke('core.embed/set-view', { blockId: host.id, view: '' }, 'menu')
-      else if (id === 'embed/outline') void registry.invoke('core.embed/set-view', { blockId: host.id, view: OUTLINE_VIEW }, 'menu')
-      else if (id.startsWith('embed/view/'))
-        void registry.invoke('core.embed/set-view', { blockId: host.id, view: id.slice('embed/view/'.length) }, 'menu')
-      // 「在源上新建视图…」打开的是**源**的那一份菜单：建完它会成为源的默认看法，
-      // 跟随态的露面当场跟着换；要钉住就再从本菜单选一次（一张视图只有一份配置）。
-      else if (id === 'embed/new') app.openViewMenu({ kind: 'block', blockId: target.id })
-      else if (id === 'embed/open') void registry.invoke('core.block/focus-block', { blockId: target.id }, 'menu')
-    },
-  })
-}
-
-/**
- * **条件树弹层**（唯一一份）：基础条件（`core.query/set-spec`）与
- * 视图切片（`core.view/set-filter`）共用同一台组件，只是 `spec` 的来源与落点不同。
- */
-function openSpecPopover(opts: {
-  owner: ViewOwnerRef
-  anchor: DOMRect | null
-  spec: () => QuerySpec
-  showOptions?: boolean
-  onApply: (spec: QuerySpec) => void
-  /**
-   * 这批结果的覆盖率（字段下拉按它排序；不给／批次为空＝全量平铺，现状）。
-   * `batch` 是条件树草稿里**已圈出的那批块**（未完成行已摘掉）——覆盖率跟草稿走，
-   * 不跟已存储的 spec：弹层树点「应用」才落，跟存储值会让刚加的行参与不了收窄。
-   */
-  coverage?: (batch: QuerySpec) => FieldCoverage | undefined
-}): void {
-  const hostId =
-    opts.owner.kind === 'block'
-      ? opts.owner.blockId
-      : opts.owner.host.kind === 'block'
-        ? opts.owner.host.blockId
-        : ''
-  const hostBlock = hostId === '' ? undefined : kb.get(hostId)
-  layers.openPopover((box) => {
-    const tree = new QueryTree(box, {
-      spec: opts.spec,
-      // 条件树的字段候选只有一份（`core/query-fields.ts`）：属性定义 ＋ 有值控件的系统槽；
-      // 有覆盖率时按「这批结果里真有值的栏」排前（与分组下拉同一条原则）
-      fields: (batch) => queryFieldsOf(kb.roots(), batch ? opts.coverage?.(batch) : undefined),
-      /**
-       * `select` 的选项：**定义块的直接子块，全量、排除软删**。
-       * 不按某一块的可选范围收窄（`choicesForDef`）—— 查询是跨块的，
-       * 同一个属性在不同块上「此刻能选什么」可以不一样。
-       * `_tags` 不是定义：它按标签归属分组时的「选项」＝ 全部标签块（组名用显示名）。
-       */
-      choices: (propId) => {
-        if (propId === '_tags') return kb.tags().map((t) => ({ id: t.id, label: blockLabel(t, kbGet) }))
-        const def = kb.get(propId)
-        if (!def || propKindOf(def) !== 'select') return []
-        return choicesOf(def).map((c) => ({ id: c.id, label: c.label }))
-      },
-      ...(hostBlock ? { owner: hostBlock } : {}),
-      pickRef: (b, propId, current, onPick, rect, trigger, opts) => pickRefValue(b, propId, current, onPick, rect, trigger, opts),
-      pickTag: pickTagValue,
-      tagLabel,
-      refLabel: (targetId) => {
-        const target = kb.get(targetId)
-        return target ? blockLabel(target, kbGet) : t('ui.props.refMissing', { id: shortId(targetId) })
-      },
-      apply: opts.onApply,
-      close: () => layers.closePopover(),
-      inline: false,
-      ...(opts.showOptions === false ? { showOptions: false } : {}),
-    })
-    tree.render(true)
-  }, opts.anchor)
-}
-
 const clipboard = setupClipboard({
   toast: (text, kind) => app.toast(text, kind),
   getEd: () => ed,
+})
+
+const viewMenus = setupViewMenus({
+  ws,
+  blocks,
+  kb,
+  kbGet,
+  owners,
+  layers,
+  uiCtx,
+  getEd: () => ed,
+  getRegistry: () => registry,
+  getPanels: () => panels,
+  getApp: () => app,
+  shortId,
+  getPageDeps: () => pageDeps,
+  toast: (text, kind) => app.toast(text, kind),
+  blockName,
 })
 
 const app: App = {
@@ -1352,405 +1246,8 @@ const app: App = {
    * 是数据。菜单项由 `_views` 现画，选中之后仍走命令面（`core.view/*`）——
    * 于是撤销、落盘、审计只有一条路（与「菜单由绑定表渲染」同一条纪律的延伸）。
    */
-  openViewMenu: (owner, dropdownAnchor, trigger) => {
-    /**
-     * **露面块不拥有视图配置**：`_embed = { block, view }` 只有一格选择。
-     * 同一个「视图…」入口在露面块上编辑的是**那根指针**（跟随源／大纲／源的命名视图）——
-     * 写它的 `_views` 不会被任何读路径看到（`isViewRoot` 排除露面块），那就是「点了没生效」。
-     */
-    if (owner.kind === 'block') {
-      const embed = blocks.find(owner.blockId)
-      if (embed && isEmbedBlock(embed)) {
-        openEmbedViewMenu(embed)
-        return
-      }
-    }
-    const data = owners.read(owner)
-    if (!data) return
-    const host = owner.kind === 'block' ? blocks.find(owner.blockId) : undefined
-    const source = sourceOfOwner(owner, data, host)
-    const active = readViewSet(data).active
-    const defaultLabel = t('ui.view.outline')
-    const rows: Row[] = [
-      {
-        id: 'view//outline',
-        label: defaultLabel,
-        icon: 'lucide:list',
-        ...(active ? {} : { keyHint: t('ui.view.current') }),
-      },
-    ]
-    for (const v of data.views) {
-      // 卡片的图标画「它现在长什么样」：网格／看板列；页签画它的方向
-      const cardLayout = v.kind === 'cards' ? cardLayoutOf(v) : ''
-      rows.push({
-        id: `view//${v.id}`,
-        label: viewNameOf(v, (k) => t(`ui.view.kind.${k}`)),
-        icon:
-          v.kind === 'list-table'
-            ? 'lucide:table-properties'
-            : v.kind === 'cards'
-              ? cardLayout === 'columns'
-                ? 'lucide:columns-3'
-                : 'lucide:layout-grid'
-              : v.kind === 'tabs'
-                ? v.tabs?.direction === 'vertical'
-                  ? 'lucide:panel-left'
-                  : 'lucide:panel-top'
-                : 'lucide:table',
-        ...(v.filter ? { hint: t('ui.view.slice') } : {}),
-        ...(active?.id === v.id ? { keyHint: t('ui.view.current') } : {}),
-      })
-    }
-    /**
-     * **当前视图的管理**：改名／切片／删除都住在这份菜单里。
-     *
-     * 不另造一个「视图设置」面板：这三件事都是那一张视图的配置，
-     * 用户已经在「视图…」里看见了它，入口就该在同一处。
-     */
-    if (active) {
-      /**
-       * **卡片的封面**：两档——「有图才显示」与「无」。
-       *
-       * 不是新视图：画廊与块卡共用同一副身体，只差这一格配置。
-       */
-      if (active.kind === 'cards') {
-        const cover = active.cards?.cover === 'none' ? 'none' : 'first-asset'
-        for (const [value, label, icon] of [
-          ['first-asset', t('ui.view.cover.first'), 'lucide:image'],
-          ['none', t('ui.view.cover.none'), 'lucide:image-off'],
-        ] as const) {
-          rows.push({
-            id: `view/cover/${value}`,
-            label,
-            icon,
-            group: 'view/7-manage',
-            ...(cover === value ? { keyHint: t('ui.view.current') } : {}),
-          })
-        }
-      }
-      /**
-       * **页签的方向**：横向（缺省）／纵向。纯渲染差异 ⇒ 配置位，
-       * 不是两种看法；这一组只对页签视图出现。
-       */
-      if (active.kind === 'tabs') {
-        const current = active.tabs?.direction === 'vertical' ? 'vertical' : 'horizontal'
-        for (const [value, label, icon] of [
-          ['horizontal', t('ui.tabs.direction.h'), 'lucide:panel-top'],
-          ['vertical', t('ui.tabs.direction.v'), 'lucide:panel-left'],
-        ] as const) {
-          rows.push({
-            id: `view/tabs-dir/${value}`,
-            label,
-            icon,
-            group: 'view/6-layout',
-            ...(current === value ? { keyHint: t('ui.view.current') } : {}),
-          })
-        }
-      }
-      rows.push({
-        id: 'view/options',
-        label: t('ui.view.options'),
-        icon: 'lucide:sliders-horizontal',
-        group: 'view/7-manage',
-      })
-      rows.push({ id: 'view/rename', label: t('ui.view.rename'), icon: 'lucide:pencil', group: 'view/7-manage' })
-      if (source.kind === 'query') {
-        rows.push({
-          id: 'view/slice',
-          label: active.filter ? t('ui.view.sliceEdit') : t('ui.view.sliceAdd'),
-          icon: 'lucide:filter',
-          group: 'view/7-manage',
-        })
-        if (active.filter) {
-          rows.push({ id: 'view/slice-clear', label: t('ui.view.sliceClear'), icon: 'lucide:filter-x', group: 'view/7-manage' })
-        }
-      }
-      rows.push({ id: 'view/remove', label: t('ui.view.remove'), icon: 'lucide:trash-2', group: 'view/7-manage' })
-    }
-    /**
-     * **结构映射表的排序**：第一行就是表头（容器的直接子块），所以排序入口按**列**列出来，
-     * 名字取那一块的显示名。排序只改显示序（行＝每列各取第 j 项的位置元组），
-     * `children` 顺序一个字节不动。
-     */
-    if (active?.kind === 'list-table' && source.kind === 'children') {
-      const table = listTableOf(source.blockId, kb)
-      const cur = active.listTable?.sort
-      table.columns.forEach((col, i) => {
-        const on = cur?.col === i ? cur.dir : ''
-        const name = displayNameOf(col).trim()
-        rows.push({
-          id: `view/sort/${i}/${on}`,
-          label:
-            name === ''
-              ? t('ui.view.sortByColumnN', { n: String(i + 1) })
-              : t('ui.view.sortByColumn', { name }),
-          icon: 'lucide:arrow-up-down',
-          group: 'view/8-sort',
-          ...(on ? { keyHint: on === 'desc' ? t('ui.view.sortDesc') : t('ui.view.sortAsc') } : {}),
-        })
-      })
-    }
-    /**
-     * **能建哪几种**（表只有 `STORED_KINDS_BY_SOURCE` 一张）：
-     * 查询源没有结构映射表与导图 —— 命中集合不是树，没有「第 k 个孩子」可对齐。
-     */
-    for (const kind of storedKindsFor(source)) {
-      rows.push({
-        id: `view/add/${kind}`,
-        // 建的行一律「新建 X」：裸 kind 名读起来像「切过去」，点下去却是建——
-        // 重复视图就是这么攒出来的。上方「已有视图」各叫各的名字（建时就给了默认名）。
-        label:
-          kind === 'table'
-            ? t('ui.view.addTable')
-            : kind === 'list-table'
-              ? t('ui.view.addListTable')
-              : t('ui.view.addKind', { kind: t(`ui.view.kind.${kind}` as 'ui.view.kind.table') }),
-        icon: VIEW_KIND_ICON[kind],
-        group: 'view/9-add',
-      })
-    }
-    /**
-     * 下拉（来自抬头那颗「当前看法」按钮）自带锚点；块菜单那条入口没有，
-     * 退回「聚焦块的块标」——两条路打开的是同一份菜单。
-     */
-    const anchor =
-      dropdownAnchor ??
-      (owner.kind === 'block' ? (app.ed.blockEl(owner.blockId)?.getBoundingClientRect() ?? null) : null)
-    layers.openMenu({
-      rows,
-      anchor,
-      // 同一颗「当前看法」按钮再点一次＝收起（toggle）；块菜单那条入口没有元素，退回先关再开
-      ...(trigger ? { trigger } : {}),
-      ...(dropdownAnchor ? { width: 260 } : {}),
-      title: t('menu.label.views'),
-      searchable: false,
-      onPick: (row) => {
-        const id = String(row.id)
-        if (id === 'view//outline') void registry.invoke('core.view/set-active', { owner, viewId: '' }, 'menu')
-        else if (id.startsWith('view//')) void registry.invoke('core.view/set-active', { owner, viewId: id.slice('view//'.length) }, 'menu')
-        else if (id.startsWith('view/sort/')) {
-          const [, , col, dir] = id.split('/')
-          // 升 → 降 → 取消（与平表表头同一套三次点击）
-          const next = dir === '' ? 'asc' : dir === 'asc' ? 'desc' : ''
-          void registry.invoke('core.view/set-sort', { owner, viewId: active?.id ?? '', by: col, dir: next }, 'menu')
-        } else if (id.startsWith('view/cover/') && active) {
-          void registry.invoke(
-            'core.view/set-cover',
-            { owner, viewId: active.id, cover: id.slice('view/cover/'.length) },
-            'menu',
-          )
-        } else if (id.startsWith('view/tabs-dir/') && active) {
-          void registry.invoke(
-            'core.view/set-tabs-direction',
-            { owner, viewId: active.id, direction: id.slice('view/tabs-dir/'.length) },
-            'menu',
-          )
-        } else if (id === 'view/options') {
-          app.showViewOptions(owner)
-        } else if (id === 'view/rename' && active) {
-          // 名字是这一张视图的配置：就在同一份菜单里改，走命令面落盘／可撤销
-          layers.openPopover(
-            (box) =>
-              renderNamePrompt(box, {
-                title: t('ui.view.renameTitle'),
-                value: active.name ?? '',
-                placeholder: t('ui.view.renamePlaceholder'),
-                submitText: t('ui.view.renameApply'),
-                cancelText: t('ui.view.renameCancel'),
-                onSubmit: (name) => {
-                  layers.closePopover()
-                  void registry.invoke('core.view/rename', { owner, name }, 'menu')
-                },
-                onCancel: () => layers.closePopover(),
-              }),
-            anchor,
-          )
-        } else if (id === 'view/slice' && active) {
-          app.openViewSlice(owner, active.id, anchor)
-        } else if (id === 'view/slice-clear' && active) {
-          void registry.invoke('core.view/set-filter', { owner, viewId: active.id, filter: null }, 'menu')
-        } else if (id === 'view/remove' && active) {
-          void registry.invoke('core.view/remove', { owner, viewId: active.id }, 'menu')
-        } else if (id.startsWith('view/add/')) void registry.invoke('core.view/add', { owner, kind: id.slice('view/add/'.length) }, 'menu')
-      },
-    })
-  },
-
-  /**
-   * **派生栏（引用／成员／同类／提及）的看法下拉**。
-   *
-   * 与自定义查询的「视图…」同壳（同一台浮层、同一颗按钮的形状），但**没有**新建／
-   * 改名／切片：派生栏是只读关系视图，没有 `_views` 可以写，看法只是设备状态的一格。
-   * 候选吃 core 的 `DERIVED_VIEW_KINDS`（兼容集与 query 源同一张表）——菜单另写一份
-   * 清单，迟早会在 core 加看法的那天漏掉一格。
-   */
-  openDerivedViewMenu: (anchor, current, onPick) => {
-    const kinds = DERIVED_VIEW_KINDS
-    const labels: Record<string, string> = {
-      outline: t('ui.view.outline'),
-      table: t('ui.view.kind.table'),
-      cards: t('ui.view.kind.cards'),
-      calendar: t('ui.view.kind.calendar'),
-    }
-    const icons: Record<string, string> = { outline: 'lucide:list-tree', ...VIEW_KIND_ICON }
-    layers.openMenu({
-      rows: kinds.map((k) => ({
-        id: k,
-        label: labels[k] ?? k,
-        icon: icons[k],
-        ...(k === current ? { keyHint: t('ui.view.current') } : {}),
-      })),
-      anchor,
-      width: 200,
-      title: t('menu.label.views'),
-      searchable: false,
-      onPick: (row) => onPick(String(row.id)),
-    })
-  },
-
-  /**
-   * **切片构建器**：与「视图… → 编辑切片…」同一台浮层（抬头切片 chip 也走这里）。
-   *
-   * 切片没有「默认看法」那一份配置：`spec` 每次现读，视图被删了就退回空树；
-   * 点「应用」才写一次，空树收成 `null` ⇒ `withFilter` 删键。
-   */
-  /**
-   * **视图选项**（四轴一个面）：块菜单入口落在浮层里（默认大纲没有抬头可挂），
-   * 抬头的「选项」按钮与这里共用同一台组件——一个轴在两个落点里说法必须一致。
-   */
-  showViewOptions: (owner) => {
-    const data = owners.read(owner)
-    if (!data) return
-    const host = owner.kind === 'block' ? blocks.find(owner.blockId) : undefined
-    const anchor =
-      owner.kind === 'block' ? (app.ed.blockEl(owner.blockId)?.getBoundingClientRect() ?? null) : app.ed.caretRect()
-    layers.openPopover((box) => {
-      const readSource = () => {
-        const d = owners.read(owner)
-        if (!d) return { view: null, source: { kind: 'children', blockId: '' } as const, filter: null, display: undefined }
-        const view = readViewSet(d).active
-        return {
-          view,
-          source: sourceOfOwner(owner, d, host ?? undefined),
-          filter: view ? (view.filter ?? null) : (d.defaultFilter ?? null),
-          display: view ? view.displayProps : d.defaultDisplayProps,
-        }
-      }
-      const records = () => {
-        const src = readSource().source
-        if (src.kind !== 'children') return []
-        return childrenRecords(src.blockId, kb)
-      }
-      /** 筛选候选与字段覆盖率共用同一批：children 现读子块；query 现算 spec（各答各的问法） */
-      const candidateRecords = () => {
-        const src = readSource().source
-        if (src.kind !== 'query') return records()
-        return resolveRows(evaluateQuerySpec(src.spec, kb, {}), kb)
-      }
-      const fields = () => queryFieldsOf(kb.roots(), fieldCoverageOf(candidateRecords()))
-      const panel = new ViewOptionsPanel({
-        owner,
-        viewId: () => readViewSet(owners.read(owner) ?? { views: [] }).active?.id ?? '',
-        read: readSource,
-        fields,
-        records,
-        filterCandidates: candidateRecords,
-        atomLabel: (atom) => {
-          if ('tag' in atom) return atom.tag
-          const b = kb.get(atom.up.is)
-          return b ? blockLabel(b, kbGet) : t('ui.page.untitled')
-        },
-        cardinalityOf: (id) => fields().find((f) => f.id === id)?.cardinality ?? 'one',
-        invoke: (name, args) => void registry.invoke(name, args, 'menu'),
-        // 自定义编辑态的预选基线（与抬头选项面板同一口径）：表格＝计算列；rich＝有值的键
-        displayDefaults: () => {
-          const { view, source } = readSource()
-          if (view?.kind === 'table') return defaultDisplayPropsFor(source, kb)
-          const keys = new Set<string>()
-          for (const r of records()) {
-            for (const [k, val] of Object.entries(r.values)) {
-              if (val !== undefined && val !== null && val !== '' && !(Array.isArray(val) && val.length === 0)) keys.add(k)
-            }
-            if (r.tags.length > 0) keys.add(TAGS_COLUMN)
-          }
-          return [...keys]
-        },
-        ...(owner.kind === 'block' ? { openChildProps: (blockId: string) => app.showChildPropsPicker(blockId) } : {}),
-        openBuilder: () => {
-          layers.closePopover()
-          app.openQueryBuilder(owner)
-        },
-      })
-      box.append(panel.root)
-      panel.render()
-    }, anchor)
-  },
-
-  openViewSlice: (owner, viewId, sliceAnchor) => {
-    openSpecPopover({
-      owner,
-      anchor: sliceAnchor ?? null,
-      /**
-       * 切片住在哪：命名视图 ⇒ 它的 `filter`；默认看法（`''`）⇒ 拥有者的
-       * `defaultFilter`。两处同一件事，判据是「此刻激活的是哪张视图」。
-       */
-      spec: () => ({
-        where:
-          viewId === ''
-            ? (owners.read(owner)?.defaultFilter ?? { any: [] })
-            : (owners.read(owner)?.views.find((v) => v.id === viewId)?.filter ?? { any: [] }),
-      }),
-      /**
-       * 覆盖率分母＝这个拥有者显示的那批块（children 现读；query 现算）。
-       * ⚠️ **不收草稿批次**：切片编辑的是筛选，批次按 187 D4 同款口径——筛选生效后不缩，
-       * 否则摘掉一颗条件、字段下拉的覆盖率跟着变。
-       */
-      coverage: (_batch) => {
-        const d = owners.read(owner)
-        if (!d) return undefined
-        const src = sourceOfOwner(owner, d, owner.kind === 'block' ? (blocks.find(owner.blockId) ?? undefined) : undefined)
-        const records =
-          src.kind === 'children'
-            ? childrenRecords(src.blockId, kb)
-            : src.kind === 'query'
-              ? resolveRows(evaluateQuerySpec(src.spec, kb, {}), kb)
-              : []
-        return fieldCoverageOf(records)
-      },
-      showOptions: false,
-      onApply: (spec) => {
-        void registry.invoke('core.view/set-filter', { owner, viewId, filter: filterOfSpec(spec) }, 'menu')
-        layers.closePopover()
-      },
-    })
-  },
-
-  /**
-   * **条件树（弹层版）**：内联树之外的第二个入口（命令面／投影窗口）。
-   *
-   * 它和正文里那棵树是**同一个组件**，不是第二套表单——草稿改在本地、点「应用」才写一次，
-   * 边打字边写会把 ⌘Z 变成「一个字一步」。
-   */
-  openQueryBuilder: (owner) => {
-    const data = owners.read(owner)
-    if (!data?.query) {
-      app.toast(t('ui.query.noSpec'), 'warn')
-      return
-    }
-    const anchor =
-      owner.kind === 'block' ? (app.ed.blockEl(owner.blockId)?.getBoundingClientRect() ?? null) : app.ed.caretRect()
-    openSpecPopover({
-      owner,
-      anchor,
-      spec: () => owners.read(owner)?.query ?? { where: { any: [] } },
-      /** 覆盖率分母＝草稿已圈出的那批块（树递过来；一条完整的都没有 ⇒ undefined ⇒ 全量） */
-      coverage: (batch) => fieldCoverageOf(resolveRows(evaluateQuerySpec(batch, kb, {}), kb)),
-      onApply: (spec) => {
-        void registry.invoke('core.query/set-spec', { owner, spec }, 'builder')
-        layers.closePopover()
-      },
-    })
-  },
+  /* —— 视图/查询/配置菜单族住 `wiring/view-menus.ts`：spread 同一组方法 —— */
+  ...viewMenus,
 
   /* ---- 行内资产：入口（粘贴/选文件）与异步入库 ---- */
   /**
@@ -1770,133 +1267,10 @@ const app: App = {
    */
   openExternal: (url) => assets.openExternalUrl(url),
 
-  /**
-   * **插入外链的输入框**（斜杠菜单／⌘K ⇒ 命令不带 `url` ⇒ 走这里）。
-   *
-   * 与「选图片」同一条理由：要跟用户要**一句话**，而命令 handler 不许碰 DOM。
-   */
-  showLinkComposer: () => {
-    layers.openPopover(
-      (host) =>
-        renderLinkComposer(host, {
-          // 仍然走命令面：插入是写动作，撤销/落盘/审计都在那条路上
-          insert: (url, text) => {
-            layers.closePopover()
-            void registry.invoke('core.editor/insert-link', { url, text }, 'popover', uiCtx())
-          },
-          toast: (text, kind) => app.toast(text, kind),
-        }),
-      ed.caretRect(),
-    )
-  },
-
-  /**
-   * 标签选择器：**显示层级**（`#演员 · 属于 #人物、#艺术家`）。
-   *
-   * 这是「`#` 补全」当前的产品形态：从列表选一个已有标签插边（正文里敲 `#` 自动成边仍未做）。
-   * 层级只帮人认位置，不参与消歧（地址唯一）。
-   *
-   * 候选与浮层都交给 `app/retrieval/name-choice.ts`：标签表与边图邻接表在**打开这一刻**
-   * 建一次，输入只做本地过滤（不再每行重建一遍邻接表）。
-   */
-  /**
-   * **子块行内属性的选择器**（块菜单「子块行内属性…」的落点）：多选清单＝
-   * 引擎两项＋全部属性定义；勾选即写父块的 `_childProps`（keepOpen，逐项一次撤销）。
-   */
-  showChildPropsPicker: (blockId) => {
-    const parent = kb.get(blockId)
-    if (!parent) return
-    const current = new Set(childDisplayProps(parent))
-    const rows = () => {
-      const all = [
-        ...kb.propDefs().map((d) => ({ id: d.id, label: propLabel(d) || blockLabel(d, kbGet) })),
-        ...enginePropDefs().map((d) => ({ id: d.id, label: propLabel(d) })),
-      ]
-      all.sort((x, y) => x.label.localeCompare(y.label, 'zh'))
-      return all.map((it) => ({
-        id: `childprop/${it.id}`,
-        label: it.label,
-        keyHint: current.has(it.id) ? '✓' : undefined,
-      }))
-    }
-    layers.openMenu({
-      rows: rows(),
-      anchor: ed.caretRect(),
-      // 标签块上的声明对**所有成员**的子块生效（解析链含标签）；普通块只对自己的子块
-      title: t(hasList(parent, 'tag') ? 'menu.label.childPropsTag' : 'menu.label.childProps'),
-      searchable: true,
-      focusSearch: true,
-      keepOpen: true,
-      onPick: (row) => {
-        const propId = String(row.id).slice('childprop/'.length)
-        const on = !current.has(propId)
-        if (on) current.add(propId)
-        else current.delete(propId)
-        void registry.invoke('core.props/set-child-props', { blockId, propId, on }, 'menu', uiCtx())
-        layers.setRows(rows())
-      },
-    })
-  },
-
-  showTagPicker: () => {
-    openTagChoice({
-      layers,
-      forest: ws.blocks,
-      anchor: ed.caretRect(),
-      title: t('ui.tagPicker.title'),
-      emptyText: t('ui.tagPicker.typeToCreate'),
-      onPick: (pick) => {
-        if (pick.kind === 'create') {
-          app.insertTag(pick.name)
-          return
-        }
-        // 插入的是**地址**（全名）：`insertTag` 走 findByAlias，叶子在 `A/B` 上解析不到。
-        void registry.invoke('core.editor/insert-tag', { tag: pick.name }, 'menu', uiCtx())
-      },
-    })
-  },
-
   addBlockRole: (blockId, role) => addBlockRole(blockId, role),
   removeBlockRole: (blockId, role) => removeBlockRole(blockId, role),
   setBlockColor: (blockId, color) => setBlockColor(blockId, color),
   setBlockIcon: (blockId, icon) => setBlockIcon(blockId, icon),
-  /**
-   * 删除标签块。与「取消标签」是**两条轴**：取消只摘 `tag` 露面位（块与内容都还在），
-   * 删除连块带子树一起软删（回收站可恢复）。
-   *
-   * **不要求「先把引用摘干净」**：归属是一格标签 id，目标不在了读路径直接跳过
-   * （`resolveTagIds`），恢复标签时旧归属自动接回 —— 这是软删 ＋ 同地址复活的一部分。
-   * 但**用着它的时候要明说**：删完这些块上的标签会消失（与「取消标签」同一份确认形状），
-   * 否则用户只会看到一堆 chip 一起没了。
-   */
-  deleteTag: (blockId) => {
-    const b = findInForest(ws.blocks, blockId)
-    if (!b || !hasList(b, 'tag')) return false
-    const members = tagMemberIds(b.id, ws.blocks).size
-    const declarations = declaredFieldIds(b).length
-    const drop = (): boolean => {
-      dropIdentity(pageDeps, b.id)
-      app.toast(t('ui.toast.tagDeleted'))
-      return true
-    }
-    // B 档条件确认：只有它还连着成员/声明才问——叶子标签没有任何连带，直接删。
-    // 与删页/删天同一个会话确认框（danger 红钮），不再用「菜单里嵌一行继续」的形状。
-    if (members === 0 && declarations === 0) return drop()
-    const body =
-      members > 0 && declarations > 0
-        ? t('ui.confirm.deleteTagBoth', { members: String(members), decls: String(declarations) })
-        : members > 0
-          ? t('ui.confirm.deleteTagMembers', { count: String(members) })
-          : t('ui.confirm.deleteTagDecls', { decls: String(declarations) })
-    layers.confirm({
-      title: t('ui.confirm.deleteTagTitle', { tag: blockName(b) }),
-      body,
-      confirmLabel: t('ui.confirm.delete'),
-      danger: true,
-      onConfirm: () => drop(),
-    })
-    return true
-  },
   openBlockConfig: (blockId, opts) => panels.openBlockConfig(blockId, opts),
   openPropertiesDrawer: (blockId, focusPropId) => panels.openPropertiesDrawer(blockId, focusPropId),
   setBlockType: (blockId, typeId) => applyBlockType(blockId, typeId),
@@ -2587,7 +1961,7 @@ function viewEvents(
         onPick: (row) => {
           if (row.id === 'appearance-views') {
             const embed = appearanceHost ? blocks.find(appearanceHost) : undefined
-            if (embed) openEmbedViewMenu(embed)
+            if (embed) viewMenus.openEmbedViewMenu(embed)
             return
           }
           // **露面行上的「删除块」＝移除这一次露面**：这一行的光标块是源，
