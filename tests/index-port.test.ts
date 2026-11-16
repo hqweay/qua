@@ -533,3 +533,28 @@ test('applyOps：只有指向边变化 ⇒ 其它表是同一个引用（真的�
   assert.deepEqual(tagMemberIdsOf(next, 't1').sort(), beforeMembers, '标签成员不变（内容变了不碰 tag 边）')
   assert.deepEqual(incomingIds(next, 't2'), ['c'], '新边要算进来')
 })
+
+/* ------------------------------------------------------------ inboundRefCount */
+
+/**
+ * **反链总数**：检索候选行上的权威信号（同一段字出现在几块，被引用得多的是
+ * 「大家都在指的那块」）。口径与 `incomingCount` 一致——只认引用边、标签归属不混入；
+ * 全部来源加总。钉三件：多源加总、同源多处各算一次、`tag` 边不算。
+ */
+import { inboundRefCount } from '../src/core/index.ts'
+
+test('反链总数：多源多处加总；标签边不算', () => {
+  const target = b('t', '目标')
+  const a = withRefs(b('a', '甲'), ref('r1', 't'), ref('r2', 't'))
+  const c = withRefs(b('c', '丙'), ref('r3', 't'))
+  const tagger = b('g', '打标签的', { props: { _tags: ['t'] } })
+  const idx = rebuild([target, a, c, tagger])
+  // 甲 2 处 ＋ 丙 1 处 ＝ 3；`_tags` 是归属（tag 边），不进「引用」
+  assert.equal(inboundRefCount(idx, 't'), 3)
+})
+
+test('反链总数：没有入向边 ⇒ 0；指向不存在目标不炸', () => {
+  const idx = rebuild([b('a', '甲')])
+  assert.equal(inboundRefCount(idx, 'a'), 0)
+  assert.equal(inboundRefCount(idx, 'ghost'), 0)
+})

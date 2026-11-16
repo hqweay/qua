@@ -821,6 +821,21 @@ export function incomingCount(
   return n
 }
 
+/**
+ * 指向目标**总共几处**（全部来源加总；口径同 `incomingCount`——只认引用边，
+ * 标签归属不混进来）。反链卡的「按根聚合」各有分工：那个回答「谁引用我」，
+ * 这个只回答「被引用得多不多」——检索候选行上区分「同一段字出现在几块」时的
+ * 那个权威信号。O(这一块自己的边数)，查表不遍历森林。
+ */
+export function inboundRefCount(index: Index, targetId: string): number {
+  let n = 0
+  for (const e of index.relations.get(targetId) ?? []) {
+    if (!(REFERENCE_KINDS as readonly RelationKind[]).includes(e.kind)) continue
+    n += e.count ?? 1
+  }
+  return n
+}
+
 /** 谁打了这个标签 —— 「标签的成员列表」（只认 `tag` 边，不认正文里的 `#名` 提及） */
 export function tagMemberIdsOf(index: Index, tagId: string): string[] {
   const out: string[] = []

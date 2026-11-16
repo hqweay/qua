@@ -1298,6 +1298,7 @@ export const MSG = {
   'ui.selRef.newKey': '↵ 页 · ⌥↵ 块',
   'ui.retrieval.mentionTitle': '页与块 · 继续打字可过滤',
   'ui.retrieval.mentionEmpty': '没有匹配的页或块',
+  'ui.retrieval.refCount': '{n} 处引用',
   'ui.refPicker.empty': '没有可引用的页或标签',
   'ui.refPicker.blocks': '{count} 块',
 

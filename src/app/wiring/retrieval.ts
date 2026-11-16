@@ -12,7 +12,7 @@ import { createTriggers, memberRows, type MemberTagRef, type TriggerDeps } from 
 import { selectionRefRows } from '../../app/retrieval/selection-ref-rows.ts'
 import { resolveBindings } from '../../core/infra/bindings.ts'
 import { type MenuRequest, type Registry } from '../../core/commands/index.ts'
-import { type ColorAxis, type CtxKeys, type TriggerChar } from '../../core/index.ts'
+import { inboundRefCount, type ColorAxis, type CtxKeys, type TriggerChar } from '../../core/index.ts'
 import { Layers } from '../../ui/overlay/layers.ts'
 import type { BlockEditor } from '../../view/editor/editor.ts'
 import type { Prefs, Workspace } from '../../core/infra/workspace.ts'
@@ -68,6 +68,8 @@ const triggerDeps: TriggerDeps = {
   newPageAltHint: t('ui.retrieval.newPageAlt', { key: isMac() ? '⌥↵' : 'Alt+↵' }),
   // `@` 候选排除「正在打字的这一块」：它自己的正文含着查询词，点它＝引用自己
   selfBlockId: () => getEd().caretBlock() ?? getEd().sel?.aBlock ?? null,
+  // 块行的反链数：主编辑器的 store 即共享关系索引，查表 O(这一块的边数)
+  refCount: (id) => inboundRefCount(getEd().store.index, id),
 }
 
 const triggers = createTriggers(triggerDeps)

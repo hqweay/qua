@@ -64,6 +64,12 @@ export interface TriggerDeps {
    * 而点它等于「插一枚指向自己的引用」。这不是可引用的目标。
    */
   selfBlockId: () => string | null
+  /**
+   * 一块被引用的总次数（反链口径：只数引用边）。块行的出处旁用它当权威信号——
+   * 同一段字可能出现在几块里，被引用得多的是「大家都在指的那块」。
+   * 提供者是装配层传的（走关系索引查表）；源自己不认得索引长什么样。
+   */
+  refCount: (blockId: string) => number
 }
 
 export interface Trigger {
@@ -231,10 +237,14 @@ function mentionRows(query: string, deps: TriggerDeps): Row[] {
     if (blocks.length >= MENTION_CAP) return
     // 来源根（块住在哪个顶层根）作为提示：同一段字可能出现在几处，用户要能分清
     const root = ctx.path[0]
+    const rootName = root && root.id !== b.id && hasList(root, 'page') ? displayNameOf(root) : ''
+    // 被引用的次数缀在出处旁（0 次不占位）：区分「同一段字出现在几块」
+    const refs = deps.refCount(b.id)
+    const hint = refs > 0 ? [rootName, t('ui.retrieval.refCount', { n: refs })].filter(Boolean).join(' · ') : rootName
     blocks.push({
       id: `retrieval/block/${b.id}`,
       label: snippet(text),
-      hint: root && root.id !== b.id && hasList(root, 'page') ? displayNameOf(root) : '',
+      hint,
       icon: 'lucide:list-tree',
       group: 'retrieval/2-block',
       pick: { kind: 'block', id: b.id, name: snippet(text) },
