@@ -1961,8 +1961,9 @@
    时，读者分不清哪一行还是正文、哪一行已经是面板的身子了。
    ⚠️ 间距仍归容器：块自己的 padding/margin 不变，这里是面板自己的内边距。
 
-   **对齐要跟着正文的竖线走**：卡片外缘落在块标列（`--ui-blk-gutter`）——
+   **对齐要跟着正文的竖线走**：左外缘落在块标列（`--ui-blk-gutter`）——
    不然卡片独自凸在文档左缘，页面上没有任何元素共享那条边，看起来就是「没对齐」。
+   右外缘落在正文换行缘（editor 内容右缘，见下）。
    **内容边要落回深度 0 的文本列**（外缘 12 ＋ 内缩 20 ＝ 32px）：tab 条与抬头是文字
    chrome，文字只跟文本列同线；取温和档的话内容边会停在 22px——那是 bullet 的圆心，
    不是任何一条文本列，面板就自成了一条新列。
@@ -1977,7 +1978,10 @@
    两个用途共用同一段空白）。 */
 .mount {
   margin-top: var(--ui-gap-6);
-  margin-inline: var(--ui-blk-gutter);
+  /* 左缘落在块标列（见上），右缘**不缩**：正文换行在 editor 内容右缘（.blk 无右内距），
+     卡片若也内缩，正文就比卡片右缘多出一截——读者把面板当这一区的容器脸，
+     正文越过它读作「溢出」。左右各贴各的竖线，不对称是对的。 */
+  margin-inline: var(--ui-blk-gutter) 0;
   padding: var(--ui-gap-4);
   background: var(--ui-surface-sunken);
   border: 1px solid var(--ui-border-subtle);
