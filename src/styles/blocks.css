@@ -1963,6 +1963,9 @@
 
    **对齐要跟着正文的竖线走**：卡片外缘落在块标列（`--ui-blk-gutter`）——
    不然卡片独自凸在文档左缘，页面上没有任何元素共享那条边，看起来就是「没对齐」。
+   **内容边要落回深度 0 的文本列**（外缘 12 ＋ 内缩 20 ＝ 32px）：tab 条与抬头是文字
+   chrome，文字只跟文本列同线；取温和档的话内容边会停在 22px——那是 bullet 的圆心，
+   不是任何一条文本列，面板就自成了一条新列。
    内边距取温和档：body 里住着表格这类宽视图，内缩的每一像素都从它的可用宽度里扣，
    宽度不足时表格会整台降级成紧凑形态。
 
@@ -1980,6 +1983,11 @@
   border: 1px solid var(--ui-border-subtle);
   border-radius: var(--ui-radius-md);
   font-size: var(--ui-fs-sm);
+}
+/* 中心段尾才有「正文竖线」可对：内容边从温和档（10px）收到文本列（12＋20＝32px）。
+   右槽卡是浮层，没有列可对，沿用基础内边距。 */
+#editor .mount {
+  padding-inline: var(--ui-marker-slot);
 }
 .mount[hidden] {
   display: none;
