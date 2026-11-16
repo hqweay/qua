@@ -55,9 +55,33 @@ export function isTagChip(n: Node): boolean {
   return n.nodeType === Node.ELEMENT_NODE && (n as HTMLElement).dataset.tagId !== undefined
 }
 
+/**
+ * 这个文本节点是不是**光标锚**的内容（`block-dom.ts` 的 `tx-caret-anchor`）。
+ * 锚里住着一个零宽空格——它给行缘光标一个真文本盒（竖线才有文字度量可取），
+ * 但对模型必须不存在。三条读路径一起扣（同 isTagChip 的纪律，缺一条就是
+ * 「看起来对、偶尔差一格」）：`nodeLen`／`offsetIn` 扣长度与偏移，`readRuns` 剥字符。
+ */
+export function isCaretAnchorText(n: Node): boolean {
+  return n.nodeType === Node.TEXT_NODE && (n.parentElement as HTMLElement | null)?.dataset?.caretAnchor === '1'
+}
+
+/** 锚文本的模型长度：扣掉锚自己那一个零宽空格（用户打进来的字照常算） */
+function anchorModelLen(text: string): number {
+  return Math.max(0, text.length - 1)
+}
+
+/** 锚文本内的 DOM 偏移 → 模型偏移：位置之前若含那个零宽空格则扣一格 */
+function anchorModelOff(text: string, off: number): number {
+  const i = text.indexOf('\u200B')
+  return i >= 0 && i < off ? off - 1 : off
+}
+
 /** DOM 子树长度：文本节点＝字符数，原子元素＝1，标签 chip＝0，其余递归 */
 export function nodeLen(n: Node): number {
-  if (n.nodeType === Node.TEXT_NODE) return (n.textContent ?? '').length
+  if (n.nodeType === Node.TEXT_NODE) {
+    const v = n.textContent ?? ''
+    return isCaretAnchorText(n) ? anchorModelLen(v) : v.length
+  }
   if (n.nodeType === Node.ELEMENT_NODE && (n as HTMLElement).dataset.atomId) return 1
   if (isTagChip(n)) return 0
   let sum = 0
@@ -71,14 +95,14 @@ export function offsetIn(root: HTMLElement, node: Node, off: number): number {
   const walk = (n: Node): boolean => {
     if (n === node) {
       if (n.nodeType === Node.TEXT_NODE) {
-        count += off
+        count += isCaretAnchorText(n) ? anchorModelOff(n.textContent ?? '', off) : off
         return true
       }
       for (let i = 0; i < off; i++) count += nodeLen(n.childNodes[i]!)
       return true
     }
     if (n.nodeType === Node.TEXT_NODE) {
-      count += (n.textContent ?? '').length
+      count += nodeLen(n)
       return false
     }
     if (n.nodeType === Node.ELEMENT_NODE && (n as HTMLElement).dataset.atomId) {
@@ -119,7 +143,9 @@ export function readRuns(tx: HTMLElement, prev: readonly Run[]): Run[] {
   const walk = (n: Node, marks: Marks): void => {
     if (isTagChip(n)) return
     if (n.nodeType === Node.TEXT_NODE) {
-      const v = n.textContent ?? ''
+      let v = n.textContent ?? ''
+      // 锚里那一个零宽空格是光标的站位件，不进模型；打进锚里的字照常读回
+      if (isCaretAnchorText(n)) v = v.replace('\u200B', '')
       if (v !== '') segs.push({ text: v, marks: { ...marks } })
       return
     }

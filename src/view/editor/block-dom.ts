@@ -254,17 +254,25 @@ export function fillBlockText(
    * **光标锚**：正文以原子**开头或收尾**时（引用/资产是行内唯一、最前或最后内容），
    * `.tx` 里那一侧没有文本节点——光标的唯一候选位是「原子与行缘之间的元素缝隙」，
    * Chrome 不认（竖线画歪/画到行框外沿、按键前把光标挪走，退格会把整行可编辑根
-   * 摘掉，见 `posAt` 的注）。在那一侧补一个**空文本节点**给光标站位：它是真文本
-   * 节点，竖线画得出、按键落得进，但长度为 0 ⇒ 读数（`readRuns` 的空段跳过／
-   * `nodeLen`／`offsetIn`）天然把它当不存在，模型一个字节不多。把零宽字符塞进
-   * 模型是把渲染层的代价转嫁给数据，这里不这么做。
+   * 摘掉，见 `posAt` 的注）。在那一侧补一个**带零宽空格的文本节点**给光标站位。
+   *
+   * 为什么不能是空文本节点：空节点没有行内盒，插入点落进去时 Chrome 借不到文字
+   * 度量——行缘一侧退回整行行框（竖线比正文高半行），贴原子的一侧退回原子盒底缘
+   * （整体下沉到基线以下），左右形状不一致。零宽空格让锚自己成为**真文本盒**：
+   * 光标画在文字度量上，两侧同形同位（正文一致 ⇒ 行缘也一致）。
+   *
+   * 它对模型必须不存在：`nodeLen`／`offsetIn` 把它扣掉、`readRuns` 读段时剥掉
+   * （`dom-text.ts` 三条一起做，同 isTagChip 的纪律）⇒ 模型一个字节不多。
+   * 代价登记：零宽空格是 Chrome 的可遍历字符——向右穿过它多吃的那一步由事件层
+   * 接管吃掉（`editor-events.ts` 的 keydown 接管，连走两步）；向左与 Shift 扩选
+   * 保持原生节奏。换来的是行缘光标形状与正文一致，且行缘两侧可停留。
    * 两端各一个：只有行尾锚时，「一行只有一枚引用」的光标落行首仍然是缝隙。
    */
   const caretAnchor = (): HTMLElement => {
     const anchor = document.createElement('span')
     anchor.className = 'tx-caret-anchor'
     anchor.dataset.caretAnchor = '1'
-    anchor.appendChild(document.createTextNode(''))
+    anchor.appendChild(document.createTextNode('\u200B'))
     return anchor
   }
   if (b.content.length > 0 && b.content[0]!.t !== 'text') tx.prepend(caretAnchor())

@@ -26209,8 +26209,9 @@ await check(
     /**
      * **原子收尾行的光标锚**：正文以原子收尾时 `.tx` 里原子后没有文本节点——
      * 光标的唯一候选位是「原子与行末之间」的元素缝隙，Chrome 不认（竖线不画、
-     * 退格摘整行）。渲染层在原子后补一个**空文本节点**（`tx-caret-anchor`）：
-     * 竖线画得出、打字落得进，长度为 0 ⇒ 四条读路径天然把它当不存在，模型零污染。
+     * 退格摘整行）。渲染层在原子后补一个**带零宽空格的文本节点**（`tx-caret-anchor`）：
+     * 它是真文本盒，竖线取得到文字度量、打字落得进；零宽空格由读路径剥掉
+     * ⇒ 模型零污染。
      */
     const anchorFx = await page.evaluate(() => {
       const inv = (name, args = {}) => window.__qua.invoke(name, args)
@@ -26228,9 +26229,9 @@ await check(
     const anchorS1 = await page.evaluate((id) => {
       const row = document.querySelector(`.blk[data-block-id="${id}"]`)
       const anchor = row?.querySelector('.tx-caret-anchor')
-      return { anchorExists: Boolean(anchor), anchorIsEmptyText: anchor?.firstChild?.nodeType === 3 && anchor.firstChild.length === 0 }
+      return { anchorExists: Boolean(anchor), anchorIsZwspText: anchor?.firstChild?.nodeType === 3 && anchor.firstChild.length === 1 && anchor.firstChild.data === '\u200B' }
     }, anchorFx.sib)
-    assert(anchorS1.anchorExists && anchorS1.anchorIsEmptyText, `原子收尾行应有空文本锚：${JSON.stringify(anchorS1)}`)
+    assert(anchorS1.anchorExists && anchorS1.anchorIsZwspText, `原子收尾行应带零宽锚：${JSON.stringify(anchorS1)}`)
     // 真键盘：点击行内 → 打字应进模型（原子后），且模型里没有锚点的痕迹
     const abox = await page.evaluate((id) => {
       const row = document.querySelector(`.blk[data-block-id="${id}"] .tx`)
@@ -26252,7 +26253,7 @@ await check(
       }
     }, anchorFx.sib)
     assert(
-      // 投影只含打进去的 A（引用芯片不进投影；锚点是空文本节点，投影零痕迹）
+      // 投影只含打进去的 A（引用芯片不进投影；锚里的零宽空格被读路径剥掉，投影零痕迹）
       anchorS2.model === '"A"' && anchorS2.domText.endsWith('A'),
       `原子行打字应进模型（投影=A、DOM 末尾=A）：${JSON.stringify(anchorS2)}`,
     )
@@ -26261,6 +26262,139 @@ await check(
     return `父块勾「创建于」⇒ 子块显示；撤掉消失；标签声明 ⇒ 成员子块同样显示`
   },
 )
+
+/**
+ * T327｜**原子独占行的光标契约**：一行只有一枚行内原子时，行缘两侧的光标都落在
+ * 锚的零宽空格上——它是真文本盒，竖线取文字度量（左右同形同位），行缘可停留。
+ *
+ * 钉四件事：
+ *   · 两端各一枚锚，内容是那一个零宽空格；
+ *   · 行缘落位后选区在锚文本节点里，且该位置有真实的行内盒（空锚时代这里返回
+ *     空列表，是「竖线画歪／画到行框外」的根源）；
+ *   · 方向键穿过原子：右键一次跨到行尾缘、左键一次跨回行首缘（锚字符那一步由
+ *     编辑器 keydown 接管吃掉，没有「看不见的按键」）；行缘继续向外一次出行；
+ *   · 两缘打字进模型且投影零痕迹（读路径剥掉锚里的零宽空格）。
+ */
+await check('T327 原子独占行：两端锚是真文本盒；方向键一次跨原子、一次出行；两缘打字投影零痕迹', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  const fx = await page.evaluate(() => {
+    const inv = (name, args = {}) => window.__qua.invoke(name, args)
+    const ed = window.__qua.__editor
+    const rows = ed.rows().map((r) => r.block)
+    const h = rows.find((b) => !b.props?._date && !b.props?._query && (b.content ?? []).some((x) => x.t === 'text' && x.v.length > 2))
+    window.__qua.focusBlock(h.id, 0)
+    const sib = ed.insert.insertBlockAfter(h.id, '')
+    // 后邻块：右缘出行的落点（没有它，右缘向右无处可去是合法行为，断言会假红）
+    const nxt = ed.insert.insertBlockAfter(sib, '后邻')
+    window.__qua.focusBlock(sib, 0)
+    const pages = window.__qua.pages()
+    inv('core.editor/insert-page-ref', { pageId: pages[0].id })
+    return { sib, nxt }
+  })
+  await page.waitForTimeout(300)
+
+  const s1 = await page.evaluate((id) => {
+    const row = document.querySelector(`.blk[data-block-id="${id}"]`)
+    const anchors = [...(row?.querySelectorAll('.tx-caret-anchor') ?? [])]
+    return {
+      count: anchors.length,
+      zwsp: anchors.map((a) => a.firstChild?.nodeType === 3 && a.firstChild.length === 1 && a.firstChild.data === '\u200B'),
+    }
+  }, fx.sib)
+  assert(s1.count === 2 && s1.zwsp.every(Boolean), `原子独占行应两端各一枚零宽锚：${JSON.stringify(s1)}`)
+
+  // 行缘落位：选区在锚文本节点里，且该位置有真行内盒（竖线取文字度量的前提）
+  const sL = await page.evaluate((id) => {
+    window.__qua.focusBlock(id, 0)
+    const sel = document.getSelection()
+    const n = sel?.anchorNode
+    const inAnchor = n?.parentElement?.dataset?.caretAnchor === '1'
+    const r = document.createRange()
+    r.setStart(n, sel.anchorOffset)
+    r.collapse(true)
+    return { inAnchor, boxes: r.getClientRects().length }
+  }, fx.sib)
+  assert(sL.inAnchor && sL.boxes >= 1, `行首光标应落在锚文本盒上（有真行内盒）：${JSON.stringify(sL)}`)
+  const sR = await page.evaluate((id) => {
+    window.__qua.focusBlock(id, 1)
+    const sel = document.getSelection()
+    const n = sel?.anchorNode
+    const inAnchor = n?.parentElement?.dataset?.caretAnchor === '1'
+    const r = document.createRange()
+    r.setStart(n, sel.anchorOffset)
+    r.collapse(true)
+    return { inAnchor, boxes: r.getClientRects().length }
+  }, fx.sib)
+  assert(sR.inAnchor && sR.boxes >= 1, `行尾光标应落在锚文本盒上（有真行内盒）：${JSON.stringify(sR)}`)
+
+  // 方向键跨原子：右键一次到右锚，左键一次回左锚（keydown 接管吃掉锚字符那一步）
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), fx.sib)
+  await page.waitForTimeout(100)
+  await page.keyboard.press('ArrowRight')
+  await page.waitForTimeout(100)
+  const sCross = await page.evaluate((id) => {
+    const row = document.querySelector(`.blk[data-block-id="${id}"]`)
+    const sel = document.getSelection()
+    const anchors = [...(row?.querySelectorAll('.tx-caret-anchor') ?? [])]
+    const right = anchors[anchors.length - 1]?.firstChild ?? null
+    return { atRightEdge: sel?.anchorNode === right }
+  }, fx.sib)
+  assert(sCross.atRightEdge, `右键一次应跨过原子停在行尾缘：${JSON.stringify(sCross)}`)
+  await page.keyboard.press('ArrowLeft')
+  await page.waitForTimeout(100)
+  const sBack = await page.evaluate((id) => {
+    const row = document.querySelector(`.blk[data-block-id="${id}"]`)
+    const sel = document.getSelection()
+    const left = row?.querySelector('.tx-caret-anchor')?.firstChild ?? null
+    return { atLeftEdge: sel?.anchorNode === left }
+  }, fx.sib)
+  assert(sBack.atLeftEdge, `左键一次应跨回行首缘：${JSON.stringify(sBack)}`)
+
+  // 跨回后继续向左：从左缘（零宽空格之后）再按一次应直接出行，不再有看不见的一步
+  await page.keyboard.press('ArrowLeft')
+  await page.waitForTimeout(100)
+  const sExitL = await page.evaluate((id) => {
+    const sel = document.getSelection()
+    let n = sel?.anchorNode
+    while (n && n.nodeType === 3) n = n.parentElement
+    const bid = n?.closest?.('[data-block-id]')?.getAttribute('data-block-id') ?? null
+    return { leftBlock: bid !== id }
+  }, fx.sib)
+  assert(sExitL.leftBlock, `左缘继续向左应一次出行（无死键）：${JSON.stringify(sExitL)}`)
+  // 对称：右缘继续向右一次出行
+  await page.evaluate((id) => window.__qua.focusBlock(id, 1), fx.sib)
+  await page.waitForTimeout(100)
+  await page.keyboard.press('ArrowRight')
+  await page.waitForTimeout(100)
+  const sExitR = await page.evaluate((id) => {
+    const sel = document.getSelection()
+    let n = sel?.anchorNode
+    while (n && n.nodeType === 3) n = n.parentElement
+    const bid = n?.closest?.('[data-block-id]')?.getAttribute('data-block-id') ?? null
+    return { leftBlock: bid !== id }
+  }, fx.sib)
+  assert(sExitR.leftBlock, `右缘继续向右应一次出行（无死键）：${JSON.stringify(sExitR)}`)
+
+  // 两缘打字进模型、投影零痕迹（左缘字在原子前、右缘字在原子后）
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), fx.sib)
+  await page.waitForTimeout(100)
+  await page.keyboard.type('L')
+  await page.waitForTimeout(300)
+  const s5a = await page.evaluate((id) => window.__qua.blocks().find((x) => x.id === id)?.text, fx.sib)
+  assert(s5a === 'L', `行首打字应进模型（剥锚）：${JSON.stringify(s5a)}`)
+  await page.evaluate((id) => window.__qua.focusBlock(id, 2), fx.sib)
+  await page.waitForTimeout(100)
+  await page.keyboard.type('R')
+  await page.waitForTimeout(300)
+  const s5b = await page.evaluate((id) => window.__qua.blocks().find((x) => x.id === id)?.text, fx.sib)
+  assert(s5b === 'LR', `行尾打字应接在原子后：${JSON.stringify(s5b)}`)
+
+  await ctx.close()
+  return `原子独占行：两端锚为真文本盒；方向键一次跨原子；两缘打字投影零痕迹`
+})
 
 /**
  * T276｜**上方插入**（⌘⇧↵）：光标所在块的上一同级多一个空正文块，光标落新块块首。

@@ -140,7 +140,7 @@ import { ALLOWED_ROW_CHILDREN, EDIT_ISLAND_ATTR, isReadonlyBlock, rowHasEmbedVie
 import { ReloadPolicy } from './reload-policy.ts'
 import { spanAt, type PlainSpan } from './hit-paint.ts'
 import { AnnoHover, type AnnoHitSpan } from './anno-hover.ts'
-import { blockIdOf, isTagChip, offsetIn, readRuns, textEndOff } from './dom-text.ts'
+import { blockIdOf, isCaretAnchorText, isTagChip, offsetIn, readRuns, textEndOff } from './dom-text.ts'
 import { Drag } from "./drag.ts"
 import { EmbedBodies } from "./embed-bodies.ts"
 import { BlockSelection } from "./block-selection.ts"
@@ -1467,7 +1467,9 @@ export class BlockEditor {
       if (done || isTagChip(n)) return
       if (n.nodeType === Node.TEXT_NODE) {
         sawContent = true
-        const len = (n.textContent ?? '').length
+        // 光标锚的零宽空格不占模型格：锚只是行缘光标的站位件（0 长），
+        // 落在它上面的模型偏移 = 行缘那个位置本身
+        const len = isCaretAnchorText(n) ? 0 : (n.textContent ?? '').length
         if (acc + len >= offset) {
           target.node = n
           target.off = Math.max(0, offset - acc)

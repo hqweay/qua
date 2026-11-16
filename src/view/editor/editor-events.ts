@@ -518,6 +518,32 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     br.syncSel()
   })
 
+  /* ── 方向键跨过光标锚 ────────────────────────────────
+   * 锚里的零宽空格（`block-dom.ts`）是 Chrome 的可遍历字符：光标贴着它的一侧
+   * （零宽空格之前向右、之后向左）按键，第一步只跨过那个看不见的字符——看上去
+   * 就是按键没反应。这里接管这两种情形：按方向的意图直接吃两步（跨锚 ＋ 跨原子
+   * ／跨出行），落点仍由原生逐字符移动给出（跨块、只读行这些语义归 Chrome，
+   * 不自己算）。其余方向从锚出发本来就是干净的一步；Shift 扩选保持原生节奏。
+   */
+  on(c, 'keydown', (e: KeyboardEvent) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+    if (e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return
+    if (br.composing()) return
+    const sel = document.getSelection()
+    const n = sel?.anchorNode
+    if (!sel || sel.type !== 'Caret' || !n || n.nodeType !== Node.TEXT_NODE) return
+    if ((n as Text).nodeValue !== '\u200B') return
+    if ((n.parentElement as HTMLElement | null)?.dataset?.caretAnchor !== '1') return
+    // 贴着零宽空格内侧才接管：offset 0 向右、offset 1 向左。外侧那步原生本来就是
+    // 干净的一步（直接跨原子或跨出行）
+    const steppingOver = e.key === 'ArrowRight' ? sel.anchorOffset === 0 : sel.anchorOffset === 1
+    if (!steppingOver) return
+    e.preventDefault()
+    const dir = e.key === 'ArrowRight' ? 'forward' : 'backward'
+    sel.modify('move', dir, 'character')
+    sel.modify('move', dir, 'character')
+  })
+
   // 焦点离开编辑区时也要把选区同步一次：否则"最后一次点的地方"会丢
   on(c, 'beforeinput', (e: InputEvent) => {
     /**
