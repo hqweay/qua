@@ -77,6 +77,8 @@
 .layer-list {
   max-height: 44vh;
   overflow: auto;
+  /* 菜单体嵌在页面滚动之上：滚到边界不把滚动传给外层 */
+  overscroll-behavior: contain;
   padding: var(--ui-gap-2);
 }
 .layer-group {
@@ -367,6 +369,8 @@
   margin-top: var(--ui-gap-2);
   max-height: 46vh;
   overflow: auto;
+  /* 卡体嵌在页面滚动之上：滚到边界不把滚动传给外层 */
+  overscroll-behavior: contain;
 }
 .popover.popover-obj {
   min-width: 300px;
@@ -405,6 +409,8 @@
   max-width: 34rem;
   max-height: min(72vh, 40rem);
   overflow: auto;
+  /* 浮层整体滚、内里还有滚动件：滚到边界不把滚动传给外层 */
+  overscroll-behavior: contain;
 }
 /* `.ui-btn` 是原语：它的几何/悬停留给 `.popover button` 与原语自己，不参与复位 */
 .popover.lenspop button:not(.ui-btn) {
@@ -484,6 +490,18 @@
 .popover.lenspop .mount-derived-kind[data-active='1'] {
   color: var(--ui-text);
   background: var(--ui-accent-soft);
+}
+.popover.lenspop .vopt-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+}
+.popover.lenspop .mount-derived-sort {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.popover.lenspop .mount-derived-sortdir {
+  flex: 0 0 auto;
 }
 
 
@@ -793,6 +811,8 @@
   border-radius: var(--ui-radius-md);
   padding: var(--ui-gap-4);
   overflow: auto;
+  /* pre 嵌在 drawer-body 的滚动里：滚到边界不把滚动传给外层 */
+  overscroll-behavior: contain;
   max-height: 46vh;
   font-size: var(--ui-fs-xs);
 }
@@ -1128,6 +1148,8 @@
   max-height: 190px; /* 五行：搜索与分类都在场，滚动能到 */
   overflow-y: auto;
   overflow-x: hidden;
+  /* 网格嵌在图标选择器浮层的滚动里：滚到边界不把滚动传给外层 */
+  overscroll-behavior: contain;
   scrollbar-width: thin;
 }
 .popover .icon-picker-recent {

@@ -332,6 +332,8 @@
   flex-direction: column;
   min-height: 0;
   overflow: auto;
+  /* 两列各自滚、嵌在中心表面的滚动里：滚到边界不把滚动传给外层 */
+  overscroll-behavior: contain;
   padding-bottom: var(--ui-gap-7);
   scrollbar-gutter: stable;
 }
@@ -339,6 +341,7 @@
   min-width: 0;
   min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   /* 分隔归这一条边框：两列之间不再有第二种分隔件 */
   border-left: 1px solid var(--ui-border);
   padding: var(--ui-gap-3) var(--ui-gap-4) var(--ui-gap-7);

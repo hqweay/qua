@@ -182,6 +182,8 @@
   /* 双向都滚：容器比表窄时靠这条出横向滚动条（列宽固定 px，不会被压碎）——
      窄槽里仍是同一张表，不换形态、不挂提示文案 */
   overflow: auto;
+  /* 表嵌在页滚动里：滚到边界不把滚动传给外层 */
+  overscroll-behavior: contain;
   /* 表自己滚：不这样，长表会把整页拉长，而页面滚动时窗口化的账算不准 */
   max-height: min(60vh, 640px);
   border: 1px solid var(--ui-border-subtle);
@@ -328,6 +330,8 @@
   border-radius: var(--ui-radius-sm);
   max-height: 40vh;
   overflow-y: auto;
+  /* 编辑格嵌在表滚动里：滚到边界不把滚动传给外层 */
+  overscroll-behavior: contain;
 }
 .tv-title-text .atom-image {
   height: 1.4em;
@@ -400,6 +404,8 @@
 }
 .lt-scroll {
   overflow: auto;
+  /* 表嵌在页滚动里：滚到边界不把滚动传给外层 */
+  overscroll-behavior: contain;
   /* 表自己滚：长表不把整页拉长，横向滚动也只发生在表里 */
   max-height: min(70vh, 720px);
   border: 1px solid var(--ui-border-subtle);
@@ -1041,6 +1047,8 @@ button.queryview-chip:hover {
   flex-direction: column;
   gap: var(--ui-gap-2);
   overflow: auto;
+  /* 视图体嵌在页滚动里：滚到边界不把滚动传给外层 */
+  overscroll-behavior: contain;
 }
 .vm-note {
   margin: 0;

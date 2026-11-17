@@ -66,6 +66,8 @@
 .surface-body {
   max-height: 46vh;
   overflow: auto;
+  /* 卡体嵌在槽/页的滚动里：滚到边界不把滚动传给外层 */
+  overscroll-behavior: contain;
 }
 .surface-foot {
   padding: var(--ui-gap-2) var(--ui-gap-3);

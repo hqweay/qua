@@ -439,6 +439,8 @@ select.qt-value {
   margin: 0;
   padding: var(--ui-gap-2);
   overflow: auto;
+  /* 嵌套在浮层里：滚到边界不把滚动传给外层 */
+  overscroll-behavior: contain;
   border-radius: var(--ui-radius-sm);
   background: var(--ui-surface-sunken);
   color: var(--ui-text-secondary);
