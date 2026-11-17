@@ -325,6 +325,11 @@ export interface ViewHostEls {
   editor: HTMLElement
   /** 表格分支 */
   table: HTMLElement
+  /**
+   * 空态的主动作（「还没有条件」才有）：点击就地展开条件树。
+   * 不进装配序、由空态渲染按需挂进大纲分支的槽——挂早了会排在岛根上面。
+   */
+  emptyAdd: HTMLButtonElement
 }
 
 /**
@@ -400,6 +405,11 @@ export function createViewHostEls(): ViewHostEls {
   table.hidden = true
   body.append(editor, table)
 
+  const emptyAdd = document.createElement('button')
+  emptyAdd.type = 'button'
+  emptyAdd.className = 'queryview-empty-add'
+  emptyAdd.hidden = true
+
   root.append(head, tree, body)
   return {
     root,
@@ -418,6 +428,7 @@ export function createViewHostEls(): ViewHostEls {
     hiddenNote,
     editor,
     table,
+    emptyAdd,
   }
 }
 
@@ -532,6 +543,9 @@ export class ViewHost {
       this.deps.invoke('core.view/set-filter', { owner: this.writeOwner, viewId: this.view?.id ?? '', filter: null })
     })
     this.els.foldAll.addEventListener('click', () => this.toggleFoldAll())
+    // 空态的主动作与条件树末尾的「＋」是同一条动作：就地展开条件树（不另开命令）
+    this.els.emptyAdd.textContent = `＋ ${t('ui.query.tree.add')}`
+    this.els.emptyAdd.addEventListener('click', () => this.openTree())
     /**
      * **一台就地编辑器**：一次只编辑一处，装进被点的那一格（不是浮层）。
      *
@@ -1882,7 +1896,7 @@ export class ViewHost {
     if (src.kind !== 'query') return
     this.paintStale()
     if (!this.frozen) {
-      this.renderEmpty(t('ui.query.noSpec'))
+      this.renderEmpty(t('ui.query.noSpec'), true)
       return
     }
     const rows = resolveFrozen(this.frozen.hits, (id) => this.deps.kb.pathOf(id))
@@ -1916,14 +1930,14 @@ export class ViewHost {
        *   · 还没有条件 ⇒ 去加一条（新建的查询块一开始正是这样，不默认查全库）；
        *   · 条件里有 `$self` 但这一处没有宿主 ⇒ 换个地方看；
        *   · 有条件、只是没命中 ⇒ 这就是结果。
+       * 前两种对用户是同一个状态（都是「还没写条件」），共用一句话与同一颗主动作。
        */
-      const why = !spec
+      const incomplete = !spec || isEmptyWhere(spec.where)
+      const why = incomplete
         ? t('ui.query.noSpec')
-        : isEmptyWhere(spec.where)
-          ? t('ui.query.noCondition')
-          : usesSelf(spec.where)
-            ? t('ui.mount.needsHost')
-            : t('ui.query.empty')
+        : usesSelf(spec.where)
+          ? t('ui.mount.needsHost')
+          : t('ui.query.empty')
       // 空结果也保留本视图的折叠态：它记的是「哪些行收着」，不是「这次有几行」
       this.outline?.ed?.loadPage({ roots: [], folded: this.outline.ed.doc.folded })
       const host = this.outlineHost
@@ -1931,6 +1945,7 @@ export class ViewHost {
         host.dataset.empty = '1'
         host.dataset.emptyText = why
       }
+      this.paintEmptyAction(incomplete)
       return
     }
     if (this.outlineHost) delete this.outlineHost.dataset.empty
@@ -2010,7 +2025,7 @@ export class ViewHost {
     this.els.foldAll.textContent = this.anyTopExpanded() ? t('ui.query.foldAll') : t('ui.query.unfoldAll')
   }
 
-  private renderEmpty(text: string): void {
+  private renderEmpty(text: string, canAdd = false): void {
     this.expanded = new Set()
     this.covers = new Map()
     // 空态没有行可折：顶层行清空，按钮随之隐藏
@@ -2030,5 +2045,18 @@ export class ViewHost {
       host.dataset.empty = '1'
       host.dataset.emptyText = text
     }
+    this.paintEmptyAction(canAdd)
+  }
+
+  /**
+   * 空态的主动作（「还没有条件」句下的那颗）：点击就地展开条件树。
+   * 只有树开得了的面才显示——开不了树的面（投影／派生栏）挂一颗点了没反应的按钮，
+   * 比不显示更糟。「没有匹配」「没有宿主」没有缺步可补，不显示；
+   * 改条件的入口在抬头已有的条件 chip 上。
+   */
+  private paintEmptyAction(canAdd: boolean): void {
+    const show = canAdd && this.treeAllowed()
+    this.els.emptyAdd.hidden = !show
+    if (show) this.els.editor.appendChild(this.els.emptyAdd)
   }
 }

@@ -621,7 +621,6 @@ export const MSG = {
   'ui.query.stale': '结果可能已过期',
   'ui.query.dropped': '有 {count} 条已不再匹配，已从结果中移除',
   'ui.query.noSpec': '这个查询还没有条件',
-  'ui.query.noCondition': '还没有条件：加一条条件（或在筛选里挑一颗）才会出现结果',
   'ui.query.empty': '没有匹配的块',
   'ui.query.badJson': '条件不是合法的 JSON（文本已保留，改好再点应用）',
   /* 构建器（条件行 ＋ 一层组合 ＋ 范围/上限/顺序 ＋ JSON） */

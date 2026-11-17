@@ -1795,6 +1795,23 @@
   color: var(--ui-text-tertiary);
   font-size: var(--ui-fs-sm);
 }
+/* 空态的主动作：只有「还没有条件」且树开得了的面才出现，与条件树末尾的「＋」同一套形状 */
+.queryview-empty-add {
+  margin-top: var(--ui-gap-2);
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+  cursor: pointer;
+}
+.queryview-empty-add:hover {
+  color: var(--ui-accent);
+}
+.queryview-empty-add[hidden] {
+  display: none;
+}
 
 /* ---------------------------------------------------------- 正文里的查询体（inline）
 

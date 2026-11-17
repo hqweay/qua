@@ -27103,12 +27103,21 @@ await check('T281 快速筛选：新建查询默认不查询；查询块的漏�
       where: JSON.stringify(b?.props?._query?.where ?? null),
       rows: document.querySelectorAll('.queryview-outline .blk').length,
       emptyText: document.querySelector('.queryview [data-empty-text]')?.dataset.emptyText ?? '',
+      addBtn: !document.querySelector('.queryview-empty-add')?.hidden,
     }
   }, bid)
   assert(bid !== '', '前置：查询块建出来了')
   assert(born.where === '{"any":[]}', `新建查询的条件应为 {any:[]}（默认不查询）：${born.where}`)
   assert(born.rows === 0, `新建查询一条都不查：${born.rows}`)
   assert(born.emptyText.includes('还没有条件'), `空态要说「还没有条件」：${born.emptyText}`)
+  assert(born.addBtn, '空态给主动作（加一条条件）：下一步不是猜出来的，是递到手边的')
+  await page.locator('.queryview-empty-add').first().click()
+  await page.waitForTimeout(200)
+  const treeOpen = await page.evaluate(() => {
+    const tree = document.querySelector('.queryview-tree')
+    return !!tree && !tree.hidden
+  })
+  assert(treeOpen, '空态主动作点开的是条件树（与抬头摘要 chip 同一条动作）')
 
   // ② 给一个真条件，再用漏斗筛一刀：切片落 _defaultFilter，基础条件不动
   await page.evaluate((id) => {
