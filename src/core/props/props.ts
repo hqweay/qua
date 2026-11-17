@@ -31,6 +31,7 @@ import {
   type BlockProps,
   type ClosureState,
 } from '../model/model.ts'
+import { BELONGS_TO_PROP, isBelongsToRefs } from '../relations/hierarchy.ts'
 import { displayNameOf } from '../identity/alias.ts'
 import { plainText, textRuns, type RefRun } from '../model/runs.ts'
 import { walkForest } from '../model/walk.ts'
@@ -1128,6 +1129,7 @@ export const QUERYABLE_SYSTEM_PROPS: readonly string[] = [
   '_type',
   ALIASES_PROP,
   TAGS_PROP,
+  BELONGS_TO_PROP,
   ENGINE_CREATED,
   ENGINE_MODIFIED,
 ]
@@ -1162,6 +1164,7 @@ export function systemQueryFieldLabel(propId: string): string | undefined {
   if (propId === '_type') return t('ui.query.sysField.type')
   if (propId === ALIASES_PROP) return t('ui.query.sysField.aliases')
   if (propId === TAGS_PROP) return t('ui.query.sysField.tags')
+  if (propId === BELONGS_TO_PROP) return t('ui.query.sysField.belongsTo')
   if (propId === ENGINE_CREATED) return t('ui.props.createdAt')
   if (propId === ENGINE_MODIFIED) return t('ui.props.modifiedAt')
   return undefined
@@ -1181,6 +1184,7 @@ export function systemQueryFieldLabel(propId: string): string | undefined {
  * | `_type` | 恒在（`blockTypeOf`：没键＝默认类型） | 类型 id（未知 id 合法，读侧降级） |
  * | `_aliases` | `aliasesOf(b)` 非空 | 地址数组（`eq` 按任一元素判） |
  * | `_tags` | 归属边里**有活着的标签**（屏幕画得出来的那些） | 标签块 id 数组 |
+ * | `_belongsTo` | 边数组**非空**（悬空上级也算——归属面板把悬空画成待清理的 chip） | 上级 id 数组 |
  * | `core/created`／`core/modified` | 必填字段，恒在 | 墙钟毫秒 |
  */
 function readSystemField(block: Block, propId: string, table: FieldTable): FieldRead | undefined {
@@ -1210,6 +1214,13 @@ function readSystemField(block: Block, propId: string, table: FieldTable): Field
   }
   if (propId === TAGS_PROP) {
     const ids = tagIdsOf(block).filter((id) => table.liveTags.has(id))
+    return ids.length > 0 ? { declared: true, value: ids } : { declared: false, value: undefined }
+  }
+  if (propId === BELONGS_TO_PROP) {
+    // 与 _tags 相反的理由：悬空上级在归属面板上是看得见的（待清理 chip），
+    // 过滤成「只有活的」反而让 exists 比屏幕宽。contains 按任一元素判，
+    // 成员反查只问「数组里有没有宿主 id」，别的上级悬不悬不影响答案。
+    const ids = isBelongsToRefs(block.props?.[BELONGS_TO_PROP]) ? (block.props![BELONGS_TO_PROP] as string[]) : []
     return ids.length > 0 ? { declared: true, value: ids } : { declared: false, value: undefined }
   }
   if (isEngineProp(propId)) return { declared: true, value: enginePropValue(block, propId) }

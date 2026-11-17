@@ -563,7 +563,7 @@ export const MSG = {
   'ui.mount.empty.created': '这一天没有新建的页或标签',
   'ui.mount.empty.notes': '还没有备注',
   'ui.mount.empty.filtered': '没有符合筛选的块',
-  'ui.mount.empty.members': '还没有块打着这个标签',
+  'ui.mount.empty.members': '还没有块归在这里',
   'ui.mount.empty.same': '没有别的块与它共享标签',
   /** 「同类」这一栏的**维度不存在**（这一块没有 `_tags`）——与「有标签但没同类的块」分开说 */
   'ui.mount.empty.sameNoTags': '这一块还没有标签',
@@ -601,7 +601,7 @@ export const MSG = {
   'ui.mount.why.refs': '正文、属性或露面指向这一块',
   'ui.mount.why.created': '创建于这一天，且是页或标签',
   'ui.mount.why.notes': '备注锚在这一块的某段字上',
-  'ui.mount.why.members': '打着这一块或它的下级标签',
+  'ui.mount.why.members': '打着这一块或它的下级标签，或声明了属于它',
   'ui.mount.why.same': '与这一块有共同标签',
   'ui.mount.why.mentions': '正文含这一块，且没有指向它',
   'ui.mount.kind.all': '全部',
@@ -648,6 +648,7 @@ export const MSG = {
   'ui.query.sysField.type': '块类型',
   'ui.query.sysField.aliases': '别名',
   'ui.query.sysField.tags': '标签',
+  'ui.query.sysField.belongsTo': '归属上级',
   'ui.query.builder.textHint': '正文包含',
   // 条件 chip 里的人话（某一天那一行）
   'ui.query.row.today': '今天',

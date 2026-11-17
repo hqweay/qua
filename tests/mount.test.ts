@@ -332,7 +332,53 @@ test('「成员」沿下级标签展开（算作）：#人物 的成员含只打
   // 归属边：演员 归在 人物 下（任何块都能配，这条边住在子块上）
   const 演员WithEdge = { ...演员, props: { ...(演员.props ?? {}), _belongsTo: [人物.id] } }
   const members = derivedSpecOf(人物, [人物, 演员WithEdge], 'members')
-  assert.deepEqual(members, { where: { any: [{ tag: 人物.id }, { tag: 演员.id }] } })
+  // 三支并存：#人物 的成员 ∪ #演员 的成员（算作）∪ 声明属于人物的块（演员自己也是一行——
+  // 它确实归在人物名下，栏面如实显示；层级展开是成员栏的读法，不是要把边藏掉）
+  assert.deepEqual(members, {
+    where: {
+      any: [
+        { tag: 人物.id },
+        { tag: 演员.id },
+        { prop: { id: '_belongsTo', contains: 人物.id } },
+      ],
+    },
+  })
+})
+
+/**
+ * 「成员」的两个来源在**消费时一元**：不管边住在 `_tags` 还是 `_belongsTo`，
+ * 「谁归在我名下」都是同一个问题，栏面不区分——差别留在正向的配置段里。
+ */
+test('页也挂成员栏：条件＝归属边反查（通用属性槽，不造专用原子）', () => {
+  const page = b('p', 'blog', { props: { _aliases: ['blog'], _lists: ['page'] } })
+  // 有人声明「属于 blog」：边住在声明者身上，宿主身上一个字节都不用动
+  const post = b('post', '图片', { props: { _belongsTo: [page.id] } })
+  assert.deepEqual(
+    SOURCES(derivedEntriesOf(page)),
+    ['members', 'refs', 'notes', 'same', 'mentions'],
+    '页的 tab 条与标签块同款，成员第一',
+  )
+  assert.deepEqual(derivedSpecOf(page, [page, post], 'members'), {
+    where: { prop: { id: '_belongsTo', contains: page.id } },
+  })
+  // 没人声明 ⇒ 维度不存在（tab 仍在，body 说原因）
+  assert.equal(derivedSpecOf(page, [page], 'members'), null)
+})
+
+test('成员的两个来源合并：标签成员 ∪ 归属边反查，一个 any 里各答各的', () => {
+  const tag = mkTagBlock('blog')
+  const tagged = b('t1', '打了标', { props: { _tags: [tag.id] } })
+  const filed = b('f1', '声明属于', { props: { _belongsTo: [tag.id] } })
+  assert.deepEqual(derivedSpecOf(tag, [tag, tagged, filed], 'members'), {
+    where: {
+      any: [
+        { tag: tag.id },
+        { prop: { id: '_belongsTo', contains: tag.id } },
+      ],
+    },
+  })
+  // 打标不落归属（两族边分开写）：只有打标的块不会进归属分支，反之亦然
+  assert.deepEqual(derivedSpecOf(tag, [tag, tagged], 'members'), { where: { tag: tag.id } })
 })
 
 /* ------------------------------------------------------------ 派生栏的记录 */

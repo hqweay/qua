@@ -37,6 +37,7 @@ import { walkForest } from '../model/walk.ts'
 import type { QueryHit, QueryNode, QuerySpec, SortKey } from '../query/query.ts'
 import { canonicalNode, isEmptyWhere, isQueryNode, isQuerySpec } from '../query/query.ts'
 import { isRefKind, REFERENCE_KINDS, type RefKind } from '../relations/relations.ts'
+import { BELONGS_TO_PROP } from '../relations/hierarchy.ts'
 import { mentionSnippet, mentionSpotsOf } from '../relations/mention.ts'
 import { t } from '../infra/msg.ts'
 import {
@@ -345,10 +346,14 @@ const SPEC_MENTIONS: QuerySpec = { where: { all: [{ text: '$self' }, { not: { re
  * 不是把这一栏藏掉（否则「重排之后才出现的栏」就没有落点）。
  *
  * 集合：
- *   · 标签块：成员 → 引用 → 备注 → 同类 → 提及；
+ *   · 标签块／页：成员 → 引用 → 备注 → （页）同类 → 提及；
  *   · 普通块：引用 → 备注 → 同类 → 提及；
  *   · 日记：引用 → 当日新建 → 备注 → 提及（日期身份不参与标签归属，不挂一个永远空的「同类」；
  *     「当日新建」是复盘那个问题——「这一天我新开了什么」——的落点）。
+ *
+ * 「成员」给页也挂：归属选人（候选＝页＋标签）让页当上级，页的成员面就在这一栏；
+ * 标签／页都是宿主类型信号， tab 稳定性判据不破。内容块当上级时维度照样算
+ * （memberSpecOf 读数据），只是没有 tab 落点——出现真实使用再放宽这里。
  *
  * 这是**规范序**（没拖过时的默认）。拖过的顺序住 `_mounts`（宿主那一格 tab 列表）：
  * 派生栏也是那条列表里的项，见 `mountEntriesOf` 的合并规则。
@@ -357,7 +362,8 @@ export function derivedEntriesOf(host: Block): Extract<MountEntry, { kind: 'deri
   const out: Extract<MountEntry, { kind: 'derived' }>[] = []
   // 属性定义页的**主视图**：谁在用这一条声明（含声明了没填的块）。全 kind 通用
   if (isPropDef(host)) out.push({ id: derivedTabId('usedBy'), kind: 'derived', source: 'usedBy' })
-  if (hasList(host, 'tag')) out.push({ id: derivedTabId('members'), kind: 'derived', source: 'members' })
+  if (hasList(host, 'tag') || hasList(host, 'page'))
+    out.push({ id: derivedTabId('members'), kind: 'derived', source: 'members' })
   out.push({ id: derivedTabId('refs'), kind: 'derived', source: 'refs' })
   if (isJournal(host)) out.push({ id: derivedTabId('created'), kind: 'derived', source: 'created' })
   out.push({ id: derivedTabId('notes'), kind: 'derived', source: 'notes' })
@@ -393,16 +399,26 @@ export function derivedSpecOf(host: Block, forest: readonly Block[], source: Der
 }
 
 /**
- * 「成员」＝ 标签块自己的成员（含下级标签，口径只在 `core/tag-tree.ts` 一份）。
+ * 「成员」＝ 归在宿主名下的块。两个来源，消费时一元（「谁归在我这里」是一个问题）：
+ *   · **标签成员**：宿主与它的下级标签（`descendantTagIds` 含自己）被打了标——
+ *     口径只在 `core/tag-tree.ts` 一份。标签块没有 `_tags`，`{tag:'$self'}` 对它
+ *     永远是空集，所以这一支用下级标签的 id 现算条件。
+ *   · **归属边反查**：谁声明了「属于这一块」。走通用属性槽（`_belongsTo` 已入
+ *     系统槽白名单），不造专用原子——`contains` 对 id 数组按任一元素判，id 之间
+ *     无前缀关系，子串不会误命中。端点放开后内容块／页都能当上级，这一支让
+ *     标签之外的身份也有成员面。
  *
- * 标签块没有 `_tags`，`{tag:'$self'}` 对它永远是空集，所以这一支用**下级标签的 id**
- * 现算条件；只有标签块才有这一栏。
+ * 两个来源并成同一个 `any`——栏面上不区分边住在哪根轴上，差别留在正向的配置段里。
  */
 function memberSpecOf(host: Block, forest: readonly Block[]): QuerySpec | null {
-  if (!hasList(host, 'tag')) return null
-  const ids = [...descendantTagIds(host.id, forest)]
-  if (ids.length === 0) return null
-  const nodes: QueryNode[] = ids.map((id) => ({ tag: id }))
+  const nodes: QueryNode[] = []
+  if (hasList(host, 'tag')) {
+    for (const id of descendantTagIds(host.id, forest)) nodes.push({ tag: id })
+  }
+  if (forest.some((b) => prop<string[]>(b, BELONGS_TO_PROP)?.includes(host.id))) {
+    nodes.push({ prop: { id: BELONGS_TO_PROP, contains: host.id } })
+  }
+  if (nodes.length === 0) return null
   return { where: nodes.length === 1 ? nodes[0]! : { any: nodes } }
 }
 

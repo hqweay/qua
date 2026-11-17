@@ -172,6 +172,21 @@ test('`{tag}` 两态验形：对象只认 id 与 desc:true，写歪的拒形', (
   assert.equal(isQueryNode({ tag: { desc: true } } as unknown as QueryNode), false)
 })
 
+test('`_belongsTo` 系统槽：归属反查走通用属性路径，两条求值路径同解', () => {
+  const page = b('blog', 'blog 页', { props: { _aliases: ['blog'], _lists: ['page'] } })
+  const filed = b('p1', '声明属于', { props: { _belongsTo: [page.id] } })
+  // 悬空上级也算（归属面板把悬空画成待清理 chip，读侧如实报）
+  const dangling = b('p2', '上级没了', { props: { _belongsTo: ['gone-id', page.id] } })
+  const plain = b('z', '没有归属')
+  const blocks = [page, filed, dangling, plain]
+  const ids = (where: QueryNode): string[] => runQuery({ where }, { blocks }).map((h) => h.blockId)
+  assert.deepEqual(ids({ prop: { id: '_belongsTo', contains: page.id } }), ['p1', 'p2'], 'contains 按任一元素判')
+  assert.deepEqual(ids({ prop: { id: '_belongsTo', exists: true } }), ['p1', 'p2'], '数组非空＝有这一栏')
+  assert.deepEqual(ids({ prop: { id: '_belongsTo', exists: false } }), ['blog', 'z'])
+  // 只加读法、不改判定：索引路径与纯函数路径必须同解
+  assertSameHits({ where: { prop: { id: '_belongsTo', contains: page.id } } }, blocks)
+})
+
 test('runQuery：`{up:{is:$self}}` ＝「这一块之下」（原 scope:subtree 的条件形状）', () => {
   const { blocks, todo } = fixture()
   const hits = runQuery({ where: { all: [{ up: { is: 'p1' } }, { tag: todo.id }] } }, { blocks })
