@@ -195,6 +195,10 @@ export type Run = <R>(
 
 export interface ViewOpts {
   container: HTMLElement
+  // ⚠️ 加回调（装配层 → 事件层的通知）只有一条通道：本接口加字段 → 构造器赋值 →
+  // `bind()` 桥接递给 editor-events。**塞进 ViewEvents 的构造 spread 不成立**——
+  // events 初始为空、选项不展开进去，条件 spread 还能静默绕过类型检查（typecheck 绿 ≠ 接通）。
+  // 2026-11-18 实测教训（组头折叠坏两轮），细节见 agent-backlink-breadcrumbs。
   /**
    * **写入事务入口**（`Run`）。装配层必须注入 —— 这不是可选参数。
    *
