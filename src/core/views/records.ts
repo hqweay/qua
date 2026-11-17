@@ -385,8 +385,14 @@ export function sortRecords(
   records: readonly ViewRecord[],
   sort: readonly SortKey[] | undefined,
   resolve?: (r: ViewRecord, key: string) => unknown,
+  /**
+   * `includeReserved`：把 `created`／`modified` 这类**保留键**也当排序键。
+   * 表格列头排序不放开它们（表头点的是「显示序」）；派生栏的成员排序要放开
+   * （「按修改时间排」正是这一栏最常用的镜头）。
+   */
+  opts: { includeReserved?: boolean } = {},
 ): ViewRecord[] {
-  const keys = (sort ?? []).filter((k) => isSortableColumn(k.by))
+  const keys = (sort ?? []).filter((k) => opts.includeReserved === true || isSortableColumn(k.by))
   if (keys.length === 0) return [...records]
   const indexed = records.map((r, i) => ({ r, i }))
   indexed.sort((x, y) => {

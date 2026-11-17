@@ -15,12 +15,10 @@ import {
   legacyChoiceOf,
   danglingOf,
   declaredFieldIds,
-  applyQuickFilter,
   derivedDisplayProps,
   derivedRecordsOf,
   derivedTemplateOf,
   displayNameOf,
-  EMPTY_QUICK_FILTER,
   SELF,
   hasQueryBody,
   hasChildrenViewBody,
@@ -54,13 +52,13 @@ import {
   todayISO,
   type Block,
   type ClickMods,
+  type DerivedLens,
   type DerivedSource,
   type DerivedViewKind,
   type MountEntry,
   type PropKind,
   type QueryContext,
   type QuerySpec,
-  type QuickFilterState,
   type ViewBindingRef,
   type ViewOwnerRef,
   type ViewSurface,
@@ -1276,8 +1274,8 @@ export function setupPanels(deps: PanelsDeps) {
     refocus: () => void
     /** 建栏/物化收尾：这一面切到新栏（激活页签每个表面各记自己的） */
     activate: (tabId: string) => void
-    /** 派生栏非大纲视图读的 chips（谁的实例谁的筛选） */
-    filterOf: (source: DerivedSource) => QuickFilterState
+    /** 写设备/条目状态之后重画**这一面**（右槽卡、引用浮层各是不同实例） */
+    renderSurface: () => void
   }
 
   function createMountArea(spec: MountSurface): MountArea {
@@ -1325,6 +1323,18 @@ export function setupPanels(deps: PanelsDeps) {
         // 设备状态是一格、两个表面都读它（与看法切换同一条）
         mountInstances.get(hostBlock.id)?.area.render()
         dockMountArea?.render()
+      },
+      setDerivedLens: (hostRef, source, patch) => {
+        const args: Record<string, unknown> = { host: hostRef, source }
+        if (patch.filter !== undefined) args.filter = patch.filter
+        if (patch.sort !== undefined) args.sort = patch.sort
+        void deps.getRegistry().invoke('core.mount/set-derived-lens', args, spec.via)
+        // 条目写入之后**这一面**要跟上（块宿主的 `_mounts` 与日记宿主的 prefs 不是同一条订阅）
+        spec.renderSurface()
+        return true
+      },
+      openDerivedSlice: (hostBlock, source, current, anchor, baseText) => {
+        app.openDerivedSlice(hostBlock.id, mountHostOf(hostBlock), source, current, baseText, anchor)
       },
       onRemoveTab: (mountHost, tabId) => {
         void deps.getRegistry().invoke('core.mount/remove', { host: mountHost, tabId }, spec.via)
@@ -1405,14 +1415,25 @@ export function setupPanels(deps: PanelsDeps) {
                * 在 `area` 还没初始化完就走进来（构造期状态必是空筛选，缺省值即真值）。
                */
               records: () =>
-                applyQuickFilter(
-                  derivedRecordsOf(blocks.find(mountHostBlock.id) ?? mountHostBlock, kb, entry.source),
-                  spec.filterOf(entry.source),
-                ),
+                derivedRecordsOf(blocks.find(mountHostBlock.id) ?? mountHostBlock, kb, entry.source, {
+                  ...(entry.filter ? { filter: entry.filter } : {}),
+                  ...(entry.sort ? { sort: entry.sort } : {}),
+                }),
               displayProps: derivedDisplayProps(entry.source),
               // 分组键与看法同层（设备状态）；下拉由挂载区抬头画，这里只带渲染用的键
               groupBy: deps.prefs().mountGroups[mountViewKey(mountHost, entry.source)] ?? '',
+              ...(entry.sort ? { sort: entry.sort } : {}),
               setKind: (k) => setDerivedKind(mountHostBlock, entry.source, k),
+              setSort: (sort) => {
+                void deps
+                  .getRegistry()
+                  .invoke(
+                    'core.mount/set-derived-lens',
+                    { host: mountHost, source: entry.source, sort },
+                    spec.via,
+                  )
+                spec.renderSurface()
+              },
               explain: t(explainKey),
             }, { surface: spec.viewSurface, source: spec.edSource }),
           )
@@ -1438,7 +1459,7 @@ export function setupPanels(deps: PanelsDeps) {
       expanded: expandedFor(host),
       refocus: refocusAfterMountOp,
       activate: (tabId) => mountInstances.get(hostId)?.area.activateTab(tabId),
-      filterOf: (source) => mountInstances.get(hostId)?.area.filterOf(source) ?? EMPTY_QUICK_FILTER,
+      renderSurface: () => mountInstances.get(hostId)?.area.render(),
     })
     const view = wantsView(host) ? createView({ kind: 'block', blockId: host.id }, host) : null
     return { area, view, viewHostId: view ? hostId : '' }
@@ -1460,7 +1481,7 @@ export function setupPanels(deps: PanelsDeps) {
       expanded: true,
       refocus: refocusAfterMountOp,
       activate: (tabId) => area?.activateTab(tabId),
-      filterOf: (source) => area?.filterOf(source) ?? EMPTY_QUICK_FILTER,
+      renderSurface: () => dockMountArea?.render(),
     })
     dockMountArea = area
     return area
@@ -1488,7 +1509,7 @@ export function setupPanels(deps: PanelsDeps) {
       expanded: true,
       refocus: refocusAfterMountOp,
       activate: (tabId) => area?.activateTab(tabId),
-      filterOf: (source) => area?.filterOf(source) ?? EMPTY_QUICK_FILTER,
+      renderSurface: () => area?.render(),
     })
     return area
   }
@@ -1573,12 +1594,12 @@ export function setupPanels(deps: PanelsDeps) {
   function materializeDerivedTab(
     hostId: string,
     source: DerivedSource,
-    opts?: { openTree?: boolean },
+    opts?: { openTree?: boolean; lens?: DerivedLens },
     surface?: Pick<MountSurface, 'via' | 'activate' | 'refocus' | 'viewSurface'>,
   ): void {
     const host = blocks.find(hostId)
     if (!host) return
-    const template = derivedTemplateOf(host, kb.roots(), source)
+    const template = derivedTemplateOf(host, kb.roots(), source, opts?.lens)
     if (!template) return
     const mountHost = mountHostOf(host)
     const before = new Set(owners.entriesOf(mountHost).map((e) => e.id))

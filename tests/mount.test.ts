@@ -39,6 +39,7 @@ import {
   moveMountEntry,
   readMounts,
   storedEntriesOf,
+  withDerivedLens,
   type MountEntry,
 } from '../src/core/index.ts'
 import { textRuns } from '../src/core/model/runs.ts'
@@ -361,6 +362,67 @@ test('派生栏记录：引用按**块**计次数（同一块引两处也只一�
   void derivedSpecOf
 })
 
+test('派生栏镜头：叠加条件只筛不改基条件；排序只改成员顺序', async () => {
+  const tagA = mkTagBlock('甲')
+  const tagB = mkTagBlock('乙')
+  const host = b('h', '被引用', { props: {} })
+  const srcA = b('a', 'A 引用', { props: { _tags: [tagA.id] }, modified: 100 })
+  const srcB = b('b', 'B 引用', { props: { _tags: [tagB.id] }, modified: 200 })
+  for (const src of [srcA, srcB]) {
+    src.content.push({ id: `r-${src.id}`, t: 'ref', to: 'h', label: '被引用' })
+  }
+  const store = new BlockStore([host, srcA, srcB, tagA, tagB] as Block[])
+  const kb = new MemoryKb(store)
+
+  assert.deepEqual(
+    derivedRecordsOf(kb.get('h')!, kb, 'refs').map((r) => r.block.id),
+    ['a', 'b'],
+    '没有镜头时是来源的天然顺序',
+  )
+  assert.deepEqual(
+    derivedRecordsOf(kb.get('h')!, kb, 'refs', { filter: { tag: tagA.id } }).map((r) => r.block.id),
+    ['a'],
+    '叠加条件只筛这一栏',
+  )
+  assert.deepEqual(
+    derivedRecordsOf(kb.get('h')!, kb, 'refs', { sort: [{ by: 'modified', dir: 'desc' }] }).map((r) => r.block.id),
+    ['b', 'a'],
+    '排序改成员顺序',
+  )
+  // 基条件没有被镜头改掉：不带镜头再读仍是两条
+  assert.equal(derivedRecordsOf(kb.get('h')!, kb, 'refs').length, 2)
+})
+
+test('派生栏镜头：条目上的 filter/sort 可往返、可清；坏字段只丢那一格不丢栏', () => {
+  const entries: MountEntry[] = [
+    { id: 'refs', kind: 'derived', source: 'refs', filter: { tag: 'x' }, sort: [{ by: 'modified', dir: 'desc' }] },
+  ]
+  const round = canonicalMountEntries(JSON.parse(JSON.stringify(entries)))
+  assert.deepEqual(round, entries, '合法镜头往返逐字节一致')
+
+  const cleared = withDerivedLens(entries, 'refs', { filter: null, sort: null })
+  assert.deepEqual(cleared, [{ id: 'refs', kind: 'derived', source: 'refs' }], 'null 清掉两格')
+
+  const bad = canonicalMountEntries([
+    { id: 'refs', kind: 'derived', source: 'refs', filter: { nope: 1 }, sort: [{}] },
+  ])
+  assert.deepEqual(bad, [{ id: 'refs', kind: 'derived', source: 'refs' }], '坏镜头不带走整栏')
+
+  const cloned = cloneMountEntries(entries)
+  ;(cloned[0] as Extract<MountEntry, { kind: 'derived' }>).filter = { tag: 'y' }
+  assert.deepEqual(
+    entries[0],
+    {
+      id: 'refs',
+      kind: 'derived',
+      source: 'refs',
+      filter: { tag: 'x' },
+      sort: [{ by: 'modified', dir: 'desc' }],
+    },
+    '深拷：改副本不串原件',
+  )
+})
+
 test('派生栏记录：提及填命中词、同类填共同标签；两者都不改块（零落盘）', async () => {
   const tagA = mkTagBlock('项目')
   const tagB = mkTagBlock('人物')
@@ -456,6 +518,34 @@ test('U12b 改名拒绝三条：派生栏没有名字可改／空名字／不存
   assert.equal(f.commands.renameMountTab({ kind: 'block', blockId: 'h' }, 't1', '   '), false, '空名字')
   assert.equal(f.commands.renameMountTab({ kind: 'block', blockId: 'h' }, 'nope', '有名字'), false, '不存在的 id')
   assert.equal(f.writes.length, 0, '拒绝 = 零写入（不产生可撤销的半截）')
+})
+
+test('U12c 派生镜头：写在这一栏条目上；基条件不动；没变化不写', () => {
+  const entries: MountEntry[] = [local('t1', '新查询'), { id: 'refs', kind: 'derived', source: 'refs' }]
+  const f = renameFixture(entries)
+  assert.equal(
+    f.commands.setDerivedLens({ kind: 'block', blockId: 'h' }, 'refs', {
+      filter: { tag: 't1' },
+      sort: [{ by: 'modified', dir: 'desc' }],
+    }),
+    true,
+  )
+  assert.equal(f.writes.length, 1, '一次镜头编辑一笔写入')
+  const entry = f.list().find((e) => e.kind === 'derived' && e.source === 'refs') as Extract<
+    MountEntry,
+    { kind: 'derived' }
+  >
+  assert.deepEqual(entry.filter, { tag: 't1' })
+  assert.deepEqual(entry.sort, [{ by: 'modified', dir: 'desc' }])
+  assert.equal(
+    f.commands.setDerivedLens({ kind: 'block', blockId: 'h' }, 'refs', {
+      filter: { tag: 't1' },
+      sort: [{ by: 'modified', dir: 'desc' }],
+    }),
+    false,
+    '同一份镜头再写一次＝没变化',
+  )
+  assert.equal(f.writes.length, 1, '没变化不产生可撤销的空动作')
 })
 
 /* ------------------------------------------------------------ 换序（`core.mount/move`）*/

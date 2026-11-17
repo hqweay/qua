@@ -151,6 +151,7 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.mount/rename', title: t('cmd.mount.rename'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.mount'), args: { host: {}, tabId: { type: 'string' }, label: { type: 'string' } }, keywords: ['mount', t('menu.cat.mount'), 'tab', 'rename'], hidden: true },
   { name: 'core.mount/move', title: t('cmd.mount.move'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.mount'), args: { host: {}, tabId: { type: 'string' }, targetId: { type: 'string' }, place: { type: 'string' } }, keywords: ['mount', t('menu.cat.mount'), 'tab', 'order', 'move', 'drag'], hidden: true },
   { name: 'core.mount/set-view', title: t('cmd.mount.set-view'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.mount'), args: { host: {}, tabId: { type: 'string' }, view: { type: 'string' } }, keywords: ['mount', t('menu.cat.mount'), 'tab', 'view'], hidden: true },
+  { name: 'core.mount/set-derived-lens', title: t('cmd.mount.set-derived-lens'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.mount'), args: { host: {}, source: { type: 'string' }, filter: {}, sort: {} }, keywords: ['mount', t('menu.cat.mount'), 'tab', 'filter', 'sort'], hidden: true },
   { name: 'core.props/undeclare', title: t('cmd.props.undeclare'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, propId: { type: 'string' } }, hidden: true },
 
   /* ---- 历史 ---- */

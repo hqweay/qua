@@ -26,10 +26,11 @@
  */
 import {
   blockLabel,
-  applyQuickFilter,
   canEditMounts,
   cardinalityOf,
+  chipsOfFilter,
   DERIVED_VIEW_KINDS,
+  derivedLensOf,
   derivedRecordsOf,
   derivedSpecOf,
   groupChoicesOf,
@@ -47,14 +48,18 @@ import {
   EMPTY_QUICK_FILTER,
   quickFilterAdd,
   quickFilterDrop,
+  quickFilterNode,
   type Block,
   type BlockStore,
+  type DerivedLens,
   type DerivedSource,
   type DerivedViewKind,
   type MountEntry,
   type MountHost,
+  type QueryNode,
   type QuickFilterAtom,
   type QuickFilterState,
+  type SortKey,
   type ViewOwnerStore,
   type ViewConfig,
   type ViewRecord,
@@ -116,7 +121,12 @@ export interface MountAreaDeps {
    * 「哪个宿主的哪个来源、锚点在哪」，写与激活都在装配层。
    * `openTree`：物化完直接摊开新栏的条件树（手势承诺「改条件」就一步够到）。
    */
-  onMaterializeTab?: (hostId: string, source: DerivedSource, anchor: DOMRect, opts?: { openTree?: boolean }) => void
+  onMaterializeTab?: (
+    hostId: string,
+    source: DerivedSource,
+    anchor: DOMRect,
+    opts?: { openTree?: boolean; lens?: DerivedLens },
+  ) => void
   /** 「×」：摘掉一栏（`tabId` 是**稳定 id**，不是数组下标） */
   onRemoveTab?: (host: MountHost, tabId: string) => void
   /**
@@ -146,6 +156,26 @@ export interface MountAreaDeps {
   derivedGroup?: (host: Block, source: DerivedSource) => string
   /** 换分组键（同上：装配层落设备状态并重画） */
   setDerivedGroup?: (host: Block, source: DerivedSource, key: string) => void
+  /**
+   * **派生栏的镜头**：把叠加条件/排序写回这一栏的条目（块宿主 `_mounts`／
+   * 日记宿主 prefs）。`null` 是清掉；基条件不在这条路上。
+   */
+  setDerivedLens?: (
+    host: MountHost,
+    source: DerivedSource,
+    patch: { filter?: QueryNode | null; sort?: SortKey[] | null },
+  ) => boolean
+  /**
+   * 打开**切片条件树**（只编辑叠加层，基条件在树外只读展示）。
+   * 这只在「这一栏可编辑」的面出现；过去的日记天不给。
+   */
+  openDerivedSlice?: (
+    host: Block,
+    source: DerivedSource,
+    current: QueryNode | null,
+    anchor: DOMRect,
+    baseText: string,
+  ) => void
   /**
    * 浮层外壳（镜头面板住在这里面）。装配层持有浮层实例，这一层
    * 不认识它的落位与生命周期——窄接口只收「画进哪、锚在哪、往哪开」，够用。
@@ -346,11 +376,11 @@ export class MountArea {
   private hoverFrame = 0
   private hoverPoint: { x: number; y: number } | null = null
   /**
-   * 派生栏的快速筛选 chips（**会话瞬态**，按来源一格）：加/摘只改这份内存状态——
-   * 不写偏好、不入库、不产生 op、不进撤销栈。段落换人时清空：
-   * 换了宿主，chips 说的就不是同一批材料了。
+   * **不可持久化的表面上**的派生镜头（会话瞬态）：只有过去的日记天走这一档——
+   * 那一格的真正配置在 `Prefs.journalMounts` 里、与今天共用一条，写进去会串到别天。
+   * 可编辑的宿主一律读条目上的 `filter`/`sort`，这里不参与。
    */
-  private readonly quickFilters = new Map<DerivedSource, QuickFilterState>()
+  private readonly sessionLenses = new Map<DerivedSource, DerivedLens>()
   /** 上一次读到的那组条目的串（`refreshEntries` 用它判「要不要重排」） */
   private entrySig = ''
 
@@ -517,7 +547,7 @@ export class MountArea {
       this.expandedByTab.clear()
       this.covers = new Map()
       this.refKind = 'all'
-      this.quickFilters.clear()
+      this.sessionLenses.clear()
       // 折叠播种也跟着宿主走：中心段尾一台实例只服务一个宿主，感知不到这条；
       // 右槽卡一台实例跟着导航换宿主，播种标记不清就会让第二位宿主永远摊开
       this.foldSeeded.clear()
@@ -1096,7 +1126,8 @@ export class MountArea {
      * 「引用里看哪几类」——两刀同一批材料，切法有先后。抬头的计数与
      * 类型计数都读**筛过之后**的那批（主数字＝现在看得见的条数）。
      */
-    const filtered = applyQuickFilter(derivedRecordsOf(host, this.deps.kb, source), this.filterOf(source))
+    // 镜头（叠加条件＋排序）在这一处落：基条件仍由 `derivedRecordsOf` 现算
+    const filtered = derivedRecordsOf(host, this.deps.kb, source, this.lensOf(host, source))
     /**
      * kind 过滤只作用于**大纲**：列表/表格走视图宿主的记录源，那里用「类型」列
      * 承担同一件事。否则会出现「抬头条数是过滤后的、表里是全部」的假数字。
@@ -1142,7 +1173,8 @@ export class MountArea {
       // 筛空与「本来就没有」要说不同的话：chips 挂着时结果空，真相是「筛选藏掉了」，
       // 不是「还没有块引用它」——冒充会让用户以为这一栏坏了。
       const empty =
-        entry.kind === 'derived' && this.filterActive(entry.source)
+        entry.kind === 'derived' &&
+        (entry.filter !== undefined || this.sessionLenses.get(entry.source)?.filter !== undefined)
           ? 'ui.mount.empty.filtered'
           : (emptyText ?? EMPTY_TEXT[entry.kind])
       this.showEmpty(t(empty))
@@ -1296,7 +1328,8 @@ export class MountArea {
   /** 镜头有没有「生效中的设置」：状态点只回答这一件事 */
   private derivedLensActive(host: Block, source: DerivedSource, kind: DerivedViewKind): boolean {
     return (
-      this.filterActive(source) ||
+      this.filterActive(host, source) ||
+      (this.lensOf(host, source).sort?.length ?? 0) > 0 ||
       (this.deps.derivedGroup?.(host, source) ?? '') !== '' ||
       kind !== 'outline' ||
       (source === 'refs' && this.refKind !== 'all')
@@ -1361,26 +1394,102 @@ export class MountArea {
     const { filtered: all } = this.displayedDerivedRecords(host, entry.source)
     const repaint = (): void => this.renderDerivedLens(box, host, entry)
 
-    /* 筛选：候选来自**未筛**的全量派生记录（摘一颗 chip 一切回来要有参照） */
+    /* 筛选：叠加条件既可从 chips 快改，也可进条件树编整棵切片 */
     const filterBody = this.lensSection(root, 'ui.view.opt.filter')
-    renderQuickFilter(filterBody, {
-      records: () => derivedRecordsOf(host, this.deps.kb, entry.source),
-      state: () => this.filterOf(entry.source),
-      labelOf: (atom) => this.atomLabel(atom),
-      onAdd: (atom, to) => {
-        if (this.mutateFilter(entry.source, (s) => quickFilterAdd(s, atom, to))) repaint()
-      },
-      onDrop: (atom) => {
-        if (this.mutateFilter(entry.source, (s) => quickFilterDrop(s, atom))) repaint()
-      },
-      onClear: () => {
-        if (!this.filterActive(entry.source)) return
-        this.quickFilters.delete(entry.source)
-        this.render()
-        repaint()
-      },
-      search: true,
-    })
+    const editable = canEditMounts(host)
+    const chips = this.filterOf(host, entry.source)
+    if (chips) {
+      renderQuickFilter(filterBody, {
+        // 候选来自**未筛**的全量派生记录（摘一颗 chip 一切回来要有参照）
+        records: () => derivedRecordsOf(host, this.deps.kb, entry.source),
+        state: () => chips,
+        labelOf: (atom) => this.atomLabel(atom),
+        onAdd: (atom, to) => {
+          if (this.mutateFilter(host, entry.source, (s) => quickFilterAdd(s, atom, to))) repaint()
+        },
+        onDrop: (atom) => {
+          if (this.mutateFilter(host, entry.source, (s) => quickFilterDrop(s, atom))) repaint()
+        },
+        onClear: () => {
+          if (!this.filterActive(host, entry.source)) return
+          this.setLens(host, entry.source, { filter: null })
+          repaint()
+        },
+        search: true,
+      })
+    } else {
+      const note = document.createElement('p')
+      note.className = 'vopt-note'
+      note.textContent = t('ui.view.opt.filterComplex')
+      filterBody.appendChild(note)
+    }
+    if (editable && this.deps.openDerivedSlice) {
+      const edit = document.createElement('button')
+      edit.type = 'button'
+      edit.className = 'ui-btn vopt-apply'
+      edit.dataset.derivedSlice = '1'
+      edit.textContent = t(this.lensOf(host, entry.source).filter ? 'ui.query.edit' : 'ui.query.tree.add')
+      edit.addEventListener('click', () =>
+        this.deps.openDerivedSlice?.(
+          host,
+          entry.source,
+          this.lensOf(host, entry.source).filter ?? null,
+          edit.getBoundingClientRect(),
+          t(DERIVED_WHY[entry.source]),
+        ),
+      )
+      filterBody.appendChild(edit)
+    } else if (!editable) {
+      const note = document.createElement('p')
+      note.className = 'vopt-note'
+      note.textContent = t('ui.mount.lensReadonlyDay')
+      filterBody.appendChild(note)
+    }
+
+    /* 排序：成员顺序（与查询的 `sort` 同一形状）；表头点击写同一份 */
+    const sortBody = this.lensSection(root, 'ui.view.opt.sort')
+    const currentSort = this.lensOf(host, entry.source).sort ?? []
+    const first = currentSort[0]
+    const sortSel = document.createElement('select')
+    sortSel.className = 'queryview-group mount-derived-sort'
+    const none = document.createElement('option')
+    none.value = ''
+    none.textContent = t('ui.query.sortKey.none')
+    sortSel.appendChild(none)
+    for (const c of this.sortChoices()) {
+      const o = document.createElement('option')
+      o.value = c.id
+      o.textContent = c.label
+      sortSel.appendChild(o)
+    }
+    sortSel.value = first?.by ?? ''
+    if (sortSel.value !== (first?.by ?? '')) sortSel.value = ''
+    const dirSel = document.createElement('select')
+    dirSel.className = 'queryview-group mount-derived-sortdir'
+    dirSel.disabled = first === undefined
+    for (const [value, label] of [
+      ['asc', 'ui.view.sortAsc'],
+      ['desc', 'ui.view.sortDesc'],
+    ] as const) {
+      const o = document.createElement('option')
+      o.value = value
+      o.textContent = t(label)
+      dirSel.appendChild(o)
+    }
+    dirSel.value = first?.dir ?? 'asc'
+    const writeSort = (by: string, dir: 'asc' | 'desc'): void => {
+      const rest = currentSort.slice(1)
+      this.setLens(host, entry.source, { sort: by === '' ? null : [{ by, dir }, ...rest] })
+      repaint()
+    }
+    sortSel.onchange = () => writeSort(sortSel.value, dirSel.value === 'desc' ? 'desc' : 'asc')
+    dirSel.onchange = () => {
+      if (first !== undefined) writeSort(first.by, dirSel.value === 'desc' ? 'desc' : 'asc')
+    }
+    const sortRow = document.createElement('div')
+    sortRow.className = 'vopt-row'
+    sortRow.append(sortSel, dirSel)
+    sortBody.appendChild(sortRow)
 
     /* 类型：只在引用栏的大纲看法里——表格用「类型」列承担同一件事 */
     if (entry.source === 'refs' && kind === 'outline' && all.length > 0) {
@@ -1493,7 +1602,10 @@ export class MountArea {
       extract.addEventListener('click', () => {
         const at = extract.getBoundingClientRect()
         this.deps.closePopover?.()
-        this.deps.onMaterializeTab?.(host.id, entry.source, at, { openTree: true })
+        this.deps.onMaterializeTab?.(host.id, entry.source, at, {
+          openTree: true,
+          lens: this.lensOf(host, entry.source),
+        })
       })
       condBody.appendChild(extract)
     }
@@ -1502,6 +1614,19 @@ export class MountArea {
     note.className = 'vopt-note lens-note'
     note.textContent = t('ui.mount.lensNote')
     root.appendChild(note)
+  }
+
+  /** 排序键候选：与查询视图同一组保留键 ＋ 属性定义（只给能排序的） */
+  private sortChoices(): readonly { id: string; label: string }[] {
+    const fields = propDisplayLabels(this.deps.kb.roots())
+    return [
+      { id: 'created', label: t('ui.query.sortKey.created') },
+      { id: 'modified', label: t('ui.query.sortKey.modified') },
+      { id: '_date', label: t('ui.query.sortKey.date') },
+      { id: 'refCount', label: t('ui.query.sortKey.refCount') },
+      { id: 'random', label: t('ui.query.sortKey.random') },
+      ...[...fields].map(([id, label]) => ({ id, label })),
+    ]
   }
 
   /** 面板一节：与查询的 `ViewOptionsPanel` 同一套标题/留白，不另造一套卡片语言 */
@@ -1520,38 +1645,84 @@ export class MountArea {
 
   /* ---------------------------------------------------------- 快速筛选 */
 
-  /**
-   * 这一栏现在的 chips（**会话瞬态**；装配层的列表/表格记录源也读这一份，
-   * 两处同一个答案——大纲与表格各算各的就会出现两批行）。
-   */
-  filterOf(source: DerivedSource): QuickFilterState {
-    return this.quickFilters.get(source) ?? EMPTY_QUICK_FILTER
+  /** 这一栏的镜头：可编辑宿主读条目；过去的日记天读会话态（不与今天共用一格） */
+  private lensOf(host: Block, source: DerivedSource): DerivedLens {
+    if (!canEditMounts(host)) return this.sessionLenses.get(source) ?? {}
+    const entry = this.entries.find(
+      (e): e is Extract<MountEntry, { kind: 'derived' }> => e.kind === 'derived' && e.source === source,
+    )
+    return derivedLensOf(entry)
   }
 
-  private filterActive(source: DerivedSource): boolean {
-    const s = this.filterOf(source)
-    return s.include.length > 0 || s.remove.length > 0
+  /** 写镜头：可编辑宿主走命令（条目上落）；否则写会话态 */
+  private setLens(
+    host: Block,
+    source: DerivedSource,
+    patch: { filter?: QueryNode | null; sort?: SortKey[] | null },
+  ): boolean {
+    if (!canEditMounts(host)) {
+      const cur = this.sessionLenses.get(source) ?? {}
+      const next: DerivedLens = { ...cur }
+      if (patch.filter !== undefined) {
+        if (patch.filter) next.filter = patch.filter
+        else delete next.filter
+      }
+      if (patch.sort !== undefined) {
+        if (patch.sort && patch.sort.length > 0) next.sort = patch.sort
+        else delete next.sort
+      }
+      this.sessionLenses.set(source, next)
+      this.render()
+      return true
+    }
+    const hostRef: MountHost = isJournal(host) ? { kind: 'journal' } : { kind: 'block', blockId: host.id }
+    // 装配层的写入自己会重画**这一面**（`renderSurface`）；这里不再叠第二遍
+    return this.deps.setDerivedLens?.(hostRef, source, patch) ?? false
+  }
+
+  /**
+   * 这一栏现在能投影成 chips 的那份筛选（装配层的列表/表格记录源也读这一份）。
+   *
+   * `null`（复合条件）与 `EMPTY`（没有条件）在调用方要分开说：前者要一句
+   * 「用条件树改」，后者是「没有筛选」。
+   */
+  filterOf(host: Block, source: DerivedSource): QuickFilterState | null {
+    const filter = this.lensOf(host, source).filter
+    if (!filter) return EMPTY_QUICK_FILTER
+    return chipsOfFilter(filter)
+  }
+
+  private filterActive(host: Block, source: DerivedSource): boolean {
+    return this.lensOf(host, source).filter !== undefined
   }
 
   /** 改一份 chips：真变了才落、才重画这一屏（返回给弹层决定要不要跟着重画） */
-  private mutateFilter(source: DerivedSource, fn: (s: QuickFilterState) => QuickFilterState | null): boolean {
-    const next = fn(this.filterOf(source))
+  private mutateFilter(
+    host: Block,
+    source: DerivedSource,
+    fn: (s: QuickFilterState) => QuickFilterState | null,
+  ): boolean {
+    const chips = this.filterOf(host, source)
+    if (!chips) return false
+    const next = fn(chips)
     if (!next) return false
-    this.quickFilters.set(source, next)
-    this.render()
-    return true
+    return this.setLens(host, source, { filter: quickFilterNode(next) })
   }
 
   /**
    * chip 的显示名：页按 id 经读门面现解析；**标签的原子本来就是名字**
    * （条件语言的 `{tag}` 按名解析，chips 与它同形，不再存 id）。
    */
+  /**
+   * chip 的显示名：页与标签都按 **id 现解析**（`{tag}` 存标签块 id，不存名字）。
+   * 旧库若留着按名字写的 tag atom，`kb.get` 查不到就原样当名字；目标没了才说「无标题」。
+   */
   private atomLabel(atom: QuickFilterAtom): string {
-    if ('tag' in atom) return atom.tag
-    const id = atom.up.is
+    const id = 'tag' in atom ? atom.tag : atom.up.is
     const block = this.deps.kb.get(id)
-    // 呈现摘要 ＋ 唯一兜底：目标没了说「无标题」，不露裸 id
-    return block ? blockLabel(block, (x) => this.deps.kb.get(x)) : t('ui.page.untitled')
+    if (block) return blockLabel(block, (x) => this.deps.kb.get(x))
+    if ('tag' in atom) return atom.tag
+    return t('ui.page.untitled')
   }
 
   private showView(host: Block, entry: MountEntry): void {

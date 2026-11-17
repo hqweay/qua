@@ -17,11 +17,11 @@
 import type { BlockEditor } from '../../view/editor/editor.ts'
 import type { ColorAxis, CtxKeys } from '../index.ts'
 import type { UndoKind } from '../model/undo.ts'
-import type { QueryNode, QuerySpec } from '../query/query.ts'
+import type { QueryNode, QuerySpec, SortKey } from '../query/query.ts'
 import type { Cardinality, ChoiceScope, UiPosition } from '../props/props.ts'
 import type { RefDomain } from '../props/ref-domain.ts'
 import type { SecLayout } from '../query/feed.ts'
-import type { MountHost } from '../views/mount.ts'
+import type { DerivedSource, MountHost } from '../views/mount.ts'
 import type { TabsDirection, ViewConfig } from '../views/view.ts'
 import type { ViewOwnerRef } from '../views/view-owner.ts'
 import type { OpenOpts, OpenAction } from '../views/open.ts'
@@ -482,6 +482,18 @@ export interface App {
   moveMountTab(host: MountHost, tabId: string, targetId: string, place: 'before' | 'after'): boolean
   /** 换这一栏选的视图（配置在 local tab 自己身上） */
   setMountTabView(host: MountHost, tabId: string, view: string): boolean
+  /**
+   * **派生栏的镜头**：往基条件上叠加筛选/排序（不替换基条件）。
+   *
+   * 配置写在这一栏的条目上：块宿主 `_mounts`（内容）、日记宿主 `Prefs.journalMounts`
+   * （设备态）。过去的日记天不可编辑（与整条 tab 条同一条准入）。
+   * @returns 是否真的变了（没变不产生一次可撤销动作）
+   */
+  setDerivedLens(
+    host: MountHost,
+    source: DerivedSource,
+    patch: { filter?: QueryNode | null; sort?: SortKey[] | null },
+  ): boolean
   /** **固定派生栏**（引用/成员/同类/提及 → local）：把现算的条件变成一栏可编辑的查询 */
   /**
    * 写块的类型（`_type`）。
@@ -710,12 +722,22 @@ export interface App {
   setViewFilter(owner: ViewOwnerRef, viewId: string, filter: QueryNode | null): boolean
   /** 打开**切片构建器**：与「视图… → 编辑切片…」同一台浮层（点抬头 chip 也走这里） */
   openViewSlice(owner: ViewOwnerRef, viewId: string, anchor?: DOMRect | null): void
+  /**
+   * 打开**派生栏的切片构建器**：基条件只读展示，只编辑叠加层。
+   * `hostBlockId` 只提供 `$self`／选择器的上下文；写入落点是这一栏的条目。
+   */
+  openDerivedSlice(
+    hostBlockId: string,
+    mountHost: MountHost,
+    source: DerivedSource,
+    current: QueryNode | null,
+    baseText: string,
+    anchor?: DOMRect | null,
+  ): void
   /** 「视图…」菜单：列出默认看法 ＋ 已有视图 ＋ 新建…（**纯 UI**，落在装配层） */
   openViewMenu(owner: ViewOwnerRef, anchor?: DOMRect | null, trigger?: HTMLElement): void
   /** 打开**视图选项**面板（四轴一个面；块菜单入口与抬头「选项」共用这一台） */
   showViewOptions(owner: ViewOwnerRef): void
-  /** 派生栏（引用／提及）的看法下拉：只有三档（大纲／列表／表格），写设备状态不建视图 */
-  openDerivedViewMenu(anchor: DOMRect | null, current: string, onPick: (kind: string) => void): void
   /** 打开**条件构建器**（一个浮层；草稿改在本地，点「应用」才写一次） */
   openQueryBuilder(owner: ViewOwnerRef): void
   /**

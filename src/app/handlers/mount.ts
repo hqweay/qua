@@ -5,6 +5,7 @@
  * 日记宿主写设备状态），那是模型层的事，不属于命令面。
  */
 import type { Handler } from '../../core/infra/ports.ts'
+import { isDerivedSource, sortKeysOfRaw, type QueryNode } from '../../core/index.ts'
 import type { QuerySpec } from '../../core/query/query.ts'
 import { hostArg, S } from './shared.ts'
 
@@ -48,5 +49,18 @@ export const MOUNT_HANDLERS: Record<string, Handler> = {
     const tabId = S(a.tabId)
     if (!host || !tabId) return false
     return app.setMountTabView(host, tabId, S(a.view))
+  },
+  /**
+   * 派生栏的镜头：`filter` / `sort` 只传要改的那一格；`null` 是清掉。
+   * 基条件不在这条命令里——它永远由 `derivedSpecOf` 现算，不能从 UI 替换。
+   */
+  'core.mount/set-derived-lens': (a, app) => {
+    const host = hostArg(a.host)
+    const source = S(a.source)
+    if (!host || !isDerivedSource(source)) return false
+    return app.setDerivedLens(host, source, {
+      ...('filter' in a ? { filter: a.filter === null ? null : (a.filter as QueryNode) } : {}),
+      ...('sort' in a ? { sort: a.sort === null ? null : sortKeysOfRaw(a.sort) } : {}),
+    })
   },
 }

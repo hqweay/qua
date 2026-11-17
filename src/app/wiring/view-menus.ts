@@ -20,7 +20,6 @@ import {
   choicesOf,
   childrenRecords,
   displayNameOf,
-  DERIVED_VIEW_KINDS,
   enginePropDefs,
   evaluateQuerySpec,
   fieldCoverageOf,
@@ -46,7 +45,10 @@ import {
   VIEW_KIND_ICON,
   type CtxKeys,
   type Block,
+  type DerivedSource,
   type FieldCoverage,
+  type MountHost,
+  type QueryNode,
   type QuerySpec,
   type ViewOwnerRef,
 } from '../../core/index.ts'
@@ -161,6 +163,11 @@ function openSpecPopover(opts: {
    * 不跟已存储的 spec：弹层树点「应用」才落，跟存储值会让刚加的行参与不了收窄。
    */
   coverage?: (batch: QuerySpec) => FieldCoverage | undefined
+  /**
+   * 树上方的一句只读说明（派生栏用它写「基条件：…（只读，改不掉）」）。
+   * 不是标题：标题属于「这一份条件是什么」，这句属于「树外那层是什么」。
+   */
+  note?: string
 }): void {
   const hostId =
     opts.owner.kind === 'block'
@@ -172,6 +179,7 @@ function openSpecPopover(opts: {
   layers.openPopover((box) => {
     const tree = new QueryTree(box, {
       spec: opts.spec,
+      ...(opts.note ? { note: opts.note } : {}),
       // 条件树的字段候选只有一份（`core/query-fields.ts`）：属性定义 ＋ 有值控件的系统槽；
       // 有覆盖率时按「这批结果里真有值的栏」排前（与分组下拉同一条原则）
       fields: (batch) => queryFieldsOf(kb.roots(), batch ? opts.coverage?.(batch) : undefined),
@@ -437,30 +445,6 @@ function openViewMenu(owner: ViewOwnerRef, dropdownAnchor?: DOMRect | null, trig
    * 候选吃 core 的 `DERIVED_VIEW_KINDS`（兼容集与 query 源同一张表）——菜单另写一份
    * 清单，迟早会在 core 加看法的那天漏掉一格。
    */
-function openDerivedViewMenu(anchor: DOMRect | null, current: string | undefined, onPick: (k: string) => void): void {
-  const kinds = DERIVED_VIEW_KINDS
-  const labels: Record<string, string> = {
-    outline: t('ui.view.outline'),
-    table: t('ui.view.kind.table'),
-    cards: t('ui.view.kind.cards'),
-    calendar: t('ui.view.kind.calendar'),
-  }
-  const icons: Record<string, string> = { outline: 'lucide:list-tree', ...VIEW_KIND_ICON }
-  layers.openMenu({
-    rows: kinds.map((k) => ({
-      id: k,
-      label: labels[k] ?? k,
-      icon: icons[k],
-      ...(k === current ? { keyHint: t('ui.view.current') } : {}),
-    })),
-    anchor,
-    width: 200,
-    title: t('menu.label.views'),
-    searchable: false,
-    onPick: (row) => onPick(String(row.id)),
-  })
-}
-
   /**
    * **切片构建器**：与「视图… → 编辑切片…」同一台浮层（抬头切片 chip 也走这里）。
    *
@@ -537,6 +521,39 @@ function showViewOptions(owner: ViewOwnerRef): void {
     box.append(panel.root)
     panel.render()
   }, anchor)
+}
+
+/**
+ * **派生栏的切片编辑器**：基条件只读展示，树只编辑叠加层。
+ *
+ * 它与视图切片共用同一台 `QueryTree`／同一个「应用」语义（空树＝没有切片），
+ * 只是落点不同：这里写这一栏条目的 `filter`（`core.mount/set-derived-lens`），
+ * 不写 `_query`／`_views`。
+ */
+function openDerivedSlice(
+  hostBlockId: string,
+  mountHost: MountHost,
+  source: DerivedSource,
+  current: QueryNode | null,
+  baseText: string,
+  anchor: DOMRect | null,
+): void {
+  openSpecPopover({
+    owner: { kind: 'block', blockId: hostBlockId },
+    anchor,
+    spec: () => ({ where: current ?? { any: [] } }),
+    showOptions: false,
+    note: t('ui.mount.sliceBase', { text: baseText }),
+    onApply: (spec) => {
+      const filter = filterOfSpec(spec)
+      void getRegistry().invoke(
+        'core.mount/set-derived-lens',
+        { host: mountHost, source, filter },
+        'mount',
+      )
+      layers.closePopover()
+    },
+  })
 }
 
 function openViewSlice(owner: ViewOwnerRef, viewId: string, sliceAnchor: DOMRect | null | undefined): void {
@@ -732,9 +749,9 @@ function deleteTag(blockId: string): boolean {
     openEmbedViewMenu,
     openSpecPopover,
     openViewMenu,
-    openDerivedViewMenu,
     showViewOptions,
     openViewSlice,
+    openDerivedSlice,
     openQueryBuilder,
     showLinkComposer,
     showChildPropsPicker,

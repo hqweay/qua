@@ -62,6 +62,11 @@ export interface QueryTreeDeps {
   /** 内联树：收起按钮；弹层：关闭按钮 */
   inline?: boolean
   /**
+   * 树上方的一句只读说明。放在组件里而不是调用方 append：`paint()` 每次重画都会
+   * `replaceChildren()`，外部塞进去的节点会在第一下手势后消失。
+   */
+  note?: string
+  /**
    * 块值选择器。`opts.rootBlock` 为真时候选里多一枚虚拟块「所在块」——
    * 只有条件树要它：属性区给某个块挑引用目标时，「随所在位置变化」没有意义。
    * `owner` 可缺省：它只用于排除自己，枚举候选不需要它（条件树未必有块宿主）。
@@ -259,6 +264,13 @@ export class QueryTree {
     this.box.replaceChildren()
     this.box.hidden = false
     this.applyBtn = null
+    if (this.deps.note) {
+      const note = document.createElement('p')
+      // 弹层里用现成的说明排版；内联树也读同一句（类名只决定字号/色阶）
+      note.className = 'popover-note qt-note'
+      note.textContent = this.deps.note
+      this.box.append(note)
+    }
     this.box.append(this.headEl())
     if (!this.draft) {
       this.box.append(this.jsonOnlyEl())

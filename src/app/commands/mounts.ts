@@ -15,6 +15,8 @@ import {
   mountEntriesOf,
   moveMountEntry,
   todayISO,
+  withDerivedLens,
+  type DerivedSource,
   type MountEntry,
   type MountHost,
   type Source,
@@ -31,6 +33,7 @@ export function mountCommands(
   | 'renameMountTab'
   | 'moveMountTab'
   | 'setMountTabView'
+  | 'setDerivedLens'
 > {
   const entriesOf = (host: MountHost): MountEntry[] => d.owners.entriesOf(host)
   const entryOf = (host: MountHost, tabId: string): MountEntry | undefined =>
@@ -59,7 +62,10 @@ export function mountCommands(
   }
 
   /** 供本文件内部复用（「固定派生栏」就是「加一栏 local」） */
-  const api: Pick<App, 'addLocalTab' | 'removeMountTab' | 'renameMountTab' | 'moveMountTab' | 'setMountTabView'> = {
+  const api: Pick<
+    App,
+    'addLocalTab' | 'removeMountTab' | 'renameMountTab' | 'moveMountTab' | 'setMountTabView' | 'setDerivedLens'
+  > = {
     /**
      * 加一栏 **local**：这一栏自己拥有条件与视图。**不建块。**
      *
@@ -155,6 +161,21 @@ export function mountCommands(
       if (view === '') delete next.activeView
       else next.activeView = view
       write(host, entriesOf(host).map((e) => (e.id === tabId ? next : e)))
+      return true
+    },
+
+    /**
+     * **派生栏的镜头**：基条件仍现算，只改「这一栏再筛什么、按什么排」。
+     *
+     * 写这一栏的条目本身（block 宿主 `_mounts`，journal 宿主 prefs）；第一次改会
+     * 把整条列表物化进内容——这是「配置跟这一栏住」的代价，也是拖拽换序早就有的形状。
+     * 过去的日记天不可编辑（`editable` 一处判），UI 在那一档退回会话态。
+     */
+    setDerivedLens: (host: MountHost, source: DerivedSource, patch) => {
+      if (!editable(host)) return false
+      const next = withDerivedLens(fullEntriesOf(host), source, patch)
+      if (!next) return false
+      write(host, next)
       return true
     },
 

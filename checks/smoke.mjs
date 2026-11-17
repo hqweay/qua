@@ -2612,6 +2612,20 @@ await check('T194b 引用含属性引用：kind 过滤可切；标签页默认�
   }))
   assert(table.kinds.some((x) => x.includes('属性') && x.includes('负责人')), `表格的类型列要写清属性名：${JSON.stringify(table.kinds)}`)
 
+  // 表头排序写**这一栏的镜头**（与面板排序同一份），不是屏内瞬态
+  await page.locator('#editor .mount-view .tv-head [data-col="refCount"]').click()
+  await page.waitForTimeout(350)
+  const sorted = await page.evaluate((id) => {
+    const host = window.__qua.__editor.store.find(id)
+    const entry = (host?.props?._mounts ?? []).find((e) => e.kind === 'derived' && e.source === 'refs')
+    const head = document.querySelector('#editor .mount-view .tv-head [data-col="refCount"]')
+    return { sort: entry?.sort ?? null, dir: head?.dataset.sort ?? '' }
+  }, setup.P)
+  assert(
+    sorted.sort?.[0]?.by === 'refCount' && sorted.sort?.[0]?.dir === 'asc' && sorted.dir === 'asc',
+    `表头排序要写进条目镜头、表头箭头跟上：${JSON.stringify(sorted)}`,
+  )
+
   // 派生栏的镜头面板：表格看法下分组节在；看法段能切回大纲；提取动作在（不点，避免物化）
   await page.locator('#editor .mount-derived-lens').first().click()
   await page.waitForTimeout(200)
@@ -2623,6 +2637,14 @@ await check('T194b 引用含属性引用：kind 过滤可切；标签页默认�
   assert(lens.group, '派生表格的镜头面板应有分组节')
   assert(lens.views.includes('table') && lens.views.includes('outline'), `镜头面板应能切回大纲：${JSON.stringify(lens.views)}`)
   assert(lens.extract, '派生栏的镜头面板应有「提取为查询」动作')
+  await page.locator('.popover.lenspop [data-derived-slice]').click()
+  await page.waitForTimeout(200)
+  const sliceTree = await page.evaluate(() => ({
+    open: Boolean(document.querySelector('.popover.qt')),
+    note: document.querySelector('.popover .popover-note')?.textContent ?? '',
+  }))
+  assert(sliceTree.open, '「编辑条件…」应打开条件树')
+  assert(sliceTree.note.includes('基条件'), `条件树上方要写明基条件只读：${sliceTree.note}`)
   await page.keyboard.press('Escape')
   await page.waitForTimeout(150)
 
@@ -23667,7 +23689,7 @@ await check('T237 候选引用：片段行高亮名字出现处、一键转成�
   return `提及 ${before.rows} 行（片段高亮＋按钮）→ 一键转换提及消失/引用出现（1 op）→ ⌘Z 换回来`
 })
 
-await check('T239 快速筛选（右槽挂载区卡·引用栏）：候选带计数、点击加入/Shift 排除、加摘可逆；全程不产生 op、不进撤销栈、不落盘', async () => {
+await check('T239 快速筛选（右槽挂载区卡·引用栏）：候选带计数、点击加入/Shift 排除、加摘可逆；筛选写在这一栏条目上', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   // 两个不同页各有一条块引用**没有既有反链的最后一页** ⇒ 卡里两行、来源两页（每页各命中 1 行）
@@ -23697,15 +23719,13 @@ await check('T239 快速筛选（右槽挂载区卡·引用栏）：候选带计
   const rowCount = () => page.evaluate((sel) => document.querySelectorAll(`${sel} .blk[data-depth="0"]`).length, card)
   assert((await rowCount()) === 2, `前置：卡里两行源块`)
 
-  // 写路径零参与的三样账：撤销栈深度、命令日志、落盘的那一份库
-  await page.waitForTimeout(300) // 让开机期的任何落盘先落完，账从稳态起算
-  const ledger = () =>
-    page.evaluate(() => ({
-      undo: window.__qua.snapshot().undoDepth,
-      cmds: window.__qua.commandLog().length,
-      store: window.localStorage.getItem('qua.workspace'),
-    }))
-  const before = await ledger()
+  // 条目上的镜头：筛选是这一栏的配置（内容），不是这一屏的瞬态
+  const lensEntry = () =>
+    page.evaluate((id) => {
+      const host = window.__qua.__editor.store.find(id)
+      const e = (host?.props?._mounts ?? []).find((x) => x.kind === 'derived' && x.source === 'refs')
+      return e ?? null
+    }, setup.P)
 
   // 打开弹层：候选＝结果集里出现过的页，各带计数 1
   await page.locator(`${card} .mount-derived-lens`).click()
@@ -23734,6 +23754,8 @@ await check('T239 快速筛选（右槽挂载区卡·引用栏）：候选带计
   assert((await candidateChips.count()) === 2, `候选与计数不随筛选缩`)
   const colOf = (col) => page.locator(`.popover .quick-filter-col[data-col="${col}"] .quick-filter-chip`)
   assert((await colOf('include').count()) === 1, `包含列有一颗已选 chip`)
+  const e1 = await lensEntry()
+  assert(e1?.filter, `筛选要写到这一栏条目的 filter 上：${JSON.stringify(e1)}`)
 
   // Shift+点另一颗 → 加入「排除」：并集里没有它，行数不变；chip 落排除列
   await rChip.click({ modifiers: ['Shift'] })
@@ -23760,18 +23782,17 @@ await check('T239 快速筛选（右槽挂载区卡·引用栏）：候选带计
   assert(emptied.rows === 0, `两页都排除后没有行：${JSON.stringify(emptied)}`)
   assert(emptied.note.includes('没有符合筛选'), `筛空的空态要说「筛选」，不说「没有反链」：${JSON.stringify(emptied)}`)
 
-  await page.waitForTimeout(300)
-  const after = await ledger()
+  const e2 = await lensEntry()
   assert(
-    after.undo === before.undo && after.cmds === before.cmds && after.store === before.store,
-    `全程不改撤销栈/命令日志/落盘：undo ${before.undo}→${after.undo} cmds ${before.cmds}→${after.cmds} store ${before.store === after.store}`,
+    JSON.stringify(e2?.filter ?? {}).includes(setup.Q) && JSON.stringify(e2?.filter ?? {}).includes(setup.R),
+    `两页都排除后，条件里两页都在（排除是叠加层，不改基条件）：${JSON.stringify(e2)}`,
   )
 
   await ctx.close()
-  return `候选两页各带计数 1；包含→1 行、Shift 排除→落排除列、逐颗摘除两行全回；筛空说「没有符合筛选的引用」；undo/命令/落盘零变化`
+  return `候选两页各带计数 1；包含→1 行、Shift 排除→落排除列、逐颗摘除两行全回；筛空说「没有符合筛选的引用」；筛选写在这一栏条目上`
 })
 
-await check('T240 快速筛选（引用栏）：大纲筛行；切到表格是同一份 chips；摘空＝无筛选；同样零写路径', async () => {
+await check('T240 快速筛选（引用栏）：大纲筛行；切到表格是同一份 chips；摘空＝无筛选；筛选写在这栏条目上', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const setup = await page.evaluate(() => {
@@ -23791,7 +23812,7 @@ await check('T240 快速筛选（引用栏）：大纲筛行；切到表格是�
     const R = pages[2]
     from(Q.id)
     from(R.id)
-    return { P: P.id, q: Q.title, r: R.title }
+    return { P: P.id, Q: Q.id, q: Q.title, r: R.title }
   })
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.P)
   await page.waitForTimeout(450)
@@ -23799,11 +23820,12 @@ await check('T240 快速筛选（引用栏）：大纲筛行；切到表格是�
   // mount 查询一律指名中心（#editor）：右槽挂载区卡是同一台组件，全局查会把两个表面的行加在一起
   const countText = () => page.evaluate(() => document.querySelector('#editor .mount-derived-count')?.textContent ?? '')
   assert((await countText()).includes('2'), `前置：引用栏两行：${await countText()}`)
-
-  await page.waitForTimeout(300)
-  // 撤销/命令的账从**任何手势之前**起算；落盘的账从**切看法之后**起算——
-  // 切看法是设备状态的合法写（偏好），不许把它的账算到 chips 头上
-  const start = await page.evaluate(() => ({ undo: window.__qua.snapshot().undoDepth, cmds: window.__qua.commandLog().length }))
+  const lensEntry = () =>
+    page.evaluate((id) => {
+      const host = window.__qua.__editor.store.find(id)
+      const e = (host?.props?._mounts ?? []).find((x) => x.kind === 'derived' && x.source === 'refs')
+      return e ?? null
+    }, setup.P)
 
   // 弹层 → 包含其中一页：大纲的行与抬头数字一起变
   await page.locator('#editor .mount .mount-derived-lens').first().click()
@@ -23813,6 +23835,17 @@ await check('T240 快速筛选（引用栏）：大纲筛行；切到表格是�
   await page.waitForTimeout(250)
   assert((await countText()).includes('1'), `筛后抬头＝1：${await countText()}`)
   assert((await mountRows(page)) === 1, `大纲只剩那一页的一行`)
+  const e1 = await lensEntry()
+  assert(
+    JSON.stringify(e1?.filter ?? {}).includes(setup.Q),
+    `筛选要写到这一栏条目的 filter 上：${JSON.stringify(e1)}`,
+  )
+  const includeLabel = await page.evaluate(
+    () =>
+      document.querySelector('.popover .quick-filter-col[data-col="include"] .quick-filter-chip-name')
+        ?.textContent ?? '',
+  )
+  assert(includeLabel === setup.q, `已选页 chip 要显示页名，不显示 id：${includeLabel}`)
 
   // 切到表格：同一份 chips 也在生效（两处各算各的就会出现两批行）
   await pickDerivedView(page, 'table')
@@ -23823,13 +23856,6 @@ await check('T240 快速筛选（引用栏）：大纲筛行；切到表格是�
   // 回大纲（切看法点的是弹层外的按钮，弹层已关，重开再摘）
   await pickDerivedView(page, 'outline')
   await page.waitForTimeout(250)
-  const ledger = () =>
-    page.evaluate(() => ({
-      undo: window.__qua.snapshot().undoDepth,
-      cmds: window.__qua.commandLog().length,
-      store: window.localStorage.getItem('qua.workspace'),
-    }))
-  const before = await ledger()
 
   await page.locator('#editor .mount .mount-derived-lens').first().click()
   await page.waitForTimeout(200)
@@ -23837,16 +23863,11 @@ await check('T240 快速筛选（引用栏）：大纲筛行；切到表格是�
   await page.waitForTimeout(250)
   assert((await countText()).includes('2'), `摘空后抬头＝2：${await countText()}`)
   assert((await mountRows(page)) === 2, `摘空后两行都回来`)
-
-  await page.waitForTimeout(300)
-  const after = await ledger()
-  assert(
-    after.undo === start.undo && after.cmds === start.cmds && after.store === before.store,
-    `全程不改撤销栈/命令日志、chips 不落盘：undo ${start.undo}→${after.undo} cmds ${start.cmds}→${after.cmds} store ${before.store === after.store}`,
-  )
+  const e2 = await lensEntry()
+  assert(!e2?.filter, `摘空后条目上的 filter 应删掉：${JSON.stringify(e2)}`)
 
   await ctx.close()
-  return `引用栏：包含一页→抬头与大纲同减；表格看法同一份 chips（1 行）；摘空＝无筛选；undo/命令/落盘零变化`
+  return `引用栏：包含一页→抬头与大纲同减；表格看法同一份 chips（1 行）；摘空＝无筛选；筛选写在这一栏条目上`
 })
 
 await check('T241 搜索面右预览：就地编辑落盘、Enter 建子块并看得见、↑↓ 换选中不重建编辑器、⌘↵ 打开、离开后活动编辑器回到正文', async () => {
@@ -27084,6 +27105,16 @@ await check('T281 快速筛选：新建查询默认不查询；查询块的漏�
   assert((await tags.count()) > 0, '面板候选里有标签')
   await tags.first().click()
   await page.waitForTimeout(400)
+  const includeLabel = await page.evaluate(
+    () =>
+      document.querySelector(
+        '.queryview-optionspanel .quick-filter-col[data-col="include"] .quick-filter-chip-name',
+      )?.textContent ?? '',
+  )
+  assert(
+    includeLabel !== '' && !/^[0-9a-f]{16,}$/.test(includeLabel),
+    `已选标签 chip 要显示名字，不显示 id：${includeLabel}`,
+  )
   const sliced = await page.evaluate((id) => {
     const find = (l) => {
       for (const b of l) {

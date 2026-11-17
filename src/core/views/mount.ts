@@ -34,8 +34,8 @@ import { ENGINE_CREATED, isPropDef } from '../props/props.ts'
 import { descendantTagIds } from '../identity/tag-tree.ts'
 import { plainText } from '../model/runs.ts'
 import { walkForest } from '../model/walk.ts'
-import type { QueryHit, QueryNode, QuerySpec } from '../query/query.ts'
-import { isQueryNode, isQuerySpec } from '../query/query.ts'
+import type { QueryHit, QueryNode, QuerySpec, SortKey } from '../query/query.ts'
+import { canonicalNode, isEmptyWhere, isQueryNode, isQuerySpec } from '../query/query.ts'
 import { isRefKind, REFERENCE_KINDS, type RefKind } from '../relations/relations.ts'
 import { mentionSnippet, mentionSpotsOf } from '../relations/mention.ts'
 import { t } from '../infra/msg.ts'
@@ -53,10 +53,13 @@ import {
   SHARED_TAGS_COLUMN,
   VIA_COLUMN,
   DERIVED_VIEW_KINDS,
+  slicedSpec,
+  sortKeysOfRaw,
   type DerivedViewKind,
   type ViewConfig,
   type ViewRecord,
 } from './view.ts'
+import { sortRecords } from './records.ts'
 import type { KbClient } from '../kb/types.ts'
 
 /** `_mounts`：块宿主上的一格（有序） */
@@ -87,13 +90,31 @@ export const DERIVED_SOURCES = ['usedBy', 'members', 'refs', 'created', 'notes',
 export type DerivedSource = (typeof DERIVED_SOURCES)[number]
 
 /**
+ * **派生栏的镜头**：基条件仍由宿主现算（反链/成员/同类不会冻结），
+ * 这里只存用户叠加的那一层。
+ *
+ * 与 `ViewConfig.filter` 同一形状、同一语义：`base ∩ filter`（AND，不替换），
+ * 空／缺省＝原样。`sort` 与 `QuerySpec.sort` 同一个形状：成员顺序。
+ */
+export interface DerivedLens {
+  /** 叠加在派生基条件上的切片；缺省＝不筛 */
+  filter?: QueryNode
+  /** 成员顺序；缺省＝来源的天然顺序 */
+  sort?: SortKey[]
+}
+
+/**
  * 一栏。
  *
  * `kind` 是**语义**（谁能拥有配置），不是样式：UI 按它查字典、决定能不能摘除，
  * 也决定「改条件」这件事落在谁的 `_query`／`spec` 上。
+ *
+ * `derived` 的 `filter`／`sort` 是**镜头**，不是基条件：基条件仍由 `derivedSpecOf`
+ * 现算，用户只能往上叠加。它们和这一栏的条目一起住（块宿主 `_mounts`、日记宿主
+ * `Prefs.journalMounts`），所以「一栏的配置跟这一栏走」。
  */
 export type MountEntry =
-  | { id: string; kind: 'derived'; source: DerivedSource }
+  | ({ id: string; kind: 'derived'; source: DerivedSource } & DerivedLens)
   | {
       id: string
       kind: 'local'
@@ -132,7 +153,12 @@ export function cloneMountEntries(entries: readonly MountEntry[]): MountEntry[] 
             ? { defaultDisplayProps: [...e.defaultDisplayProps] as string[] }
             : {}),
         }
-      : e,
+      : {
+          ...e,
+          // 镜头也要深拷：复制一栏不能与原件共享同一份条件/排序对象
+          ...(e.filter ? { filter: JSON.parse(JSON.stringify(e.filter)) as QueryNode } : {}),
+          ...(e.sort ? { sort: e.sort.map((s) => ({ ...s })) } : {}),
+        },
   )
 }
 
@@ -187,6 +213,50 @@ export function mkTabId(): string {
  */
 export function derivedTabId(source: DerivedSource): string {
   return source
+}
+
+/** 一条对应来源的派生栏条目（没有就是没有） */
+export function derivedEntryOf(
+  entries: readonly MountEntry[],
+  source: DerivedSource,
+): Extract<MountEntry, { kind: 'derived' }> | undefined {
+  return entries.find((e): e is Extract<MountEntry, { kind: 'derived' }> => e.kind === 'derived' && e.source === source)
+}
+
+/** 读这一栏的镜头（缺省空对象；调用方不用自己拼 filter/sort 两格） */
+export function derivedLensOf(entry: Extract<MountEntry, { kind: 'derived' }> | undefined): DerivedLens {
+  if (!entry) return {}
+  return {
+    ...(entry.filter ? { filter: entry.filter } : {}),
+    ...(entry.sort ? { sort: entry.sort } : {}),
+  }
+}
+
+/**
+ * 把一份镜头补丁写回一栏。返回 `null` ＝这一栏不在列表里／补丁没造成变化
+ * （调用方据此决定「要不要产生一次可撤销动作」）。
+ *
+ * 只动派生栏；`filter`/`sort` 传 `null` ＝清掉。基条件不在这里，也不可清。
+ */
+export function withDerivedLens(
+  entries: readonly MountEntry[],
+  source: DerivedSource,
+  patch: { filter?: QueryNode | null; sort?: SortKey[] | null },
+): MountEntry[] | null {
+  const at = entries.findIndex((e) => e.kind === 'derived' && e.source === source)
+  if (at < 0) return null
+  const current = entries[at] as Extract<MountEntry, { kind: 'derived' }>
+  const next: Extract<MountEntry, { kind: 'derived' }> = { ...current }
+  if (patch.filter !== undefined) {
+    if (patch.filter !== null && !isEmptyWhere(patch.filter)) next.filter = canonicalNode(patch.filter)
+    else delete next.filter
+  }
+  if (patch.sort !== undefined) {
+    if (patch.sort !== null && patch.sort.length > 0) next.sort = patch.sort.map((s) => ({ ...s }))
+    else delete next.sort
+  }
+  if (JSON.stringify(next) === JSON.stringify(current)) return null
+  return entries.map((e, i) => (i === at ? next : e))
 }
 
 /** 这个 id 是不是某个内置栏的稳定 id（物化出的 local 会占用它们，见 `mountEntriesOf`） */
@@ -359,22 +429,46 @@ function createdSpecOf(host: Block): QuerySpec {
  *   · 引用是**块粒度**（谁引用了我），不按「第几处引用」拆行；
  *   · 派生值不进 `props`、不落盘：`refCount`／`matched`／`sharedTags` 都是这次读出来的。
  */
-export function derivedRecordsOf(host: Block, kb: KbClient, source: DerivedSource): ViewRecord[] {
+export function derivedRecordsOf(
+  host: Block,
+  kb: KbClient,
+  source: DerivedSource,
+  lens: DerivedLens = {},
+): ViewRecord[] {
+  const sort = (records: ViewRecord[]): ViewRecord[] =>
+    lens.sort && lens.sort.length > 0
+      ? sortRecords(records, lens.sort, undefined, { includeReserved: true })
+      : records
+
   // 备注栏：直读 annotates 边（谁在评论我），不走 QuerySpec
-  if (source === 'notes') return noteRecordsOf(host, kb)
-  const spec = derivedSpecOf(host, kb.roots(), source)
-  if (!spec) return []
+  if (source === 'notes') {
+    let records = noteRecordsOf(host, kb)
+    if (lens.filter) {
+      const spec: QuerySpec = { where: lens.filter }
+      records = records.filter((r) =>
+        kb.matchesSpec(spec, r.block, { selfId: host.id, excludeIds: [host.id] }),
+      )
+    }
+    return sort(records)
+  }
+
+  const base = derivedSpecOf(host, kb.roots(), source)
+  if (!base) return []
+  // 基条件 ∩ 镜头切片：**叠加**，不是替换；无切片时 `slicedSpec` 原样返回
+  const spec = lens.filter ? slicedSpec(base, lens.filter) : base
   const hits = kb.query(spec, { selfId: host.id, excludeIds: [host.id] })
   const rows = resolveRows(hits, kb)
-  if (source === 'refs') return refRecords(host, kb, rows)
-  if (source === 'created') return rows
-  if (source === 'members') return memberRecords(host, kb, rows)
-  if (source === 'mentions') return mentionRecords(host, kb)
+  if (source === 'refs') return sort(refRecords(host, kb, rows))
+  if (source === 'created') return sort(rows)
+  if (source === 'members') return sort(memberRecords(host, kb, rows))
+  if (source === 'mentions') return sort(mentionRecords(host, kb))
   const own = new Set(kb.tagsOf(host.id).map((t) => plainText(t.content)))
-  return rows.map((r) => {
-    const shared = r.tags.map((t) => plainText(t.content)).filter((name) => own.has(name))
-    return shared.length === 0 ? r : { ...r, derived: { sharedTags: shared } }
-  })
+  return sort(
+    rows.map((r) => {
+      const shared = r.tags.map((t) => plainText(t.content)).filter((name) => own.has(name))
+      return shared.length === 0 ? r : { ...r, derived: { sharedTags: shared } }
+    }),
+  )
 }
 
 /**
@@ -549,9 +643,14 @@ export function derivedTemplateOf(
   host: Block,
   forest: readonly Block[],
   source: DerivedSource,
+  lens: DerivedLens = {},
 ): { spec: QuerySpec; views: ViewConfig[] } | null {
-  const spec = derivedSpecOf(host, forest, source)
-  if (!spec) return null
+  const base = derivedSpecOf(host, forest, source)
+  if (!base) return null
+  // 冻结成独立查询：把当前镜头一起焊进 spec（之后它不再跟宿主现算）。
+  // 无切片时也要拷一份再写 sort——`SPEC_REFS` 这类基条件是共享常量，不能原地改。
+  const spec: QuerySpec = lens.filter ? slicedSpec(base, lens.filter) : { ...base }
+  if (lens.sort && lens.sort.length > 0) spec.sort = lens.sort.map((s) => ({ ...s }))
   /**
    * 这里**仍默认表格**，与「＋ 新建栏」的缺省大纲不同，不是漏改：物化出来的栏带着
    * 现算好的非空条件与本源的派生列（引用次数／命中词／共同标签），表格是那些列的载体；
@@ -641,7 +740,13 @@ export function mountEntriesOf(host: Block, opts: MountReadOpts = {}): MountEntr
       continue
     }
     const d = bySource.get(e.source)
-    if (d) out.push(d)
+    if (d) {
+      // 位置标记可以带**镜头**：基条件仍取内置那一条，filter/sort 从存储条目上叠回来
+      const merged: Extract<MountEntry, { kind: 'derived' }> = { ...d }
+      if (e.filter) merged.filter = e.filter
+      if (e.sort) merged.sort = e.sort
+      out.push(merged)
+    }
   }
   const missing = live.filter((d) => !markers.some((m) => m.source === d.source))
   if (missing.length > 0) {
@@ -714,7 +819,13 @@ export function canonicalMountEntries(raw: unknown): MountEntry[] {
       const id = stableId(e.id, seen, derivedTabId(source))
       if (!id) continue
       seen.add(id)
-      out.push({ id, kind: 'derived', source })
+      const entry: Extract<MountEntry, { kind: 'derived' }> = { id, kind: 'derived', source }
+      // 镜头是可选字段：形状坏了只丢那一格，**不丢整栏**（那一栏的基条件仍然有效）。
+      const filter = (e as { filter?: unknown }).filter
+      if (isQueryNode(filter) && !isEmptyWhere(filter)) entry.filter = canonicalNode(filter)
+      const sort = sortKeysOfRaw((e as { sort?: unknown }).sort)
+      if (sort.length > 0) entry.sort = sort
+      out.push(entry)
       continue
     }
     if (e.kind === 'local') {

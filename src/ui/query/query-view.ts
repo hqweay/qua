@@ -284,8 +284,12 @@ export interface DerivedMode {
   displayProps: string[]
   /** 这一栏的分组键（设备状态；'' ＝ 没分组）。与看法同层：派生栏没有可写的视图配置 */
   groupBy: string
+  /** 这一栏的排序（条目上的镜头；与查询的 `sort` 同一形状） */
+  sort?: SortKey[]
   /** 切看法写哪（设备状态；由装配层落地） */
   setKind: (kind: DerivedViewKind) => void
+  /** 改排序（写这一栏条目的镜头；表头点击也走这里，不另立屏内瞬态） */
+  setSort?: (sort: SortKey[]) => void
   /** 表头的只读说明（「指向这一块」这类） */
   explain: string
 }
@@ -479,8 +483,6 @@ export class ViewHost {
    * 说明差的正是这一步「按当前树重算」。
    */
   private structureDirty = false
-  /** 派生栏在这一屏内的显示排序（表面状态：不进库、不同步） */
-  private derivedSort: SortKey[] = []
   /** 派生栏的「整片重算」防抖（成员可能新增，局部修补不够） */
   private readonly derivedFlush = new DeferredFlush(() => this.sync(true), 120)
   /** 这一屏的**顶层行**（`render` 时存下来：「全部收起」要有东西可收才有意义） */
@@ -787,8 +789,8 @@ export class ViewHost {
     return {
       id: 'derived:table',
       kind: 'table',
-      // 排序与显示都是顶层轴（派生栏的这两份是设备态，临时构造不落盘）
-      ...(this.derivedSort.length > 0 ? { sort: this.derivedSort } : {}),
+      // 排序是这一栏条目上的镜头（不是这一屏的瞬态）；显示仍是临时构造
+      ...(d.sort && d.sort.length > 0 ? { sort: d.sort } : {}),
       displayProps: [...d.displayProps],
       ...group,
     }
@@ -1300,11 +1302,19 @@ export class ViewHost {
     return resolveRows(evaluateQuerySpec(src.spec, this.deps.kb, this.evalContext(src.spec)), this.deps.kb)
   }
 
-  /** chip 的显示名：页按 id 现解析；标签的原子本来就是名字。目标没了说「无标题」，不露裸 id */
+  /**
+   * chip 的显示名：页与标签都按 **id 现解析**（条件语言里 `{tag}` 存标签块 id，
+   * 不存名字——名字会随改名失配）。
+   *
+   * 旧库里可能还留着按名字写的 tag atom（238 早期形状）：`kb.get` 查不到就原样
+   * 当名字显示，不把它丢掉，也不露裸 id。目标没了才说「无标题」。
+   */
   private atomLabel(atom: QuickFilterAtom): string {
+    const id = 'tag' in atom ? atom.tag : atom.up.is
+    const b = this.deps.kb.get(id)
+    if (b) return blockLabel(b, (x) => this.deps.kb.get(x))
     if ('tag' in atom) return atom.tag
-    const b = this.deps.kb.get(atom.up.is)
-    return b ? blockLabel(b, (x) => this.deps.kb.get(x)) : t('ui.page.untitled')
+    return t('ui.page.untitled')
   }
 
   /** 条件树能不能落在这里（投影／派生栏没有可编辑的落点） */
@@ -1742,8 +1752,8 @@ export class ViewHost {
       // 派生栏没有可写的配置：排序只在这一屏内生效（切走回原序，不留第二真相）
       sort: (by, dir) => {
         if (this.deps.derived) {
-          this.derivedSort = dir === '' ? [] : [{ by, dir: dir === 'desc' ? 'desc' : 'asc' }]
-          this.sync(true)
+          // 表头点击写**这一栏的镜头**：与面板里的排序是同一份，不另立屏内瞬态
+          this.deps.derived.setSort?.(dir === '' ? [] : [{ by, dir: dir === 'desc' ? 'desc' : 'asc' }])
           return
         }
         // 表头点击＝写**第一键**：整份多键在排序面板里编辑
