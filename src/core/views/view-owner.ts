@@ -146,6 +146,9 @@ export function ownerDataOfTab(entry: MountEntry | undefined): ViewOwnerData | n
   if (entry.activeView !== undefined && entry.activeView !== '') out.activeView = entry.activeView
   if (isQueryNode(entry.defaultFilter)) out.defaultFilter = entry.defaultFilter
   if (isChildPropsValue(entry.defaultDisplayProps)) out.defaultDisplayProps = entry.defaultDisplayProps
+  // 缺省层的两个位与块拥有者同一条读路：漏读＝面板的 seg 永远停在「显示／不分段」
+  if (entry.defaultShowPaths === false) out.defaultShowPaths = false
+  if (typeof entry.defaultGroup === 'string' && entry.defaultGroup !== '') out.defaultGroup = entry.defaultGroup
   return out
 }
 
@@ -162,6 +165,9 @@ export function withTabOwnerData(entry: Extract<MountEntry, { kind: 'local' }>, 
   if (data.activeView !== undefined && data.activeView !== '') out.activeView = data.activeView
   if (data.defaultFilter !== undefined) out.defaultFilter = data.defaultFilter
   if (data.defaultDisplayProps !== undefined) out.defaultDisplayProps = data.defaultDisplayProps
+  // 与 ownerDataOfTab 对称：写不回去＝白写了（下一次读回就退回默认）
+  if (data.defaultShowPaths !== undefined) out.defaultShowPaths = data.defaultShowPaths
+  if (data.defaultGroup !== undefined) out.defaultGroup = data.defaultGroup
   return out
 }
 

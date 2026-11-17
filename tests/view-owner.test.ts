@@ -170,6 +170,21 @@ test('withTabOwnerData：写回 local 条目，id 与名字不丢；views 按 qu
   )
 })
 
+test('local tab 的缺省层写回→落盘校验→读回：显隐／分段／显示覆写不丢', () => {
+  // 写回缺省层的三个位，再过一遍落盘校验与读路——任何一环漏带字段，seg 就永远切不过去
+  const written = withTabOwnerData(localTab(), {
+    views: [],
+    defaultShowPaths: false,
+    defaultGroup: 'hostPage',
+    defaultDisplayProps: [],
+  })
+  const stored = canonicalMountEntries([written])[0] as Extract<MountEntry, { kind: 'local' }>
+  const data = ownerDataOfTab(stored)
+  assert.equal(data?.defaultShowPaths, false, '行首路径显隐随栏往返')
+  assert.equal(data?.defaultGroup, 'hostPage', '分段键随栏往返')
+  assert.deepEqual(data?.defaultDisplayProps, [], '显示覆写随栏往返（空数组＝只标题，也是覆写）')
+})
+
 /* ------------------------------------------------------------ 绑定：只有指针 */
 
 test('bindingOfEmbed：`_embed = {block, view}` 就是一次绑定的全部', () => {

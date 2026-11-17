@@ -30,7 +30,7 @@ import { dayStartMs, isJournal, journalDate, shiftISO, todayISO } from '../ident
 import { displayTextOf } from '../identity/alias.ts'
 import { hasList, primaryAliasOf, prop, type Block } from '../model/model.ts'
 import { tagIdsOf } from '../identity/tags.ts'
-import { ENGINE_CREATED, isPropDef } from '../props/props.ts'
+import { ENGINE_CREATED, isChildPropsValue, isPropDef } from '../props/props.ts'
 import { descendantTagIds } from '../identity/tag-tree.ts'
 import { plainText } from '../model/runs.ts'
 import { walkForest } from '../model/walk.ts'
@@ -131,6 +131,13 @@ export type MountEntry =
       defaultFilter?: QueryNode
       /** **默认看法（大纲）的显示覆写**：全局白名单（空数组＝只标题）；缺失＝rich 默认 */
       defaultDisplayProps?: string[]
+      /**
+       * **默认看法（大纲）的行首路径开关**：只认显式 `false`（关）；缺失＝照画。
+       * 与块拥有者的 `_defaultShowPaths` 同一件事——缺省层的位跟「源是 query」走，不跟「配置住哪」走。
+       */
+      defaultShowPaths?: false
+      /** **默认看法（大纲）的分段键**：现阶段只有 `'hostPage'`（所在页）有面；缺失＝不分段 */
+      defaultGroup?: string
     }
 
 /**
@@ -154,6 +161,9 @@ export function cloneMountEntries(entries: readonly MountEntry[]): MountEntry[] 
           ...(e.defaultDisplayProps
             ? { defaultDisplayProps: [...e.defaultDisplayProps] as string[] }
             : {}),
+          // 缺省层的位也是配置：复制一栏不能丢（丢了下一次装载就退回「显示／不分段」）
+          ...(e.defaultShowPaths !== undefined ? { defaultShowPaths: e.defaultShowPaths } : {}),
+          ...(e.defaultGroup ? { defaultGroup: e.defaultGroup } : {}),
         }
       : {
           ...e,
@@ -863,6 +873,10 @@ export function canonicalMountEntries(raw: unknown): MountEntry[] {
       }
       if (typeof l.activeView === 'string' && l.activeView !== '') entry.activeView = l.activeView
       if (isQueryNode(l.defaultFilter)) entry.defaultFilter = l.defaultFilter
+      // 缺省层的位是可选字段：形状坏了只丢那一格，不丢整栏（与 filter 同一纪律）
+      if (isChildPropsValue(l.defaultDisplayProps)) entry.defaultDisplayProps = l.defaultDisplayProps as string[]
+      if (l.defaultShowPaths === false) entry.defaultShowPaths = false
+      if (typeof l.defaultGroup === 'string' && l.defaultGroup !== '') entry.defaultGroup = l.defaultGroup
       out.push(entry)
     }
   }
