@@ -608,9 +608,27 @@ export function setupPanels(deps: PanelsDeps) {
     opts: { anchor?: DOMRect | HTMLElement | null; autofocus?: boolean } = {},
   ): void => {
     if (!findInForest(deps.getWs().blocks, blockId)) return
-    // 元素锚点跟着那一颗按钮走（行随重渲染被换掉时锚点变 null ⇒ 浮层收起）
-    const liveAnchor = (el: HTMLElement): (() => DOMRect | null) => () =>
-      el.isConnected ? el.getBoundingClientRect() : null
+    /**
+     * 元素锚点跟着那一颗按钮走，但**按钮会随行重渲染被换掉**（别名头改一次名字
+     * 行就换一遍）。换掉 ≠ 锚点没了：在同一块的新行里按同一把交椅找回
+     * （同一表面内查，别把另一处挂载的同名行认成锚）；连表面都不在了才是真消失
+     * ⇒ 返回 null、浮层按「锚点消失」收起。找回后重落位跟着新按钮走，
+     * 写一次别名不会把配置浮层闪关。
+     */
+    const liveAnchor = (el: HTMLElement): (() => DOMRect | null) => {
+      const row = el.closest<HTMLElement>('.blk[data-block-id]')
+      const hostId = row?.dataset.blockId
+      const action = el.getAttribute('data-alias-action') ?? ''
+      const surface = el.closest<HTMLElement>('#doc, .sec-mount, .dock-window-editor')
+      return () => {
+        if (el.isConnected) return el.getBoundingClientRect()
+        const again =
+          surface?.querySelector<HTMLElement>(
+            `.blk[data-block-id="${hostId ?? ''}"] [data-alias-action="${action}"]`,
+          ) ?? null
+        return again ? again.getBoundingClientRect() : null
+      }
+    }
     const anchor = opts.anchor ?? null
     layers.openPopover(
       (host) => {
