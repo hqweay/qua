@@ -182,6 +182,13 @@ export const DEFAULT_GROUP_PROP = '_defaultGroup' as const
  */
 export interface GroupHead {
   beforeRootId: string
+  /**
+   * **组键**（组页 id；无页归属的组是空串）——折叠路由的身份。
+   * ⚠️ 不能拿 `beforeRootId` 顶这一格：锚是「插在哪一行前」，折叠组的锚还是
+   * **下一组**的头一行——锚与组键只在「命中行恰好是页自己」时重合，拿锚当键
+   * 就是「有时能折、有时不能」（真机抓到的正是这个）。
+   */
+  key: string
   /** 组名（页的显示名；根身份组有自己的兜底名） */
   label: string
   /** 组内行数（只数这一装载里的根行，不含展开的祖先行） */
@@ -235,6 +242,8 @@ export type SystemPropId =
   | typeof ACTIVE_VIEW_PROP
   | typeof DEFAULT_FILTER_PROP
   | typeof DEFAULT_DISPLAY_PROPS_PROP
+  | typeof DEFAULT_SHOW_PATHS_PROP
+  | typeof DEFAULT_GROUP_PROP
   // 露面指针（见 `core/embed.ts`）：同一块在别处再出现一次
   | '_embed'
   // 字段定义（prop-def）：kind / 格式 / 声明列表 / 选项记录域

@@ -29,6 +29,8 @@ import {
   COLOR_PROP,
   DEFAULT_DISPLAY_PROPS_PROP,
   DEFAULT_FILTER_PROP,
+  DEFAULT_GROUP_PROP,
+  DEFAULT_SHOW_PATHS_PROP,
   DELETED_AT_PROP,
   DISPLAY_PROP,
   ICON_PROP,
@@ -96,6 +98,10 @@ export const SYSTEM_PROP_CHECKS: Readonly<Record<string, (value: unknown) => boo
   [DEFAULT_FILTER_PROP]: isQueryNode,
   // 默认看法的显示覆写：白名单（非空字符串数组），空数组＝只标题也合法——同一形状复用 `_childProps` 判据
   [DEFAULT_DISPLAY_PROPS_PROP]: isChildPropsValue,
+  // 默认看法的行首路径开关：只有 false 一个合法值（开回默认＝删格，恒真 true 不落盘）
+  [DEFAULT_SHOW_PATHS_PROP]: (v) => v === false,
+  // 默认看法的分段键：现阶段只有 'hostPage' 有面（语义校验在命令层，这里只挡形状）
+  [DEFAULT_GROUP_PROP]: (v) => typeof v === 'string' && v !== '',
   [EMBED_PROP]: (v) => canonicalViewRef(v) !== null,
   // 字段定义（props.ts）
   _kind: isPropKind,

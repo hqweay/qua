@@ -227,7 +227,8 @@ export class RenderOps {
   private makeGroupHead(h: GroupHead): HTMLElement {
     const el = document.createElement('div')
     el.className = 'grp-head'
-    el.dataset.grpHead = h.beforeRootId
+    // 组键（折叠路由的身份），不是锚——锚只管插位，见 GroupHead.key 的说明
+    el.dataset.grpHead = h.key
     el.contentEditable = 'false'
     const caret = document.createElement('span')
     caret.className = 'grp-caret'

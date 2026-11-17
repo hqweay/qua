@@ -1150,13 +1150,13 @@ export class MountArea {
     const groups = pageGroupsOf(base)
     const collapsed = this.groupCollapsed.get(entryId) ?? new Set<string>()
     const heads: GroupHead[] = []
-    const deferred: { label: string; count: number }[] = []
+    const deferred: { key: string; label: string; count: number; openId?: string }[] = []
     const plans: ContextPlan[] = []
     for (const g of groups) {
       const label = this.pageGroupLabel(g.page)
       // 折叠的组没有自己的行可锚：头先攒着，锚到下一组的头一行；排在最后 ⇒ 哨兵
       if (collapsed.has(g.page?.id ?? '')) {
-        deferred.push({ label, count: g.roots.length })
+        deferred.push({ key: g.page?.id ?? '', label, count: g.roots.length, ...(g.page ? { openId: g.page.id } : {}) })
         continue
       }
       const plan = expandContexts(
@@ -1166,12 +1166,13 @@ export class MountArea {
         focusHint,
       )
       const anchor = plan.roots[0]?.id ?? ''
-      for (const d of deferred) heads.push({ beforeRootId: anchor, label: d.label, count: d.count, collapsed: true })
+      const key = g.page?.id ?? ''
+      for (const d of deferred) heads.push({ beforeRootId: anchor, key: d.key, label: d.label, count: d.count, collapsed: true, ...(d.openId ? { openId: d.openId } : {}) })
       deferred.length = 0
-      if (anchor !== '') heads.push({ beforeRootId: anchor, label, count: g.roots.length, ...(g.page ? { openId: g.page.id } : {}) })
+      if (anchor !== '') heads.push({ beforeRootId: anchor, key, label, count: g.roots.length, ...(g.page ? { openId: g.page.id } : {}) })
       plans.push(plan)
     }
-    for (const d of deferred) heads.push({ beforeRootId: '', label: d.label, count: d.count, collapsed: true })
+    for (const d of deferred) heads.push({ beforeRootId: '', key: d.key, label: d.label, count: d.count, collapsed: true, ...(d.openId ? { openId: d.openId } : {}) })
     return { plan: mergeContextPlans(plans), heads }
   }
 

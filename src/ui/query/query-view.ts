@@ -2002,13 +2002,15 @@ export class ViewHost {
       const groups = pageGroupsOf(base)
       const collapsed = this.groupCollapsed
       heads = []
-      const deferred: { label: string; count: number }[] = []
+      const deferred: { key: string; label: string; count: number; openId?: string }[] = []
       const plans: ContextPlan[] = []
       for (const g of groups) {
         const label = this.pageGroupLabel(g.page)
-        // 折叠组扣行：头锚到下一组的头一行；排在最后 ⇒ 哨兵（文档末尾）
-        if (collapsed.has(g.page?.id ?? '')) {
-          deferred.push({ label, count: g.roots.length })
+        const key = g.page?.id ?? ''
+        // 折叠组扣行：头锚到下一组的头一行；排在最后 ⇒ 哨兵（文档末尾）。
+        // 锚与组键分开带：折叠路由认键，锚只管插位（真机抓到的「有时能折」就是拿锚当了键）
+        if (collapsed.has(key)) {
+          deferred.push({ key, label, count: g.roots.length, ...(g.page ? { openId: g.page.id } : {}) })
           continue
         }
         const p = expandContexts(
@@ -2018,12 +2020,12 @@ export class ViewHost {
           focusHint,
         )
         const anchor = p.roots[0]?.id ?? ''
-        for (const d of deferred) heads.push({ beforeRootId: anchor, label: d.label, count: d.count, collapsed: true })
+        for (const d of deferred) heads.push({ beforeRootId: anchor, key: d.key, label: d.label, count: d.count, collapsed: true, ...(d.openId ? { openId: d.openId } : {}) })
         deferred.length = 0
-        if (anchor !== '') heads.push({ beforeRootId: anchor, label, count: g.roots.length, ...(g.page ? { openId: g.page.id } : {}) })
+        if (anchor !== '') heads.push({ beforeRootId: anchor, key, label, count: g.roots.length, ...(g.page ? { openId: g.page.id } : {}) })
         plans.push(p)
       }
-      for (const d of deferred) heads.push({ beforeRootId: '', label: d.label, count: d.count, collapsed: true })
+      for (const d of deferred) heads.push({ beforeRootId: '', key: d.key, label: d.label, count: d.count, collapsed: true, ...(d.openId ? { openId: d.openId } : {}) })
       plan = mergeContextPlans(plans)
     } else {
       plan = expandContexts(base, this.expanded, (id) => this.deps.kb.pathOf(id), focusHint)
