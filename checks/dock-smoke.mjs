@@ -1132,6 +1132,9 @@ await check('A23b 根行同时带面包屑＋别名头（两个头）：偏移�
   const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1400, height: 900 } })
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
+  // 页的成员栏按规范序最前；面包屑行住在「引用」栏，先切过去再读
+  await page.click('#editor .mount .mount-tabs [data-tab="refs"]')
+  await page.waitForTimeout(250)
   await page.waitForTimeout(150)
 
   /**

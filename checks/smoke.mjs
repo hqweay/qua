@@ -153,6 +153,13 @@ const openFirstPage = (page) =>
   page.evaluate(() => window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[0].id }))
 
 /**
+ * 切到挂载区的「引用」栏再读行：页也挂成员栏之后，规范序是「成员 → 引用 → …」，
+ * 打开页面默认亮的是成员栏——凡是要看「谁引用了这一页」的断言，先切栏再读，
+ * 别按「第一栏恒为引用」的旧形状挑第一栏。
+ */
+const openRefsColumn = (page) => page.click('#editor .mount .mount-tabs [data-tab="refs"]')
+
+/**
  * 打开种子里那个查询块（`欢迎使用相` 页里的 `_query`），返回它的 id。
  *
  * 条件树的用例都从「一个真的查询块」出发：空壳 DOM 测不出 `$self`／冻结／撤销这些装配。
@@ -1965,9 +1972,17 @@ await check('T11 主题三档 = 真 token 切换（DOM 形状不变；皮肤已�
     }))
   const a = await sig()
   assert(!a.hasSkin, 'body 上不该有 data-skin（D3：甲/乙/丙三皮肤已删）')
+  /**
+   * 主题切换包在 View Transition 里：DOM 翻转发生在过渡回调里（下一帧），
+   * setTheme 返回就读读到的是旧帧 —— 等档位真翻过去再取签名。
+   */
+  const themeApplied = (th) =>
+    page.waitForFunction((t) => document.body.dataset.theme === t, th, { timeout: 5000 })
   await page.evaluate(() => window.__qua.setTheme('light'))
+  await themeApplied('light')
   const light = await sig()
   await page.evaluate(() => window.__qua.setTheme('dark'))
+  await themeApplied('dark')
   const dark = await sig()
   assert(a.domShape === light.domShape && light.domShape === dark.domShape, '换主题不该改 DOM 形状（只换 token）')
   assert(a.bg !== dark.bg, `亮/暗配色应有区分：${a.bg} / ${dark.bg}`)
@@ -1980,6 +1995,7 @@ await check('T11 主题三档 = 真 token 切换（DOM 形状不变；皮肤已�
   //    `prefers-color-scheme` ＋ `light-dark()` 决定。用 Playwright 真改媒体查询（真 Chrome）断言：
   //    `data-theme` 记的是**档位**（system 不动），底色必须跟着系统变。
   await page.evaluate(() => window.__qua.setTheme('system'))
+  await themeApplied('system')
   const sysLight = await sig()
   await page.emulateMedia({ colorScheme: 'dark' })
   await page.waitForTimeout(80)
@@ -5783,6 +5799,8 @@ await check('T34 反链 footer 可原地编辑；同一源块在正文与反链�
     return b.id
   }, targetPage)
   await page.waitForTimeout(350) // footer 的 200ms 查询去抖
+  await openRefsColumn(page) // 打开页面默认亮「成员」栏；这条断言的行住在「引用」栏
+  await page.waitForTimeout(200)
 
   const footer = await page.evaluate((id) => {
     const row = document.querySelector(`#editor .mount .mount-editor .blk[data-block-id="${id}"] .tx`)
@@ -5881,6 +5899,8 @@ await check('T40 反链 footer 的块标能聚焦：点一下中心槽切到该�
     return { id: b.id, text: plain(b) }
   }, targetPage)
   await page.waitForTimeout(350) // footer 的 200ms 查询去抖
+  await openRefsColumn(page) // 源块的行住在「引用」栏，不是默认亮的「成员」栏
+  await page.waitForTimeout(200)
 
   const marker = `#editor .mount .mount-editor .blk[data-block-id="${src.id}"] > .left > .marker`
   assert((await page.locator(marker).count()) === 1, `footer 里应有该源块的块标：${src.id}`)
@@ -6278,7 +6298,12 @@ await check('T44 左键点引用直接打开目标；⌥ 才弹详情；dangling
   /**
    * 图片原子：左键**不再是详情**，而是 lightbox（那是「看这张图」的默认动作）；
    * `⌥` 才回到详情。两条都验，否则「点了没反应」与「弹错东西」分不开。
+   *
+   * 图片行不在正文里：种子把图片样本写在日记导览与「写作示范」里，「引用」栏的
+   * 来源行带着它们 —— 先切到引用栏，别在正文里找。
    */
+  await openRefsColumn(page)
+  await page.waitForTimeout(250)
   await page.locator('#editor .atom-image').first().click()
   const openedLb = await page.evaluate(() => Boolean(document.querySelector('.lightbox')))
   assert(openedLb, '左键点图应开 lightbox（不是详情）')
@@ -12567,6 +12592,8 @@ await check('T117 Shift+点反链 footer 的块标／面包屑 ⇒ 右槽窗口�
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
+  await openRefsColumn(page) // 反链行住在「引用」栏，不是默认亮的「成员」栏
+  await page.waitForTimeout(250)
 
   const src = await page.evaluate(() => document.querySelector('#editor .mount .blk[data-block-id]')?.dataset.blockId ?? '')
   assert(src, '当前页应有反链（footer 里有源块）')
@@ -13779,6 +13806,8 @@ await check('T135 挂载区与正文**同一套手势**：点引用跳、块标�
     return { P, Q, b: b.id }
   })
   await page.waitForTimeout(500)
+  await openRefsColumn(page) // 行住在「引用」栏，不是默认亮的「成员」栏
+  await page.waitForTimeout(200)
   const panel = `#editor .mount .mount-editor .blk[data-block-id="${ids.b}"]`
 
   // ① 行内引用：点它 ⇒ 中心跳到目标（与正文同一条 refClick）
@@ -13789,6 +13818,8 @@ await check('T135 挂载区与正文**同一套手势**：点引用跳、块标�
   // ② 块标：点它 ⇒ 聚焦到那一块（与正文同一颗块标、同一条命令）
   await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), ids.P)
   await page.waitForTimeout(400)
+  await openRefsColumn(page) // 重开页面后挂载区回到第一栏，再切回「引用」
+  await page.waitForTimeout(200)
   await page.locator(`${panel} > .left > .marker`).first().click()
   await page.waitForTimeout(400)
   assert((await page.evaluate(() => window.__qua.snapshot().activeId)) === ids.b, '面板里的块标应当聚焦到那一块')
@@ -13796,6 +13827,8 @@ await check('T135 挂载区与正文**同一套手势**：点引用跳、块标�
   // ③ 右键：出块菜单（这条以前在面板里是空的——事件只接了一半）
   await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), ids.P)
   await page.waitForTimeout(400)
+  await openRefsColumn(page) // 重开页面后挂载区回到第一栏，再切回「引用」
+  await page.waitForTimeout(200)
   await page.locator(`${panel} > .left > .marker`).first().click({ button: 'right' })
   await page.waitForTimeout(250)
   const menu = await page.evaluate(() => ({
@@ -13812,6 +13845,12 @@ await check('T135 挂载区与正文**同一套手势**：点引用跳、块标�
    *    容器级 contenteditable，`End` 在它上面不动模型光标（真踩过：只有点击点恰好落在
    *    文字之后时测试才是绿的）。点行右端＝文字之后，与用户「点到行尾再敲」同一条手势。
    */
+  /**
+   * ⚠️ 先把行滚进视口中部再量落点：引用栏的栏身带镜头行，行可能正压在视口下缘，
+   *    裸 mouse.click 打在视口外＝点了个空。与 T34 的滚动配方同一条教训。
+   */
+  await page.locator(`${panel} > .tx`).first().evaluate((el) => el.scrollIntoView({ block: 'center' }))
+  await page.waitForTimeout(150)
   const rowBox = await page.locator(`${panel} > .tx`).first().boundingBox()
   assert(rowBox, '前置：挂载区那一行应能量到尺寸')
   await page.mouse.click(rowBox.x + rowBox.width - 4, rowBox.y + rowBox.height / 2)
@@ -14039,6 +14078,8 @@ await check('T142 挂载区里 ↵：新块是命中块的子块、留在本栏�
     return { P, b: b.id }
   })
   await page.waitForTimeout(500)
+  await openRefsColumn(page) // 行住在「引用」栏，不是默认亮的「成员」栏
+  await page.waitForTimeout(200)
 
   const row = `#editor .mount .mount-editor .blk[data-block-id="${ids.b}"]`
   const n0 = await mountRows(page)
@@ -14806,6 +14847,8 @@ await check('T148 一源三视：挂载区里改字 ⇒ 正文与右槽窗口都
     return { P, b: b.id }
   })
   await page.waitForTimeout(450)
+  await openRefsColumn(page) // 行住在「引用」栏，不是默认亮的「成员」栏
+  await page.waitForTimeout(200)
 
   // 同一块再开进右槽 ⇒ 正文／挂载区／窗口三处同时可见
   await page.evaluate((id) => window.__qua.invoke('core.dock/open-block', { blockId: id, side: 'right' }), ids.b)
@@ -22059,7 +22102,7 @@ await check('T221 挂载区的查询栏可以改名：双击 → 输入 → 落�
 })
 
 
-await check('T224 用户栏可以拖到派生栏前面：整条 tab 条一条顺序、内容那一格物化、重开仍第一', async () => {
+await check('T224 用户栏可以拖到派生栏前面：整条 tab 条一条顺序、内容那一格物化、重开不变（没拖过的成员栏按规范序补位）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await page.evaluate(() => window.__qua.loadState('seed'))
@@ -22115,8 +22158,9 @@ await check('T224 用户栏可以拖到派生栏前面：整条 tab 条一条顺
   await page.waitForTimeout(500)
 
   const after = await state()
-  assert(after.dom[0] === localId, `用户栏应排到整条 tab 条最前：${JSON.stringify(after.dom)}`)
-  assert(after.model[0] === localId, `内容那一格要写成整条顺序（不是只挪 DOM）：${JSON.stringify(after.model)}`)
+  // 页的成员栏按规范序仍最前（它也被物化成位置标记）；用户栏的拖拽意图是「排在引用之前」
+  assert(after.dom[0] === 'members' && after.dom.indexOf(localId) < after.dom.indexOf('refs'), `用户栏应拖到「引用」之前（成员栏按规范序仍最前）：${JSON.stringify(after.dom)}`)
+  assert(after.model.indexOf(localId) < after.model.indexOf('refs'), `内容那一格要写成整条顺序（不是只挪 DOM）：${JSON.stringify(after.model)}`)
   assert(
     after.model.includes('refs') && after.model.includes('same') && after.model.includes('mentions'),
     `内置栏也要物化成位置标记：${JSON.stringify(after.model)}`,
@@ -22138,13 +22182,13 @@ await check('T224 用户栏可以拖到派生栏前面：整条 tab 条一条顺
   await page.waitForTimeout(500)
   const reopened = await state()
   assert(
-    reopened.dom[0] === localId,
+    reopened.dom.indexOf(localId) < reopened.dom.indexOf('refs'),
     `重开后顺序应不变：${JSON.stringify(after.dom)} → ${JSON.stringify(reopened.dom)}`,
   )
-  assert(reopened.active === localId, `打开这个块时应默认展示最前面那一栏：${JSON.stringify(reopened)}`)
+  assert(reopened.active === reopened.dom[0], `打开这个块时应默认展示最前面那一栏：${JSON.stringify(reopened)}`)
 
   await ctx.close()
-  return `用户栏拖到引用前 ⇒ 整条顺序落 _mounts（内置栏物化）；重开后仍在第一位且默认打开`
+  return `用户栏拖到引用前 ⇒ 整条顺序落 _mounts（内置栏物化，成员栏按规范序补在最前）；重开不变、默认开第一栏`
 })
 
 
