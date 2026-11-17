@@ -447,6 +447,14 @@ export class MountArea {
       // 面包屑：普通点＝就地展开；展开根行首的「收起上下文」＝逐层退回
       onExpandContext: (ancestorId, rowId) => this.expand(ancestorId, rowId),
       onContextBack: (rootId) => this.collapse(rootId),
+      // 分段大纲的组头翻折叠（扣行重装走 render）；此刻装着哪一栏由 groupEntryId 记
+      onGroupToggle: (key) => {
+        const set = this.groupCollapsed.get(this.groupEntryId) ?? new Set<string>()
+        if (set.has(key)) set.delete(key)
+        else set.add(key)
+        this.groupCollapsed.set(this.groupEntryId, set)
+        this.render()
+      },
     })
 
     this.bodyEl.append(this.derivedHeadEl, this.emptyEl, this.block.root, this.viewEl)
@@ -454,8 +462,6 @@ export class MountArea {
     this.hitObserver = new MutationObserver(() => this.scheduleHitPaint())
     this.hitObserver.observe(this.editorEl, { subtree: true, childList: true, characterData: true })
     this.editorEl.addEventListener('click', this.onHitClick)
-    // 组头点击＝翻这组的折叠（扣行重装在 render 里走）；chrome 自己不是编辑面
-    this.editorEl.addEventListener('click', this.onGroupHeadClick)
     this.editorEl.addEventListener('mousemove', this.onHitHover)
     this.editorEl.addEventListener('mouseleave', this.onHitLeave)
     this.editorEl.addEventListener('mousedown', this.onHitDown)
@@ -478,7 +484,6 @@ export class MountArea {
     this.lensHost = null
     this.hitObserver.disconnect()
     this.editorEl.removeEventListener('click', this.onHitClick)
-    this.editorEl.removeEventListener('click', this.onGroupHeadClick)
     this.editorEl.removeEventListener('mousemove', this.onHitHover)
     this.editorEl.removeEventListener('mouseleave', this.onHitLeave)
     this.editorEl.removeEventListener('mousedown', this.onHitDown)
@@ -829,21 +834,6 @@ export class MountArea {
    * 打在文本上它本来是空的，不会和 ⌘ 新 tab、Shift 进右槽撞。
    * 落点用 `caretRangeFromPoint` 换算回 plain 偏移：高亮只是画层，没有可点的元素。
    */
-  /** 组头点击＝翻这组的折叠（扣行重装走 render）；落在 chrome 上，编辑面的点击路由不认识它 */
-  private readonly onGroupHeadClick = (e: MouseEvent): void => {
-    const target = e.target instanceof Element ? e.target : null
-    const head = target?.closest<HTMLElement>('[data-grp-head]')
-    if (!head) return
-    e.preventDefault()
-    e.stopPropagation()
-    const key = head.dataset.grpHead ?? ''
-    const set = this.groupCollapsed.get(this.groupEntryId) ?? new Set<string>()
-    if (set.has(key)) set.delete(key)
-    else set.add(key)
-    this.groupCollapsed.set(this.groupEntryId, set)
-    this.render()
-  }
-
   private readonly onHitClick = (e: MouseEvent): void => {
     if (!this.mentionTo || !e.altKey) return
     /**
@@ -1178,7 +1168,7 @@ export class MountArea {
       const anchor = plan.roots[0]?.id ?? ''
       for (const d of deferred) heads.push({ beforeRootId: anchor, label: d.label, count: d.count, collapsed: true })
       deferred.length = 0
-      if (anchor !== '') heads.push({ beforeRootId: anchor, label, count: g.roots.length })
+      if (anchor !== '') heads.push({ beforeRootId: anchor, label, count: g.roots.length, ...(g.page ? { openId: g.page.id } : {}) })
       plans.push(plan)
     }
     for (const d of deferred) heads.push({ beforeRootId: '', label: d.label, count: d.count, collapsed: true })

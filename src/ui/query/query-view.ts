@@ -1301,6 +1301,9 @@ export class ViewHost {
           source: this.source,
           filter: this.activeFilter,
           display: this.view ? this.view.displayProps : this.deps.owners.read(this.writeOwner)?.defaultDisplayProps,
+          // 行首路径／分段是缺省层的两个位：seg 现读；不接这两条就永远停在「显示／不分段」
+          pathsHidden: this.pathsHidden,
+          pathsGrouped: !this.view && this.deps.owners.read(this.writeOwner)?.defaultGroup === PAGE_COLUMN,
         }),
         fields: () => this.deps.fields(this.source.kind === 'query' ? this.source.spec : undefined),
         records: () => this.records(),
@@ -1529,18 +1532,6 @@ export class ViewHost {
       const host = document.createElement('div')
       host.className = 'queryview-editor'
       host.spellcheck = false
-      // 组头点击＝翻这组的折叠（扣行重装走 render）；chrome 不是编辑面，挂一次容器级监听
-      host.addEventListener('click', (e) => {
-        const target = e.target instanceof Element ? e.target : null
-        const head = target?.closest<HTMLElement>('[data-grp-head]')
-        if (!head) return
-        e.preventDefault()
-        e.stopPropagation()
-        const key = head.dataset.grpHead ?? ''
-        if (this.groupCollapsed.has(key)) this.groupCollapsed.delete(key)
-        else this.groupCollapsed.add(key)
-        this.render()
-      })
       this.outline = new EditableBlock({
         host,
         store: this.deps.store,
@@ -1558,6 +1549,12 @@ export class ViewHost {
         onFocus: (editor) => this.deps.onFocus(editor),
         onExpandContext: (ancestorId, rowId) => this.expand(ancestorId, rowId),
         onContextBack: (rootId) => this.collapse(rootId),
+        // 分段大纲的组头翻折叠（扣行重装走 render）
+        onGroupToggle: (key) => {
+          if (this.groupCollapsed.has(key)) this.groupCollapsed.delete(key)
+          else this.groupCollapsed.add(key)
+          this.render()
+        },
       })
       this.outline.ensureEditor()
       this.els.editor.appendChild(this.outline.root)
@@ -2023,7 +2020,7 @@ export class ViewHost {
         const anchor = p.roots[0]?.id ?? ''
         for (const d of deferred) heads.push({ beforeRootId: anchor, label: d.label, count: d.count, collapsed: true })
         deferred.length = 0
-        if (anchor !== '') heads.push({ beforeRootId: anchor, label, count: g.roots.length })
+        if (anchor !== '') heads.push({ beforeRootId: anchor, label, count: g.roots.length, ...(g.page ? { openId: g.page.id } : {}) })
         plans.push(p)
       }
       for (const d of deferred) heads.push({ beforeRootId: '', label: d.label, count: d.count, collapsed: true })

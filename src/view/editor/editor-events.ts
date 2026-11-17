@@ -410,6 +410,8 @@ export interface EditorBridge {
   clickEmptyArea: (clientY: number, clientX: number, place: OpenAction) => boolean
   /** 点进空天格子（复盘兜底）：物化那天归装配层；`place` 已翻译好修饰键 */
   onShellActivate: (date: string, place: OpenAction) => void
+  /** 分段大纲的组头翻折叠（扣行重装是装载单位的知识，归装配层）；组键＝组页 id */
+  onGroupActivate: (key: string) => void
   /** 勾选 / 取消待办（点方框）*/
   /** `propId` 由 gutter 上那一枚图标带过来；命令/快捷键不带 ⇒ 唯一的任务状态字段 */
   toggleClosure: (blockId: string, propId?: string) => void
@@ -933,6 +935,25 @@ export function bindEditorEvents(br: EditorBridge): () => void {
       const host = noteHostEl.dataset.noteHost
       if (br.openBlock) br.openBlock(host, openActionOf(e))
       else br.focusBlock(host)
+      e.preventDefault()
+      return
+    }
+
+    /**
+     * **分段大纲的组头**：组名（`data-grp-open`）＝去那一页——与备注来源格同一条
+     * 落点分流（普通＝聚焦，修饰键＝别处）；其余（箭头/空白）＝翻这一段的折叠，
+     * 扣行重装是装载单位的知识，归装配层（`onGroupActivate` 只报组键）。
+     */
+    const grpHeadEl = path.find((n): n is HTMLElement => n instanceof HTMLElement && n.dataset.grpHead !== undefined)
+    if (grpHeadEl) {
+      const openEl = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-grp-open]') : null
+      if (openEl?.dataset.grpOpen) {
+        const pageId = openEl.dataset.grpOpen
+        if (br.openBlock) br.openBlock(pageId, openActionOf(e))
+        else br.focusBlock(pageId)
+      } else {
+        br.onGroupActivate(grpHeadEl.dataset.grpHead ?? '')
+      }
       e.preventDefault()
       return
     }

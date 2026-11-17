@@ -187,6 +187,8 @@ export interface GroupHead {
   /** 组内行数（只数这一装载里的根行，不含展开的祖先行） */
   count: number
   collapsed?: boolean
+  /** 组页的块 id（点组名去那一页；无页归属的根身份组没有，组名不可点） */
+  openId?: string
 }
 
 /** 这一块被删了吗（只看它自己；整棵子树不可见由遍历的跳过规则保证） */

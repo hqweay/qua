@@ -534,6 +534,30 @@
   flex: 1;
   min-width: 0;
 }
+/*
+ * 组名的可点击档（有组页才有）：与面包屑同一族——悬停 accent-soft 底。
+ * 箭头与块折叠同一族：`chevron-down`，收起转 -90°（省一个图标名，也留出过渡）。
+ */
+#editor .grp-head .grp-name[data-grp-open] {
+  cursor: pointer;
+  border-radius: var(--ui-radius-sm);
+}
+#editor .grp-head .grp-name[data-grp-open]:hover {
+  background: var(--ui-accent-soft);
+  color: var(--ui-text);
+}
+#editor .grp-head .grp-caret .ico {
+  display: inline-flex;
+  transition: transform 120ms ease;
+}
+#editor .grp-head .grp-caret[data-collapsed='1'] .ico {
+  transform: rotate(-90deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  #editor .grp-head .grp-caret .ico {
+    transition: none;
+  }
+}
 #editor .grp-head .grp-count {
   color: var(--ui-text-tertiary);
   font-variant-numeric: tabular-nums;

@@ -90,6 +90,8 @@ export interface EditableBlockDeps {
   /** 面包屑的就地展开／逐层收起（省略则事件层退回 focusBlock） */
   onExpandContext?: (ancestorId: string, rowId: string) => void
   onContextBack?: (rootId: string) => void
+  /** 分段大纲的组头翻折叠（扣行重装归装配层；编辑器只报组键） */
+  onGroupToggle?: (key: string) => void
   /**
    * **空块占位文案**（省略＝不挂占位）。
    *
@@ -228,6 +230,7 @@ export class EditableBlock {
       ...(this.deps.emptyPlaceholder !== undefined ? { emptyPlaceholder: this.deps.emptyPlaceholder } : {}),
       onExpandContext: this.deps.onExpandContext,
       onContextBack: this.deps.onContextBack,
+      ...(this.deps.onGroupToggle ? { groupToggle: this.deps.onGroupToggle } : {}),
     })
     this.deps.wire(ed, (kind) => {
       // `load` 是装载自己的回声，不是编辑；落盘该跳过它

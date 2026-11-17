@@ -452,6 +452,12 @@ export interface ViewEvents {
    */
   shellWrite?: (date: string, place?: OpenAction) => void
   /**
+   * **分段大纲的组头被点了非组名区**（箭头/空白）：翻这一段的折叠。
+   * 扣行重装是装载单位的知识（哪些组折着、装载根怎么扣），归装配层；
+   * 编辑器只报组键（组页 id）。
+   */
+  groupToggle?: (key: string) => void
+  /**
    * **一次改名被拒**（编辑边界上撞到已有地址，正文已回滚）。
    *
    * 为什么从编辑器里报、而不是让每个调用方看返回值：三个边界入口都可能撞名，
@@ -2818,6 +2824,7 @@ export class BlockEditor {
       endMouseSelect: () => this.bsel.endMouseSelect(),
       hasBlockSelection: () => this.bsel.hasBlockSelection(),
       onShellActivate: (date, place) => this.events.shellWrite?.(date, place),
+      onGroupActivate: (key) => this.events.groupToggle?.(key),
       emitTrigger: (id) => this.triggers.emitTrigger(id),
       dropTrigger: (id) => this.triggers.dropTrigger(id),
       insertPlainText: (id, _off, text, cut) => this.clip.pasteAt(id, _off, text, cut),

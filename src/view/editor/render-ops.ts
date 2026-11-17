@@ -35,6 +35,7 @@ import {
 } from '../../core/index.ts'
 import { type GroupHead } from '../../core/model/model.ts'
 import { plainText } from '../../core/model/runs.ts'
+import { renderIcon } from '../icons.ts'
 import { t } from '../../core/infra/msg.ts'
 import { assetViewOf, markAssetMissing } from '../asset-views.ts'
 import { LINE_H, fillBlockText, makeBlockEl, makeRefBadgeEl, rowHasEmbedViewBody, rowHasInlineViewBody, visibleRowHeight } from './block-dom.ts'
@@ -214,25 +215,28 @@ export class RenderOps {
   }
 
   /**
-   * **分段大纲的组头**（chrome 行）：页名 ＋ 条数 ＋ 折叠箭头。
+   * **分段大纲的组头**（chrome 行）：折叠箭头 ＋ 页名 ＋ 条数。
    *
    * 它不是块也不进段模型：`contentEditable=false` 断开编辑链（与 `.sec-mount` 同一条
    * 教训——chrome 嵌在 contenteditable 容器里必须自断，否则焦点被外层宿主吃掉）。
-   * 点击行为归**装配层**（折叠＝扣行重装，装载单位的知识不在编辑器）；
-   * 这里只交代「这是一颗组头」——`data-grp-head` ＝ 组键，面级监听用它接。
+   * 点击路由归**事件层**（`data-grp-head`）：组名（`data-grp-open`）去那一页——
+   * 与块标/备注来源格同一条路由（普通＝聚焦，修饰键＝别处）；其余（箭头/空白）翻折叠，
+   * 装载单位的知识不在编辑器，`onGroupActivate` 只报组键。箭头与块折叠同一族
+   * （`chevron-down`，收起转 -90°，省一个图标名也留出过渡）。
    */
   private makeGroupHead(h: GroupHead): HTMLElement {
     const el = document.createElement('div')
     el.className = 'grp-head'
     el.dataset.grpHead = h.beforeRootId
-    el.dataset.grpCollapsed = h.collapsed ? '1' : '0'
     el.contentEditable = 'false'
     const caret = document.createElement('span')
     caret.className = 'grp-caret'
-    caret.textContent = h.collapsed ? '▸' : '▾'
+    if (h.collapsed) caret.dataset.collapsed = '1'
+    renderIcon(caret, undefined, 'chevron-down', 'sm')
     const name = document.createElement('span')
     name.className = 'grp-name ui-ellipsis'
     name.textContent = h.label
+    if (h.openId) name.dataset.grpOpen = h.openId
     const count = document.createElement('span')
     count.className = 'grp-count'
     count.textContent = String(h.count)
