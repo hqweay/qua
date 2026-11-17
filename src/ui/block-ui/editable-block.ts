@@ -230,7 +230,7 @@ export class EditableBlock {
       ...(this.deps.emptyPlaceholder !== undefined ? { emptyPlaceholder: this.deps.emptyPlaceholder } : {}),
       onExpandContext: this.deps.onExpandContext,
       onContextBack: this.deps.onContextBack,
-      ...(this.deps.onGroupToggle ? { groupToggle: this.deps.onGroupToggle } : {}),
+      onGroupToggle: this.deps.onGroupToggle,
     })
     this.deps.wire(ed, (kind) => {
       // `load` 是装载自己的回声，不是编辑；落盘该跳过它

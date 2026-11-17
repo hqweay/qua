@@ -513,26 +513,28 @@
   display: contents;
 }
 /*
- * 分段大纲的组头（chrome 行，不是块）：页名＋条数＋折叠箭头。
- * 浮层组头（.vgroup-head）的同一族语言：小字、次要色、沉底——它是隔断，不是内容；
- * 可点击（翻折叠）但不可编辑（contentEditable=false 在渲染层断链）。
+ * 分段大纲的组头（chrome 行，不是块）：箭头＋页名＋条数。
+ * **吃行度量对齐**：与 `.blk` 同一套字号/行高/列距——箭头占 marker 槽
+ * （与行首圆点同位），组名落在行文字列上。它是隔断不是内容：次要色、
+ * 可点击（箭头翻折叠、组名跳页）但不可编辑（contentEditable=false 在渲染层断链）。
  */
 #editor .grp-head {
   display: flex;
   align-items: center;
-  gap: var(--ui-gap-2);
+  gap: var(--ui-gap-4);
   color: var(--ui-text-secondary);
-  font-size: var(--ui-fs-xs);
-  padding: var(--ui-gap-1) var(--ui-gap-2);
+  font-size: var(--ui-fs-md);
+  line-height: var(--ui-lh-relaxed);
+  padding-inline: var(--ui-gap-1);
   margin-top: var(--ui-gap-3);
-  border-radius: var(--ui-radius-sm);
-  background: var(--ui-surface-sunken);
   cursor: pointer;
   user-select: none;
 }
-#editor .grp-head .grp-name {
-  flex: 1;
-  min-width: 0;
+#editor .grp-head .grp-caret {
+  flex: 0 0 var(--ui-marker-slot);
+  display: inline-flex;
+  align-items: center;
+  color: var(--ui-text-tertiary);
 }
 /*
  * 组名的可点击档（有组页才有）：与面包屑同一族——悬停 accent-soft 底。
@@ -560,6 +562,7 @@
 }
 #editor .grp-head .grp-count {
   color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
   font-variant-numeric: tabular-nums;
 }
 #doc:has(> #editor[data-layout='row']),

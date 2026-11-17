@@ -259,6 +259,8 @@ export interface ViewOpts {
   onExpandContext?: (ancestorId: string, rowId: string) => void
   /** 展开出来的上下文根行首的「收起上下文」＝收掉这一层，露出下一层 */
   onContextBack?: (rootId: string) => void
+  /** 分段大纲的组头翻折叠（扣行重装是装载单位的知识，归装配层；编辑器只报组键） */
+  onGroupToggle?: (key: string) => void
   /**
    * **这一份装载里要不要展开露面块的身体**（镜像／投影）。
    *
@@ -452,12 +454,6 @@ export interface ViewEvents {
    */
   shellWrite?: (date: string, place?: OpenAction) => void
   /**
-   * **分段大纲的组头被点了非组名区**（箭头/空白）：翻这一段的折叠。
-   * 扣行重装是装载单位的知识（哪些组折着、装载根怎么扣），归装配层；
-   * 编辑器只报组键（组页 id）。
-   */
-  groupToggle?: (key: string) => void
-  /**
    * **一次改名被拒**（编辑边界上撞到已有地址，正文已回滚）。
    *
    * 为什么从编辑器里报、而不是让每个调用方看返回值：三个边界入口都可能撞名，
@@ -638,6 +634,8 @@ export class BlockEditor {
   private readonly onExpandContext: ViewOpts['onExpandContext']
   /** 展开根的「收起上下文」回调；渲染协作对象画那颗按钮与算行头时读它 */
   readonly onContextBack: ViewOpts['onContextBack']
+  /** 分段大纲的组头翻折叠；见 `ViewOpts` */
+  private readonly onGroupToggle: ViewOpts['onGroupToggle']
   /** 行身体（露面／查询）的挂载与回收，都在协作对象里 */
   readonly embeds: EmbedBodies
   /** 这一面是不是「一屏就是这一块」的聚焦面（见 `ViewOpts.focusSurface`） */
@@ -701,6 +699,7 @@ export class BlockEditor {
     }
     this.onExpandContext = o.onExpandContext
     this.onContextBack = o.onContextBack
+    this.onGroupToggle = o.onGroupToggle
     this.embeds = new EmbedBodies(this, o.embedBodies !== false)
     this.focusSurface = o.focusSurface === true
     this.emptyPlaceholder = o.emptyPlaceholder
@@ -2824,7 +2823,7 @@ export class BlockEditor {
       endMouseSelect: () => this.bsel.endMouseSelect(),
       hasBlockSelection: () => this.bsel.hasBlockSelection(),
       onShellActivate: (date, place) => this.events.shellWrite?.(date, place),
-      onGroupActivate: (key) => this.events.groupToggle?.(key),
+      onGroupActivate: (key) => this.onGroupToggle?.(key),
       emitTrigger: (id) => this.triggers.emitTrigger(id),
       dropTrigger: (id) => this.triggers.dropTrigger(id),
       insertPlainText: (id, _off, text, cut) => this.clip.pasteAt(id, _off, text, cut),
