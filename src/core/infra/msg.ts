@@ -587,6 +587,8 @@ export const MSG = {
   'ui.mount.materialize': '冻结为独立查询（可改条件、可摘除；不再跟这一栏变）',
   'ui.mount.lensNote': '条件与排序存在这一栏上；要独立成一份查询就冻结',
   'ui.mount.lensReadonlyDay': '过去的日记天只读；这里的筛选只影响这一屏',
+  'ui.mount.clearLens': '清除筛选与排序',
+  'ui.mount.lensCleared': '已清除筛选与排序；⌘Z 可撤销',
   'ui.mount.sliceBase': '基条件：{text}（只读，改不掉；下面只加筛选）',
   'ui.mount.kindTitle': '类型',
   'ui.mount.viewGone': '这张视图已不存在',

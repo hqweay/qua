@@ -208,6 +208,8 @@ export interface MountAreaDeps {
    * （一次内容写、可撤销）。这一层不认识命令表，只报「谁、哪一段、指向谁」。
    */
   invoke: (name: string, args: Record<string, unknown>) => void
+  /** 提示（镜头重置后说一句「已清除；⌘Z 可撤销」） */
+  toast?: (text: string, kind?: 'ok' | 'warn' | 'info') => void
   /**
    * 初始是否展开。日记流里只有今天展开，更早的天是一行摘要（一行 DOM ＋ 不建编辑器）。
    */
@@ -1608,6 +1610,27 @@ export class MountArea {
         })
       })
       condBody.appendChild(extract)
+    }
+
+    /**
+     * **两轴一起清**：只有筛选与排序同时存在时才出现。
+     * 只有一轴时各自的零态已经够用（「清除筛选」／「不排序」），
+     * 再加一颗泛泛的「重置」会让「清的是哪几轴」说不清。
+     */
+    const lensNow = this.lensOf(host, entry.source)
+    if (lensNow.filter && (lensNow.sort?.length ?? 0) > 0) {
+      const reset = document.createElement('button')
+      reset.type = 'button'
+      reset.className = 'ui-btn lens-reset'
+      reset.dataset.lensReset = '1'
+      reset.textContent = t('ui.mount.clearLens')
+      reset.addEventListener('click', () => {
+        if (!this.setLens(host, entry.source, { filter: null, sort: null })) return
+        this.deps.toast?.(t('ui.mount.lensCleared'))
+        // 写入之后装配层已重画身体；把面板自己的回显跟上（chip/排序/按钮一起消失）
+        if (box.isConnected) repaint()
+      })
+      root.appendChild(reset)
     }
 
     const note = document.createElement('p')

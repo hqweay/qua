@@ -1296,6 +1296,7 @@ export function setupPanels(deps: PanelsDeps) {
       invoke: (name, args) => {
         void deps.getRegistry().invoke(name, args, spec.via)
       },
+      toast: (text, kind) => app.toast(text, kind),
       // 与正文同一套事件（点引用/块标/右键菜单/`#`·`@` 补全），装配层只给这一份
       wire: (editor, change) => deps.wireEditor(editor, change, spec.via, spec.inlineViewBodies),
       onAddTab: (id) => addLocalQueryTab(id, spec),

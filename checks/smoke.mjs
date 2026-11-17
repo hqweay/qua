@@ -2626,6 +2626,30 @@ await check('T194b 引用含属性引用：kind 过滤可切；标签页默认�
     `表头排序要写进条目镜头、表头箭头跟上：${JSON.stringify(sorted)}`,
   )
 
+  // 筛选＋排序同时存在时给「清除筛选与排序」：一次写入、两轴一起清
+  await page.locator('#editor .mount-derived-lens').first().click()
+  await page.waitForTimeout(200)
+  const somePage = page.locator('.popover.lenspop .quick-filter-pages .quick-filter-chip').first()
+  assert((await somePage.count()) > 0, '前置：引用结果里应有可筛的页')
+  await somePage.click()
+  await page.waitForTimeout(250)
+  const reset = page.locator('.popover.lenspop [data-lens-reset]')
+  assert((await reset.count()) === 1, '筛选与排序同时存在时应给「清除筛选与排序」')
+  await reset.click()
+  await page.waitForTimeout(300)
+  const cleared = await page.evaluate((id) => {
+    const host = window.__qua.__editor.store.find(id)
+    const entry = (host?.props?._mounts ?? []).find((e) => e.kind === 'derived' && e.source === 'refs')
+    return { filter: entry?.filter ?? null, sort: entry?.sort ?? null }
+  }, setup.P)
+  assert(cleared.filter === null && cleared.sort === null, `一次清掉两轴：${JSON.stringify(cleared)}`)
+  assert(
+    (await page.locator('#editor .mount-view .tv-row').count()) === 3,
+    '清除后行集回到原样',
+  )
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(150)
+
   // 派生栏的镜头面板：表格看法下分组节在；看法段能切回大纲；提取动作在（不点，避免物化）
   await page.locator('#editor .mount-derived-lens').first().click()
   await page.waitForTimeout(200)
