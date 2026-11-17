@@ -72,6 +72,7 @@ import { type BlockEditor, type Run } from '../../view/editor/editor.ts'
 import { EditableBlock } from '../block-ui/editable-block.ts'
 import { clearHits, offsetAtPoint, paintHits, rangeAtSpan, spanAt, type PlainSpan } from '../../view/editor/hit-paint.ts'
 import { claimHighlightKey, releaseHighlightKey } from '../search/highlight-key.ts'
+import { paintSortRows } from '../views/sort-rows.ts'
 import { bindDropTarget, setDragTab } from '../../view/dnd.ts'
 import { renderIcon } from '../../view/icons.ts'
 import { placeNear } from '../../view/place.ts'
@@ -1448,50 +1449,14 @@ export class MountArea {
       filterBody.appendChild(note)
     }
 
-    /* 排序：成员顺序（与查询的 `sort` 同一形状）；表头点击写同一份 */
+    /* 排序：成员顺序（与查询的 `sort` 同一形状，多键、数组序即优先级）。
+       表头点击写**第一键**，整份多键在这里编辑——与查询面板同一台编辑器，
+       不另造第二种画法；应用＝一次写入、一轮撤销（与条件树同节奏） */
     const sortBody = this.lensSection(root, 'ui.view.opt.sort')
-    const currentSort = this.lensOf(host, entry.source).sort ?? []
-    const first = currentSort[0]
-    const sortSel = document.createElement('select')
-    sortSel.className = 'queryview-group mount-derived-sort'
-    const none = document.createElement('option')
-    none.value = ''
-    none.textContent = t('ui.query.sortKey.none')
-    sortSel.appendChild(none)
-    for (const c of this.sortChoices()) {
-      const o = document.createElement('option')
-      o.value = c.id
-      o.textContent = c.label
-      sortSel.appendChild(o)
-    }
-    sortSel.value = first?.by ?? ''
-    if (sortSel.value !== (first?.by ?? '')) sortSel.value = ''
-    const dirSel = document.createElement('select')
-    dirSel.className = 'queryview-group mount-derived-sortdir'
-    dirSel.disabled = first === undefined
-    for (const [value, label] of [
-      ['asc', 'ui.view.sortAsc'],
-      ['desc', 'ui.view.sortDesc'],
-    ] as const) {
-      const o = document.createElement('option')
-      o.value = value
-      o.textContent = t(label)
-      dirSel.appendChild(o)
-    }
-    dirSel.value = first?.dir ?? 'asc'
-    const writeSort = (by: string, dir: 'asc' | 'desc'): void => {
-      const rest = currentSort.slice(1)
-      this.setLens(host, entry.source, { sort: by === '' ? null : [{ by, dir }, ...rest] })
+    paintSortRows(sortBody, this.sortChoices(), [...(this.lensOf(host, entry.source).sort ?? [])], (draft) => {
+      this.setLens(host, entry.source, { sort: draft.length > 0 ? draft : null })
       repaint()
-    }
-    sortSel.onchange = () => writeSort(sortSel.value, dirSel.value === 'desc' ? 'desc' : 'asc')
-    dirSel.onchange = () => {
-      if (first !== undefined) writeSort(first.by, dirSel.value === 'desc' ? 'desc' : 'asc')
-    }
-    const sortRow = document.createElement('div')
-    sortRow.className = 'vopt-row'
-    sortRow.append(sortSel, dirSel)
-    sortBody.appendChild(sortRow)
+    })
 
     /* 类型：只在引用栏的大纲看法里——表格用「类型」列承担同一件事 */
     if (entry.source === 'refs' && kind === 'outline' && all.length > 0) {

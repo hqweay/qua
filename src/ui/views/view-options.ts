@@ -17,6 +17,7 @@
  *     （`_childProps` 的写口不变），只在声明真正生效的组合给（children 源的大纲/卡片）
  */
 import { t } from '../../core/infra/msg.ts'
+import { sectionInfo } from '../../view/info.ts'
 import type { ViewConfig, ViewOwnerRef, ViewRecord } from '../../core/index.ts'
 import type { QueryNode } from '../../core/query/query.ts'
 import type { Source, ViewAxis } from '../../core/views/view.ts'
@@ -40,6 +41,7 @@ import {
   type QuickFilterState,
 } from '../../core/views/quick-filter.ts'
 import { renderQuickFilter } from '../chrome/quick-filter.ts'
+import { paintSortRows } from './sort-rows.ts'
 
 /** 结构分组在分组下拉里的 UI-only 哨兵（落盘的是 `groupByStructure:true`，不是这个值） */
 export const STRUCTURE_GROUP = '\u0000structure'
@@ -111,12 +113,14 @@ export class ViewOptionsPanel {
 
   /* ---------------------------------------------------------- 通用件 */
 
-  private section(title: string): HTMLElement {
+  private section(title: string, tip?: string): HTMLElement {
     const box = document.createElement('div')
     box.className = 'vopt-section'
     const head = document.createElement('div')
     head.className = 'vopt-title'
     head.textContent = title
+    // 这一段的语义解释退到段头 ⓘ：解释没有操作权，不占正文行的宽度
+    if (tip) head.append(sectionInfo(tip))
     const body = document.createElement('div')
     body.className = 'vopt-body'
     box.append(head, body)
@@ -207,7 +211,7 @@ export class ViewOptionsPanel {
   private renderSort(axes: readonly ViewAxis[], source: Source, view: ViewConfig | null): void {
     if (axes.includes('sort') && view !== null) {
       const body = this.section(t('ui.view.opt.sort'))
-      this.paintSortRows(body, (view.sort ?? []).map((s) => ({ ...s })), (draft) => {
+      paintSortRows(body, this.sortKeys(), (view.sort ?? []).map((s) => ({ ...s })), (draft) => {
         this.deps.invoke('core.view/set-sort', { owner: this.deps.owner, viewId: this.deps.viewId(), sort: draft })
         this.refresh()
       })
@@ -216,9 +220,8 @@ export class ViewOptionsPanel {
     // 默认大纲（query 源）：没有显示序可写；成员顺序（取哪些、按什么序）仍是查询的一部分
     if (view === null && source.kind === 'query') {
       const spec = source.spec
-      const body = this.section(t('ui.view.opt.memberSort'))
-      body.append(this.note(t('ui.view.opt.memberSortHint')))
-      this.paintSortRows(body, (spec.sort ?? []).map((s) => ({ ...s })), (draft) => {
+      const body = this.section(t('ui.view.opt.memberSort'), t('ui.view.opt.memberSortHint'))
+      paintSortRows(body, this.sortKeys(), (spec.sort ?? []).map((s) => ({ ...s })), (draft) => {
         const next = { ...spec }
         if (draft.length > 0) next.sort = draft.map((s) => ({ ...s }))
         else delete next.sort
@@ -228,103 +231,6 @@ export class ViewOptionsPanel {
     }
   }
 
-  /** 多键排序的行编辑器（字段 ＋ 方向 ＋ 上移/下移/移除；次序即优先级）。落盘交给 `apply` */
-  private paintSortRows(
-    body: HTMLElement,
-    draft: { by: string; dir: 'asc' | 'desc' }[],
-    apply: (draft: { by: string; dir: 'asc' | 'desc' }[]) => void,
-  ): void {
-    const repaint = (): void => {
-      body.replaceChildren()
-      this.paintSortRows(body, draft, apply)
-    }
-    const fields = this.sortKeys()
-    draft.forEach((s, i) => {
-      const row = document.createElement('div')
-      row.className = 'qsp-row'
-      const col = document.createElement('select')
-      col.className = 'qsp-field ui-input'
-      for (const f of fields) {
-        const o = document.createElement('option')
-        o.value = f.id
-        o.textContent = f.label
-        col.append(o)
-      }
-      col.value = s.by
-      col.onchange = () => {
-        draft[i] = { ...s, by: col.value }
-        repaint()
-      }
-      const dir = document.createElement('select')
-      dir.className = 'qsp-dir ui-input'
-      for (const [v, key] of [
-        ['asc', 'ui.view.sortAsc'],
-        ['desc', 'ui.view.sortDesc'],
-      ] as const) {
-        const o = document.createElement('option')
-        o.value = v
-        o.textContent = t(key)
-        dir.append(o)
-      }
-      dir.value = s.dir
-      dir.onchange = () => {
-        draft[i] = { ...s, dir: dir.value === 'desc' ? 'desc' : 'asc' }
-        repaint()
-      }
-      const ops = document.createElement('span')
-      ops.className = 'qsp-ops'
-      for (const [label, disabled, act] of [
-        ['↑', i === 0, (): void => {
-          ;[draft[i - 1], draft[i]] = [draft[i]!, draft[i - 1]!]
-        }],
-        ['↓', i === draft.length - 1, (): void => {
-          ;[draft[i + 1], draft[i]] = [draft[i]!, draft[i + 1]!]
-        }],
-        ['×', false, (): void => {
-          draft.splice(i, 1)
-        }],
-      ] as const) {
-        const b = document.createElement('button')
-        b.type = 'button'
-        b.textContent = label
-        b.disabled = disabled
-        b.addEventListener('click', () => {
-          act()
-          repaint()
-        })
-        ops.append(b)
-      }
-      row.append(col, dir, ops)
-      body.append(row)
-    })
-    // 添加一行：只列还没在用的字段；选了当场落一行（方向缺省升序，行内可改）
-    const unused = fields.filter((f) => !draft.some((s) => s.by === f.id))
-    const add = document.createElement('select')
-    add.className = 'qsp-add ui-input'
-    const placeholder = document.createElement('option')
-    placeholder.value = ''
-    placeholder.textContent = t('ui.query.sortAdd')
-    add.append(placeholder)
-    for (const f of unused) {
-      const o = document.createElement('option')
-      o.value = f.id
-      o.textContent = f.label
-      add.append(o)
-    }
-    add.disabled = unused.length === 0
-    add.onchange = () => {
-      if (add.value === '') return
-      draft.push({ by: add.value, dir: 'asc' })
-      repaint()
-    }
-    body.append(add)
-    const applyBtn = document.createElement('button')
-    applyBtn.type = 'button'
-    applyBtn.className = 'qsp-apply ui-btn'
-    applyBtn.textContent = t('ui.query.builder.apply')
-    applyBtn.addEventListener('click', () => apply(draft))
-    body.append(applyBtn)
-  }
 
   /* ---------------------------------------------------------- 分组 */
 
@@ -379,7 +285,7 @@ export class ViewOptionsPanel {
 
   private renderDisplay(axes: readonly ViewAxis[], source: Source, view: ViewConfig | null, display?: string[]): void {
     if (!axes.includes('display')) return
-    const body = this.section(t('ui.view.opt.display'))
+    const body = this.section(t('ui.view.opt.display'), t('ui.view.opt.defaultHint'))
     const whitelist = display
     const custom = whitelist !== undefined
     // 三态：「跟随默认」＝缺省（rich 默认/计算列）；「编辑默认」＝声明层；
@@ -418,10 +324,7 @@ export class ViewOptionsPanel {
     )
     body.append(seg)
 
-    if (!editing) {
-      body.append(this.note(t('ui.view.opt.defaultHint')))
-      return
-    }
+    if (!editing) return
     // 勾选清单：基线＝白名单（已在自定义态）或当前生效显示（编辑态预选）；
     // 勾选即写（整份替换）；全不勾 ＝ 只标题
     const base = whitelist ?? (this.deps.displayDefaults?.() ?? [])

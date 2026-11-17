@@ -495,13 +495,6 @@
   align-items: center;
   gap: var(--ui-gap-2);
 }
-.popover.lenspop .mount-derived-sort {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.popover.lenspop .mount-derived-sortdir {
-  flex: 0 0 auto;
-}
 
 
 /*

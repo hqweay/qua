@@ -676,7 +676,6 @@ export const MSG = {
   'ui.query.sortKey.date': '日志时间',
   'ui.query.sortKey.refCount': '引用次数',
   'ui.query.sortKey.random': '随机',
-  'ui.query.sortKey.none': '不排序',
   'ui.query.group.none': '不分组',
   'ui.query.group.structure': '一级子块',
   'ui.query.group.tagsKey': '标签',
