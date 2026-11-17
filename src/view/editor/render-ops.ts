@@ -171,7 +171,11 @@ export class RenderOps {
     if (this.ed.virtualize && !this.ed.blockEl(id)) this.applyWindow(id)
     const el = this.ed.blockEl(id)
     if (!el) return
-    el.scrollIntoView({ block: 'center' })
+    // 跳块走平滑滚动：viewport 级瞬跳读作「换了一屏」，眼睛跟不上路；
+    // 减动效偏好直接瞬移（flash 仍承担「到了哪里」的可达性反馈）。
+    // ⚠️ 只在这一个跳转点选 smooth：打字时的滚动到光标必须瞬时，不走 CSS 全局 scroll-behavior。
+    const smooth = !matchMedia('(prefers-reduced-motion: reduce)').matches
+    el.scrollIntoView({ block: 'center', behavior: smooth ? 'smooth' : 'auto' })
     el.dataset.flash = '1'
     window.setTimeout(() => {
       if (el.isConnected) delete el.dataset.flash
