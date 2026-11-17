@@ -91,3 +91,54 @@ export function placeNear(p: Placement): PlacementResult {
   if (secondaryFits) return { left, top: secondary, flipped: true, clamped: false }
   return { left, top: clamp(primary, pad, vh - boxH - pad), flipped: false, clamped: true }
 }
+
+/**
+ * **向侧面开**：窄容器的镜头面板不能盖住它自己那一列（右槽 320px 里放不下
+ * 一张四节面板），所以从锚点往主内容一侧开：右槽的面板向左开、右槽的行仍可见。
+ *
+ * 与 `placeNear` 是同一族的两个方向：`placeNear` 解决「上下放不下就翻面」，
+ * 这里解决「左右放不下就翻面」。两者共用 `clamp` 与返回形状，调用方只换一个函数。
+ */
+export interface BesidePlacement {
+  boxW: number
+  boxH: number
+  vw: number
+  vh: number
+  anchor: { left: number; top: number; right: number; bottom: number } | null
+  /** 期望开在锚点的哪一侧；那一侧放不下就**翻到另一侧** */
+  side: 'left' | 'right'
+  /** 竖直对齐：`start`＝贴锚点顶部；`center`＝与锚点中线对齐 */
+  align?: 'start' | 'center'
+  gap: number
+  pad: number
+}
+
+export function placeBeside(p: BesidePlacement): PlacementResult {
+  const { boxW, boxH, vw, vh, anchor, side, gap, pad } = p
+  const align = p.align ?? 'start'
+
+  if (!anchor) {
+    return {
+      left: clamp((vw - boxW) / 2, pad, vw - boxW - pad),
+      top: clamp(vh * 0.16, pad, vh - boxH - pad),
+      flipped: false,
+      clamped: false,
+    }
+  }
+
+  // ---- 水平：优先放 side，放不下翻面，两面都放不下就夹 ----
+  const preferLeft = side === 'left'
+  const primary = preferLeft ? anchor.left - boxW - gap : anchor.right + gap
+  const secondary = preferLeft ? anchor.right + gap : anchor.left - boxW - gap
+  const primaryFits = primary >= pad && primary + boxW <= vw - pad
+  const secondaryFits = secondary >= pad && secondary + boxW <= vw - pad
+
+  // ---- 竖直：与锚点对齐后夹进视口 ----
+  const rawTop =
+    align === 'center' ? anchor.top + (anchor.bottom - anchor.top) / 2 - boxH / 2 : anchor.top
+  const top = clamp(rawTop, pad, vh - boxH - pad)
+
+  if (primaryFits) return { left: primary, top, flipped: false, clamped: top !== rawTop }
+  if (secondaryFits) return { left: secondary, top, flipped: true, clamped: top !== rawTop }
+  return { left: clamp(primary, pad, vw - boxW - pad), top, flipped: false, clamped: true }
+}

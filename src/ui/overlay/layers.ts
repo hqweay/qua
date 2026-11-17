@@ -15,7 +15,7 @@ import { DECL_BY_NAME, type CommandDecl } from '../../core/commands/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import { renderIcon } from '../../view/icons.ts'
 import { captureFocus, type FocusReturn } from './focus-return.ts'
-import { placeNear } from '../../view/place.ts'
+import { placeBeside, placeNear } from '../../view/place.ts'
 import { dismissFloating } from './overlay-dismiss.ts'
 import { menuKeyAction } from './menu-key.ts'
 import { groupTitle } from './group-titles.ts'
@@ -169,6 +169,11 @@ export class Layers {
    * 见 `openPopover` 的说明：快照记不住自己指向谁，窗口一变／正文一滚它就失效。
    */
   private popAnchor: (() => DOMRect | null) | null = null
+  /**
+   * 这一层从锚点的哪一侧开。缺省 `below`（信息浮层的老形状）；
+   * 窄容器（右槽）用 `left`——面板往主内容一侧开，不盖住被调的那一列。
+   */
+  private popPlacement: 'below' | 'left' | 'right' = 'below'
   /** 菜单打开之前焦点在哪（关闭时归还；见 `ui/focus-return.ts`） */
   private menuFocus: FocusReturn | null = null
   /** 信息浮层打开之前焦点在哪（同上） */
@@ -805,6 +810,7 @@ export class Layers {
     anchor: DOMRect | null | (() => DOMRect | null),
     onClose?: () => void,
     trigger?: { el?: HTMLElement; key?: string },
+    placement: 'below' | 'left' | 'right' = 'below',
   ): void {
     /**
      * **同一颗触发器再点一次＝收起**（toggle）：入口按钮就是这层浮层的开关，
@@ -833,6 +839,7 @@ export class Layers {
     this.popEl = box
     this.popClose = onClose ?? null
     this.popAnchor = typeof anchor === 'function' ? anchor : anchor ? () => anchor : null
+    this.popPlacement = placement
     /**
      * 焦点归还：浮层本身**不抢**焦点（只有里面的输入框在 autofocus 时才会拿走），
      * 但用户一旦点进去，关掉之后就没人负责把焦点还回来。见 `ui/focus-return.ts`。
@@ -859,17 +866,30 @@ export class Layers {
       this.closePopover()
       return
     }
-    const at = placeNear({
-      boxW: box.offsetWidth,
-      boxH: box.offsetHeight,
-      vw: window.innerWidth,
-      vh: window.innerHeight,
-      anchor,
-      side: 'below',
-      align: 'left',
-      gap: 8,
-      pad: 8,
-    })
+    const at =
+      this.popPlacement === 'below'
+        ? placeNear({
+            boxW: box.offsetWidth,
+            boxH: box.offsetHeight,
+            vw: window.innerWidth,
+            vh: window.innerHeight,
+            anchor,
+            side: 'below',
+            align: 'left',
+            gap: 8,
+            pad: 8,
+          })
+        : placeBeside({
+            boxW: box.offsetWidth,
+            boxH: box.offsetHeight,
+            vw: window.innerWidth,
+            vh: window.innerHeight,
+            anchor,
+            side: this.popPlacement,
+            align: 'start',
+            gap: 8,
+            pad: 8,
+          })
     box.style.left = `${at.left}px`
     box.style.top = `${at.top}px`
   }
@@ -886,6 +906,7 @@ export class Layers {
     const close = this.popClose
     this.popClose = null
     this.popAnchor = null
+    this.popPlacement = 'below'
     this.popEl = null
     this.popTriggerEl = null
     this.popTriggerKey = undefined

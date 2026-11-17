@@ -241,12 +241,14 @@ const mountTab = async (page, kind) => {
   await page.waitForTimeout(180)
 }
 
-/** 派生栏的看法是**一颗下拉**（与自定义查询的「视图…」同壳）：点按钮 → 点菜单行 */
+/** 派生栏的看法在镜头弹层里（与筛选/分组同一个入口）：点镜头 → 点看法段 */
 const pickDerivedView = async (page, kind) => {
   // 派生抬头现在有两个表面都有（中心段尾＋右槽卡）：切看法指名**中心**那一台
-  await page.locator('#editor .mount-derived-views .qv-view-btn').first().click()
-  await page.waitForTimeout(150)
-  await page.locator(`.layer-item[data-id="${kind}"]`).click()
+  if ((await page.locator('.popover.lenspop').count()) === 0) {
+    await page.locator('#editor .mount-derived-lens').first().click()
+    await page.waitForTimeout(150)
+  }
+  await page.locator(`.popover.lenspop [data-derived-view="${kind}"]`).click()
   await page.waitForTimeout(250)
 }
 
@@ -2456,7 +2458,7 @@ await check('T194 派生栏切表格：路径/引用次数/命中词/共同标�
   const head = () =>
     page.evaluate(() => ({
       count: document.querySelector('#editor .mount-derived-count')?.textContent ?? '',
-      active: document.querySelector('#editor .mount-derived-views .mount-derived-view-label')?.textContent ?? '',
+      active: document.querySelector('#editor .mount-derived-lens')?.dataset.view ?? '',
       why: document.querySelector('#editor .mount-derived-why')?.textContent ?? '',
     }))
   const tableOf = () =>
@@ -2480,7 +2482,7 @@ await check('T194 派生栏切表格：路径/引用次数/命中词/共同标�
   await pickDerivedView(page, 'table')
   await page.waitForTimeout(450)
   const refsTable = await tableOf()
-  assert(refsHead.active === '大纲', '前置：缺省是大纲')
+  assert(refsHead.active === 'outline', `前置：缺省是大纲（${refsHead.active}）`)
   assert(refsTable.rows === refsCount, `切表格不改变成员：${refsCount} → ${refsTable.rows}`)
   assert(refsTable.cols.includes('path') && refsTable.cols.includes('refCount'), `引用表要有路径与次数：${JSON.stringify(refsTable.cols)}`)
   assert(refsTable.cells.some((c) => /^\d+$/.test(c) && Number(c) >= 1), `引用次数要画出来：${JSON.stringify(refsTable.cells)}`)
@@ -2494,10 +2496,10 @@ await check('T194 派生栏切表格：路径/引用次数/命中词/共同标�
   await page2.waitForTimeout(450)
   await mountTab(page2, 'refs')
   const persisted = await page2.evaluate(() => ({
-    active: document.querySelector('#editor .mount-derived-views .mount-derived-view-label')?.textContent ?? '',
+    active: document.querySelector('#editor .mount-derived-lens')?.dataset.view ?? '',
     rows: document.querySelectorAll('#editor .mount-view .tv-row').length,
   }))
-  assert(persisted.active === '表格', `派生栏的看法要落设备状态（重开仍是表格）：${JSON.stringify(persisted)}`)
+  assert(persisted.active === 'table', `派生栏的看法要落设备状态（重开仍是 table）：${JSON.stringify(persisted)}`)
   assert(persisted.rows === refsCount, `重开后成员一致：${refsCount} → ${persisted.rows}`)
 
   // ③ 提及 / 同类：命中词与共同标签各自落在表里
@@ -2586,19 +2588,21 @@ await check('T194b 引用含属性引用：kind 过滤可切；标签页默认�
   await page.waitForTimeout(400)
   await mountTab(page, 'refs')
   // 同 T194：右槽也有同一台挂载区卡，mount 查询一律指名中心（#editor）
+  await page.locator('#editor .mount-derived-lens').first().click()
+  await page.waitForTimeout(200)
   const initial = await page.evaluate(() => ({
     count: Number((document.querySelector('#editor .mount-derived-count')?.textContent ?? '0').match(/\d+/)?.[0] ?? '0'),
-    chips: [...document.querySelectorAll('#editor .mount-derived-kind')].map((e) => e.textContent ?? ''),
+    chips: [...document.querySelectorAll('.popover.lenspop .mount-derived-kind')].map((e) => e.textContent ?? ''),
     rows: document.querySelectorAll('#editor .mount-editor .blk').length,
   }))
   assert(initial.count >= 1 && initial.rows >= 1, `属性引用应进「引用」栏：${JSON.stringify(initial)}`)
   assert(initial.chips.some((x) => x.includes('属性')), `应有「属性」过滤 chip：${JSON.stringify(initial.chips)}`)
   const has = (id) => !!document.querySelector(`#editor .mount-editor .blk[data-block-id="${id}"]`)
   assert(await page.evaluate(has, setup.src), '属性引用源应在「全部」里')
-  await page.locator('#editor .mount-derived-kind[data-kind="inline"]').click()
+  await page.locator('.popover.lenspop .mount-derived-kind[data-kind="inline"]').click()
   await page.waitForTimeout(250)
   assert(!(await page.evaluate(has, setup.src)), '切到「正文」后，只靠属性引用的源不该再出现')
-  await page.locator('#editor .mount-derived-kind[data-kind="all"]').click()
+  await page.locator('.popover.lenspop .mount-derived-kind[data-kind="all"]').click()
   await page.waitForTimeout(250)
   assert(await page.evaluate(has, setup.src), '切回「全部」后属性引用源回来')
   await pickDerivedView(page, 'table')
@@ -2607,6 +2611,20 @@ await check('T194b 引用含属性引用：kind 过滤可切；标签页默认�
     kinds: [...document.querySelectorAll('#editor .mount-view .tv-row [data-col="relKinds"]')].map((e) => e.textContent ?? ''),
   }))
   assert(table.kinds.some((x) => x.includes('属性') && x.includes('负责人')), `表格的类型列要写清属性名：${JSON.stringify(table.kinds)}`)
+
+  // 派生栏的镜头面板：表格看法下分组节在；看法段能切回大纲；提取动作在（不点，避免物化）
+  await page.locator('#editor .mount-derived-lens').first().click()
+  await page.waitForTimeout(200)
+  const lens = await page.evaluate(() => ({
+    group: Boolean(document.querySelector('.popover.lenspop .mount-derived-group')),
+    views: [...document.querySelectorAll('.popover.lenspop [data-derived-view]')].map((e) => e.dataset.derivedView ?? ''),
+    extract: Boolean(document.querySelector('.popover.lenspop [data-materialize]')),
+  }))
+  assert(lens.group, '派生表格的镜头面板应有分组节')
+  assert(lens.views.includes('table') && lens.views.includes('outline'), `镜头面板应能切回大纲：${JSON.stringify(lens.views)}`)
+  assert(lens.extract, '派生栏的镜头面板应有「提取为查询」动作')
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(150)
 
   const tag = await page.evaluate(() => window.__qua.allBlocks().find((b) => b.roles?.includes('tag') && b.text === '任务')?.id ?? '')
   assert(tag, '假数据里应有 #任务')
@@ -23690,8 +23708,18 @@ await check('T239 快速筛选（右槽挂载区卡·引用栏）：候选带计
   const before = await ledger()
 
   // 打开弹层：候选＝结果集里出现过的页，各带计数 1
-  await page.locator(`${card} .mount-derived-filter`).click()
+  await page.locator(`${card} .mount-derived-lens`).click()
   await page.waitForTimeout(200)
+  // 右槽是 320px 窄列：镜头面板必须向主内容一侧开，不许盖住被调的那一列
+  const geo = await page.evaluate((sel) => {
+    const pop = document.querySelector('.popover.lenspop')?.getBoundingClientRect()
+    const dock = document.querySelector(sel)?.getBoundingClientRect()
+    return pop && dock ? { popRight: pop.right, dockLeft: dock.left } : null
+  }, card)
+  assert(
+    geo !== null && geo.popRight <= geo.dockLeft + 1,
+    `右槽的镜头面板要外开、不盖住这一栏：${JSON.stringify(geo)}`,
+  )
   const candidateChips = page.locator('.popover .quick-filter-pages .quick-filter-chip')
   assert((await candidateChips.count()) === 2, `候选应只有两个来源页：${await candidateChips.count()}`)
   const chipN = async (loc) => Number((await loc.locator('.quick-filter-chip-n').textContent()) ?? '0')
@@ -23778,7 +23806,7 @@ await check('T240 快速筛选（引用栏）：大纲筛行；切到表格是�
   const start = await page.evaluate(() => ({ undo: window.__qua.snapshot().undoDepth, cmds: window.__qua.commandLog().length }))
 
   // 弹层 → 包含其中一页：大纲的行与抬头数字一起变
-  await page.locator('#editor .mount .mount-derived-filter').first().click()
+  await page.locator('#editor .mount .mount-derived-lens').first().click()
   await page.waitForTimeout(200)
   const candidateChips = page.locator('.popover .quick-filter-pages .quick-filter-chip')
   await candidateChips.filter({ hasText: setup.q }).click()
@@ -23803,7 +23831,7 @@ await check('T240 快速筛选（引用栏）：大纲筛行；切到表格是�
     }))
   const before = await ledger()
 
-  await page.locator('#editor .mount .mount-derived-filter').first().click()
+  await page.locator('#editor .mount .mount-derived-lens').first().click()
   await page.waitForTimeout(200)
   await page.locator('.popover .quick-filter-col[data-col="include"] .quick-filter-chip').click()
   await page.waitForTimeout(250)

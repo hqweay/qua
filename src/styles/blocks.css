@@ -1741,6 +1741,9 @@
   display: none;
 }
 .queryview-options {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
   background: none;
   border: 0;
   padding: 0;
@@ -1750,6 +1753,17 @@
 }
 .queryview-options:hover {
   color: var(--ui-text);
+}
+/* 派生栏的镜头生效（筛选/分组/看法/类型）：一点状态色——它没有条件 pill 可承接 */
+.mount-derived-lens[data-active='1']::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--ui-accent);
 }
 .queryview-refresh {
   margin-left: auto;
@@ -2195,33 +2209,32 @@
   color: var(--ui-text);
   background: var(--ui-accent-soft);
 }
-.mount-derived-views {
+/* 抬头右侧的动作簇：折/展与镜头并排，靠 margin-left:auto 推右 */
+.mount-derived-actions {
   display: flex;
-  gap: var(--ui-gap-1);
+  align-items: center;
+  gap: var(--ui-gap-2);
   margin-left: auto;
 }
-.mount-derived-view,
-.mount-derived-more,
-.mount-derived-filter {
+.mount-derived-lens {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
   background: none;
   border: 0;
-  padding: 0 var(--ui-gap-2);
+  padding: 0 var(--ui-gap-1);
   font: inherit;
   color: var(--ui-text-tertiary);
   cursor: pointer;
   border-radius: var(--ui-radius-sm);
   line-height: 1.6;
 }
-.mount-derived-view:hover,
-.mount-derived-more:hover,
-.mount-derived-filter:hover {
+.mount-derived-lens:hover {
   color: var(--ui-text);
   background: var(--ui-bg-hover);
 }
-.mount-derived-view[data-active='1'],
-.mount-derived-filter[data-active='1'] {
-  color: var(--ui-text);
-  background: var(--ui-accent-soft);
+.mount-derived-lens[data-active='1'] {
+  color: var(--ui-accent);
 }
 /*
   一键折/展（引用栏抬头）：与「筛选」同观感但**独立类名**——抬头的按钮各有自己的

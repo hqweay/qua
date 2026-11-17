@@ -29,6 +29,7 @@ import {
   applyQuickFilter,
   canEditMounts,
   cardinalityOf,
+  DERIVED_VIEW_KINDS,
   derivedRecordsOf,
   derivedSpecOf,
   groupChoicesOf,
@@ -57,6 +58,7 @@ import {
   type ViewOwnerStore,
   type ViewConfig,
   type ViewRecord,
+  type ViewSurface,
 } from '../../core/index.ts'
 import type { FoldState } from '../../core/index.ts'
 import type { KbClient } from '../../core/kb/types.ts'
@@ -145,21 +147,25 @@ export interface MountAreaDeps {
   /** 换分组键（同上：装配层落设备状态并重画） */
   setDerivedGroup?: (host: Block, source: DerivedSource, key: string) => void
   /**
-   * 派生栏的看法下拉（与自定义查询的「视图…」同壳：同一台浮层）。
-   * 候选吃 core 的 `DERIVED_VIEW_KINDS`（大纲／表格／卡片／日历）——记录是平的，
-   * 兼容集与 query 源同一张表，没有可新建的东西。
-   */
-  openDerivedViewMenu?: (anchor: DOMRect | null, current: DerivedViewKind, onPick: (kind: DerivedViewKind) => void) => void
-  /**
-   * 浮层外壳（快速筛选的 chips 弹层住在这里面）。装配层持有浮层实例，这一层
-   * 不认识它的落位与生命周期——窄接口只收「画进哪、锚在哪」，够用。
+   * 浮层外壳（镜头面板住在这里面）。装配层持有浮层实例，这一层
+   * 不认识它的落位与生命周期——窄接口只收「画进哪、锚在哪、往哪开」，够用。
    */
   openPopover?: (
     render: (host: HTMLElement) => void,
     anchor: DOMRect | null | (() => DOMRect | null),
     /** 这次打开的触发者；给了它，同一触发者再点一次＝收起（toggle，见 `layers.openPopover`） */
     trigger?: { el?: HTMLElement; key?: string },
+    /** `left`／`right`：窄容器按「主内容在哪一侧」外开；缺省 `below` */
+    placement?: 'below' | 'left' | 'right',
+    onClose?: () => void,
   ) => void
+  /** 关掉当前浮层（宿主拆栏时收自己的尾） */
+  closePopover?: () => void
+  /**
+   * 这一台挂载区所在的表面（`dock` 是右槽窄列：镜头面板要向主内容一侧开）。
+   * 只影响浮层落位，不影响数据与写路径。
+   */
+  surface?: ViewSurface
   /**
    * 这一栏非大纲时用的视图体（local 栏可以有表格等看法）。
    *
@@ -293,6 +299,8 @@ export class MountArea {
   private readonly tabViews = new Map<string, ViewBodyHost>()
   /** 引用栏的 kind 过滤（大纲专用设备状态；切到表格时由「类型」列承担同一件事） */
   private refKind: 'all' | 'inline' | 'property' | 'embed' = 'all'
+  /** 派生栏镜头面板现在挂在哪个浮层宿主里（`null` ＝ 没开） */
+  private lensHost: HTMLElement | null = null
   /**
    * **提及栏的高亮**：块 id → plain 区间（`derived.mentionSpots` 原样搬来）。
    * 派生值，不落盘；切栏时清空。
@@ -423,6 +431,9 @@ export class MountArea {
 
   /** 摘掉实例（装配层在段根换人时调）：退订 store、卸事件，别让游离容器继续被重画 */
   dispose(): void {
+    // 这一台拆了，镜头浮层不能还挂着一份旧面板
+    if (this.lensHost?.isConnected) this.deps.closePopover?.()
+    this.lensHost = null
     this.hitObserver.disconnect()
     this.editorEl.removeEventListener('click', this.onHitClick)
     this.editorEl.removeEventListener('mousemove', this.onHitHover)
@@ -683,6 +694,11 @@ export class MountArea {
 
   private activate(id: string, focusHint?: string): void {
     if (this.active === id && focusHint === undefined) return
+    // 换栏：上一栏的镜头面板没有意义了，关掉再换身体
+    if (this.lensHost) {
+      this.deps.closePopover?.()
+      this.lensHost = null
+    }
     this.active = id
     const host = this.deps.host()
     if (host) this.renderTabs(host, this.entries.findIndex((e) => e.id === this.active))
@@ -1218,35 +1234,157 @@ export class MountArea {
     num.className = 'mount-derived-count'
     num.textContent = t('ui.mount.count', { count })
     /**
-     * **条件句就是「改条件」的入口**：点它＝原地物化（local 栏占用这一栏的稳定 id，
-     * 内置栏被替换而不是多出一份副本）＋ 直接打开条件树——条件树认 `{ref}` 行，
-     * 从「看条件」到「改条件」没有中间步骤。维度不存在 ⇒ 没有可编辑的条件，保留死句。
+     * **条件说明是状态，不是入口**：它回答「这一栏为什么存在」，但改条件/切镜头
+     * 都从右侧那颗镜头图标进——一段看起来像正文的字不该承担「点了会写库」的手势。
+     * 维度不存在时也保留死句（那一栏本来就没有可编辑的条件）。
      */
-    if (derivedSpecOf(host, this.deps.kb.roots(), entry.source) !== null) {
-      const why = document.createElement('button')
-      why.type = 'button'
-      why.className = 'mount-derived-why ui-ellipsis'
-      why.dataset.tip = t('ui.mount.materialize')
-      why.textContent = t(DERIVED_WHY[entry.source])
-      why.addEventListener('click', () => {
-        this.deps.onMaterializeTab?.(host.id, entry.source, why.getBoundingClientRect(), { openTree: true })
-      })
-      head.append(title, num, why)
-    } else {
-      const why = document.createElement('span')
-      why.className = 'mount-derived-why ui-ellipsis'
-      why.textContent = t(DERIVED_WHY[entry.source])
-      head.append(title, num, why)
+    const why = document.createElement('span')
+    why.className = 'mount-derived-why ui-ellipsis'
+    why.textContent = t(DERIVED_WHY[entry.source])
+    why.dataset.tip = why.textContent
+    head.append(title, num, why)
+
+    const actions = document.createElement('div')
+    actions.className = 'mount-derived-actions'
+
+    /**
+     * **一键折/展**（引用栏·大纲看法）：折/展全部**关联型**根。传递型不在名单里——
+     * 它的子块就是这条引用真正指到的内容，折了只剩一枚孤零零的引用（与折叠播种
+     * 同一份豁免判据）。方向随现状翻面：有关联型折着 ⇒ 全展开，全都开着 ⇒ 全折
+     * （与 dock「收起所有卡 ⇄ 展开所有卡」同款）。没有可折的关联根时不给——
+     * 挂一颗点了没反应的按钮是噪声。
+     */
+    if (entry.source === 'refs' && kind === 'outline') {
+      const assocIds = outermostHits(all)
+        .roots.filter((b) => !passThroughRefTarget(b) && hasLiveChildren(b))
+        .map((b) => b.id)
+      if (assocIds.length > 0) {
+        const bulk = document.createElement('button')
+        bulk.type = 'button'
+        bulk.className = 'mount-derived-bulkfold'
+        bulk.dataset.refsBulk = '1'
+        const anyFolded = assocIds.some((id) => Boolean(this.block.ed?.doc.folded?.[id]))
+        renderIcon(
+          bulk,
+          anyFolded ? 'lucide:chevrons-up-down' : 'lucide:chevrons-down-up',
+          anyFolded ? 'chevrons-up-down' : 'chevrons-down-up',
+        )
+        bulk.dataset.tip = t(anyFolded ? 'ui.refs.expandAll' : 'ui.refs.foldAll')
+        bulk.addEventListener('click', () => this.bulkToggleRefFolds(host))
+        actions.appendChild(bulk)
+      }
     }
 
-    // 抬头不重复挂引用数 chip：这一栏自己就是可编辑的反链块列。两个锚点是
-    // 「块行行尾 hover → 临时浮层」与「点徽标 → 底部这一栏」，不是两枚 chip。
-    // 宿主也不同（这栏按段根建、行尾徽标属于那个块），两份账并排只会让人以为坏了。
     /**
-     * 引用栏的 kind 过滤：只用**这次已经取到的记录**统计（不再扫一遍库），
-     * 且只在大纲显示——表格/列表用「类型」列承担同一件事，避免两处筛选各说各的。
+     * **镜头一个入口**：筛选/排序/分组/看法/类型都从这一颗进。抬头不再排一排
+     * 文字控件——320px 的右槽里那一排会挤成工具栏，且「点了会怎样」全靠读字。
+     * 有镜头生效时带状态点；点开的是锚定弹层（右槽向主内容一侧开）。
      */
+    const lens = document.createElement('button')
+    lens.type = 'button'
+    lens.className = 'mount-derived-lens'
+    lens.dataset.tip = t('ui.view.optionsTitle')
+    lens.dataset.view = kind
+    lens.setAttribute('aria-label', t('ui.view.options'))
+    if (this.derivedLensActive(host, entry.source, kind)) lens.dataset.active = '1'
+    renderIcon(lens, 'lucide:list-filter', 'list-filter')
+    lens.addEventListener('click', () => this.openDerivedLens(host, entry, lens))
+    actions.appendChild(lens)
+    head.appendChild(actions)
+  }
+
+  /** 镜头有没有「生效中的设置」：状态点只回答这一件事 */
+  private derivedLensActive(host: Block, source: DerivedSource, kind: DerivedViewKind): boolean {
+    return (
+      this.filterActive(source) ||
+      (this.deps.derivedGroup?.(host, source) ?? '') !== '' ||
+      kind !== 'outline' ||
+      (source === 'refs' && this.refKind !== 'all')
+    )
+  }
+
+  /**
+   * 镜头面板的锚点：宽面贴图标；**右槽贴这一栏的左缘**。
+   *
+   * 右槽只有 320px（窄档 180px），拿图标矩形向左开仍会横跨整栏——面板是会盖住
+   * 下面的行的。把锚点推到栏的左缘，面板整体落在主内容一侧，右槽的行保持可见，
+   * 调的仍是这一栏（位置贴着栏边界，不贴着屏幕中央）。
+   */
+  private lensAnchor(): DOMRect | null {
+    const lens = this.derivedHeadEl.querySelector('.mount-derived-lens')?.getBoundingClientRect()
+    if (this.deps.surface !== 'dock') return lens ?? null
+    const shell = this.root.closest('.dock-card') ?? this.root
+    const box = shell.getBoundingClientRect()
+    return new DOMRect(box.left, lens?.top ?? box.top, 0, lens?.height ?? 0)
+  }
+
+  /**
+   * 派生栏的镜头面板：**同一台面板、窄宿主外开**。
+   *
+   * 它不写拥有者配置（派生栏没有 owner）：筛选是会话态、看法/分组是设备态；
+   * 「提取为查询」是唯一会物化的动作，因此显式放在弹层里，不占默认单击。
+   */
+  private openDerivedLens(
+    host: Block,
+    entry: Extract<MountEntry, { kind: 'derived' }>,
+    trigger: HTMLElement,
+  ): void {
+    if (!this.deps.openPopover) return
+    this.deps.openPopover(
+      (box) => {
+        box.classList.add('lenspop')
+        this.lensHost = box
+        this.renderDerivedLens(box, host, entry)
+      },
+      // 手势会重画抬头、换掉触发按钮：锚点每次现查，矩形快照会指向已不存在的元素
+      () => this.lensAnchor(),
+      { el: trigger },
+      this.deps.surface === 'dock' ? 'left' : 'below',
+      () => {
+        this.lensHost = null
+      },
+    )
+  }
+
+  /** 派生栏镜头面板的内容重画（配置一律现读；切看法/分组/类型后重调） */
+  private renderDerivedLens(
+    box: HTMLElement,
+    host: Block,
+    entry: Extract<MountEntry, { kind: 'derived' }>,
+  ): void {
+    box.replaceChildren()
+    const root = document.createElement('div')
+    root.className = 'vopt lens-panel'
+    box.appendChild(root)
+
+    const kind = this.deps.derivedKind?.(host, entry.source) ?? 'outline'
+    const { filtered: all } = this.displayedDerivedRecords(host, entry.source)
+    const repaint = (): void => this.renderDerivedLens(box, host, entry)
+
+    /* 筛选：候选来自**未筛**的全量派生记录（摘一颗 chip 一切回来要有参照） */
+    const filterBody = this.lensSection(root, 'ui.view.opt.filter')
+    renderQuickFilter(filterBody, {
+      records: () => derivedRecordsOf(host, this.deps.kb, entry.source),
+      state: () => this.filterOf(entry.source),
+      labelOf: (atom) => this.atomLabel(atom),
+      onAdd: (atom, to) => {
+        if (this.mutateFilter(entry.source, (s) => quickFilterAdd(s, atom, to))) repaint()
+      },
+      onDrop: (atom) => {
+        if (this.mutateFilter(entry.source, (s) => quickFilterDrop(s, atom))) repaint()
+      },
+      onClear: () => {
+        if (!this.filterActive(entry.source)) return
+        this.quickFilters.delete(entry.source)
+        this.render()
+        repaint()
+      },
+      search: true,
+    })
+
+    /* 类型：只在引用栏的大纲看法里——表格用「类型」列承担同一件事 */
     if (entry.source === 'refs' && kind === 'outline' && all.length > 0) {
+      const body = this.lensSection(root, 'ui.mount.kindTitle')
       const counts = new Map<'inline' | 'property' | 'embed', number>()
       for (const r of all) {
         const keys = r.derived?.relKindKeys
@@ -1269,6 +1407,7 @@ export class MountArea {
           if (this.refKind === key) return
           this.refKind = key
           this.render()
+          repaint()
         })
         kinds.appendChild(b)
       }
@@ -1276,89 +1415,15 @@ export class MountArea {
       add('inline', t('ui.mount.kind.inline'), counts.get('inline') ?? 0)
       add('property', t('ui.mount.kind.property'), counts.get('property') ?? 0)
       add('embed', t('ui.mount.kind.embed'), counts.get('embed') ?? 0)
-      head.appendChild(kinds)
+      body.appendChild(kinds)
     }
 
-    /**
-     * 快速筛选的入口（引用／提及两栏）：候选与计数都是面板层的 chrome，
-     * 与行渲染器分层。结果为空且没筛时不给——空结果上没有可筛的东西，
-     * 挂一颗点了只说「没有候选」的按钮是噪声。
-     */
-    if ((entry.source === 'refs' || entry.source === 'mentions') && (count > 0 || this.filterActive(entry.source))) {
-      head.appendChild(this.quickFilterButton(entry.source))
-    }
-
-    /**
-     * **一键折/展**（引用栏·大纲看法）：折/展全部**关联型**根。传递型不在名单里——
-     * 它的子块就是这条引用真正指到的内容，折了只剩一枚孤零零的引用（与折叠播种
-     * 同一份豁免判据）。方向随现状翻面：有关联型折着 ⇒ 全展开；全都开着 ⇒ 全折
-     * （与 dock「收起所有卡 ⇄ 展开所有卡」同款）。没有可折的关联根时不给——
-     * 挂一颗点了没反应的按钮是噪声。
-     */
-    if (entry.source === 'refs' && kind === 'outline') {
-      const assocIds = outermostHits(all)
-        .roots.filter((b) => !passThroughRefTarget(b) && hasLiveChildren(b))
-        .map((b) => b.id)
-      if (assocIds.length > 0) {
-        const bulk = document.createElement('button')
-        bulk.type = 'button'
-        bulk.className = 'mount-derived-bulkfold'
-        bulk.dataset.refsBulk = '1'
-        const anyFolded = assocIds.some((id) => Boolean(this.block.ed?.doc.folded?.[id]))
-        renderIcon(
-          bulk,
-          anyFolded ? 'lucide:chevrons-up-down' : 'lucide:chevrons-down-up',
-          anyFolded ? 'chevrons-up-down' : 'chevrons-down-up',
-        )
-        bulk.dataset.tip = t(anyFolded ? 'ui.refs.expandAll' : 'ui.refs.foldAll')
-        bulk.addEventListener('click', () => this.bulkToggleRefFolds(host))
-        head.appendChild(bulk)
-      }
-    }
-
-    /**
-     * 看法切换是**一颗下拉**（与自定义查询的「视图…」同壳、同台浮层），不是一排 tab：
-     * 非大纲看法是同一件事的几种读法，排开只会抢走条数与筛选的位置。
-     */
-    const seg = document.createElement('div')
-    seg.className = 'mount-derived-views'
-    const labels: Record<DerivedViewKind, MsgId> = {
-      outline: 'ui.view.outline',
-      table: 'ui.view.kind.table',
-      cards: 'ui.view.kind.cards',
-      calendar: 'ui.view.kind.calendar',
-    }
-    const btn = document.createElement('button')
-    btn.type = 'button'
-    // ⚠️ 不带 `qv-view-current`：那是视图宿主抬头切换器的钩子（冒烟按它点），
-    //    派生栏这一颗凑同名会把两台切换器搅在一起；样式借 `qv-view-btn`，身份用自己的。
-    btn.className = 'qv-view-btn mount-derived-view-btn'
-    btn.dataset.tip = t('ui.view.switchHint')
-    const label = document.createElement('span')
-    label.className = 'mount-derived-view-label'
-    label.textContent = t(labels[kind])
-    const caret = document.createElement('span')
-    caret.className = 'qv-view-caret'
-    renderIcon(caret, 'lucide:chevron-down', 'chevron-down')
-    btn.append(label, caret)
-    btn.addEventListener('click', () => {
-      this.deps.openDerivedViewMenu?.(btn.getBoundingClientRect(), kind, (k) => {
-        if (k === kind) return
-        this.deps.setDerivedKind?.(host, entry.source, k)
-      })
-    })
-    seg.appendChild(btn)
-    head.appendChild(seg)
-
-    /**
-     * **分组下拉**（表格／卡片才有）：与看法切换同排、与查询视图同一个候选源
-     * （core `groupChoicesOf`）。分组键住设备状态（`Prefs.mountGroups`，与看法同层）。
-     * 卡片带键＝列（看板），表格带键＝分节——键是记录视图共用位，两种呈现一个答案。
-     */
+    /* 分组：记录型看法才有——与查询视图同一个候选源，键住设备状态 */
     if (kind === 'table' || kind === 'cards') {
+      const body = this.lensSection(root, 'ui.view.opt.group')
       const fields = propDisplayLabels(this.deps.kb.roots())
       const group = document.createElement('select')
-      group.className = 'queryview-group mount-derived-group'
+      group.className = 'ui-input queryview-group mount-derived-group'
       const none = document.createElement('option')
       none.value = ''
       none.textContent = t('ui.query.group.none')
@@ -1378,9 +1443,79 @@ export class MountArea {
       const current = this.deps.derivedGroup?.(host, entry.source) ?? ''
       group.value = current
       if (group.value !== current) group.value = ''
-      group.onchange = () => this.deps.setDerivedGroup?.(host, entry.source, group.value)
-      head.appendChild(group)
+      group.onchange = () => {
+        // 装配层的 setDerivedGroup 会重画两个表面；这里只把弹层里的回显跟上
+        this.deps.setDerivedGroup?.(host, entry.source, group.value)
+        repaint()
+      }
+      body.appendChild(group)
     }
+
+    /* 看法：一组需要比较的选项 ⇒ 弹层里用文字，不排一排图标 */
+    const viewBody = this.lensSection(root, 'ui.view.switchHint')
+    const labels: Record<DerivedViewKind, MsgId> = {
+      outline: 'ui.view.outline',
+      table: 'ui.view.kind.table',
+      cards: 'ui.view.kind.cards',
+      calendar: 'ui.view.kind.calendar',
+    }
+    const views = document.createElement('div')
+    views.className = 'vopt-seg'
+    for (const k of DERIVED_VIEW_KINDS) {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.className = 'vopt-seg-btn'
+      b.dataset.derivedView = k
+      if (k === kind) b.dataset.active = '1'
+      b.textContent = t(labels[k])
+      b.addEventListener('click', () => {
+        if (k === kind) return
+        // 看法切换会换整个身体：选完就收层，把屏幕交回结果
+        this.deps.closePopover?.()
+        this.deps.setDerivedKind?.(host, entry.source, k)
+      })
+      views.appendChild(b)
+    }
+    viewBody.appendChild(views)
+
+    /* 条件：只读说明 ＋ 唯一的物化动作（改变拥有者，必须显式） */
+    const condBody = this.lensSection(root, 'ui.query.filter')
+    const why = document.createElement('p')
+    why.className = 'vopt-note'
+    why.textContent = t(DERIVED_WHY[entry.source])
+    condBody.appendChild(why)
+    if (derivedSpecOf(host, this.deps.kb.roots(), entry.source) !== null) {
+      const extract = document.createElement('button')
+      extract.type = 'button'
+      extract.className = 'ui-btn vopt-apply'
+      extract.dataset.materialize = '1'
+      extract.textContent = t('ui.mount.materialize')
+      extract.addEventListener('click', () => {
+        const at = extract.getBoundingClientRect()
+        this.deps.closePopover?.()
+        this.deps.onMaterializeTab?.(host.id, entry.source, at, { openTree: true })
+      })
+      condBody.appendChild(extract)
+    }
+
+    const note = document.createElement('p')
+    note.className = 'vopt-note lens-note'
+    note.textContent = t('ui.mount.lensNote')
+    root.appendChild(note)
+  }
+
+  /** 面板一节：与查询的 `ViewOptionsPanel` 同一套标题/留白，不另造一套卡片语言 */
+  private lensSection(root: HTMLElement, title: MsgId): HTMLElement {
+    const box = document.createElement('div')
+    box.className = 'vopt-section'
+    const head = document.createElement('div')
+    head.className = 'vopt-title'
+    head.textContent = t(title)
+    const body = document.createElement('div')
+    body.className = 'vopt-body'
+    box.append(head, body)
+    root.appendChild(box)
+    return body
   }
 
   /* ---------------------------------------------------------- 快速筛选 */
@@ -1396,47 +1531,6 @@ export class MountArea {
   private filterActive(source: DerivedSource): boolean {
     const s = this.filterOf(source)
     return s.include.length > 0 || s.remove.length > 0
-  }
-
-  private quickFilterButton(source: DerivedSource): HTMLButtonElement {
-    const btn = document.createElement('button')
-    btn.type = 'button'
-    btn.className = 'mount-derived-filter'
-    btn.textContent = t('ui.filter.button')
-    btn.dataset.tip = t('ui.filter.buttonHint')
-    if (this.filterActive(source)) btn.dataset.active = '1'
-    btn.addEventListener('click', () => this.openQuickFilter(source, btn))
-    return btn
-  }
-
-  /**
-   * 弹出 chips 层。锚点每次**现查**（手势会重画抬头、重建按钮，矩形快照会指向
-   * 一个已经不存在的元素）；锚点不在了 ⇒ 浮层自己关（装配层浮层的既有口径）。
-   */
-  private openQuickFilter(source: DerivedSource, trigger?: HTMLElement): void {
-    if (!this.deps.openPopover) return
-    this.deps.openPopover(
-      (box) => {
-        const paint = (): void =>
-          renderQuickFilter(box, {
-            records: () => {
-              const h = this.deps.host()
-              return h ? derivedRecordsOf(h, this.deps.kb, source) : []
-            },
-            state: () => this.filterOf(source),
-            labelOf: (atom) => this.atomLabel(atom),
-            onAdd: (atom, to) => {
-              if (this.mutateFilter(source, (s) => quickFilterAdd(s, atom, to))) paint()
-            },
-            onDrop: (atom) => {
-              if (this.mutateFilter(source, (s) => quickFilterDrop(s, atom))) paint()
-            },
-          })
-        paint()
-      },
-      () => this.derivedHeadEl.querySelector('.mount-derived-filter')?.getBoundingClientRect() ?? null,
-      trigger ? { el: trigger } : undefined,
-    )
   }
 
   /** 改一份 chips：真变了才落、才重画这一屏（返回给弹层决定要不要跟着重画） */

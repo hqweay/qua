@@ -13,7 +13,7 @@
  */
 import { test } from 'node:test'
 import * as assert from 'node:assert/strict'
-import { placeNear, type Placement } from '../src/view/place.ts'
+import { placeBeside, placeNear, type BesidePlacement, type Placement } from '../src/view/place.ts'
 
 const VW = 1440
 const VH = 900
@@ -31,6 +31,19 @@ const base = (o: Partial<Placement> = {}): Placement => ({
 })
 
 const rect = (left: number, top: number, w = 0, h = 0) => ({ left, top, right: left + w, bottom: top + h })
+
+const besideBase = (o: Partial<BesidePlacement> = {}): BesidePlacement => ({
+  boxW: 320,
+  boxH: 300,
+  vw: VW,
+  vh: VH,
+  anchor: null,
+  side: 'left',
+  align: 'start',
+  gap: 8,
+  pad: 8,
+  ...o,
+})
 
 test('没有锚点：水平居中、竖直落在视口上部（命令面板那一档）', () => {
   const r = placeNear(base({ boxW: 430 }))
@@ -93,4 +106,29 @@ test('side=above 的偏好也被尊重（划选气泡要贴在选区上方）', 
 test('浮层比视口还宽 ⇒ 夹到左边留白，不产生负坐标', () => {
   const r = placeNear(base({ boxW: VW + 100, anchor: rect(700, 100) }))
   assert.equal(r.left, 8)
+})
+
+test('向侧面开：右槽的锚点向左开，右槽那一列不被盖住', () => {
+  const r = placeBeside(besideBase({ anchor: rect(VW - 40, 100, 24, 24) }))
+  assert.equal(r.left, VW - 40 - 320 - 8)
+  assert.equal(r.top, 100)
+  assert.equal(r.flipped, false)
+})
+
+test('向侧面开：左边放不下 ⇒ 翻到右边', () => {
+  const r = placeBeside(besideBase({ anchor: rect(30, 100, 24, 24) }))
+  assert.equal(r.left, 30 + 24 + 8)
+  assert.equal(r.flipped, true)
+})
+
+test('向侧面开：竖直对齐后夹进视口（不越出下缘）', () => {
+  const r = placeBeside(besideBase({ anchor: rect(600, VH - 40, 24, 24) }))
+  assert.equal(r.top, VH - 300 - 8)
+  assert.equal(r.clamped, true)
+})
+
+test('向侧面开：两侧都放不下 ⇒ 夹进视口，并如实标出 clamped', () => {
+  const r = placeBeside(besideBase({ boxW: VW + 100, anchor: rect(500, 100, 24, 24) }))
+  assert.equal(r.left, 8)
+  assert.equal(r.clamped, true)
 })

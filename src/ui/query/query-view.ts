@@ -204,6 +204,20 @@ export interface ViewHostDeps {
    * 不必先绕进菜单。`anchor` 取 chip 的矩形，浮层贴着它弹。
    */
   openSlice?: (owner: ViewOwnerRef, viewId: string, anchor: DOMRect | null) => void
+  /**
+   * **镜头面板的浮层外壳**（四轴一个面）。面板内容仍由这一层造，
+   * 装配层只决定「画进哪、贴在哪」：宽面从图标下方开；窄面（右槽）向主内容一侧开，
+   * 不盖住被调的那一列。关闭由 Layers 统一处理，`onClose` 只负责清这一层的引用。
+   */
+  openLens?: (opts: {
+    render: (host: HTMLElement) => void
+    anchor: DOMRect
+    trigger: HTMLElement
+    placement?: 'below' | 'left' | 'right'
+    onClose?: () => void
+  }) => void
+  /** 关掉镜头浮层（宿主 dispose 时收自己的尾；不去关别人的层） */
+  closeLens?: () => void
   /** 复杂条件交给条件构建器（选项面板的筛选节认不出 chips 时给） */
   openBuilder?: () => void
   /** 声明层选择器（选项面板显示节的「编辑默认」；`_childProps` 写口不变） */
@@ -286,10 +300,8 @@ export interface ViewHostEls {
   topCount: HTMLElement
   /** 视图切换器（默认看法 ＋ 已有视图 ＋ 加一张） */
   views: HTMLElement
-  /** **选项**按钮：四轴一个面（筛选/排序/分组/显示；可用性读 `axesFor`） */
+  /** **镜头**按钮：四轴一个面（筛选/排序/分组/显示；可用性读 `axesFor`） */
   optionsBtn: HTMLButtonElement
-  /** 选项面板（就地展开；与条件树同一哲学） */
-  optionsPanel: HTMLElement
   /** 条件 chip 条（查询源才有；收起时只剩一条摘要） */
   filters: HTMLElement
   /** 条件树（就地展开；与抬头同属这一段，不是浮层） */
@@ -345,9 +357,6 @@ export function createViewHostEls(): ViewHostEls {
   optionsBtn.type = 'button'
   optionsBtn.className = 'queryview-options'
   optionsBtn.hidden = true
-  const optionsPanel = document.createElement('div')
-  optionsPanel.className = 'queryview-sortpanel queryview-optionspanel'
-  optionsPanel.hidden = true
   const refresh = document.createElement('button')
   refresh.type = 'button'
   refresh.className = 'queryview-refresh'
@@ -387,7 +396,7 @@ export function createViewHostEls(): ViewHostEls {
   table.hidden = true
   body.append(editor, table)
 
-  root.append(head, tree, optionsPanel, body)
+  root.append(head, tree, body)
   return {
     root,
     head,
@@ -398,7 +407,6 @@ export function createViewHostEls(): ViewHostEls {
     filters,
     views,
     optionsBtn,
-    optionsPanel,
     refresh,
     foldAll,
     newRow,
@@ -425,9 +433,10 @@ export class ViewHost {
   private tabs: ViewTabs | null = null
   /** children 记录视图当前的显示掩码（命中 id 集；`null` ＝ 无掩码）。`paintChrome` 每次重画现算 */
   private maskIds: Set<string> | null = null
-  /** 选项面板（四轴一个面；懒建一台，切视图只换它读到的活配置） */
+  /** 镜头面板（四轴一个面；懒建一台，切视图只换它读到的活配置） */
   private optionsUi: ViewOptionsPanel | null = null
-  private optionsOpen = false
+  /** 面板现在挂在哪个浮层宿主里（`null` ＝ 没开；关层时由 `onClose` 清） */
+  private optionsHost: HTMLElement | null = null
   private calendar: ViewCalendar | null = null
   private mindmap: ViewMindmap | null = null
   /** 分组包装（表格带 `groupBy` 时）：段头归它、段身仍是表格 */
@@ -509,10 +518,10 @@ export class ViewHost {
     this.els.refresh.dataset.tip = t('ui.query.refresh')
     this.els.refresh.setAttribute('aria-label', t('ui.query.refresh'))
     this.els.refresh.addEventListener('click', () => this.refresh())
-    renderIcon(this.els.optionsBtn, 'lucide:sliders-horizontal', 'sliders-horizontal')
+    renderIcon(this.els.optionsBtn, 'lucide:list-filter', 'list-filter')
     this.els.optionsBtn.dataset.tip = t('ui.view.optionsTitle')
     this.els.optionsBtn.setAttribute('aria-label', t('ui.view.options'))
-    this.els.optionsBtn.addEventListener('click', () => this.toggleOptions())
+    this.els.optionsBtn.addEventListener('click', () => this.openLens())
     this.els.newRow.textContent = t('ui.view.newRow')
     this.els.newRow.dataset.tip = t('ui.view.newRowTitle')
     this.els.newRow.addEventListener('click', () => this.deps.invoke('core.view/new-row', { owner: this.writeOwner }))
@@ -645,6 +654,9 @@ export class ViewHost {
 
   dispose(): void {
     this.offStale()
+    // 这一台宿主拆了，镜头浮层不能还挂着一份旧面板（关层会回调 onClose 清引用）
+    if (this.optionsHost?.isConnected) this.deps.closeLens?.()
+    this.optionsHost = null
     this.derivedFlush.dispose()
     this.treeUi = null
     this.outline?.dispose()
@@ -1031,11 +1043,10 @@ export class ViewHost {
     if (!query || view !== null) this.els.topCount.hidden = true
     this.els.refresh.hidden = !query
     /**
-     * **四轴一个面**：筛选/排序/分组/显示都从这一颗进——工具栏默认隐藏是刻意的：
+     * **镜头一个入口**：筛选/排序/分组/显示都从这一颗进——工具栏默认隐藏是刻意的：
      * 派生栏没有可写配置（看法/分组由设备状态回答，挂载区自己画）⇒ 不给这一颗。
      */
     this.els.optionsBtn.hidden = Boolean(derived)
-    if (derived) this.optionsOpen = false
     this.repaintOptions()
     // 派生栏是只读关系视图 ⇒ 不给新建/改名/刷新
     this.els.newRow.hidden = Boolean(derived) || query
@@ -1195,17 +1206,48 @@ export class ViewHost {
 
   /* ---------------------------------------------------------- 快速筛选 */
 
-  /** 选项面板就地开合（与条件树同一哲学；打开时按当前活配置现画） */
-  private toggleOptions(): void {
-    this.optionsOpen = !this.optionsOpen
-    this.repaintOptions()
+  /**
+   * 镜头面板的锚点：宽面贴图标；**右槽贴这一栏的左缘**。
+   *
+   * 右槽只有 320px（窄档 180px），拿图标矩形向左开仍会横跨整栏——面板会盖住
+   * 下面的行。把锚点推到栏的左缘，面板整体落在主内容一侧，右槽的行保持可见。
+   */
+  private lensAnchor(btn: HTMLElement): DOMRect {
+    if (this.deps.surface !== 'dock') return btn.getBoundingClientRect()
+    const shell = this.els.root.closest('.dock-card') ?? this.els.root
+    const box = shell.getBoundingClientRect()
+    const rect = btn.getBoundingClientRect()
+    return new DOMRect(box.left, rect.top, 0, rect.height)
+  }
+
+  /**
+   * 镜头面板：**一个入口、四个轴**。宽面从图标下方开；右槽（`dock`）向主内容
+   * 一侧开——320px 的列里放不下四节面板，弹层盖住结果就看不见「点一颗 chip 行怎么变」。
+   */
+  private openLens(): void {
+    if (!this.deps.openLens) return
+    const btn = this.els.optionsBtn
+    this.deps.openLens({
+      render: (host) => {
+        // 旧断言按 `.queryview-optionspanel` 找面板；这个类只是浮层宿主的定位钩子，
+        // 不带 `.queryview-sortpanel` 的边框/内距，样式仍由 `.vopt` 自己负责。
+        host.classList.add('queryview-optionspanel', 'lenspop')
+        this.optionsHost = host
+        this.repaintOptions()
+      },
+      anchor: this.lensAnchor(btn),
+      trigger: btn,
+      placement: this.deps.surface === 'dock' ? 'left' : 'below',
+      onClose: () => {
+        this.optionsHost = null
+      },
+    })
   }
 
   /** 面板内容重画（配置一律现读；切视图/写配置后由 paintChrome 顺带调） */
   private repaintOptions(): void {
-    const panel = this.els.optionsPanel
-    panel.hidden = !this.optionsOpen
-    if (!this.optionsOpen) return
+    const panel = this.optionsHost
+    if (!panel) return
     if (!this.optionsUi) {
       this.optionsUi = new ViewOptionsPanel({
         owner: this.writeOwner,
@@ -1240,8 +1282,8 @@ export class ViewHost {
         },
         afterApply: () => this.refocusBody(),
       })
-      panel.replaceChildren(this.optionsUi.root)
     }
+    if (this.optionsUi.root.parentElement !== panel) panel.replaceChildren(this.optionsUi.root)
     this.optionsUi.render()
   }
 

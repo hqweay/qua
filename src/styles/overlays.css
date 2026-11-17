@@ -394,6 +394,100 @@
 }
 
 /*
+  镜头面板（`.vopt` 四轴／派生栏的筛选·分组·看法）住在通用浮层里。
+  `.popover button` 是给「信息浮层里那种一颗主按钮」定的；它会从选择器侧面漏进
+  一组 chips／分段按钮里——每颗多一圈边框、内距被放大、悬停叠一层底色。
+  这一组先把通用框复位，再按各组件自己的形状接回（不新增第二种形状）。
+  与 `.popover` 的通用按钮规则同处一个文件，级联顺序不会再被别的分片翻掉。
+*/
+.popover.lenspop {
+  min-width: 22rem;
+  max-width: 34rem;
+  max-height: min(72vh, 40rem);
+  overflow: auto;
+}
+/* `.ui-btn` 是原语：它的几何/悬停留给 `.popover button` 与原语自己，不参与复位 */
+.popover.lenspop button:not(.ui-btn) {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+}
+.popover.lenspop button:not(.ui-btn):hover {
+  background: none;
+  color: inherit;
+}
+.popover.lenspop .vopt-seg-btn {
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface);
+  color: var(--ui-text-secondary);
+  padding: 0 var(--ui-gap-2);
+}
+.popover.lenspop .vopt-seg-btn[data-active] {
+  color: var(--ui-text);
+  border-color: var(--ui-border);
+}
+.popover.lenspop .quick-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  max-width: 100%;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-sm);
+  padding: 0 var(--ui-gap-2);
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-secondary);
+  line-height: 1.6;
+}
+.popover.lenspop .quick-filter-chip:hover {
+  color: var(--ui-text);
+  background: var(--ui-bg-hover);
+}
+.popover.lenspop .quick-filter-clear {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--ui-text-tertiary);
+}
+.popover.lenspop .quick-filter-clear:hover {
+  color: var(--ui-text);
+  background: none;
+}
+/* `.ui-btn` 的几何与悬停由原语/通用浮层按钮给；这里只补激活色 */
+.popover.lenspop .ui-btn[data-active='1'] {
+  background: var(--ui-accent-soft);
+  border-color: var(--ui-accent);
+  color: var(--ui-accent);
+}
+.popover.lenspop .qsp-ops button {
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface);
+  color: var(--ui-text-secondary);
+  min-width: 22px;
+  padding: 0 var(--ui-gap-1);
+}
+.popover.lenspop .mount-derived-kind {
+  border: 0;
+  padding: 0 var(--ui-gap-2);
+  border-radius: var(--ui-radius-sm);
+  background: none;
+  color: var(--ui-text-tertiary);
+  line-height: 1.6;
+}
+.popover.lenspop .mount-derived-kind:hover {
+  color: var(--ui-text);
+  background: var(--ui-bg-hover);
+}
+.popover.lenspop .mount-derived-kind[data-active='1'] {
+  color: var(--ui-text);
+  background: var(--ui-accent-soft);
+}
+
+
+/*
   ⌘P 浮层搜索的宿主尺寸：`placePopover` 在 append 之后量 box 定坐标，
   所以宽高必须在 CSS 里定死（渲染回调里补 class，量之前就已生效）。
   base `.popover` 的 380px 上限与内边距是「信息浮层」的形状，这里全部覆盖。

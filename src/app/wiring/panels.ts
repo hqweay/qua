@@ -1140,6 +1140,10 @@ export function setupPanels(deps: PanelsDeps) {
       // 视图切换是下拉：贴着按钮弹「视图…」菜单（行仍由装配层现画）
       openViewMenu: (owner, anchor, trigger) => app.openViewMenu(owner, anchor, trigger),
       openSlice: (owner, viewId, anchor) => app.openViewSlice(owner, viewId, anchor),
+      // 镜头面板：宽面下开、右槽左开（`placement` 由 ViewHost 按表面给）
+      openLens: ({ render, anchor, trigger, placement, onClose }) =>
+        layers.openPopover(render, anchor, onClose, { el: trigger }, placement),
+      closeLens: () => layers.closePopover(),
       // 选项面板的两个出口：复杂条件交给构建器；「编辑默认」调声明层选择器
       openBuilder: () => app.openQueryBuilder(owner),
       openChildProps: (blockId) => app.showChildPropsPicker(blockId),
@@ -1298,8 +1302,11 @@ export function setupPanels(deps: PanelsDeps) {
       wire: (editor, change) => deps.wireEditor(editor, change, spec.via, spec.inlineViewBodies),
       onAddTab: (id) => addLocalQueryTab(id, spec),
       onMaterializeTab: (id, source, _anchor, opts) => materializeDerivedTab(id, source, opts, spec),
-      // 快速筛选的弹层外壳（chips 的内容与状态都在挂载区自己手里）
-      openPopover: (render, anchor, trigger) => layers.openPopover(render, anchor, undefined, trigger),
+      // 镜头面板的浮层外壳：右槽（`dock`）向主内容一侧开，不盖住这一栏的行
+      surface: spec.viewSurface,
+      openPopover: (render, anchor, trigger, placement, onClose) =>
+        layers.openPopover(render, anchor, onClose, trigger, placement),
+      closePopover: () => layers.closePopover(),
       // 大纲分支的切换下拉：与视图宿主那条同一个菜单（装配层现画行，这里只给锚点）
       derivedKind: (hostBlock, source) => {
         const mountHost = mountHostOf(hostBlock)
@@ -1319,8 +1326,6 @@ export function setupPanels(deps: PanelsDeps) {
         mountInstances.get(hostBlock.id)?.area.render()
         dockMountArea?.render()
       },
-      // 看法下拉与自定义查询的「视图…」同壳（同一台浮层，行由宿主层现画）
-      openDerivedViewMenu: (anchor, current, onPick) => app.openDerivedViewMenu(anchor, current, (k) => onPick(k as DerivedViewKind)),
       onRemoveTab: (mountHost, tabId) => {
         void deps.getRegistry().invoke('core.mount/remove', { host: mountHost, tabId }, spec.via)
         // 摘完当场重排：栏是模型/设备状态里的一格，DOM 不会自己知道
