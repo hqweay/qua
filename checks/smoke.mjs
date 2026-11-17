@@ -12872,6 +12872,40 @@ await check('T121 右槽挂载区卡的引用栏与正文同一种东西：一�
   assert(!undone.dom.includes('W'), `卡里的 ⌘Z 应回滚这一行：${JSON.stringify(undone)}`)
 
   /**
+   * 行首路径显隐（镜头一格，缺省显示）：隐藏 ⇒ 路径格消失但行还在、条目上落 `showPaths:false`；
+   * 开回来 ⇒ 路径回、条目上的字段摘掉（缺省不存恒真）。只关显示：展开栈与上下文照算。
+   */
+  await page.locator(`${card} .mount-derived-lens`).click()
+  await page.waitForTimeout(120)
+  await page.locator('.lenspop [data-paths-opt="hide"]').click()
+  await page.waitForTimeout(500) // 重载带 200ms 防抖：等它过完再读
+  const hidden = await page.evaluate((sel) => ({
+    rows: document.querySelectorAll(`${sel} .blk[data-depth="0"]`).length,
+    crumbs: document.querySelectorAll(`${sel} .blk-context-cell`).length,
+    mounts: (window.__qua.__editor.store.find(window.__qua.snapshot().activeId)?.props?._mounts ?? []),
+  }), card)
+  assert(hidden.rows === 2, `关路径后行还在：${JSON.stringify(hidden)}`)
+  assert(hidden.crumbs === 0, `关路径后行首不再画路径格：${JSON.stringify(hidden)}`)
+  assert(
+    hidden.mounts.some((e) => e.source === 'refs' && e.showPaths === false),
+    `关路径写进引用栏条目（配置跟栏走）：${JSON.stringify(hidden.mounts)}`,
+  )
+  await page.locator('.lenspop [data-paths-opt="show"]').click()
+  await page.waitForTimeout(500)
+  const shown = await page.evaluate((sel) => ({
+    crumbs: document.querySelectorAll(`${sel} .blk-context-cell`).length,
+    mounts: (window.__qua.__editor.store.find(window.__qua.snapshot().activeId)?.props?._mounts ?? []),
+  }), card)
+  assert(shown.crumbs === 2, `开回来路径格要复原：${JSON.stringify(shown)}`)
+  assert(
+    shown.mounts.every((e) => e.source !== 'refs' || !('showPaths' in e)),
+    `开回默认＝条目上摘掉字段（不存恒真）：${JSON.stringify(shown.mounts)}`,
+  )
+  // 收掉镜头面板再往下走：后面的点击不该被弹层拦
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(120)
+
+  /**
    * 面包屑就地展开：点来源页，卡里装成那一页的子树（中心/历史不动）。
    * 与正文「引用」栏/右槽窗口共用 `expandContexts`，不是卡片自己发明的第二套。
    */
@@ -12901,7 +12935,7 @@ await check('T121 右槽挂载区卡的引用栏与正文同一种东西：一�
   assert(after.active === before.active, `反链行 Shift+点不换中心：${before.active} → ${after.active}`)
 
   await ctx.close()
-  return `卡里两行源块（面包屑「写作示范」）；直接编辑/⌘Z；面包屑就地展开；Shift 开源块`
+  return `卡里两行源块（面包屑「写作示范」）；直接编辑/⌘Z；路径显隐开关；面包屑就地展开；Shift 开源块`
 })
 
 await check('T123 标签页成员块标的 Shift ⇒ 右槽窗口；中心不动', async () => {

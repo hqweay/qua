@@ -399,8 +399,8 @@ export class RenderOps {
         onReorderTags: (blockId, orderedIds) => {
           void this.ed.reorderTags(blockId, orderedIds)
         },
-        // 只有装载根会带上下文：子行的位置已经由缩进表达
-        context: r.depth === 0 ? this.ed.doc.contexts?.get(r.block.id) : undefined,
+        // 只有装载根会带上下文：子行的位置已经由缩进表达。装载声明 paths=false 时只关这一格的显示
+        context: r.depth === 0 && this.ed.doc.paths !== false ? this.ed.doc.contexts?.get(r.block.id) : undefined,
         // 来源说明与面包屑同一格：都在说明「这一行为什么在这一屏里」
         note: r.depth === 0 ? this.ed.doc.rootNotes?.get(r.block.id) : undefined,
         // 备注根说明「在评论谁」；这一屏已经说明了宿主时（备注栏／浮窗）Doc 关掉它
@@ -621,7 +621,8 @@ export class RenderOps {
   /** 这一行除正文外还占几条「整行头」（面包屑／别名头／来源说明的高度由 block-dom 统一算） */
   private extraHeads(r: VisibleRow): number {
     if (r.depth !== 0) return 0
-    const hasTrail = (this.ed.doc.contexts?.get(r.block.id)?.length ?? 0) > 0
+    // 与渲染同一份门：关掉路径的装载不再为它留一行（虚拟化占位高度跟着缩）
+    const hasTrail = this.ed.doc.paths !== false && (this.ed.doc.contexts?.get(r.block.id)?.length ?? 0) > 0
     const hasBack = Boolean(this.ed.onContextBack) && (this.ed.doc.expandedRoots?.has(r.block.id) ?? false)
     // 来源说明与面包屑同住 `.blk-context` 那一行：都在时仍是**一条**头，不是两条
     const hasNote = (this.ed.doc.rootNotes?.get(r.block.id) ?? '') !== ''

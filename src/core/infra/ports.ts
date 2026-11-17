@@ -492,7 +492,7 @@ export interface App {
   setDerivedLens(
     host: MountHost,
     source: DerivedSource,
-    patch: { filter?: QueryNode | null; sort?: SortKey[] | null },
+    patch: { filter?: QueryNode | null; sort?: SortKey[] | null; showPaths?: boolean | null },
   ): boolean
   /** **固定派生栏**（引用/成员/同类/提及 → local）：把现算的条件变成一栏可编辑的查询 */
   /**

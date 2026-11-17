@@ -403,6 +403,32 @@ test('派生栏镜头：条目上的 filter/sort 可往返、可清；坏字段�
   const cleared = withDerivedLens(entries, 'refs', { filter: null, sort: null })
   assert.deepEqual(cleared, [{ id: 'refs', kind: 'derived', source: 'refs' }], 'null 清掉两格')
 
+  // 路径显隐是镜头一格：关＝字段落 false；开回来＝字段摘掉（缺省就是显示，不存恒真）
+  const hidden = withDerivedLens(entries, 'refs', { showPaths: false })
+  assert.deepEqual(hidden, [
+    { id: 'refs', kind: 'derived', source: 'refs', filter: { tag: 'x' }, sort: [{ by: 'modified', dir: 'desc' }], showPaths: false },
+  ], '关路径只落这一格，不动筛选与排序')
+  assert.deepEqual(
+    canonicalMountEntries(JSON.parse(JSON.stringify(hidden))),
+    hidden,
+    '显式 false 过规范化仍在（重载不丢）',
+  )
+  assert.deepEqual(
+    withDerivedLens(hidden, 'refs', { showPaths: null }),
+    entries,
+    '开回来＝摘掉字段，回到缺省显示',
+  )
+  assert.deepEqual(
+    canonicalMountEntries([{ id: 'refs', kind: 'derived', source: 'refs', showPaths: true }]),
+    [{ id: 'refs', kind: 'derived', source: 'refs' }],
+    '恒真的 true 不落盘：规范化剥回缺省',
+  )
+
+  // 物化之后读取走「位置标记合并」分支：镜头三格都要从存储条目上叠回来（漏一格＝写了不生效）
+  const markerHost = b('m', '宿主', { props: { _mounts: [{ id: 'refs', kind: 'derived', source: 'refs', showPaths: false }] } })
+  const refsMerged = mountEntriesOf(markerHost).find((e) => e.source === 'refs')
+  assert.equal(refsMerged?.showPaths, false, '合并后的派生条目要带回 showPaths:false')
+
   const bad = canonicalMountEntries([
     { id: 'refs', kind: 'derived', source: 'refs', filter: { nope: 1 }, sort: [{}] },
   ])

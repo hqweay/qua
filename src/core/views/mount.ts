@@ -101,6 +101,8 @@ export interface DerivedLens {
   filter?: QueryNode
   /** 成员顺序；缺省＝来源的天然顺序 */
   sort?: SortKey[]
+  /** 行首路径**关掉**的标记；缺省（无字段）＝照画。密度出口：来源一多，路径每条命中独占一行 */
+  showPaths?: boolean
 }
 
 /**
@@ -229,6 +231,7 @@ export function derivedLensOf(entry: Extract<MountEntry, { kind: 'derived' }> | 
   return {
     ...(entry.filter ? { filter: entry.filter } : {}),
     ...(entry.sort ? { sort: entry.sort } : {}),
+    ...(entry.showPaths !== undefined ? { showPaths: entry.showPaths } : {}),
   }
 }
 
@@ -241,7 +244,7 @@ export function derivedLensOf(entry: Extract<MountEntry, { kind: 'derived' }> | 
 export function withDerivedLens(
   entries: readonly MountEntry[],
   source: DerivedSource,
-  patch: { filter?: QueryNode | null; sort?: SortKey[] | null },
+  patch: { filter?: QueryNode | null; sort?: SortKey[] | null; showPaths?: boolean | null },
 ): MountEntry[] | null {
   const at = entries.findIndex((e) => e.kind === 'derived' && e.source === source)
   if (at < 0) return null
@@ -254,6 +257,11 @@ export function withDerivedLens(
   if (patch.sort !== undefined) {
     if (patch.sort !== null && patch.sort.length > 0) next.sort = patch.sort.map((s) => ({ ...s }))
     else delete next.sort
+  }
+  if (patch.showPaths !== undefined) {
+    // 缺省就是显示：字段只在「关掉」时落笔，开回来＝摘掉（不存一份恒真的 true）
+    if (patch.showPaths === false) next.showPaths = false
+    else delete next.showPaths
   }
   if (JSON.stringify(next) === JSON.stringify(current)) return null
   return entries.map((e, i) => (i === at ? next : e))
@@ -741,10 +749,11 @@ export function mountEntriesOf(host: Block, opts: MountReadOpts = {}): MountEntr
     }
     const d = bySource.get(e.source)
     if (d) {
-      // 位置标记可以带**镜头**：基条件仍取内置那一条，filter/sort 从存储条目上叠回来
+      // 位置标记可以带**镜头**：基条件仍取内置那一条，filter/sort/showPaths 从存储条目上叠回来
       const merged: Extract<MountEntry, { kind: 'derived' }> = { ...d }
       if (e.filter) merged.filter = e.filter
       if (e.sort) merged.sort = e.sort
+      if (e.showPaths === false) merged.showPaths = false
       out.push(merged)
     }
   }
@@ -825,6 +834,8 @@ export function canonicalMountEntries(raw: unknown): MountEntry[] {
       if (isQueryNode(filter) && !isEmptyWhere(filter)) entry.filter = canonicalNode(filter)
       const sort = sortKeysOfRaw((e as { sort?: unknown }).sort)
       if (sort.length > 0) entry.sort = sort
+      // 路径显隐也是镜头一格：只认显式的 false（关）；缺省与其它值都归回「显示」
+      if ((e as { showPaths?: unknown }).showPaths === false) entry.showPaths = false
       out.push(entry)
       continue
     }

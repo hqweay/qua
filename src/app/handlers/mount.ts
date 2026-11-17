@@ -61,6 +61,7 @@ export const MOUNT_HANDLERS: Record<string, Handler> = {
     return app.setDerivedLens(host, source, {
       ...('filter' in a ? { filter: a.filter === null ? null : (a.filter as QueryNode) } : {}),
       ...('sort' in a ? { sort: a.sort === null ? null : sortKeysOfRaw(a.sort) } : {}),
+      ...('showPaths' in a ? { showPaths: a.showPaths === null ? null : a.showPaths !== false } : {}),
     })
   },
 }

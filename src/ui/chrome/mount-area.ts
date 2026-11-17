@@ -164,7 +164,7 @@ export interface MountAreaDeps {
   setDerivedLens?: (
     host: MountHost,
     source: DerivedSource,
-    patch: { filter?: QueryNode | null; sort?: SortKey[] | null },
+    patch: { filter?: QueryNode | null; sort?: SortKey[] | null; showPaths?: boolean | null },
   ) => boolean
   /**
    * 打开**切片条件树**（只编辑叠加层，基条件在树外只读展示）。
@@ -1219,6 +1219,8 @@ export class MountArea {
       expandedRoots: plan.contextRoots,
       // 备注栏的每一行本来就是这个宿主的备注：行首再写一遍「评论 · 本页」是同义反复
       ...(entry.kind === 'derived' && entry.source === 'notes' ? { noteSource: false } : {}),
+      // 行首路径关掉的装载：只关显示——上下文照算，「收起上下文」照画，重开不丢
+      ...(entry.kind === 'derived' && !this.showPathsOf(entry) ? { paths: false as const } : {}),
     })
     // 装载刚换了整片 DOM：立刻画一次（不等观测器那一帧，避免「先无高亮再补上」的闪动）
     this.paintMentionHits()
@@ -1333,6 +1335,7 @@ export class MountArea {
     return (
       this.filterActive(host, source) ||
       (this.lensOf(host, source).sort?.length ?? 0) > 0 ||
+      this.lensOf(host, source).showPaths === false ||
       (this.deps.derivedGroup?.(host, source) ?? '') !== '' ||
       kind !== 'outline' ||
       (source === 'refs' && this.refKind !== 'all')
@@ -1457,6 +1460,32 @@ export class MountArea {
       this.setLens(host, entry.source, { sort: draft.length > 0 ? draft : null })
       repaint()
     })
+
+    /* 行首路径：密度出口。来源一多，路径每条命中独占一行；关掉只关显示——
+       上下文与展开栈照算，「收起上下文」照画，重开不丢。
+       代价（明写）：就地展开的入口在路径格上，关掉时随之收起，要展开先开回来 */
+    const pathsBody = this.lensSection(root, 'ui.view.opt.paths')
+    const pathsSeg = document.createElement('div')
+    pathsSeg.className = 'vopt-seg'
+    const showPaths = this.lensOf(host, entry.source).showPaths !== false
+    for (const [on, label] of [
+      [true, 'ui.view.opt.pathsShow'],
+      [false, 'ui.view.opt.pathsHide'],
+    ] as const) {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.className = 'vopt-seg-btn'
+      b.dataset.pathsOpt = on ? 'show' : 'hide'
+      if (on === showPaths) b.dataset.active = '1'
+      b.textContent = t(label)
+      b.addEventListener('click', () => {
+        if (on === showPaths) return
+        this.setLens(host, entry.source, { showPaths: on ? null : false })
+        repaint()
+      })
+      pathsSeg.appendChild(b)
+    }
+    pathsBody.appendChild(pathsSeg)
 
     /* 类型：只在引用栏的大纲看法里——表格用「类型」列承担同一件事 */
     if (entry.source === 'refs' && kind === 'outline' && all.length > 0) {
@@ -1639,11 +1668,19 @@ export class MountArea {
     return derivedLensOf(entry)
   }
 
+  /** 这一栏的行首路径开没开（缺省开；关是镜头里显式登记的那一位） */
+  private showPathsOf(entry: MountEntry): boolean {
+    if (entry.kind !== 'derived') return true
+    const host = this.deps.host()
+    if (!host) return true
+    return this.lensOf(host, entry.source).showPaths !== false
+  }
+
   /** 写镜头：可编辑宿主走命令（条目上落）；否则写会话态 */
   private setLens(
     host: Block,
     source: DerivedSource,
-    patch: { filter?: QueryNode | null; sort?: SortKey[] | null },
+    patch: { filter?: QueryNode | null; sort?: SortKey[] | null; showPaths?: boolean | null },
   ): boolean {
     if (!canEditMounts(host)) {
       const cur = this.sessionLenses.get(source) ?? {}
@@ -1655,6 +1692,11 @@ export class MountArea {
       if (patch.sort !== undefined) {
         if (patch.sort && patch.sort.length > 0) next.sort = patch.sort
         else delete next.sort
+      }
+      if (patch.showPaths !== undefined) {
+        // 与 withDerivedLens 同一条笔法：缺省就是显示，字段只在关掉时落笔
+        if (patch.showPaths === false) next.showPaths = false
+        else delete next.showPaths
       }
       this.sessionLenses.set(source, next)
       this.render()

@@ -1329,6 +1329,7 @@ export function setupPanels(deps: PanelsDeps) {
         const args: Record<string, unknown> = { host: hostRef, source }
         if (patch.filter !== undefined) args.filter = patch.filter
         if (patch.sort !== undefined) args.sort = patch.sort
+        if (patch.showPaths !== undefined) args.showPaths = patch.showPaths
         void deps.getRegistry().invoke('core.mount/set-derived-lens', args, spec.via)
         // 条目写入之后**这一面**要跟上（块宿主的 `_mounts` 与日记宿主的 prefs 不是同一条订阅）
         spec.renderSurface()
