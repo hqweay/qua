@@ -1474,7 +1474,7 @@ export class MountArea {
     ] as const) {
       const b = document.createElement('button')
       b.type = 'button'
-      b.className = 'vopt-seg-btn'
+      b.className = 'ui-btn vopt-seg-btn'
       b.dataset.pathsOpt = on ? 'show' : 'hide'
       if (on === showPaths) b.dataset.active = '1'
       b.textContent = t(label)
@@ -1504,7 +1504,7 @@ export class MountArea {
       const add = (key: 'all' | 'inline' | 'property' | 'embed', label: string, n: number): void => {
         const b = document.createElement('button')
         b.type = 'button'
-        b.className = 'mount-derived-kind'
+        b.className = 'ui-btn mount-derived-kind'
         b.dataset.kind = key
         if (this.refKind === key) b.dataset.active = '1'
         b.textContent = n > 0 ? `${label} ${n}` : label
@@ -1569,7 +1569,7 @@ export class MountArea {
     for (const k of DERIVED_VIEW_KINDS) {
       const b = document.createElement('button')
       b.type = 'button'
-      b.className = 'vopt-seg-btn'
+      b.className = 'ui-btn vopt-seg-btn'
       b.dataset.derivedView = k
       if (k === kind) b.dataset.active = '1'
       b.textContent = t(labels[k])

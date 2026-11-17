@@ -2217,24 +2217,7 @@
   display: flex;
   gap: var(--ui-gap-1);
 }
-.mount-derived-kind {
-  background: none;
-  border: 0;
-  padding: 0 var(--ui-gap-2);
-  font: inherit;
-  color: var(--ui-text-tertiary);
-  cursor: pointer;
-  border-radius: var(--ui-radius-sm);
-  line-height: 1.6;
-}
-.mount-derived-kind:hover {
-  color: var(--ui-text);
-  background: var(--ui-bg-hover);
-}
-.mount-derived-kind[data-active='1'] {
-  color: var(--ui-text);
-  background: var(--ui-accent-soft);
-}
+/* 「类型」按钮挂 `.ui-btn` 原语：几何/悬停/选中态归原语，这里只留容器排布 */
 /* 抬头右侧的动作簇：折/展与镜头并排，靠 margin-left:auto 推右 */
 .mount-derived-actions {
   display: flex;

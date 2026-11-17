@@ -484,22 +484,11 @@ select.qt-value {
 .vopt-note {
   color: var(--ui-text-tertiary);
 }
-/* 三态（跟随默认／编辑默认／自定义）：分段按钮；选中态用字重与色阶，不另起底色 */
+/* 分段按钮（跟随默认／编辑默认／自定义／看法切换）：容器只管排布；
+   按钮挂 `.ui-btn` 原语——几何/悬停/选中态都归它，切换类按钮亮起来的样子只有一种 */
 .vopt-seg {
   display: flex;
   gap: var(--ui-gap-1);
-}
-.vopt-seg-btn {
-  border: 1px solid var(--ui-border-subtle);
-  border-radius: var(--ui-radius-sm);
-  background: var(--ui-surface);
-  color: var(--ui-text-secondary);
-  padding: 0 var(--ui-gap-2);
-  cursor: pointer;
-}
-.vopt-seg-btn[data-active] {
-  color: var(--ui-text);
-  border-color: var(--ui-border);
 }
 .vopt-props {
   display: flex;

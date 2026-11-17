@@ -352,7 +352,7 @@ export class ViewOptionsPanel {
   private segBtn(label: string, active: boolean, onClick: () => void): HTMLButtonElement {
     const b = document.createElement('button')
     b.type = 'button'
-    b.className = 'vopt-seg-btn'
+    b.className = 'ui-btn vopt-seg-btn'
     b.textContent = label
     if (active) b.dataset.active = '1'
     b.addEventListener('click', onClick)

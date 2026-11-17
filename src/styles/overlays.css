@@ -423,17 +423,8 @@
   background: none;
   color: inherit;
 }
-.popover.lenspop .vopt-seg-btn {
-  border: 1px solid var(--ui-border-subtle);
-  border-radius: var(--ui-radius-sm);
-  background: var(--ui-surface);
-  color: var(--ui-text-secondary);
-  padding: 0 var(--ui-gap-2);
-}
-.popover.lenspop .vopt-seg-btn[data-active] {
-  color: var(--ui-text);
-  border-color: var(--ui-border);
-}
+/* 分段按钮（看法／显示路径）与「类型」都挂 `.ui-btn` 原语：
+   选中态只有一种（accent），这里不再各画一套——复位规则也因 ui-btn 而不必 */
 .popover.lenspop .quick-filter-chip {
   display: inline-flex;
   align-items: center;
@@ -474,22 +465,7 @@
   min-width: 22px;
   padding: 0 var(--ui-gap-1);
 }
-.popover.lenspop .mount-derived-kind {
-  border: 0;
-  padding: 0 var(--ui-gap-2);
-  border-radius: var(--ui-radius-sm);
-  background: none;
-  color: var(--ui-text-tertiary);
-  line-height: 1.6;
-}
-.popover.lenspop .mount-derived-kind:hover {
-  color: var(--ui-text);
-  background: var(--ui-bg-hover);
-}
-.popover.lenspop .mount-derived-kind[data-active='1'] {
-  color: var(--ui-text);
-  background: var(--ui-accent-soft);
-}
+/* 「类型」（全部/行内/属性/嵌入）同样挂 `.ui-btn`：与相邻两组分段按钮同一份选中语言 */
 .popover.lenspop .vopt-row {
   display: flex;
   align-items: center;
