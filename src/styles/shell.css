@@ -21,6 +21,14 @@ body {
 ::selection {
   background: var(--ui-accent-soft);
 }
+/* 换肤的交叉溶解走 View Transitions：旧帧淡出、新帧淡入，整屏不闪。
+   时长取状态切换档（--ui-dur-2）；不支持该 API 的环境根本不会产生这两帧，
+   JS 侧降级成直接写属性，这里无需兜底。 */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: var(--ui-dur-2);
+  animation-timing-function: var(--ui-ease-out);
+}
 /* 滚动条是 chrome 不是内容：全应用统一细条。此前一处 thin（图标网格）其余
    全是引擎默认的粗条——同一个「局部现代化」病根：角色没定，各处各抓一档。
    thumb 用结构线 token（暗色主题跟着 token 走）、轨道透明——「现代」来自

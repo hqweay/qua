@@ -68,8 +68,20 @@ export function setupChrome(deps: ChromeDeps) {
    * ⚠️ **不再有 `data-skin`**：内建只有一种样式，观感调 token 即可。
    */
   function applyChrome(): void {
-    document.body.dataset.theme = prefs().theme
-    document.body.dataset.themeMode = prefs().theme
+    const theme = prefs().theme
+    const themeChanged = document.body.dataset.theme !== theme
+    // 换肤走 View Transitions 交叉溶解：整屏瞬间换色读作闪烁；老环境与
+    // 减动效偏好都自动降级成直接写属性（这正是默认路径，不写兼容分支）。
+    if (themeChanged && booted && typeof document.startViewTransition === 'function'
+      && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      document.startViewTransition(() => {
+        document.body.dataset.theme = theme
+        document.body.dataset.themeMode = theme
+      })
+    } else {
+      document.body.dataset.theme = theme
+      document.body.dataset.themeMode = theme
+    }
     applyDockVisibility({ left: deps.axisSlotOpen('left'), right: deps.axisSlotOpen('right') })
     const appEl = deps.$('app')
     applyDockWidth(appEl, 'left', prefs().dock.left.width, deps.axisSlotOpen('left'))
