@@ -153,6 +153,15 @@ export const DEFAULT_FILTER_PROP = '_defaultFilter' as const
  */
 export const DEFAULT_DISPLAY_PROPS_PROP = '_defaultDisplayProps' as const
 
+/**
+ * **默认看法（大纲）的行首路径开关**：没有激活视图时，查询结果的行首面包屑显隐。
+ *
+ * 只写 `false`（关掉才落笔），开回默认＝摘掉这一格——「恒真的 true」没有信息量，
+ * 落了盘只会让条目形状变脏。与 `_defaultFilter` 同层：都是**默认看法的位**；
+ * 大纲不落盘（没有「激活的命名大纲视图」），所以不存在视图层的同名格。
+ */
+export const DEFAULT_SHOW_PATHS_PROP = '_defaultShowPaths' as const
+
 /** 这一块被删了吗（只看它自己；整棵子树不可见由遍历的跳过规则保证） */
 export function isDeleted(b: Block): boolean {
   return b.props !== undefined && DELETED_AT_PROP in b.props

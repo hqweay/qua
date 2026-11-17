@@ -720,6 +720,11 @@ export interface App {
    * 只对 query 源有效；别的源当场拒绝（写进去也会被读路径丢掉）。
    */
   setViewFilter(owner: ViewOwnerRef, viewId: string, filter: QueryNode | null): boolean
+  /**
+   * 写**行首路径显隐**（默认大纲的那一格）：`false` ＝ 关，`null` ＝ 开回默认。
+   * 只对 query 源有效；没有视图位——大纲不落盘，行首面包屑只存在于默认看法。
+   */
+  setViewPaths(owner: ViewOwnerRef, showPaths: false | null): boolean
   /** 打开**切片构建器**：与「视图… → 编辑切片…」同一台浮层（点抬头 chip 也走这里） */
   openViewSlice(owner: ViewOwnerRef, viewId: string, anchor?: DOMRect | null): void
   /**

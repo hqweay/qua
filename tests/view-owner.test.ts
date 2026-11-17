@@ -203,3 +203,25 @@ test('canonicalMountEntries：两种 kind 的必填字段各自成立，坏项�
     '坏项不连坐：一栏读不出来不该让整个挂载区消失',
   )
 })
+
+test('ownerDataOfBlock / withBlockOwnerData：`_defaultShowPaths` 只有 false 落笔，开回默认＝删格', () => {
+  // 写：false 进属性袋；别的值（true / undefined）不落
+  const off = withBlockOwnerData({ _icon: 'lucide:x' }, { views: [], defaultShowPaths: false })
+  assert.equal(off?._defaultShowPaths, false)
+  assert.deepEqual(off?._icon, 'lucide:x')
+  const cleared = withBlockOwnerData({ _defaultShowPaths: false }, { views: [] })
+  assert.equal(cleared?._defaultShowPaths, undefined, '开回默认＝删格，不留恒真值')
+  // 读：false 进 data；别的形状读作「没关」
+  const block = mk('b', '', { _defaultShowPaths: false })
+  assert.equal(ownerDataOfBlock(block).defaultShowPaths, false)
+  const weird = mk('b2', '', { _defaultShowPaths: true })
+  assert.equal(ownerDataOfBlock(weird).defaultShowPaths, undefined, '恒真 true 读作「没配」')
+})
+
+test('applyOwnerPatch：defaultShowPaths false 落笔、null 清掉、缺省不动；与别的格互不抹除', () => {
+  const base = { views: [], defaultFilter: QUERY, defaultShowPaths: false as const }
+  assert.equal(applyOwnerPatch(base, { defaultShowPaths: null }).defaultShowPaths, undefined, 'null ＝ 清掉')
+  assert.equal(applyOwnerPatch(base, {}).defaultShowPaths, false, '缺省不动')
+  const patched = applyOwnerPatch(base, { defaultShowPaths: false })
+  assert.deepEqual(patched.defaultFilter, QUERY, '写一格不抹别的格')
+})

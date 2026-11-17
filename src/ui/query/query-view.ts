@@ -774,6 +774,17 @@ export class ViewHost {
   }
 
   /**
+   * **行首路径关没关**：与 `activeFilter` 同一条读路——激活视图没有大纲（记录视图
+   * 的路径走「路径」列），所以只有**默认看法**有这一格（拥有者的 `_defaultShowPaths`）。
+   * 派生面自己带镜头格（挂载区装载时传），不走这里。
+   */
+  private get pathsHidden(): boolean {
+    if (this.deps.derived) return false
+    const data = this.deps.owners.read(this.writeOwner)
+    return data?.defaultShowPaths === false
+  }
+
+  /**
    * 冻结键里的视图位：切片住在视图上 ⇒ 换一张视图必须重算，
    * 哪怕两份条件串看起来一样（两张都无切片的视图也该各自冻各自的那一份）。
    */
@@ -1965,7 +1976,14 @@ export class ViewHost {
     this.covers = plan.covers
     this.rows = plan.roots
     const folded = unfoldForContext(this.outline?.ed?.doc.folded ?? {}, plan.covers, (id) => this.deps.kb.pathOf(id))
-    this.outline?.ed?.loadPage({ roots: plan.roots, folded, contexts: plan.contexts, expandedRoots: plan.contextRoots })
+    this.outline?.ed?.loadPage({
+      roots: plan.roots,
+      folded,
+      contexts: plan.contexts,
+      expandedRoots: plan.contextRoots,
+      // 行首路径关掉的装载：只关显示——上下文照算，「收起上下文」照画，重开不丢
+      ...(this.pathsHidden ? { paths: false as const } : {}),
+    })
     if (plan.focusId) this.outline?.ed?.reveal(plan.focusId)
     this.syncFoldAll()
   }

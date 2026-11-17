@@ -61,7 +61,14 @@ export interface ViewOptionsDeps {
    * `filter` ＝ 这一张此刻生效的条件（命名视图的切片/掩码；默认看法的 `_defaultFilter`）；
    * `display` ＝ 这一张此刻的显示白名单（命名视图的 `displayProps`；默认看法的 `_defaultDisplayProps`）。
    */
-  read: () => { view: ViewConfig | null; source: Source; filter: QueryNode | null; display?: string[] }
+  read: () => {
+    view: ViewConfig | null
+    source: Source
+    filter: QueryNode | null
+    display?: string[]
+    /** 默认大纲的行首路径此刻关没关（只 query 源有意义；与 `paths` 轴配套） */
+    pathsHidden?: boolean
+  }
   /** 属性定义（排序键与显示清单的候选主体） */
   fields: () => readonly { id: string; label: string }[]
   /** 记录（分组候选的覆盖率分母） */
@@ -102,12 +109,13 @@ export class ViewOptionsPanel {
 
   /** 现画全部 section（每次手势后由持有方重调；配置一律现读，不留快照） */
   render(): void {
-    const { view, source, filter, display } = this.deps.read()
+    const { view, source, filter, display, pathsHidden } = this.deps.read()
     const axes = axesFor(source, view?.kind ?? 'outline')
     this.root.replaceChildren()
     this.renderFilter(axes, source, filter)
     this.renderSort(axes, source, view)
     this.renderGroup(axes, source, view)
+    this.renderPaths(axes, pathsHidden === true)
     this.renderDisplay(axes, source, view, display)
   }
 
@@ -192,6 +200,35 @@ export class ViewOptionsPanel {
       filter: quickFilterNode(next),
     })
     this.refresh()
+  }
+
+  /**
+   * **行首路径显隐**（默认大纲的密度出口）：只 query 源有这一段——命中行的位置投影
+   * 每条独占一格，来源一多就是噪声；children 大纲的行住在真树上，位置由缩进表达。
+   * 与派生栏镜头的 seg 同一套面板语言（307 同一台）。
+   */
+  private renderPaths(axes: readonly ViewAxis[], hidden: boolean): void {
+    if (!axes.includes('paths')) return
+    const body = this.section(t('ui.view.opt.paths'))
+    const seg = document.createElement('div')
+    seg.className = 'vopt-seg'
+    for (const [on, label] of [
+      [true, 'ui.view.opt.pathsShow'],
+      [false, 'ui.view.opt.pathsHide'],
+    ] as const) {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.className = 'ui-btn vopt-seg-btn'
+      if (on === !hidden) b.dataset.active = '1'
+      b.textContent = t(label)
+      b.addEventListener('click', () => {
+        if (on === !hidden) return
+        this.deps.invoke('core.view/set-paths', { owner: this.deps.owner, showPaths: on ? null : false })
+        this.refresh()
+      })
+      seg.appendChild(b)
+    }
+    body.appendChild(seg)
   }
 
   /* ---------------------------------------------------------- 排序 */

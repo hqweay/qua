@@ -116,6 +116,7 @@ export function viewConfigCommands(
   | 'viewSetCover'
   | 'viewSetTabsDirection'
   | 'setViewFilter'
+  | 'setViewPaths'
   | 'setQuerySpec'
   | 'createQuery'
 > {
@@ -492,6 +493,27 @@ export function viewConfigCommands(
         return false
       }
       d.owners.write(owner, { views: upsertView(data.views, withFilter(view, filter)) })
+      reveal(owner)
+      return true
+    },
+
+    /**
+     * 写**行首路径显隐**（默认看法的那一格）：只有 `false`（关）与 `null`（开回默认）。
+     *
+     * 行首面包屑只存在于**默认大纲**（命中行的位置投影）——命名视图没有大纲、
+     * 记录视图的路径走「路径」列（显示轴管），所以这里没有 viewId 位；
+     * 写到非 query 源当场拒绝（children 大纲的行住在真树上，位置由缩进表达）。
+     */
+    setViewPaths: (owner, showPaths) => {
+      const data = d.owners.read(owner)
+      if (!data) return false
+      if (showPaths !== false && showPaths !== null) return false
+      const source = sourceOfRef(d, owner)
+      if (!source || source.kind !== 'query') {
+        d.toast(t('ui.view.pathsOnlyQuery'), 'warn')
+        return false
+      }
+      d.owners.write(owner, { defaultShowPaths: showPaths })
       reveal(owner)
       return true
     },

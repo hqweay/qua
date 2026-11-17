@@ -101,7 +101,7 @@ export const STORED_KINDS_BY_SOURCE: Record<Source['kind'], readonly StoredViewK
 }
 
 /** 四个共用轴：一个看法支持哪些位，由这一份矩阵回答 */
-export type ViewAxis = 'filter' | 'sort' | 'group' | 'display'
+export type ViewAxis = 'filter' | 'sort' | 'group' | 'display' | 'paths'
 
 /**
  * **轴 × 看法矩阵（唯一一份）**：哪种看法支持哪个位。
@@ -117,8 +117,9 @@ export type ViewAxis = 'filter' | 'sort' | 'group' | 'display'
  */
 const AXES_BY_KIND: Record<Source['kind'], Record<ViewKind, readonly ViewAxis[]>> = {
   query: {
-    // 默认看法（大纲）：filter 走 `_defaultFilter`、display 走 `_defaultDisplayProps`；sort/group 不做
-    outline: ['filter', 'display'],
+    // 默认看法（大纲）：filter 走 `_defaultFilter`、display 走 `_defaultDisplayProps`；sort/group 不做。
+    // paths 只在这里有面：命中行的行首面包屑（children 大纲的行住在真树上，位置由缩进表达）
+    outline: ['filter', 'paths', 'display'],
     table: ['filter', 'sort', 'group', 'display'],
     'list-table': [],
     cards: ['filter', 'sort', 'group', 'display'],

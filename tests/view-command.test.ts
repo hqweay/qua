@@ -580,3 +580,56 @@ test('viewNewCard：「未设置」列（不传值）⇒ 只建块不写值；�
   assert.equal(toasts.length, 1, '拒了要说一句')
   assert.equal(d.kb.children('root').length, 1, '拒绝时不留半成品块')
 })
+
+test('setViewPaths：query 源写默认大纲那一格（false 落笔／null 清）；children 源当场拒绝', () => {
+  const q = mkBlock('查询')
+  q.id = 'qp'
+  q.props = { _query: { where: { tag: 'x' } } }
+  const kb = kbOf([q]).kb
+  const writes: { owner: unknown; patch: Partial<ViewOwnerData> }[] = []
+  const toasts: string[] = []
+  const owners: OwnerStore = {
+    read: () => ({ query: { where: { tag: 'x' } }, views: [] }),
+    write: (_owner, patch) => writes.push({ owner: _owner, patch }),
+    readBinding: () => null,
+    setBindingView: () => {},
+    entriesOf: () => [],
+    writeEntries: () => {},
+    entryOf: () => undefined,
+  }
+  const d: ViewConfigDeps = {
+    kb,
+    owners,
+    run: <R,>(fn: (tx: Tx) => R) => kb.tx(fn),
+    reloadPage: () => {},
+    rerenderEditor: () => {},
+    rootIds: () => [],
+    viewShown: () => true,
+    activeId: () => 'qp',
+    openBlock: () => {},
+    refreshList: () => {},
+    toast: (text) => toasts.push(text),
+  }
+  const app = viewConfigCommands(d)
+  const owner = { kind: 'block', blockId: 'qp' } as const
+
+  assert.equal(app.setViewPaths(owner, false), true)
+  assert.deepEqual(writes[0]!.patch.defaultShowPaths, false, '关＝落 false')
+  assert.equal(app.setViewPaths(owner, null), true)
+  assert.deepEqual(writes[1]!.patch.defaultShowPaths, null, '开回默认＝写 null（补丁层删格）')
+  assert.equal(writes.length, 2, '一次动作一笔写（一步撤销）')
+
+  // children 源：大纲行住在真树上，位置由缩进表达，没有行首路径可关
+  const plain = mkBlock('普通')
+  plain.id = 'pn'
+  const plainWrites: unknown[] = []
+  const plainOwners: OwnerStore = {
+    ...owners,
+    read: () => ({ views: [] }),
+    write: (_owner, patch) => plainWrites.push(patch),
+  }
+  const app2 = viewConfigCommands({ ...d, owners: plainOwners })
+  assert.equal(app2.setViewPaths({ kind: 'block', blockId: 'pn' }, false), false)
+  assert.equal(plainWrites.length, 0, '拒绝时一个字节都不写')
+  assert.ok(toasts.length >= 1, '要说一句话')
+})

@@ -102,6 +102,13 @@ export const VIEW_CONFIG_HANDLERS: Record<string, Handler> = {
     if (raw !== null && !isQueryNode(raw)) return false
     return app.setViewFilter(owner, viewId, raw as QueryNode | null)
   },
+  /** 行首路径显隐（默认大纲的那一格）：`false` ＝ 关，`null` ＝ 开回默认；没有视图位（大纲不落盘） */
+  'core.view/set-paths': (a, app) => {
+    const owner = ownerOrCur(a, app)
+    if (!owner) return false
+    if (a.showPaths !== false && a.showPaths !== null) return false
+    return app.setViewPaths(owner, a.showPaths)
+  },
   'core.view/new-row': (a, app) => {
     const owner = ownerOrCur(a, app)
     if (!owner) return false
