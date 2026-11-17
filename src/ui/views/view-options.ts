@@ -30,6 +30,7 @@ import {
   axesFor,
   groupChoicesOf,
   groupsByStructure,
+  PAGE_COLUMN,
 } from '../../core/views/view.ts'
 import {
   EMPTY_QUICK_FILTER,
@@ -68,6 +69,8 @@ export interface ViewOptionsDeps {
     display?: string[]
     /** 默认大纲的行首路径此刻关没关（只 query 源有意义；与 `paths` 轴配套） */
     pathsHidden?: boolean
+    /** 默认大纲的分段键是不是「所在页」（与 `group` 轴配套；其它键对大纲不生效） */
+    pathsGrouped?: boolean
   }
   /** 属性定义（排序键与显示清单的候选主体） */
   fields: () => readonly { id: string; label: string }[]
@@ -109,12 +112,12 @@ export class ViewOptionsPanel {
 
   /** 现画全部 section（每次手势后由持有方重调；配置一律现读，不留快照） */
   render(): void {
-    const { view, source, filter, display, pathsHidden } = this.deps.read()
+    const { view, source, filter, display, pathsHidden, pathsGrouped } = this.deps.read()
     const axes = axesFor(source, view?.kind ?? 'outline')
     this.root.replaceChildren()
     this.renderFilter(axes, source, filter)
     this.renderSort(axes, source, view)
-    this.renderGroup(axes, source, view)
+    this.renderGroup(axes, source, view, pathsGrouped === true)
     this.renderPaths(axes, pathsHidden === true)
     this.renderDisplay(axes, source, view, display)
   }
@@ -271,8 +274,36 @@ export class ViewOptionsPanel {
 
   /* ---------------------------------------------------------- 分组 */
 
-  private renderGroup(axes: readonly ViewAxis[], source: Source, view: ViewConfig | null): void {
-    if (!axes.includes('group') || view === null) return
+  private renderGroup(axes: readonly ViewAxis[], source: Source, view: ViewConfig | null, grouped: boolean): void {
+    if (!axes.includes('group')) return
+    // 默认大纲没有视图配置可写：分段键走缺省层（`_defaultGroup`，set-group 的空串分支），
+    // 只有「所在页」一档有面——分段＝投影重排，与记录看法的全量候选是两回事
+    if (view === null) {
+      if (source.kind !== 'query') return
+      const body = this.section(t('ui.view.opt.group'))
+      const select = document.createElement('select')
+      select.className = 'ui-input vopt-group'
+      for (const [value, label] of [
+        ['', 'ui.query.group.none'],
+        [PAGE_COLUMN, 'ui.query.group.pageKey'],
+      ] as const) {
+        const o = document.createElement('option')
+        o.value = value
+        o.textContent = t(label)
+        select.append(o)
+      }
+      select.value = grouped ? PAGE_COLUMN : ''
+      select.onchange = () => {
+        this.deps.invoke('core.view/set-group', {
+          owner: this.deps.owner,
+          viewId: '',
+          groupBy: select.value,
+        })
+        this.refresh()
+      }
+      body.append(select)
+      return
+    }
     const body = this.section(t('ui.view.opt.group'))
     const cards = view.kind === 'cards'
     // 「按一级子块」只对 children 源的卡片成立：组是容器的直接子块（query 命中是平的）

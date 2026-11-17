@@ -225,3 +225,16 @@ test('applyOwnerPatch：defaultShowPaths false 落笔、null 清掉、缺省不�
   const patched = applyOwnerPatch(base, { defaultShowPaths: false })
   assert.deepEqual(patched.defaultFilter, QUERY, '写一格不抹别的格')
 })
+
+test('ownerDataOfBlock / withBlockOwnerData：`_defaultGroup` 往返；空串/非串读作「没配」', () => {
+  const off = withBlockOwnerData({ _icon: 'lucide:x' }, { views: [], defaultGroup: 'hostPage' })
+  assert.equal(off?._defaultGroup, 'hostPage')
+  const cleared = withBlockOwnerData({ _defaultGroup: 'hostPage' }, { views: [] })
+  assert.equal(cleared?._defaultGroup, undefined, '清掉＝删格')
+  const block = mk('b', '', { _defaultGroup: 'hostPage' })
+  assert.equal(ownerDataOfBlock(block).defaultGroup, 'hostPage')
+  const bad = mk('b2', '', { _defaultGroup: 42 })
+  assert.equal(ownerDataOfBlock(bad).defaultGroup, undefined, '非串读作「没配」')
+  const empty = applyOwnerPatch({ views: [], defaultGroup: 'hostPage' }, { defaultGroup: null })
+  assert.equal(empty.defaultGroup, undefined, 'null ＝ 清掉')
+})

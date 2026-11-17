@@ -14,6 +14,7 @@
  *   · **去重**：某个祖先覆盖了多个命中时，那些命中不再单列，否则同一块出现两遍。
  */
 import type { Block, FoldState } from '../model/model.ts'
+import { nearestPageInChain } from '../identity/pages.ts'
 
 export interface ContextBase {
   /** 最外层命中（已经去过重） */
@@ -155,4 +156,64 @@ export function unfoldForContext(
     }
   }
   return changed ? (Object.keys(next).length > 0 ? next : undefined) : folded
+}
+
+/* ------------------------------------------------------------ 分段大纲 */
+
+/** 分段大纲的一组：组页 ＋ 组内命中根（原顺序）＋ 截掉页前缀的面包屑 */
+export interface PageGroup {
+  /** 组页；`undefined` ＝ 无页归属的根身份组（链上没有页露面） */
+  page: Block | undefined
+  roots: Block[]
+  /**
+   * **截掉页前缀的面包屑**：页名已经在组头上，行首再读一遍是重复——
+   * 组内行的祖先链从「最近的页」往后截。命中自己就是页 ⇒ 整条链照旧。
+   */
+  contexts: Map<string, readonly Block[]>
+}
+
+/**
+ * **分段大纲的分桶**：把最外层命中按「行住在哪一页」分段。
+ *
+ * 组序＝**第一次出现**（显示排序里的相对次序保留）；页的判据＝
+ * `nearestPageInChain`（自己是页就是自己；沿祖先链找最近的页；无页祖先落顶层根）——
+ * 与记录型看法的「所在页」分组键同一份判据，两处各算一遍就会在嵌套页下漂移。
+ */
+export function pageGroupsOf(base: ContextBase): PageGroup[] {
+  const groups = new Map<string, PageGroup>()
+  for (const r of base.roots) {
+    const path = base.contexts.get(r.id) ?? []
+    const page = nearestPageInChain(r, path)
+    const key = page?.id ?? ''
+    let g = groups.get(key)
+    if (!g) {
+      g = { page, roots: [], contexts: new Map() }
+      groups.set(key, g)
+    }
+    g.roots.push(r)
+    // 面包屑截页段：命中自己是页时（page === r，path 里没有它）整条链照旧
+    const at = page && page.id !== r.id ? path.findIndex((b) => b.id === page.id) : -1
+    const trail = at >= 0 ? path.slice(at + 1) : path
+    if (trail.length > 0) g.contexts.set(r.id, trail)
+  }
+  return [...groups.values()]
+}
+
+/** 把各组各展各的装载计划接成一份（组序即根序；展开 id／覆盖表并集） */
+export function mergeContextPlans(plans: readonly ContextPlan[]): ContextPlan {
+  const roots: Block[] = []
+  const contexts = new Map<string, readonly Block[]>()
+  const contextRoots = new Set<string>()
+  const covers = new Map<string, string[]>()
+  const expanded = new Set<string>()
+  let focusId: string | null = null
+  for (const p of plans) {
+    roots.push(...p.roots)
+    for (const [k, v] of p.contexts) contexts.set(k, v)
+    for (const id of p.contextRoots) contextRoots.add(id)
+    for (const [k, v] of p.covers) covers.set(k, v)
+    for (const id of p.expanded) expanded.add(id)
+    if (focusId === null && p.focusId !== null) focusId = p.focusId
+  }
+  return { roots, contexts, contextRoots, covers, expanded, focusId }
 }

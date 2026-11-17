@@ -80,9 +80,13 @@ export const VIEW_CONFIG_HANDLERS: Record<string, Handler> = {
    */
   'core.view/set-group': (a, app) => {
     const owner = ownerOrCur(a, app)
-    const viewId = S(a.viewId)
-    if (!owner || !viewId) return false
-    const groupBy = S(a.groupBy)
+    /**
+     * `viewId === ''` 是**默认大纲的分段键**（合法值，与 set-filter 的空串同一约定）；
+     * 只有**没传**才拒绝——写必须说清落到哪一层。
+     */
+    if (!owner || typeof a.viewId !== 'string' || typeof a.groupBy !== 'string') return false
+    const viewId = a.viewId
+    const groupBy = a.groupBy
     const rawOrder = a.groupOrder
     const groupOrder = Array.isArray(rawOrder) ? rawOrder.map((g) => S(g)).filter((g) => g !== '') : undefined
     return app.viewSetGroup(owner, viewId, groupBy, groupOrder, a.structure === true)

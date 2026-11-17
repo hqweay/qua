@@ -118,8 +118,9 @@ export type ViewAxis = 'filter' | 'sort' | 'group' | 'display' | 'paths'
 const AXES_BY_KIND: Record<Source['kind'], Record<ViewKind, readonly ViewAxis[]>> = {
   query: {
     // 默认看法（大纲）：filter 走 `_defaultFilter`、display 走 `_defaultDisplayProps`；sort/group 不做。
-    // paths 只在这里有面：命中行的行首面包屑（children 大纲的行住在真树上，位置由缩进表达）
-    outline: ['filter', 'paths', 'display'],
+    // paths 只在这里有面：命中行的行首面包屑（children 大纲的行住在真树上，位置由缩进表达）。
+    // group 也只在这里有面：分段大纲（所在页），键走 `_defaultGroup`——大纲不落盘，没有视图位
+    outline: ['filter', 'paths', 'group', 'display'],
     table: ['filter', 'sort', 'group', 'display'],
     'list-table': [],
     cards: ['filter', 'sort', 'group', 'display'],

@@ -43,9 +43,13 @@ import {
   usesToday,
   resolveTodayBase,
   journalDate,
+  journalDateLabel,
+  isJournal,
   defaultDisplayPropsFor,
   TAGS_COLUMN,
   PAGE_COLUMN,
+  pageGroupsOf,
+  mergeContextPlans,
   viewsBroken,
   viewNameOf,
   droppedFrom,
@@ -74,6 +78,8 @@ import {
   type DerivedViewKind,
   type SortKey,
   type ViewConfig,
+  type ContextPlan,
+  type GroupHead,
   type ViewOwnerData,
   type ViewOwnerRef,
   type ViewOwnerStore,
@@ -782,6 +788,16 @@ export class ViewHost {
     if (this.deps.derived) return false
     const data = this.deps.owners.read(this.writeOwner)
     return data?.defaultShowPaths === false
+  }
+
+  /** 分段大纲的折叠组（会话态；刷新回全开——密度出口不是结构） */
+  private readonly groupCollapsed = new Set<string>()
+
+  /** 组头名：日记天用日期，页/根用显示名（解析不到兜「无标题」，不露裸 id） */
+  private pageGroupLabel(page: Block | undefined): string {
+    if (!page) return t('ui.query.group.topLevel')
+    if (isJournal(page)) return journalDateLabel(journalDate(page))
+    return blockLabel(page, (id) => this.deps.kb.get(id))
   }
 
   /**
@@ -1513,6 +1529,18 @@ export class ViewHost {
       const host = document.createElement('div')
       host.className = 'queryview-editor'
       host.spellcheck = false
+      // 组头点击＝翻这组的折叠（扣行重装走 render）；chrome 不是编辑面，挂一次容器级监听
+      host.addEventListener('click', (e) => {
+        const target = e.target instanceof Element ? e.target : null
+        const head = target?.closest<HTMLElement>('[data-grp-head]')
+        if (!head) return
+        e.preventDefault()
+        e.stopPropagation()
+        const key = head.dataset.grpHead ?? ''
+        if (this.groupCollapsed.has(key)) this.groupCollapsed.delete(key)
+        else this.groupCollapsed.add(key)
+        this.render()
+      })
       this.outline = new EditableBlock({
         host,
         store: this.deps.store,
@@ -1966,12 +1994,43 @@ export class ViewHost {
     // 只装「最外层命中」：子树由编辑器自己展开，命中块的祖先链作为行首面包屑。
     const contexts = new Map<string, readonly Block[]>()
     for (const r of rows) if (r.path.length > 0) contexts.set(r.block.id, r.path)
-    const plan = expandContexts(
-      { roots: rows.map((r) => r.block), contexts },
-      this.expanded,
-      (id) => this.deps.kb.pathOf(id),
-      focusHint,
-    )
+    const base = { roots: rows.map((r) => r.block), contexts }
+    // 分段大纲：缺省层的分组键是「所在页」⇒ 按住处分桶、组头随装载；
+    // 命名视图没有大纲，不存在视图层的同名格。派生面走挂载区自己的分组（设备态），不走这里
+    const grouped =
+      !this.deps.derived && !this.view && this.deps.owners.read(this.writeOwner)?.defaultGroup === PAGE_COLUMN
+    let plan: ContextPlan
+    let heads: GroupHead[] | undefined
+    if (grouped) {
+      const groups = pageGroupsOf(base)
+      const collapsed = this.groupCollapsed
+      heads = []
+      const deferred: { label: string; count: number }[] = []
+      const plans: ContextPlan[] = []
+      for (const g of groups) {
+        const label = this.pageGroupLabel(g.page)
+        // 折叠组扣行：头锚到下一组的头一行；排在最后 ⇒ 哨兵（文档末尾）
+        if (collapsed.has(g.page?.id ?? '')) {
+          deferred.push({ label, count: g.roots.length })
+          continue
+        }
+        const p = expandContexts(
+          { roots: g.roots, contexts: g.contexts },
+          this.expanded,
+          (id) => this.deps.kb.pathOf(id),
+          focusHint,
+        )
+        const anchor = p.roots[0]?.id ?? ''
+        for (const d of deferred) heads.push({ beforeRootId: anchor, label: d.label, count: d.count, collapsed: true })
+        deferred.length = 0
+        if (anchor !== '') heads.push({ beforeRootId: anchor, label, count: g.roots.length })
+        plans.push(p)
+      }
+      for (const d of deferred) heads.push({ beforeRootId: '', label: d.label, count: d.count, collapsed: true })
+      plan = mergeContextPlans(plans)
+    } else {
+      plan = expandContexts(base, this.expanded, (id) => this.deps.kb.pathOf(id), focusHint)
+    }
     this.expanded = plan.expanded
     this.covers = plan.covers
     this.rows = plan.roots
@@ -1983,6 +2042,8 @@ export class ViewHost {
       expandedRoots: plan.contextRoots,
       // 行首路径关掉的装载：只关显示——上下文照算，「收起上下文」照画，重开不丢
       ...(this.pathsHidden ? { paths: false as const } : {}),
+      // 分段大纲的组头：chrome 随装载走；不分组时缺省（undefined）＝没有组头
+      ...(heads !== undefined && heads.length > 0 ? { groupHeads: heads } : {}),
     })
     if (plan.focusId) this.outline?.ed?.reveal(plan.focusId)
     this.syncFoldAll()

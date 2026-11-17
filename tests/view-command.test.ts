@@ -633,3 +633,53 @@ test('setViewPaths：query 源写默认大纲那一格（false 落笔／null 清
   assert.equal(plainWrites.length, 0, '拒绝时一个字节都不写')
   assert.ok(toasts.length >= 1, '要说一句话')
 })
+
+test('setViewGroup 空串视图 id：默认大纲的分段键（只认所在页）；非查询源拒绝', () => {
+  const q = mkBlock('查询')
+  q.id = 'qg'
+  q.props = { _query: { where: { tag: 'x' } } }
+  const kb = kbOf([q]).kb
+  const writes: { owner: unknown; patch: Partial<ViewOwnerData> }[] = []
+  const toasts: string[] = []
+  const owners: OwnerStore = {
+    read: () => ({ query: { where: { tag: 'x' } }, views: [] }),
+    write: (_owner, patch) => writes.push({ owner: _owner, patch }),
+    readBinding: () => null,
+    setBindingView: () => {},
+    entriesOf: () => [],
+    writeEntries: () => {},
+    entryOf: () => undefined,
+  }
+  const d: ViewConfigDeps = {
+    kb,
+    owners,
+    run: <R,>(fn: (tx: Tx) => R) => kb.tx(fn),
+    reloadPage: () => {},
+    rerenderEditor: () => {},
+    rootIds: () => [],
+    viewShown: () => true,
+    activeId: () => 'qg',
+    openBlock: () => {},
+    refreshList: () => {},
+    toast: (text) => toasts.push(text),
+  }
+  const app = viewConfigCommands(d)
+  const owner = { kind: 'block', blockId: 'qg' } as const
+
+  assert.equal(app.viewSetGroup(owner, '', 'hostPage', undefined, false), true)
+  assert.deepEqual(writes[0]!.patch.defaultGroup, 'hostPage')
+  assert.equal(app.viewSetGroup(owner, '', '', undefined, false), true)
+  assert.deepEqual(writes[1]!.patch.defaultGroup, null, '空串＝清掉')
+  // 只认所在页一档：别的键对大纲不生效，当面拒绝
+  assert.equal(app.viewSetGroup(owner, '', 'someProp', undefined, false), false)
+  assert.equal(writes.length, 2, '拒绝不落笔')
+  assert.equal(toasts.length, 0, '键不合法是参数错，不是源错——不弹源警告')
+
+  // children 源：大纲行住在真树上，没有分段位
+  const plain = mkBlock('普通')
+  plain.id = 'pg'
+  const plainOwners: OwnerStore = { ...owners, read: () => ({ views: [] }), write: () => {} }
+  const app2 = viewConfigCommands({ ...d, owners: plainOwners })
+  assert.equal(app2.viewSetGroup({ kind: 'block', blockId: 'pg' }, '', 'hostPage', undefined, false), false)
+  assert.equal(toasts.length >= 1, true, '要说一句话')
+})

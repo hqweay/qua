@@ -81,3 +81,71 @@ test('展开出来的路径要真的打开：折叠的上下文根与中间祖�
   assert.deepEqual(next, { a1: true })
   assert.equal(unfoldForContext(undefined, new Map(), pathOf), undefined, '没有展开就不动折叠表')
 })
+
+/* ------------------------------------------------------------ 分段大纲 */
+
+import { mergeContextPlans, pageGroupsOf } from '../src/core/views/context-expand.ts'
+import { mkPageBlock } from '../src/core/index.ts'
+
+/** 页甲包着 a；b 在无页容器 top 下 */
+const pageA = { ...mkPageBlock('甲'), id: 'pA', children: [] }
+const top = mk('top', [b1])
+const base2: ContextBase = {
+  roots: [a1, b1],
+  contexts: new Map([
+    ['a1', [pageA]],
+    ['b1', [top]],
+  ]),
+}
+
+test('pageGroupsOf：按最近的页分段；组序＝第一次出现；面包屑截掉页前缀', () => {
+  const groups = pageGroupsOf(base2)
+  assert.deepEqual(
+    groups.map((g) => [g.page?.id ?? '', g.roots.map((r) => r.id)]),
+    [
+      ['pA', ['a1']],
+      ['top', ['b1']],
+    ],
+  )
+  assert.equal(groups[0]!.contexts.get('a1'), undefined, '页自己就是组头：行首不再重复整条链')
+})
+
+test('pageGroupsOf：嵌套页取最近的一页，页前缀整段截掉；命中自己是页 ⇒ 自己成组', () => {
+  const pageB = { ...mkPageBlock('乙'), id: 'pB', children: [] }
+  const g = pageGroupsOf({
+    roots: [a1],
+    contexts: new Map([['a1', [pageA, pageB]]]),
+  })
+  assert.equal(g.length, 1)
+  assert.equal(g[0]!.page?.id, 'pB', '嵌套时贴着自己的页赢（与 nearestPageInChain 同一口径）')
+  assert.equal(g[0]!.contexts.get('a1'), undefined, '链上只剩页段 ⇒ 行首没有面包屑')
+  // 命中块自己是页：组＝自己，面包屑照旧（path 里没有自己）
+  const selfPage = { ...mkPageBlock('丙'), id: 'pC', children: [] }
+  const g2 = pageGroupsOf({ roots: [selfPage], contexts: new Map([['pC', [pageA]]]) })
+  assert.equal(g2[0]!.page?.id, 'pC')
+  assert.deepEqual(g2[0]!.contexts.get('pC')?.map((b) => b.id), ['pA'])
+})
+
+test('mergeContextPlans：根按组序拼接、展开表并集、焦点取第一个非空', () => {
+  const planA: ReturnType<typeof expandContexts> = {
+    roots: [pageA, a1],
+    contexts: new Map([['pageA', []]]),
+    contextRoots: new Set(['pageA']),
+    covers: new Map([['pageA', ['a1']]]),
+    expanded: new Set(['pageA']),
+    focusId: null,
+  }
+  const planB: ReturnType<typeof expandContexts> = {
+    roots: [b1],
+    contexts: new Map([['b1', [top]]]),
+    contextRoots: new Set(),
+    covers: new Map(),
+    expanded: new Set(),
+    focusId: 'b1',
+  }
+  const merged = mergeContextPlans([planA, planB])
+  assert.deepEqual(merged.roots.map((r) => r.id), ['pA', 'a1', 'b1'], '组序即根序')
+  assert.deepEqual([...merged.contextRoots], ['pageA'])
+  assert.deepEqual(merged.covers.get('pageA'), ['a1'])
+  assert.equal(merged.focusId, 'b1')
+})

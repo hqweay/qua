@@ -33,6 +33,7 @@ import {
   type ShellCol,
   type VisibleRow,
 } from '../../core/index.ts'
+import { type GroupHead } from '../../core/model/model.ts'
 import { plainText } from '../../core/model/runs.ts'
 import { t } from '../../core/infra/msg.ts'
 import { assetViewOf, markAssetMissing } from '../asset-views.ts'
@@ -212,6 +213,33 @@ export class RenderOps {
     this.ancestors = ancestorsByBlockId(this.ed.rows())
   }
 
+  /**
+   * **分段大纲的组头**（chrome 行）：页名 ＋ 条数 ＋ 折叠箭头。
+   *
+   * 它不是块也不进段模型：`contentEditable=false` 断开编辑链（与 `.sec-mount` 同一条
+   * 教训——chrome 嵌在 contenteditable 容器里必须自断，否则焦点被外层宿主吃掉）。
+   * 点击行为归**装配层**（折叠＝扣行重装，装载单位的知识不在编辑器）；
+   * 这里只交代「这是一颗组头」——`data-grp-head` ＝ 组键，面级监听用它接。
+   */
+  private makeGroupHead(h: GroupHead): HTMLElement {
+    const el = document.createElement('div')
+    el.className = 'grp-head'
+    el.dataset.grpHead = h.beforeRootId
+    el.dataset.grpCollapsed = h.collapsed ? '1' : '0'
+    el.contentEditable = 'false'
+    const caret = document.createElement('span')
+    caret.className = 'grp-caret'
+    caret.textContent = h.collapsed ? '▸' : '▾'
+    const name = document.createElement('span')
+    name.className = 'grp-name ui-ellipsis'
+    name.textContent = h.label
+    const count = document.createElement('span')
+    count.className = 'grp-count'
+    count.textContent = String(h.count)
+    el.append(caret, name, count)
+    return el
+  }
+
   /** 造一列空壳：只读日期头 ＋ 一行「点一下开始写」的落笔位（与真实日期行同一个视觉形状） */
   private makeShellSec(col: ShellCol): HTMLElement {
     const sec = document.createElement('div')
@@ -306,12 +334,16 @@ export class RenderOps {
       slot.contentEditable = 'false'
       sec.appendChild(slot)
     }
+    const groupHeads = this.ed.doc.groupHeads ?? []
     for (const r of rows) {
       if (r.depth === 0 || sec === null) {
         // 新的一段之前，先摆按列序应出现在这里的空天格子（复盘兜底；column 下 shells 恒空）
         if (r.depth === 0) {
           closeSec()
           for (const col of this.ed.shells) if (col.beforeRootId === r.block.id) this.ed.container.appendChild(this.makeShellSec(col))
+          // 分段大纲的组头：插在这一组第一行之前（chrome，不是块——行的编辑语义一个字不变）。
+          // 折叠的组没有自己的行可锚，锚到下一组的头一行 ⇒ 同一锚可以叠多颗头，按声明序插。
+          for (const head of groupHeads) if (head.beforeRootId === r.block.id) this.ed.container.appendChild(this.makeGroupHead(head))
         }
         sec = document.createElement('div')
         sec.className = 'sec'
@@ -320,6 +352,8 @@ export class RenderOps {
       }
       sec.appendChild(this.makeBlockEl(r, gutters.get(r.block.id), below.get(r.block.id)))
     }
+    // 哨兵组头（`beforeRootId: ''`）：折叠组排在最后时，后面没有行可锚 ⇒ 落在文档末尾
+    for (const head of groupHeads) if (head.beforeRootId === '') this.ed.container.appendChild(this.makeGroupHead(head))
     if (tailComplete) closeSec()
     // 比所有已装段都更早的空天格子：追加在最后
     if (this.ed.layout !== 'column') {

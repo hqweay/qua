@@ -512,6 +512,32 @@
 #editor .sec {
   display: contents;
 }
+/*
+ * 分段大纲的组头（chrome 行，不是块）：页名＋条数＋折叠箭头。
+ * 浮层组头（.vgroup-head）的同一族语言：小字、次要色、沉底——它是隔断，不是内容；
+ * 可点击（翻折叠）但不可编辑（contentEditable=false 在渲染层断链）。
+ */
+#editor .grp-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-fs-xs);
+  padding: var(--ui-gap-1) var(--ui-gap-2);
+  margin-top: var(--ui-gap-3);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-sunken);
+  cursor: pointer;
+  user-select: none;
+}
+#editor .grp-head .grp-name {
+  flex: 1;
+  min-width: 0;
+}
+#editor .grp-head .grp-count {
+  color: var(--ui-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
 #doc:has(> #editor[data-layout='row']),
 #doc:has(> #editor[data-layout='grid']) {
   /* 横排／网格要吃满一行：measure 收窄是单列流的对齐约束，这里不再适用 */

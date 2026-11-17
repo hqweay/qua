@@ -38,6 +38,11 @@ import {
   expandContexts,
   hasLiveChildren,
   isJournal,
+  journalDate,
+  journalDateLabel,
+  mergeContextPlans,
+  pageGroupsOf,
+  PAGE_COLUMN,
   mentionSpotsOf,
   mountEntriesOf,
   outermostHits,
@@ -51,9 +56,11 @@ import {
   quickFilterNode,
   type Block,
   type BlockStore,
+  type ContextPlan,
   type DerivedLens,
   type DerivedSource,
   type DerivedViewKind,
+  type GroupHead,
   type MountEntry,
   type MountHost,
   type QueryNode,
@@ -447,6 +454,8 @@ export class MountArea {
     this.hitObserver = new MutationObserver(() => this.scheduleHitPaint())
     this.hitObserver.observe(this.editorEl, { subtree: true, childList: true, characterData: true })
     this.editorEl.addEventListener('click', this.onHitClick)
+    // 组头点击＝翻这组的折叠（扣行重装在 render 里走）；chrome 自己不是编辑面
+    this.editorEl.addEventListener('click', this.onGroupHeadClick)
     this.editorEl.addEventListener('mousemove', this.onHitHover)
     this.editorEl.addEventListener('mouseleave', this.onHitLeave)
     this.editorEl.addEventListener('mousedown', this.onHitDown)
@@ -469,6 +478,7 @@ export class MountArea {
     this.lensHost = null
     this.hitObserver.disconnect()
     this.editorEl.removeEventListener('click', this.onHitClick)
+    this.editorEl.removeEventListener('click', this.onGroupHeadClick)
     this.editorEl.removeEventListener('mousemove', this.onHitHover)
     this.editorEl.removeEventListener('mouseleave', this.onHitLeave)
     this.editorEl.removeEventListener('mousedown', this.onHitDown)
@@ -819,6 +829,21 @@ export class MountArea {
    * 打在文本上它本来是空的，不会和 ⌘ 新 tab、Shift 进右槽撞。
    * 落点用 `caretRangeFromPoint` 换算回 plain 偏移：高亮只是画层，没有可点的元素。
    */
+  /** 组头点击＝翻这组的折叠（扣行重装走 render）；落在 chrome 上，编辑面的点击路由不认识它 */
+  private readonly onGroupHeadClick = (e: MouseEvent): void => {
+    const target = e.target instanceof Element ? e.target : null
+    const head = target?.closest<HTMLElement>('[data-grp-head]')
+    if (!head) return
+    e.preventDefault()
+    e.stopPropagation()
+    const key = head.dataset.grpHead ?? ''
+    const set = this.groupCollapsed.get(this.groupEntryId) ?? new Set<string>()
+    if (set.has(key)) set.delete(key)
+    else set.add(key)
+    this.groupCollapsed.set(this.groupEntryId, set)
+    this.render()
+  }
+
   private readonly onHitClick = (e: MouseEvent): void => {
     if (!this.mentionTo || !e.altKey) return
     /**
@@ -1112,7 +1137,59 @@ export class MountArea {
       entry.source === 'refs' && this.refKind !== 'all'
         ? 'ui.mount.empty.refsKind'
         : DERIVED_EMPTY[entry.source]
+    // 分段大纲（镜头选了「所在页」）：按住处分段装载——组头 chrome ＋ 折叠组扣行
+    if (kind === 'outline' && (this.deps.derivedGroup?.(host, entry.source) ?? '') === PAGE_COLUMN) {
+      const prepared = this.prepareGroupedOutline(entry.id, { roots, contexts }, focusHint)
+      this.loadOutline(entry, { roots, contexts }, focusHint, empty, prepared)
+      return
+    }
     this.loadOutline(entry, { roots, contexts }, focusHint, empty)
+  }
+
+  /** 分段的折叠组（会话态，按栏记；刷新回全开——密度出口不是结构） */
+  private readonly groupCollapsed = new Map<string, Set<string>>()
+  /** 此刻装在编辑器里的栏（组头点击路由用；点击落在 chrome 上，事件里没有栏上下文） */
+  private groupEntryId = ''
+
+  /** 分段大纲的装载计划：按所在页分桶、组头对齐到每组头一行、折叠组扣行并锚到下一组 */
+  private prepareGroupedOutline(
+    entryId: string,
+    base: MountRoots,
+    focusHint?: string,
+  ): { plan: ContextPlan; heads: GroupHead[] } {
+    const groups = pageGroupsOf(base)
+    const collapsed = this.groupCollapsed.get(entryId) ?? new Set<string>()
+    const heads: GroupHead[] = []
+    const deferred: { label: string; count: number }[] = []
+    const plans: ContextPlan[] = []
+    for (const g of groups) {
+      const label = this.pageGroupLabel(g.page)
+      // 折叠的组没有自己的行可锚：头先攒着，锚到下一组的头一行；排在最后 ⇒ 哨兵
+      if (collapsed.has(g.page?.id ?? '')) {
+        deferred.push({ label, count: g.roots.length })
+        continue
+      }
+      const plan = expandContexts(
+        { roots: g.roots, contexts: g.contexts },
+        this.expandedFor(entryId),
+        (id) => this.deps.kb.pathOf(id),
+        focusHint,
+      )
+      const anchor = plan.roots[0]?.id ?? ''
+      for (const d of deferred) heads.push({ beforeRootId: anchor, label: d.label, count: d.count, collapsed: true })
+      deferred.length = 0
+      if (anchor !== '') heads.push({ beforeRootId: anchor, label, count: g.roots.length })
+      plans.push(plan)
+    }
+    for (const d of deferred) heads.push({ beforeRootId: '', label: d.label, count: d.count, collapsed: true })
+    return { plan: mergeContextPlans(plans), heads }
+  }
+
+  /** 组头名：日记天用日期，页用显示名，无页归属的组给一句实话 */
+  private pageGroupLabel(page: Block | undefined): string {
+    if (!page) return t('ui.query.group.topLevel')
+    if (isJournal(page)) return journalDateLabel(journalDate(page))
+    return blockLabel(page, (id) => this.deps.kb.get(id))
   }
 
   /**
@@ -1167,12 +1244,21 @@ export class MountArea {
   }
 
   /** 大纲装载（local／派生共用的那一支） */
-  private loadOutline(entry: MountEntry, base: MountRoots, focusHint?: string, emptyText?: MsgId): void {
-    const plan = expandContexts(base, this.expandedFor(entry.id), (id) => this.deps.kb.pathOf(id), focusHint)
+  private loadOutline(
+    entry: MountEntry,
+    base: MountRoots,
+    focusHint?: string,
+    emptyText?: MsgId,
+    /** 分段大纲的预备计划：给了就跳过基础展开，组头随装载下去 */
+    prepared?: { plan: ContextPlan; heads: readonly GroupHead[] },
+  ): void {
+    const plan = prepared?.plan ?? expandContexts(base, this.expandedFor(entry.id), (id) => this.deps.kb.pathOf(id), focusHint)
+    const heads = prepared?.heads
+    this.groupEntryId = entry.id
     // 过期的展开 id 当场剪掉：下次再出现同 id 时不该「自己又展开」
     this.expandedByTab.set(entry.id, plan.expanded)
     this.covers = plan.covers
-    if (plan.roots.length === 0) {
+    if (plan.roots.length === 0 && (heads === undefined || heads.length === 0)) {
       // 筛空与「本来就没有」要说不同的话：chips 挂着时结果空，真相是「筛选藏掉了」，
       // 不是「还没有块引用它」——冒充会让用户以为这一栏坏了。
       const empty =
@@ -1221,6 +1307,8 @@ export class MountArea {
       ...(entry.kind === 'derived' && entry.source === 'notes' ? { noteSource: false } : {}),
       // 行首路径关掉的装载：只关显示——上下文照算，「收起上下文」照画，重开不丢
       ...(entry.kind === 'derived' && !this.showPathsOf(entry) ? { paths: false as const } : {}),
+      // 分段大纲的组头：chrome 随装载走；不分组时缺省（undefined）＝没有组头
+      ...(heads !== undefined && heads.length > 0 ? { groupHeads: heads } : {}),
     })
     // 装载刚换了整片 DOM：立刻画一次（不等观测器那一帧，避免「先无高亮再补上」的闪动）
     this.paintMentionHits()
@@ -1550,6 +1638,28 @@ export class MountArea {
       if (group.value !== current) group.value = ''
       group.onchange = () => {
         // 装配层的 setDerivedGroup 会重画两个表面；这里只把弹层里的回显跟上
+        this.deps.setDerivedGroup?.(host, entry.source, group.value)
+        repaint()
+      }
+      body.appendChild(group)
+    } else if (kind === 'outline') {
+      /* 大纲的分段：只有「所在页」一档有面（分段＝投影重排，与记录看法的全量候选是两回事）。
+         表格/卡片存在别的键时这里如实回落「不分组」——那份键对大纲不生效，不冒充。 */
+      const body = this.lensSection(root, 'ui.view.opt.group')
+      const group = document.createElement('select')
+      group.className = 'ui-input queryview-group mount-derived-group'
+      for (const [value, label] of [
+        ['', 'ui.query.group.none'],
+        [PAGE_COLUMN, 'ui.query.group.pageKey'],
+      ] as const) {
+        const o = document.createElement('option')
+        o.value = value
+        o.textContent = t(label)
+        group.appendChild(o)
+      }
+      const current = this.deps.derivedGroup?.(host, entry.source) ?? ''
+      group.value = current === PAGE_COLUMN ? PAGE_COLUMN : ''
+      group.onchange = () => {
         this.deps.setDerivedGroup?.(host, entry.source, group.value)
         repaint()
       }

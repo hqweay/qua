@@ -162,6 +162,33 @@ export const DEFAULT_DISPLAY_PROPS_PROP = '_defaultDisplayProps' as const
  */
 export const DEFAULT_SHOW_PATHS_PROP = '_defaultShowPaths' as const
 
+/**
+ * **默认看法（大纲）的分组键**：没有激活视图时，查询结果按什么分大段。
+ *
+ * 现阶段唯一有意义的值是 `'hostPage'`（所在页，`PAGE_COLUMN`）；缺失＝不分组。
+ * 与 `_defaultFilter`／`_defaultShowPaths` 同层：都是**默认看法的位**——大纲不落盘，
+ * 所以不存在视图层的同名格。
+ */
+export const DEFAULT_GROUP_PROP = '_defaultGroup' as const
+
+/**
+ * **分段的组头 chrome**（分段大纲的装载描述；派生、视图私有、不入库）。
+ *
+ * 组头不是块——它是「这一段的隔断＋名字」，插在每组第一行的前面；行的编辑语义
+ * 一个字不变（行还是真块、写回原位、全局一份撤销）。`beforeRootId` 对齐到组内
+ * 第一行的块 id（折叠的组没有自己的行可锚，锚到**下一组**的头一行；排在最后的
+ * 折叠组用空串哨兵＝落在文档末尾）；`collapsed` 只管 ▼/▶ 的画法（扣行发生在
+ * 装载，不在这里）。
+ */
+export interface GroupHead {
+  beforeRootId: string
+  /** 组名（页的显示名；根身份组有自己的兜底名） */
+  label: string
+  /** 组内行数（只数这一装载里的根行，不含展开的祖先行） */
+  count: number
+  collapsed?: boolean
+}
+
 /** 这一块被删了吗（只看它自己；整棵子树不可见由遍历的跳过规则保证） */
 export function isDeleted(b: Block): boolean {
   return b.props !== undefined && DELETED_AT_PROP in b.props
@@ -592,6 +619,11 @@ export interface Doc {
    * 与 `contexts` 一样是派生、视图私有、不入库。
    */
   expandedRoots?: ReadonlySet<string>
+  /**
+   * **分段大纲的组头**：`beforeRootId` 对齐到根行；渲染在那一行前插一段组头 chrome。
+   * 与 `contexts` 同族——派生、视图私有、不入库、不参与撤销。缺省＝没有组头。
+   */
+  groupHeads?: readonly GroupHead[]
   /**
    * **这一份装载里，哪个根的子块不归编辑器画**（非大纲视图的宿主）。
    *

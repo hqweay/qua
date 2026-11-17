@@ -25,7 +25,7 @@
  *    不许在各处直接摸 `props._views`／`_mounts`／`Prefs`（`arch-check` 钉住了这一条）。
  * ⚠️ 本文件只有类型与纯函数：读写发生在**装配层**，因为「一次动作一笔事务」在那里才做得到。
  */
-import { ACTIVE_VIEW_PROP, DEFAULT_DISPLAY_PROPS_PROP, DEFAULT_FILTER_PROP, DEFAULT_SHOW_PATHS_PROP, VIEWS_PROP, isQueryBlock, type Block } from '../model/model.ts'
+import { ACTIVE_VIEW_PROP, DEFAULT_DISPLAY_PROPS_PROP, DEFAULT_FILTER_PROP, DEFAULT_GROUP_PROP, DEFAULT_SHOW_PATHS_PROP, VIEWS_PROP, isQueryBlock, type Block } from '../model/model.ts'
 import { readEmbed, type ViewRef } from './embed.ts'
 import { canonicalViews, readViews, resolveView, sourceOf, type Source, type ViewConfig, type ViewSet } from './view.ts'
 import { isQueryNode, type QueryNode, type QuerySpec } from '../query/query.ts'
@@ -67,6 +67,11 @@ export interface ViewOwnerData extends ViewSet {
    * 命名视图没有大纲 ⇒ 不存在视图层的同名格；`false` 落在块上＝这一块的大纲关掉行首面包屑。
    */
   defaultShowPaths?: false
+  /**
+   * **默认看法（大纲）的分组键**：现阶段只有 `'hostPage'`（所在页）有面。
+   * 与 `defaultShowPaths` 同层同读路；缺失＝不分组。
+   */
+  defaultGroup?: string
   /** tab 的名字（块拥有者的名字是它的地址，不在这里） */
   label?: string
 }
@@ -78,11 +83,16 @@ export interface ViewOwnerData extends ViewSet {
  * 显示覆写（回到 rich 默认）。视图切片的清空走 `withFilter(view, null)`，形状不同：
  * 那一份配置本来就允许没有 `filter` 键。
  */
-export type ViewOwnerPatch = Omit<Partial<ViewOwnerData>, 'defaultFilter' | 'defaultDisplayProps' | 'defaultShowPaths'> & {
+export type ViewOwnerPatch = Omit<
+  Partial<ViewOwnerData>,
+  'defaultFilter' | 'defaultDisplayProps' | 'defaultShowPaths' | 'defaultGroup'
+> & {
   defaultFilter?: QueryNode | null
   defaultDisplayProps?: string[] | null
   /** `null` ＝ 清掉（开回默认显示）；`false` ＝ 关掉行首路径 */
   defaultShowPaths?: false | null
+  /** `null`/`''` ＝ 清掉；`'hostPage'` ＝ 按所在页分段 */
+  defaultGroup?: string | null
 }
 
 /**
@@ -105,6 +115,8 @@ export function applyOwnerPatch(data: ViewOwnerData, patch: ViewOwnerPatch): Vie
   if (display !== undefined && display !== null) out.defaultDisplayProps = display
   const showPaths = patch.defaultShowPaths !== undefined ? patch.defaultShowPaths : data.defaultShowPaths
   if (showPaths === false) out.defaultShowPaths = false
+  const group = patch.defaultGroup !== undefined ? patch.defaultGroup : data.defaultGroup
+  if (group !== undefined && group !== null && group !== '') out.defaultGroup = group
   const label = patch.label !== undefined ? patch.label : data.label
   if (label !== undefined) out.label = label
   return out
@@ -122,6 +134,8 @@ export function ownerDataOfBlock(b: Block | undefined): ViewOwnerData {
   const display = b.props?.[DEFAULT_DISPLAY_PROPS_PROP]
   if (isChildPropsValue(display)) out.defaultDisplayProps = display as string[]
   if (b.props?.[DEFAULT_SHOW_PATHS_PROP] === false) out.defaultShowPaths = false
+  const group = b.props?.[DEFAULT_GROUP_PROP]
+  if (typeof group === 'string' && group !== '') out.defaultGroup = group
   return out
 }
 
@@ -170,6 +184,8 @@ export function withBlockOwnerData(
   else out[DEFAULT_DISPLAY_PROPS_PROP] = data.defaultDisplayProps
   if (data.defaultShowPaths !== false) delete out[DEFAULT_SHOW_PATHS_PROP]
   else out[DEFAULT_SHOW_PATHS_PROP] = false
+  if (data.defaultGroup === undefined || data.defaultGroup === '') delete out[DEFAULT_GROUP_PROP]
+  else out[DEFAULT_GROUP_PROP] = data.defaultGroup
   if (data.activeView === undefined || data.activeView === '') delete out[ACTIVE_VIEW_PROP]
   else out[ACTIVE_VIEW_PROP] = data.activeView
   return Object.keys(out).length === 0 ? undefined : out

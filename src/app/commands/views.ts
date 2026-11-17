@@ -35,6 +35,7 @@ import {
   withTabsDirection,
   withListSort,
   axesFor,
+  PAGE_COLUMN,
   setValue,
   sortKeysOfRaw,
   withSort,
@@ -443,6 +444,22 @@ export function viewConfigCommands(
     viewSetGroup: (owner, viewId, groupBy, groupOrder, structure) => {
       const data = d.owners.read(owner)
       if (!data) return false
+      /**
+       * `viewId === ''` 是**默认大纲的分段键**（拥有者的 `_defaultGroup`）——
+       * 与 set-filter 的空串分支同一约定。大纲只有「所在页」一档有面
+       * （分段＝投影重排，按字段分大纲没有需求信号）；`''` ＝ 清掉。
+       */
+      if (viewId === '') {
+        const source = sourceOfRef(d, owner)
+        if (!source || source.kind !== 'query') {
+          d.toast(t('ui.view.groupOnlyQuery'), 'warn')
+          return false
+        }
+        if (groupBy !== '' && groupBy !== PAGE_COLUMN) return false
+        d.owners.write(owner, { defaultGroup: groupBy === '' ? null : groupBy })
+        reveal(owner)
+        return true
+      }
       const view = resolveView(data, viewId)
       if (!view) return false
       /**

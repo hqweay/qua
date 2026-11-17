@@ -29,6 +29,7 @@ import {
   isEmbedBlock,
   listTableOf,
   OUTLINE_VIEW,
+  PAGE_COLUMN,
   propKindOf,
   propLabel,
   queryFieldsOf,
@@ -471,8 +472,10 @@ function showViewOptions(owner: ViewOwnerRef): void {
         source: sourceOfOwner(owner, d, host ?? undefined),
         filter: view ? (view.filter ?? null) : (d.defaultFilter ?? null),
         display: view ? view.displayProps : d.defaultDisplayProps,
-        // 行首路径只有默认大纲有面（命名视图没有大纲）；缺省显示，false 才落笔
+        // 行首路径只有默认大纲有面（命名视图没有大纲）；缺省显示，false 才落笔。
+        // 分段同层：`_defaultGroup` 只认「所在页」，别的键对大纲不生效
         pathsHidden: view ? false : d.defaultShowPaths === false,
+        pathsGrouped: view ? false : d.defaultGroup === PAGE_COLUMN,
       }
     }
     const records = () => {
