@@ -45,6 +45,7 @@ import {
   journalDate,
   defaultDisplayPropsFor,
   TAGS_COLUMN,
+  PAGE_COLUMN,
   viewsBroken,
   viewNameOf,
   droppedFrom,
@@ -1810,6 +1811,8 @@ export class ViewHost {
    * 的值是字面量，翻不动原样回落。kind 按 kb 现读判（不依赖 `fields()` 的覆盖面）。
    */
   private groupValueLabel(propId: string, raw: unknown): string | undefined {
+    // 所在页的值是页块 id：走 `refLabel` 一族（目标没了兜「已删除」，不露裸 id）
+    if (propId === PAGE_COLUMN) return this.deps.refLabel(String(raw))
     const def = this.deps.kb.get(propId)
     return propValueText({ id: propId, ...(def ? { kind: propKindOf(def) } : {}) }, raw, {
       ...(this.deps.choices ? { choices: this.deps.choices } : {}),
