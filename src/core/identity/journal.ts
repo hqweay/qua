@@ -71,6 +71,23 @@ export function journalDate(b: Block): string {
 }
 
 /**
+ * 一行的「日志时间」＝**它所属的那一天**：自己的 `_date`；自己不是日记就沿祖先链
+ * 找最近的一天 —— 块不是「放进」那一天的，但它的位置回答了「它属于哪一天的工作流」，
+ * 排序/显示要的正是这个坐标。不在任何一天下面 ⇒ `''`（调用方按缺槽处理，排最后）。
+ *
+ * 祖先链是**根→父**序 ⇒ 从末尾往前找，最近的那个赢（嵌套时贴着自己的那一天优先）。
+ */
+export function journalDateInChain(b: Block, ancestors: readonly Block[]): string {
+  const own = journalDate(b)
+  if (own !== '') return own
+  for (let i = ancestors.length - 1; i >= 0; i--) {
+    const d = journalDate(ancestors[i]!)
+    if (d !== '') return d
+  }
+  return ''
+}
+
+/**
  * ⚠️ 返回 **boolean** 而不是类型谓词：`b is Block` 会把 `if` 的 else 分支收窄成 `never`
  * （`Block` 减 `Block`），于是「非 journal」那条路一行都写不出来。
  */

@@ -12,6 +12,7 @@
  */
 import { isDeleted, liveChildren, type Block, type BlockProps } from '../model/model.ts'
 import { displayNameOf } from '../identity/alias.ts'
+import { journalDateInChain } from '../identity/journal.ts'
 import { plainText } from '../model/runs.ts'
 import { t } from '../infra/msg.ts'
 import type { KbClient } from '../kb/types.ts'
@@ -328,6 +329,8 @@ export function fieldTextOf(r: ViewRecord, key: string, resolve?: (value: unknow
  * 取一列的排序值（**只读**，不做格式化）。
  *
  * 属性列直接取 `props[key]`；标签列取标签名的拼接串；子块列取子块数。
+ * `_date` 读**所属的那一天**（与成员排序同一份取值，`journalDateInChain`）：
+ * 行自己不是日记时，它住在哪一天下面，那一天就是它的日志时间。
  * 定义缺失时值照旧返回（「数据不静默消失」）。
  */
 export function sortValueOf(r: ViewRecord, key: string): unknown {
@@ -337,6 +340,7 @@ export function sortValueOf(r: ViewRecord, key: string): unknown {
   if (key === MODIFIED_COLUMN) return r.block.modified
   if (key === TAGS_COLUMN) return r.tags.map((t) => plainText(t.content)).join(' ')
   if (key === PATH_COLUMN) return pathTextOf(r)
+  if (key === '_date') return journalDateInChain(r.block, r.path)
   // 派生列按**数**排（引用次数 9 < 10；按串排会得到 10 < 9），其余按显示文本
   if (key === REF_COUNT_COLUMN) {
     const v = r.derived?.[REF_COUNT_COLUMN]

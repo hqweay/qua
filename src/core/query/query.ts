@@ -17,7 +17,7 @@ import { findPath } from '../model/tree.ts'
 import { tagIdsOf, tagMemberIds } from '../identity/tags.ts'
 import { membersOf } from '../identity/tag-tree.ts'
 import { buildAdjacency, type Adjacency } from '../relations/hierarchy.ts'
-import { dayStartMs, journalDate, journalDays, shiftISO } from '../identity/journal.ts'
+import { dayStartMs, journalDate, journalDateInChain, journalDays, shiftISO } from '../identity/journal.ts'
 import { displayTextOf } from '../identity/alias.ts'
 import { fieldTableOf, isQueryableField, readField, type FieldTable } from '../props/props.ts'
 import { isRefKind, relationEdgesOfForest, REFERENCE_KINDS, type RefKind, type RelationKind } from '../relations/relations.ts'
@@ -525,7 +525,7 @@ export function evaluateQuery(
   forest: readonly Block[] = roots,
 ): QueryHit[] {
   const matcher = createMatcher(forest, env)
-  const hits: { blockId: string; path: string[]; block: Block }[] = []
+  const hits: { blockId: string; path: string[]; block: Block; ancestors: readonly Block[] }[] = []
   /** 收窄过的候选集里，同一块可能既当「后代」又当「候选根」被走到——一条结果只许出现一次 */
   const seen = new Set<string>()
   walk(roots, (b, ancestors) => {
@@ -533,7 +533,7 @@ export function evaluateQuery(
     if (!matcher.matches(spec.where, b)) return
     if (seen.has(b.id)) return
     seen.add(b.id)
-    hits.push({ blockId: b.id, path: ancestors.map((a) => a.id), block: b })
+    hits.push({ blockId: b.id, path: ancestors.map((a) => a.id), block: b, ancestors })
   })
   applySort(hits, spec.sort, forest)
   const size = typeof spec.limit === 'number' ? Math.max(0, spec.limit) : hits.length
@@ -546,9 +546,16 @@ export function evaluateQuery(
  * 取值不只属性袋（保留键 H 批：能显示的列也要能排序）——`created`／`modified` 是块字段，
  * `refCount` 是关系事实（引用几处是这一刻的派生，不进属性袋）、一次扫描整林现算，
  * `random` 按 (块 id, 种子) 确定性散列——同一种子同一序，「随机抽 N 条」才回访得回来。
+ * `_date` 读**所属的那一天**（`journalDateInChain`）：命中行自己不是日记时，
+ * 它住在哪一天下面，那一天就是它的日志时间——只读自己的属性袋会让
+ * 「按日志时间排」对日记下的块整体失效（全都取不到值 ＝ 等于没排）。
  * `path`／`matched`／`sharedTags` 仍未接：按什么比要先有语义（path 是深度还是链上名字？）。
  */
-function applySort(hits: { block: Block }[], sort: readonly SortKey[] | undefined, forest: readonly Block[]): void {
+function applySort(
+  hits: { block: Block; ancestors: readonly Block[] }[],
+  sort: readonly SortKey[] | undefined,
+  forest: readonly Block[],
+): void {
   if (!sort || sort.length === 0) return
   const refCounts = sort.some((s) => s.by === 'refCount')
     ? (() => {
@@ -561,8 +568,8 @@ function applySort(hits: { block: Block }[], sort: readonly SortKey[] | undefine
     const { by, dir, seed } = sort[i]!
     const sign = dir === 'desc' ? -1 : 1
     hits.sort((x, y) => {
-      const xv = sortValueOf(x.block, by, seed, refCounts)
-      const yv = sortValueOf(y.block, by, seed, refCounts)
+      const xv = sortValueOf(x, by, seed, refCounts)
+      const yv = sortValueOf(y, by, seed, refCounts)
       if (xv === undefined || yv === undefined) {
         if (xv === undefined && yv === undefined) return 0
         return xv === undefined ? 1 : -1
@@ -573,11 +580,22 @@ function applySort(hits: { block: Block }[], sort: readonly SortKey[] | undefine
 }
 
 /** 排序键的取值：属性键读属性袋，保留键读块字段与派生量（与保留列键同名同义） */
-function sortValueOf(b: Block, by: string, seed: number | undefined, refCounts: ReadonlyMap<string, number> | undefined): unknown {
+function sortValueOf(
+  hit: { block: Block; ancestors: readonly Block[] },
+  by: string,
+  seed: number | undefined,
+  refCounts: ReadonlyMap<string, number> | undefined,
+): unknown {
+  const b = hit.block
   if (by === 'created') return b.created
   if (by === 'modified') return b.modified
   if (by === 'refCount') return refCounts?.get(b.id) ?? 0
   if (by === 'random') return randomOf(b.id, seed)
+  // 「不在任何一天下」＝缺槽（`undefined` ⇒ 排最后）；空串是值，会让 desc 把它排到最前
+  if (by === '_date') {
+    const d = journalDateInChain(b, hit.ancestors)
+    return d === '' ? undefined : d
+  }
   return b.props?.[by]
 }
 

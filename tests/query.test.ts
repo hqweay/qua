@@ -322,6 +322,28 @@ test('canonicalSpec：role 条件与 sort 键要能存活下来（否则存进 _
   )
 })
 
+test('runQuery：sort 的 `_date` 读**所属的那一天**（日记下的块沿祖先链取日期，不在任何一天下 ⇒ 缺槽最后）', () => {
+  // 任务块自己没有 `_date`（它在日记块上）：按日志时间排＝按它住在哪一天下面排
+  const day = (id: string, date: string, children: Block[]): Block =>
+    b(id, '', { props: { _date: date }, children })
+  const forest: Block[] = [
+    day('d1', '2026-10-19', [b('t1', '前一天的任务')]),
+    day('d2', '2026-10-21', [b('t2', '后一天的任务')]),
+    b('p', '普通页', { props: { _aliases: ['p'], _lists: ['page'] }, children: [b('t3', '不在任何一天下的任务')] }),
+  ]
+  const ids = (hits: { blockId: string }[]): string[] => hits.map((h) => h.blockId)
+  const spec: QuerySpec = { where: { text: '任务' }, sort: [{ by: '_date', dir: 'desc' }] }
+  // desc：后一天 → 前一天 → 没有日期坐标的（缺槽最后，与方向无关）
+  assert.deepEqual(ids(runQuery(spec, { blocks: forest })), ['t2', 't1', 't3'])
+  assert.deepEqual(ids(runQuery({ ...spec, sort: [{ by: '_date', dir: 'asc' }] }, { blocks: forest })), [
+    't1',
+    't2',
+    't3',
+  ])
+  // 两条求值路径同一答案（索引路径收窄候选集之后顺序仍要一致）
+  assertSameHits(spec, forest)
+})
+
 test('runQuery：all / any / not 组合', () => {
   const { blocks, todo } = fixture()
   const openTask = { prop: { id: TASK_STATUS_PROP_ID, eq: false } } as const

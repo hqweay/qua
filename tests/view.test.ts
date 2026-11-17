@@ -374,6 +374,29 @@ test('sortRecords：number 按数值排（10 在 9 后面），空值永远最�
   )
 })
 
+test('sortRecords：`_date` 读**所属的那一天**（行自己不是日记时沿 path 找最近的一天）', () => {
+  const day = (id: string, date: string): Block => mk(id, '', [], { _date: date })
+  const rec = (block: Block, path: readonly Block[]): ViewRecord => ({
+    block,
+    path,
+    title: block.id,
+    tags: [],
+    values: {},
+    derived: undefined,
+  })
+  // 日记下的任务：自己没有 `_date`，住哪一天下面，那一天就是它的日志时间
+  const underD1 = rec(mk('t1', '任务'), [day('d1', '2026-10-19')])
+  const underD2 = rec(mk('t2', '任务'), [day('d2', '2026-10-21')])
+  assert.equal(sortValueOf(underD1, '_date'), '2026-10-19')
+  assert.deepEqual(
+    sortRecords([underD1, underD2, rec(mk('t3', '不在任何一天下'), [])], [{ by: '_date', dir: 'desc' }]).map(
+      (r) => r.block.id,
+    ),
+    ['t2', 't1', 't3'],
+    '没有日期坐标的行缺槽排最后',
+  )
+})
+
 test('sortRecords：相等元素保持来源顺序（稳定），且不产新数组元素', () => {
   const { root, defs } = pageWith5()
   const { kb } = kbOf([root, ...defs])
