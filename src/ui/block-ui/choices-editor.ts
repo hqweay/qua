@@ -35,6 +35,7 @@ import {
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import { renderIcon } from '../../view/icons.ts'
+import { sectionInfo } from '../../view/info.ts'
 
 /** 写入口（由装配层实现成命令；组件只声明「发生了什么」） */
 export interface ChoiceActions {
@@ -134,13 +135,7 @@ export class ChoicesEditor {
       const text = document.createElement('span')
       text.textContent = t('ui.props.choice.gutter')
       // 「不勾选会落到哪」是解释，不是第二个决定：退到说明图标，行上只留开关。
-      const info = document.createElement('span')
-      info.className = 'cc-info'
-      info.dataset.tip = t('ui.props.choice.gutterTitle')
-      info.setAttribute('aria-label', t('ui.props.choice.gutterTitle'))
-      info.tabIndex = 0
-      renderIcon(info, 'lucide:info', 'info', 'sm')
-      gutter.append(box, text, info)
+      gutter.append(box, text, sectionInfo(t('ui.props.choice.gutterTitle')))
       section.appendChild(gutter)
     }
 
@@ -303,13 +298,7 @@ export class ChoicesEditor {
     stext.className = 'cc-label'
     stext.textContent = t('ui.props.choice.checkStatus')
     slabel.append(sbox, stext)
-    const info = document.createElement('span')
-    info.className = 'cc-info'
-    info.dataset.tip = t('ui.props.choice.checkStatusHint')
-    info.setAttribute('aria-label', t('ui.props.choice.checkStatusHint'))
-    info.tabIndex = 0
-    renderIcon(info, 'lucide:info', 'info', 'sm')
-    statusRow.append(slabel, info)
+    statusRow.append(slabel, sectionInfo(t('ui.props.choice.checkStatusHint')))
     map.appendChild(statusRow)
 
     box.appendChild(map)

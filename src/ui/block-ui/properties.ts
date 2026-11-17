@@ -52,6 +52,7 @@ import {
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import { renderIcon } from '../../view/icons.ts'
+import { sectionInfo } from '../../view/info.ts'
 import { ChoicesEditor, type ChoiceActions } from './choices-editor.ts'
 import {
   belongsContent,
@@ -113,21 +114,6 @@ function sectionHead(icon: string, title: string, count?: number): HTMLElement {
     head.appendChild(badge)
   }
   return head
-}
-
-/**
- * 段头上的 ⓘ：解释没有操作权，就不占正文宽度——段头带里一枚小图标，
- * hover / 键盘聚焦出 tip（tip 委托在 overlay），读屏经 `aria-label` 拿到同文。
- * 约束与后果不许走这里：tip 不接「阻止动作」的那类话。
- */
-function sectionInfo(text: string): HTMLElement {
-  const info = document.createElement('span')
-  info.className = 'props-section-info'
-  info.dataset.tip = text
-  info.setAttribute('aria-label', text)
-  info.tabIndex = 0
-  renderIcon(info, 'lucide:info', 'info', 'sm')
-  return info
 }
 
 export interface PropertiesDeps {

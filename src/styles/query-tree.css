@@ -470,6 +470,9 @@ select.qt-value {
   gap: var(--ui-gap-2);
 }
 .vopt-title {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
   font-weight: 600;
   color: var(--ui-text-secondary);
 }

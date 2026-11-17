@@ -1515,12 +1515,17 @@
 .props-section--primary .props-section-count {
   color: var(--ui-accent);
 }
-/* 段头上的 ⓘ：解释不占正文宽度——图标在带里、话在 tip 里（悬停/键盘聚焦出） */
-.props-section-info {
+/* 段头／行上的 ⓘ（共用原语 `ui-info`）：解释不占正文宽度——图标在带里、话在 tip 里（悬停/键盘聚焦出） */
+.ui-info {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: none;
   color: var(--ui-text-tertiary);
   cursor: help;
+}
+.ui-info:hover {
+  color: var(--ui-text-secondary);
 }
 /* 字段行之间画分隔线：一列「标签＋值」靠线扫，不靠留白猜 */
 .prop-fields .prop-row[data-prop-id] {
@@ -3043,17 +3048,6 @@
 }
 .cc-state[data-on='1'] .cc-label {
   color: var(--ui-accent);
-}
-.cc-info {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  color: var(--ui-text-tertiary);
-  cursor: help;
-}
-.cc-info:hover {
-  color: var(--ui-text-secondary);
 }
 /* select 单元格：当前值图标 + 原生下拉。没有图标时不加壳，保持原样 */
 .prop-select {
