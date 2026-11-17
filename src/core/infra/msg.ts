@@ -584,8 +584,9 @@ export const MSG = {
   'ui.mount.newTabName': '这一栏叫什么？',
   'ui.mount.specTitle': '条件（JSON）',
   'ui.mount.localName': '新查询',
-  'ui.mount.materialize': '冻结为独立查询（可改条件、可摘除；不再跟这一栏变）',
-  'ui.mount.lensNote': '条件与排序存在这一栏上；要独立成一份查询就冻结',
+  'ui.mount.materialize': '冻结为独立查询',
+  // 后果说明挂在按钮 tip（动作可撤销、非破坏，不属「必须直说」的硬后果）
+  'ui.mount.materializeTip': '改成独立的一份查询：可改条件、可摘除；不再跟这一栏变',
   'ui.mount.lensReadonlyDay': '过去的日记天只读；这里的筛选只影响这一屏',
   'ui.mount.clearLens': '清除筛选与排序',
   'ui.mount.lensCleared': '已清除筛选与排序；⌘Z 可撤销',

@@ -1566,6 +1566,8 @@ export class MountArea {
       extract.className = 'ui-btn vopt-apply'
       extract.dataset.materialize = '1'
       extract.textContent = t('ui.mount.materialize')
+      // 「冻结」的语义后果（不再跟这一栏变）进 tip：动作可撤销，不是硬后果
+      extract.dataset.tip = t('ui.mount.materializeTip')
       extract.addEventListener('click', () => {
         const at = extract.getBoundingClientRect()
         this.deps.closePopover?.()
@@ -1597,11 +1599,6 @@ export class MountArea {
       })
       root.appendChild(reset)
     }
-
-    const note = document.createElement('p')
-    note.className = 'vopt-note lens-note'
-    note.textContent = t('ui.mount.lensNote')
-    root.appendChild(note)
   }
 
   /** 排序键候选：与查询视图同一组保留键 ＋ 属性定义（只给能排序的） */

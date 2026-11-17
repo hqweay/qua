@@ -169,6 +169,8 @@ export class Layers {
    * 见 `openPopover` 的说明：快照记不住自己指向谁，窗口一变／正文一滚它就失效。
    */
   private popAnchor: (() => DOMRect | null) | null = null
+  /** 浮层内容尺寸监听：长高后重落位（见 openPopover） */
+  private popResize: ResizeObserver | null = null
   /**
    * 这一层从锚点的哪一侧开。缺省 `below`（信息浮层的老形状）；
    * 窄容器（右槽）用 `left`——面板往主内容一侧开，不盖住被调的那一列。
@@ -849,6 +851,10 @@ export class Layers {
     // 窗口尺寸变了要重算（拖窗口边是桌面端常态）；正文滚动同理
     window.addEventListener('resize', this.reflow)
     window.addEventListener('scroll', this.reflow, true)
+    // **浮层自己的内容长高也要重算**：打开之后才出现的控件（比如筛了一下才亮出来的
+    // 「清除」钮）会把底边推出视口——落位只在打开那一刻量一次高，量的是长高前的那份
+    this.popResize = new ResizeObserver(() => this.placePopover())
+    this.popResize.observe(box)
   }
 
   /**
@@ -902,6 +908,8 @@ export class Layers {
   closePopover(): void {
     window.removeEventListener('resize', this.reflow)
     window.removeEventListener('scroll', this.reflow, true)
+    this.popResize?.disconnect()
+    this.popResize = null
     const box = this.popEl
     const close = this.popClose
     this.popClose = null
