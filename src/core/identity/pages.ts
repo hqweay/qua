@@ -42,6 +42,25 @@ export function mkPageBlock(name?: string): Block {
   }
 }
 
+/**
+ * **行住在哪一页**：自己是页就是自己；否则沿祖先链（根→父）从末尾往前找
+ * 最近的 `page` 露面——块不是「放进」那一页的，但它的位置回答了「它住在谁的下面」，
+ * 分组要的正是这个坐标。链上没有页 ⇒ 落**顶层根**（祖先链的第一个）：
+ * 分组永远有落点，「住处不明」不该在界面上出现。链为空且自己不是页 ⇒ `undefined`。
+ *
+ * 与快速过滤的页候选**不是同一个问**，不要合并：过滤问「这行跟这页有关吗」——
+ * 链上**任何一页**都算（嵌套时祖先也算）；这里问「它住哪」——**最近的一页**赢
+ * （与 `journalDateInChain` 的「贴着自己的那一天优先」同一条口径）。
+ */
+export function nearestPageInChain(b: Block, ancestors: readonly Block[]): Block | undefined {
+  if (hasList(b, 'page')) return b
+  for (let i = ancestors.length - 1; i >= 0; i--) {
+    const a = ancestors[i]!
+    if (hasList(a, 'page')) return a
+  }
+  return ancestors[0]
+}
+
 /** 名字解析的窄口：与 `TagLookup` 同形，只取页需要的两项。 */
 export interface PageLookup {
   resolveAlias(name: string): Block | undefined

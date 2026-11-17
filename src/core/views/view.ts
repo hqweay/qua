@@ -338,6 +338,13 @@ export const MODIFIED_COLUMN = 'modified' as const
  */
 export const PATH_COLUMN = 'path' as const
 /**
+ * **所在页列**：这一条记录住在哪一页（派生，见 `nearestPageInChain`）。
+ *
+ * 为什么是保留键而不是属性：页归属是**位置的推论**，不是块上的数据——
+ * 写进属性就等于承认「挪了位置值还在原地」。值是页块 id，段头按 `ref` 一族解析。
+ */
+export const PAGE_COLUMN = 'hostPage' as const
+/**
  * 派生列：值来自**这一次表面的数据**（引用次数／命中词／共同标签），不进 `props`、不落盘。
  *
  * 为什么允许 `ViewRecord` 带一个派生袋而不是把这些做成属性：一个块被引用几次
@@ -922,6 +929,16 @@ export function isMultiValueKey(
   return key === '_tags' || cardinalityOf?.(key) === 'many'
 }
 
+/**
+ * 这个分组键是不是**派生**（位置的推论，值不可写）。
+ *
+ * 看板的拖卡＝「写那格的值」、列尾新建＝「带着值出生」——派生键两样都不成立
+ * （挪块是结构动作，不是改值），与多值键一样不进列分组。
+ */
+export function isDerivedGroupKey(key: string): boolean {
+  return key === PAGE_COLUMN
+}
+
 /** 分组下拉的一个候选（key ＋ 显示名 ＋ 覆盖率 ＋ 是否多值） */
 export interface GroupChoice {
   key: string
@@ -965,6 +982,10 @@ export function groupChoicesOf(
           : (opts.fields.find((f) => f.id === key)?.label ?? key.slice(-6))
       return { key, label, count, total, multi: isMultiValueKey(key, opts.cardinalityOf) }
     })
+    // 「所在页」是结构常量，不依赖这批结果声明过什么 ⇒ 只要有结果就候选
+    // （每行都有住处，覆盖率恒满）。排位跟覆盖率一起走：满覆盖与最高栏并列时排其后。
+    .concat(total > 0 ? [{ key: PAGE_COLUMN, label: t('ui.query.group.pageKey'), count: total, total, multi: false }] : [])
+    .sort((a, b) => b.count - a.count)
 }
 
 /**

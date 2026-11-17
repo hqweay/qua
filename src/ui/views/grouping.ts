@@ -13,7 +13,8 @@
  * 多值键（`isMultiValueKey`）的口径：一块**出现在每个所属组**（fan-out）；
  * 没有值（含空串）⇒ 只进「未设置」。
  */
-import { isMultiValueKey, sortRecords, type ViewConfig, type ViewRecord } from '../../core/index.ts'
+import { isMultiValueKey, isDerivedGroupKey, sortRecords, type ViewConfig, type ViewRecord } from '../../core/index.ts'
+import { nearestPageInChain } from '../../core/identity/pages.ts'
 import { t } from '../../core/infra/msg.ts'
 
 /** 「未设置」桶的内部键。分组键带类型前缀（`s:`／`n:`…），`\u0000` 不会与真值相撞 */
@@ -77,7 +78,8 @@ export function bucketize(
     b.records.push(r)
   }
   for (const r of records) {
-    const raw = r.values[key]
+    // 派生键的值不在属性袋里：现算（位置的推论），不进 `props`、不落盘
+    const raw = isDerivedGroupKey(key) ? nearestPageInChain(r.block, r.path)?.id : r.values[key]
     // 多值字段的旧值可能是单值（定义刚从 one 切成 many）⇒ 读成一个元素，不落进「未设置」
     const values = multi
       ? Array.isArray(raw)

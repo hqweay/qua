@@ -8,7 +8,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkBlock, type ViewRecord } from '../src/core/index.ts'
+import { mkBlock, mkPageBlock, PAGE_COLUMN, type Block, type ViewRecord } from '../src/core/index.ts'
 import { bucketize, bucketLabel, orderBuckets, GROUP_UNSET } from '../src/ui/views/grouping.ts'
 
 const rec = (id: string, values: Record<string, unknown> = {}): ViewRecord => ({
@@ -131,4 +131,26 @@ test('bucketLabel：ref 的值是块 id，走 valueLabel 翻译；非 ref 字段
   }
   assert.equal(bucketLabel(buckets[0]!, 'g', o), '目标块', 'ref 值翻译成名字，不露裸 id')
   assert.equal(bucketLabel(buckets[1]!, 'g', o), '一段普通文本', '解析不了的原样回落（text 组不被误翻）')
+})
+
+test('bucketize：所在页（派生键）——按最近的页分桶，无页祖先落根身份', () => {
+  const outer = mkPageBlock('外')
+  const inner = mkPageBlock('内')
+  const root = mkBlock('根')
+  const withPath = (id: string, path: readonly Block[]) =>
+    ({ ...rec(id), path }) as ViewRecord
+  const { buckets, multi } = bucketize(
+    [withPath('a', [outer, inner]), withPath('b', [outer]), withPath('c', [root])],
+    PAGE_COLUMN,
+    { choices: () => [] },
+  )
+  assert.equal(multi, false, '所在页是单值键，不 fan-out')
+  assert.deepEqual(
+    buckets.map((b) => [b.raw, b.records.map((r) => r.title)]),
+    [
+      [inner.id, ['a']],
+      [outer.id, ['b']],
+      [root.id, ['c']],
+    ],
+  )
 })

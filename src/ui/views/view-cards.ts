@@ -19,6 +19,7 @@ import {
   blockLabel,
   COLOR_PROP,
   groupsByStructure,
+  isDerivedGroupKey,
   openActionOf,
   prop,
   sortRecords,
@@ -157,7 +158,8 @@ export class ViewCards {
      * 卡还留在旧列」就是这条缝。内容变化（高频路径）仍走下面的就地修补。
      */
     const key = view?.groupBy ?? ''
-    if (cardLayoutOf(view) === 'columns' && key !== '') {
+    // 派生键没有列可换（上面已退回说明条）；别让「找不到列」被判成「换桶了」
+    if (cardLayoutOf(view) === 'columns' && key !== '' && !isDerivedGroupKey(key)) {
       const o = this.bucketOpts(view)
       const colOf = new Map<string, string>()
       for (const b of bucketize(this.deps.records(), key, o).buckets) {
@@ -279,6 +281,15 @@ export class ViewCards {
      */
     const o = this.bucketOpts(view)
     const { multi } = bucketize(this.deps.records(), key, o)
+    /**
+     * **派生键也不进列分组**：拖卡与列尾新建都是「写那格的值」，而所在页是
+     * 位置的推论，没有可写的值（挪块是结构动作，回大纲做）。如实说明，不静默。
+     */
+    if (isDerivedGroupKey(key)) {
+      this.multi = true
+      this.root.appendChild(viewNote(t('ui.board.noDerivedGroup')))
+      return
+    }
     if (multi) {
       this.multi = true
       this.root.appendChild(viewNote(t('ui.board.noMultiGroup')))

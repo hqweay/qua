@@ -749,10 +749,11 @@ test('分组候选：只认这批结果里出现过的栏，按覆盖率排序�
   assert.deepEqual(
     choices.map((c) => [c.key, c.count, c.multi]),
     [
+      ['hostPage', 3, false],
       ['p1', 2, false],
       ['_tags', 1, true],
     ],
-    '按覆盖率排序；不在 fields 里的属性键不进候选',
+    '按覆盖率排序；所在页是结构常量恒满覆盖；不在 fields 里的属性键不进候选',
   )
 })
 

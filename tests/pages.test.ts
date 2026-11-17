@@ -7,7 +7,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { ensurePageDirect, hasList, mkPageBlock, mkTagBlock } from '../src/core/index.ts'
+import { ensurePageDirect, hasList, mkBlock, mkPageBlock, mkTagBlock, nearestPageInChain } from '../src/core/index.ts'
 
 test('mkPageBlock：名字进地址、带 page 露面与一个可写的空首子块', () => {
   const p = mkPageBlock('甲')
@@ -47,4 +47,19 @@ test('ensurePageDirect：空名字不建块', () => {
   const forest: ReturnType<typeof mkPageBlock>[] = []
   assert.equal(ensurePageDirect(forest, '   '), null)
   assert.equal(forest.length, 0)
+})
+
+test('nearestPageInChain：自己是页就是自己；最近的页赢（嵌套时贴着自己的优先）', () => {
+  const outer = mkPageBlock('外')
+  const inner = mkPageBlock('内')
+  const row = mkBlock('行')
+  assert.equal(nearestPageInChain(outer, [])?.id, outer.id, '页块自己住自己下面')
+  assert.equal(nearestPageInChain(row, [outer, inner])?.id, inner.id)
+})
+
+test('nearestPageInChain：链上没有页 ⇒ 落顶层根；链为空 ⇒ undefined', () => {
+  const root = mkBlock('根')
+  const row = mkBlock('行')
+  assert.equal(nearestPageInChain(row, [root])?.id, root.id, '分组永远有落点，不出现「未设置」')
+  assert.equal(nearestPageInChain(row, []), undefined)
 })
