@@ -33,8 +33,11 @@ export type TreeRow =
    * 填了 ＝ 带那个标签（标签块 id，与 `{prop}` 同一条「键是 id」纪律）。
    * 「没有标签」＝ 这一行挂「非」（值位仍空）——`_tags` 的 `exists:false` 不映射回这一行
    * （拼回字节不同，`specKey` 会误判「条件变了」），那种形状走通用属性行如实显示。
+   *
+   * `desc: true` ＝ **含子标签**（「算作」）。值位空时它没有意义（问的是「有任意标签」），
+   * 拼回时忽略——开关只在选了标签之后出现。
    */
-  | { kind: 'tag'; value: string }
+  | { kind: 'tag'; value: string; desc?: true }
   /** 正文行。`value: ''` ＝ **有正文**（`{text:{nonempty:true}}`，一条完整条件），填了比包含 */
   | { kind: 'text'; value: string }
   | { kind: 'prop'; field: string; op: DraftOp; value: string }
@@ -272,7 +275,12 @@ export function treeRowOf(node: QueryNode): TreeRow | null {
   if (day) return day
   const stamp = stampRowOf(node)
   if (stamp) return stamp
-  if ('tag' in node) return { kind: 'tag', value: node.tag }
+  if ('tag' in node) {
+    if (typeof node.tag === 'string') return { kind: 'tag', value: node.tag }
+    return node.tag.desc === true
+      ? { kind: 'tag', value: node.tag.id, desc: true }
+      : { kind: 'tag', value: node.tag.id }
+  }
   /**
    * 对象形态＝「有正文」，行的值位就是空的（与 ref/link 行同一条「空值＝存在量化」模式）。
    * 空串是**拒形**（contains '' 恒真）：拆不动返回 null，不许把它拆成空值行——
@@ -398,7 +406,11 @@ export function treeNodeOfRow(row: TreeRow): QueryNode | null {
    * 值位空＝**存在量化**（tag／text 两行；ref/link 早就是这条模式）：空值不是「还没填」，
    * 是「有任意标签／有正文」这条完整条件。「一个都没有」由行上的「非」表达。
    */
-  if (row.kind === 'tag') return row.value.trim() === '' ? { prop: { id: TAGS_PROP, exists: true } } : { tag: row.value }
+  if (row.kind === 'tag') {
+    if (row.value.trim() === '') return { prop: { id: TAGS_PROP, exists: true } }
+    // canonical：只有 `desc:true` 才用对象形态，否则保持存量的字符串写法
+    return row.desc === true ? { tag: { id: row.value, desc: true } } : { tag: row.value }
+  }
   if (row.kind === 'text') return row.value.trim() === '' ? { text: { nonempty: true } } : { text: row.value }
   if (row.kind === 'children') return { children: true }
   if (row.kind === 'ref') {

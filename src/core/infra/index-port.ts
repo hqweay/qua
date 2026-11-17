@@ -848,6 +848,31 @@ export function tagMemberIdsOf(index: Index, tagId: string): string[] {
   return out
 }
 
+/**
+ * 下级**标签** id（含自己）——「算作」的闭包在索引上的那一份。
+ *
+ * 口径与 `identity/tag-tree.ts` 的 `descendantTagIds` 必须一致：沿归属边走全部下级，
+ * 但只把**带 `tag` 露面**的收进来——归属边能连任何块，而「成员」说的仍然是
+ * 「打了这个标签的块」。两级查询路径（纯函数／索引）给两个答案，比没有这个参数更糟。
+ */
+function descendantTagIdsOfIndex(index: Index, tagId: string): Set<string> {
+  const out = new Set<string>()
+  const seen = new Set<string>()
+  const stack = [tagId]
+  while (stack.length > 0) {
+    const id = stack.pop()!
+    if (seen.has(id)) continue
+    seen.add(id)
+    const b = index.blocks.get(id)
+    if (b && hasList(b, 'tag')) out.add(id)
+    // 归属边：from＝下级、to＝上级 ⇒ `relations.get(id)` 是 id 的直接下级
+    for (const e of index.relations.get(id) ?? []) {
+      if (e.kind === 'belongsTo' && !seen.has(e.from)) stack.push(e.from)
+    }
+  }
+  return out
+}
+
 /** 某个目标上每种关系出现了几次（UI 的 kind chips 用；`inline` 按出现次数计） */
 export function relationKindCounts(index: Index, targetId: string): Map<RelationKind, number> {
   const out = new Map<RelationKind, number>()
@@ -1019,8 +1044,12 @@ function tagsByIndex(node: QueryNode, index: Index): Set<string> {
     else if ('near' in n) visit(n.near)
     else if ('tag' in n) {
       // 条件按**标签块 id**存；与纯函数路径同一条守卫：id 要解析得到活着的标签块
-      const tag = lookupBlock(index, n.tag)
-      if (tag && hasList(tag, 'tag')) for (const id of tagMemberIdsOf(index, tag.id)) out.add(id)
+      const id = typeof n.tag === 'string' ? n.tag : n.tag.id
+      const desc = typeof n.tag === 'string' ? false : n.tag.desc === true
+      const tag = lookupBlock(index, id)
+      if (!tag || !hasList(tag, 'tag')) return
+      const tags = desc ? descendantTagIdsOfIndex(index, tag.id) : [tag.id]
+      for (const tid of tags) for (const mid of tagMemberIdsOf(index, tid)) out.add(mid)
     }
   }
   visit(node)

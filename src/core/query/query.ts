@@ -15,6 +15,8 @@ import { MARK_KINDS, normMarks, plainText, type Content, type Marks } from '../m
 import { walkForest } from '../model/walk.ts'
 import { findPath } from '../model/tree.ts'
 import { tagIdsOf, tagMemberIds } from '../identity/tags.ts'
+import { membersOf } from '../identity/tag-tree.ts'
+import { buildAdjacency, type Adjacency } from '../relations/hierarchy.ts'
 import { dayStartMs, journalDate, journalDays, shiftISO } from '../identity/journal.ts'
 import { displayTextOf } from '../identity/alias.ts'
 import { fieldTableOf, isQueryableField, readField, type FieldTable } from '../props/props.ts'
@@ -95,8 +97,16 @@ export type QueryNode =
    * `tagMention` 边，「分类」的问题由 `{tag}` 原子答，两问不混。
    */
   | { ref: string | RefTarget }
-  /** 带某个标签的块：值是**标签块 id**（与 `{prop}` 同一条「键是 id」纪律——标签改名不影响查询语义）；id 解析不到活着的标签块就是空集 */
-  | { tag: string }
+  /**
+   * 带某个标签的块：值是**标签块 id**（与 `{prop}` 同一条「键是 id」纪律——标签改名不影响查询语义）；
+   * id 解析不到活着的标签块就是空集。
+   *
+   * 两态：字符串＝只算**直读**归属（存量查询的写法，语义不变）；
+   * 对象＋`desc:true` ＝ **含子标签**（「算作」：沿下级标签展开成员）。
+   * 同一个问题（「这个标签有哪些成员」）在库里有**一条**判据
+   * （`identity/tag-tree.ts` 的 `membersOf`）；查询默认问的是更窄的那一问。
+   */
+  | { tag: string | { id: string; desc?: true } }
   /** 正文包含某串；**空串拒形**（contains 空串恒真，见 `isQueryNode`），对象形态＝「有正文」 */
   | { text: string | { nonempty: true } }
   /**
@@ -1025,7 +1035,21 @@ export function isQueryNode(raw: unknown): raw is QueryNode {
     if (typeof ref.kind === 'string') return isRefKind(ref.kind)
     return Array.isArray(ref.kind) && ref.kind.every((k) => isRefKind(k))
   }
-  if ('tag' in n) return typeof n.tag === 'string'
+  /**
+   * 标签条件两态：字符串＝**只算直读**（存量写法不变）；对象＝带 `desc:true` 的
+   * 「含子标签」（算作，与同类栏／引用候选同一份闭包）。只认这一个键，未知键拒形——
+   * 「写歪了但看起来成立」的条件比没写更危险。
+   */
+  if ('tag' in n) {
+    if (typeof n.tag === 'string') return true
+    const tg = n.tag
+    if (!tg || typeof tg !== 'object' || Array.isArray(tg)) return false
+    const keys = Object.keys(tg)
+    if (keys.some((k) => k !== 'id' && k !== 'desc')) return false
+    const obj = tg as { id?: unknown; desc?: unknown }
+    if (typeof obj.id !== 'string' || obj.id === '') return false
+    return obj.desc === undefined || obj.desc === true
+  }
   /**
    * 正文条件两态：字符串＝包含，**空串拒形**（`includes('')` 恒真——一条写歪的条件
    * 看起来像「这条条件成立」，与 `{mark:{}}` 同一条守卫；「有正文」有对象形态，不用它）；
@@ -1108,7 +1132,12 @@ export function canonicalNode(n: QueryNode): QueryNode {
       },
     }
   }
-  if ('tag' in n) return { tag: n.tag }
+  if ('tag' in n) {
+    // 对象形态只在 `desc:true` 时保留（canonical：缺省不带 `desc`），其余压回字符串——
+    // 同一个语义不许两种字节，`specKey` 靠这条判「条件变了没有」
+    if (typeof n.tag === 'string') return { tag: n.tag }
+    return n.tag.desc === true ? { tag: { id: n.tag.id, desc: true } } : { tag: n.tag.id }
+  }
   if ('text' in n) return typeof n.text === 'string' ? { text: n.text } : { text: { nonempty: true } }
   if ('children' in n) return { children: true }
   if ('mark' in n) return { mark: normMarks(n.mark) ?? {} }
@@ -1274,9 +1303,12 @@ export function resolveSelfSpec(spec: QuerySpec, host: Block, forest: readonly B
       return { prop: { id: n.prop.id, eq: value } }
     }
     if ('tag' in n) {
-      if (n.tag !== SELF) return { tag: n.tag }
+      const id = typeof n.tag === 'string' ? n.tag : n.tag.id
+      const desc = typeof n.tag === 'string' ? false : n.tag.desc === true
+      if (id !== SELF) return { tag: n.tag }
       if (hostTagIds.length === 0) return NEVER
-      return { any: hostTagIds.map((id) => ({ tag: id })) }
+      // `$self` 是对每个宿主标签分别展开的：`desc` 跟着每一支走，不在这里丢
+      return { any: hostTagIds.map((tid) => (desc ? { tag: { id: tid, desc: true } } : { tag: tid })) }
     }
     if ('text' in n) {
       if (n.text !== SELF) return { text: n.text }
@@ -1315,6 +1347,8 @@ const NEVER: QueryNode = { any: [] }
  */
 function collectTags(node: QueryNode, forest: readonly Block[]): Set<string> {
   const out = new Set<string>()
+  /** 「含子标签」那几支共用的邻接表（`membersOf` 缺省每次现建一张） */
+  let adj: Adjacency | undefined
   const visit = (n: QueryNode): void => {
     if ('all' in n) n.all.forEach(visit)
     else if ('any' in n) n.any.forEach(visit)
@@ -1324,8 +1358,17 @@ function collectTags(node: QueryNode, forest: readonly Block[]): Set<string> {
     else if ('near' in n) visit(n.near)
     else if ('tag' in n) {
       // 条件里的值就是**标签块 id**；id 解析不到活着的标签块 ⇒ 空集（那个标签不存在，自然没有块带它）—— 不是「当文本搜」
-      const tag = findById(forest, n.tag)
-      if (tag && hasList(tag, 'tag')) for (const id of tagMemberIds(tag.id, forest)) out.add(id)
+      const id = typeof n.tag === 'string' ? n.tag : n.tag.id
+      const desc = typeof n.tag === 'string' ? false : n.tag.desc === true
+      const tag = findById(forest, id)
+      if (!tag || !hasList(tag, 'tag')) return
+      if (!desc) {
+        for (const m of tagMemberIds(tag.id, forest)) out.add(m)
+        return
+      }
+      // 「含子标签」不在这里另写一套闭包：成员判据只有 `tag-tree.ts` 那份（同类栏／引用候选同源）
+      adj ??= buildAdjacency(forest)
+      for (const m of membersOf(tag.id, forest, adj)) out.add(m)
     }
   }
   visit(node)

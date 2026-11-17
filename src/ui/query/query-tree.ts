@@ -571,6 +571,9 @@ export class QueryTree {
     el.append(kind)
     switch (row.kind) {
       case 'tag':
+        el.append(this.textRowControls(row))
+        el.append(...this.descControls(row))
+        break
       case 'text':
         el.append(this.textRowControls(row))
         break
@@ -647,6 +650,30 @@ export class QueryTree {
     chip.dataset.qt = 'value'
     chip.textContent = text
     return chip
+  }
+
+  /**
+   * 标签行的「含子标签」开关。只在**选了标签之后**出现：值位空问的是「有任意标签」，
+   * 那句话没有子标签可含。样式复用「非」那枚开关（同一处视觉语言，不新造控件）。
+   */
+  private descControls(row: Extract<TreeRow, { kind: 'tag' }>): HTMLElement[] {
+    if (row.value.trim() === '' || row.value === SELF) return []
+    const label = document.createElement('label')
+    label.className = 'qt-not qt-desc'
+    label.dataset.tip = t('ui.query.tagDescHint')
+    const box = document.createElement('input')
+    box.type = 'checkbox'
+    box.dataset.qt = 'desc'
+    box.checked = row.desc === true
+    box.addEventListener('change', () => {
+      if (box.checked) row.desc = true
+      else delete row.desc
+      this.paint()
+    })
+    const text = document.createElement('span')
+    text.textContent = t('ui.query.tagDesc')
+    label.append(box, text)
+    return [label]
   }
 
   private textRowControls(row: Extract<TreeRow, { kind: 'tag' | 'text' }>): HTMLElement {

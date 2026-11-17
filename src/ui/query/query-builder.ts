@@ -163,7 +163,9 @@ function rowSentence(row: TreeRow, deps: ConditionTextDeps): string {
       if (row.value === '') return t('ui.query.chip.tagAny')
       // 条件按**标签块 id**存：显示名现解析；解析不到说「已删除」，不把 id 摆给用户
       const name = deps.tagLabel?.(row.value) ?? row.value
-      return name === '' ? t('ui.query.tagGone') : `#${name}`
+      if (name === '') return t('ui.query.tagGone')
+      // 「含子标签」必须读得出来：不加这句，两枚 chip 同形不同义
+      return row.desc === true ? t('ui.query.chip.tagDesc', { name }) : `#${name}`
     }
     case 'text':
       // 值位空＝「有正文」，与 ref/link 行同一条「空值＝存在量化」

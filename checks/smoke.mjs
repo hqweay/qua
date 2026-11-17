@@ -31436,6 +31436,79 @@ await check('T326 `@` 新建页行的第二落点：⌥↵ 建普通块（宿主
   return '⌥↵ ⇒ 普通块落在宿主下一兄弟位＋一枚引用；页没建、浮层关'
 })
 
+/* ------------------------------------------------- 条件树：含子标签 */
+
+await check('T330 条件树的「含子标签」：desc 读回、取消压回字符串；chip 读得出这一档', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  // 造层级：先让库里有 #人物 / #演员，再把 #演员 归到 #人物 下（算作边）
+  const tagIds = await page.evaluate(() => {
+    const bs = window.__qua.blocks().filter((b) => b.roles.length === 0 && b.children === 0 && b.text.length > 2)
+    window.__qua.focusBlock(bs[0].id, 0)
+    window.__qua.invoke('core.editor/insert-tag', { tag: '人物' })
+    window.__qua.invoke('core.editor/insert-tag', { tag: '演员' })
+    const all = window.__qua.allBlocks().filter((x) => x.roles.includes('tag'))
+    return Object.fromEntries(all.map((x) => [x.text, x.id]))
+  })
+  assert(tagIds['人物'] && tagIds['演员'], `应有两个标签块：${JSON.stringify(tagIds)}`)
+  await page.evaluate(
+    ({ child, parent }) => window.__qua.invoke('core.belongs-to/add', { childId: child, parentId: parent }),
+    { child: tagIds['演员'], parent: tagIds['人物'] },
+  )
+
+  // 种子查询改成「带 #人物（含子标签）」，条件树摊开
+  const qid = await openSeedQuery(page)
+  assert(qid !== '', '前置：种子里应有一个查询块')
+  await page.evaluate(
+    ({ q, tag }) =>
+      window.__qua.invoke('core.query/set-spec', { blockId: q, spec: { where: { tag: { id: tag, desc: true } } } }),
+    { q: qid, tag: tagIds['人物'] },
+  )
+  await page.waitForTimeout(400)
+  await ensureTree(page)
+
+  // ① 树上读得出这一档：开关在、且是勾上的（模型 → UI 的方向）
+  const row = await page.evaluate(() => {
+    const el = document.querySelector('.queryview-tree .qt-row[data-qt-row="tag"]')
+    const box = el?.querySelector('[data-qt="desc"]')
+    return { text: el?.textContent ?? '', hasBox: Boolean(box), checked: box?.checked ?? null }
+  })
+  assert(row.hasBox, `标签行应有「含子标签」开关：${JSON.stringify(row)}`)
+  assert(row.checked === true, `库里存的 desc:true 应让开关是勾上的：${JSON.stringify(row)}`)
+
+  // ② 收起态 chip 必须说出这一档（否则两枚「#人物」同形不同义）
+  await page.locator('.queryview-tree [data-qt="close"]').click()
+  await page.waitForTimeout(250)
+  const chipOn = await page.evaluate(
+    () => document.querySelector('.queryview-filters [data-query-chip="summary"]')?.textContent ?? '',
+  )
+  assert(chipOn.includes('含子标签'), `收起态 chip 要写出「含子标签」：${JSON.stringify(chipOn)}`)
+
+  // ③ 取消勾选 ⇒ 应用后压回字符串形态（只算直读）；chip 不再带那一句（UI → 模型的方向）
+  await page.locator('.queryview-filters [data-query-chip="summary"]').click()
+  await page.waitForTimeout(250)
+  await page.locator('.queryview-tree .qt-row[data-qt-row="tag"] [data-qt="desc"]').uncheck()
+  await page.waitForTimeout(150)
+  await page.locator('.queryview-tree [data-qt="apply"]').click()
+  await page.waitForTimeout(400)
+  const after = await page.evaluate((q) => {
+    const where = window.__qua.__editor.store.find(q)?.props?._query?.where
+    return { tag: where?.tag ?? null }
+  }, qid)
+  assert(after.tag === tagIds['人物'], `取消后条件应压回字符串形态（只算直读）：${JSON.stringify(after)}`)
+  await page.locator('.queryview-tree [data-qt="close"]').click()
+  await page.waitForTimeout(250)
+  const chipOff = await page.evaluate(
+    () => document.querySelector('.queryview-filters [data-query-chip="summary"]')?.textContent ?? '',
+  )
+  assert(!chipOff.includes('含子标签'), `取消后 chip 不该再说含子标签：${JSON.stringify(chipOff)}`)
+
+  await ctx.close()
+  return `开关读回 desc:true → chip「${chipOn}」；取消后条件回字符串形态`
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

@@ -140,6 +140,38 @@ test('runQuery：标签条件只命中带标签的块', () => {
   assert.deepEqual(hits.map((h) => h.blockId), ['a', 'b', 'd1', 'e', 'j1b'])
 })
 
+test('runQuery：`{tag}` 默认只算直读；`desc:true` 含子标签（算作）', () => {
+  /**
+   * 同一个问题（「这个标签有哪些成员」）在库里只有一条判据：
+   * `identity/tag-tree.ts` 的 `membersOf`（同类栏与引用候选都问它）。
+   * 查询默认问的是更窄的「直读」；`desc` 把宽的那一问也变成可问的。
+   */
+  const people = mkTagBlock('人物')
+  const actor = mkTagBlock('演员')
+  // 「算作」＝一条归属边（子 → 父）：演员归在人物下
+  actor.props = { ...(actor.props ?? {}), _belongsTo: [people.id] }
+  const byActor = b('x', '演员的块', { props: { _tags: [actor.id] } })
+  const byPeople = b('y', '人物的块', { props: { _tags: [people.id] } })
+  const plain = b('z', '没有标签')
+  const blocks = [byActor, byPeople, plain, people, actor]
+  const ids = (where: QueryNode): string[] => runQuery({ where }, { blocks }).map((h) => h.blockId)
+  assert.deepEqual(ids({ tag: people.id }), ['y'], '字符串形态＝直读，存量查询语义不变')
+  assert.deepEqual(ids({ tag: { id: people.id, desc: true } }), ['x', 'y'], 'desc:true ＝ 含下级标签的成员')
+  assert.deepEqual(ids({ tag: actor.id }), ['x'], '看下级标签自己时，直读仍是直读')
+  // 只加参数、不改判定：索引路径与纯函数路径必须同解
+  assertSameHits({ where: { tag: { id: people.id, desc: true } } }, blocks)
+})
+
+test('`{tag}` 两态验形：对象只认 id 与 desc:true，写歪的拒形', () => {
+  assert.equal(isQueryNode({ tag: 't1' }), true)
+  assert.equal(isQueryNode({ tag: { id: 't1' } }), true, '对象不带 desc 合法（归一化会压回字符串）')
+  assert.equal(isQueryNode({ tag: { id: 't1', desc: true } }), true)
+  assert.equal(isQueryNode({ tag: { id: '' } }), false, '空 id 命中不了任何块')
+  assert.equal(isQueryNode({ tag: { id: 't1', desc: false } }), false, 'canonical 里没有 false 这一档')
+  assert.equal(isQueryNode({ tag: { id: 't1', decs: true } } as unknown as QueryNode), false, '拼错的键不是「差不多对」')
+  assert.equal(isQueryNode({ tag: { desc: true } } as unknown as QueryNode), false)
+})
+
 test('runQuery：`{up:{is:$self}}` ＝「这一块之下」（原 scope:subtree 的条件形状）', () => {
   const { blocks, todo } = fixture()
   const hits = runQuery({ where: { all: [{ up: { is: 'p1' } }, { tag: todo.id }] } }, { blocks })

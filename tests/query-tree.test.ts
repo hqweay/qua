@@ -288,6 +288,17 @@ test('存在量化行往返：tag 空→_tags exists、text 空→{nonempty}、c
   roundTrip({ where: { prop: { id: '_tags', exists: false } } })
 })
 
+test('标签行的「含子标签」往返：desc:true 保对象形态，缺省压回字符串', () => {
+  roundTrip({ where: { tag: { id: 't1', desc: true } } })
+  // 非 canonical 写法（对象但不带 desc）归一化后与字符串形态同字节——同一语义不许两种写法
+  const loose = { where: { tag: { id: 't1' } } } as unknown as QuerySpec
+  assert.deepEqual(canonicalSpec(loose), { where: { tag: 't1' } })
+  assert.deepEqual(specOfTree(treeOfSpec(loose)!), { where: { tag: 't1' } })
+  assert.deepEqual(treeNodeOfRow({ kind: 'tag', value: 't1', desc: true }), { tag: { id: 't1', desc: true } })
+  // 值位空时开关没有意义：拼回仍是「有任意标签」
+  assert.deepEqual(treeNodeOfRow({ kind: 'tag', value: '', desc: true }), { prop: { id: '_tags', exists: true } })
+})
+
 test('存在量化行是完整条件：空值行不进「未完成」（应用不禁用），拒形拆不动', () => {
   assert.deepEqual(treeNodeOfRow({ kind: 'tag', value: '' }), { prop: { id: '_tags', exists: true } })
   assert.deepEqual(treeNodeOfRow({ kind: 'text', value: '' }), { text: { nonempty: true } })
