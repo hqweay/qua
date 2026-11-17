@@ -67,7 +67,12 @@
   color: var(--ui-text-tertiary);
   opacity: var(--ui-quiet);
 }
-.blk-alias-btn:hover,
+/* 悬停是中性的「指针在这儿」；焦点是「圈定了它」——两态分色，不再共用 accent-soft */
+.blk-alias-btn:hover {
+  color: var(--ui-text);
+  background: var(--ui-bg-hover);
+  opacity: 1;
+}
 .blk-alias-btn:focus-visible {
   color: var(--ui-text);
   background: var(--ui-accent-soft);
@@ -762,7 +767,7 @@
   color: var(--ui-text-tertiary);
 }
 .props-add:hover {
-  background: var(--ui-accent-soft);
+  background: var(--ui-bg-hover);
   color: var(--ui-text);
 }
 /* 行结构走 `.ui-row`（原语）；这里只给属性区自己的密度与字号 */
@@ -919,7 +924,7 @@
 }
 .prop-ref-change:hover {
   color: var(--ui-text);
-  background: var(--ui-accent-soft);
+  background: var(--ui-bg-hover);
 }
 /* ref 值的 inline 岛宿主：岛根 display:contents 已全局（不产生盒子），
    宿主只接排版——内容是目标块的正文投影（深度 1，子树不展开），

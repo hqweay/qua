@@ -693,6 +693,6 @@
   color: var(--ui-text-tertiary);
 }
 .settings-key-reset:hover {
-  background: var(--ui-accent-soft);
+  background: var(--ui-bg-hover);
   color: var(--ui-text);
 }

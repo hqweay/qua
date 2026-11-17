@@ -43,7 +43,7 @@
   line-height: 1;
 }
 .dock-btn:hover {
-  background: var(--ui-accent-soft);
+  background: var(--ui-bg-hover);
   color: var(--ui-text);
 }
 /* 顶栏里的槽按钮与窗口级按钮同一档命中区：一排图标读起来才是一排 */
@@ -198,7 +198,8 @@
   color: var(--ui-text-secondary);
 }
 .dock-tile-main:hover {
-  background: var(--ui-accent-soft);
+  /* 中性叠色不换底：卡底是 raised＋影，悬停沉底色会读作按下；变 accent 则与选中分不开 */
+  background: var(--ui-bg-hover);
   color: var(--ui-text);
 }
 /* 快捷小卡：图标下挂一两个字，让一排同图标的格子能彼此区分；全名仍在悬停提示里 */
@@ -244,7 +245,7 @@
 }
 .dock-tile-x:hover {
   color: var(--ui-text);
-  background: var(--ui-accent-soft);
+  background: var(--ui-bg-hover);
 }
 /*
  * 块卡头：卡片**自己的 chrome**，不是「块」——块在 body 里由 `block-renderers` 画。
@@ -428,7 +429,7 @@
 }
 .dock-resize:hover,
 body[data-dock-resizing='1'] .dock-resize {
-  background: var(--ui-accent-soft);
+  background: var(--ui-bg-hover);
 }
 body[data-dock-left='closed'] #dock-left .dock-resize,
 body[data-dock-right='closed'] #dock-right .dock-resize {

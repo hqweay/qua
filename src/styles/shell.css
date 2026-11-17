@@ -78,7 +78,8 @@ button.ghost {
   color: var(--ui-text-secondary);
 }
 button.ghost:hover {
-  background: var(--ui-accent-soft);
+  /* 原语走中性悬停：ghost 是普通动作钮，accent-soft 是选中/激活的语义，不是「可以点」 */
+  background: var(--ui-bg-hover);
   color: var(--ui-text);
 }
 input {
