@@ -65,7 +65,7 @@
   padding: 0 var(--ui-gap-1);
   border-radius: var(--ui-radius-sm);
   color: var(--ui-text-tertiary);
-  opacity: 0.55;
+  opacity: var(--ui-quiet);
 }
 .blk-alias-btn:hover,
 .blk-alias-btn:focus-visible {
@@ -110,7 +110,7 @@
 .blk-context-sep {
   flex: 0 0 auto;
   color: var(--ui-text-tertiary);
-  opacity: 0.6;
+  opacity: var(--ui-quiet);
 }
 /*
   **来源说明**（`Doc.rootNotes`）：这一行为什么出现在这一屏里。
@@ -392,10 +392,10 @@
  * 悬停仍由下一条抬到 0.9 —— 顺序不能反：同特异性下后者赢，反过来悬停就抬不亮了。
  */
 .blk[data-collapsed='1'] .fold {
-  opacity: 0.55;
+  opacity: var(--ui-quiet);
 }
 .blk:hover .fold {
-  opacity: 0.9;
+  opacity: var(--ui-soft);
 }
 @media (prefers-reduced-motion: reduce) {
   .blk .fold {
@@ -450,7 +450,7 @@
   /* 身份色走行上的局部槽（--identity-c，由渲染层按 colorOf 写 token 引用）；
      没有配色的块回落中性——无颜色是合法态。色环（≥2 有色标签）也是这一槽的值 */
   background: var(--identity-c, var(--ui-text-tertiary));
-  opacity: 0.6;
+  opacity: var(--ui-quiet);
   transition: opacity 120ms ease, transform 120ms ease;
 }
 /* 悬停：抓手替换点（`.grip` 默认隐藏，见下） */
@@ -469,7 +469,7 @@
   cursor: grab;
 }
 .blk .marker:hover .grip {
-  opacity: 0.85;
+  opacity: var(--ui-soft);
 }
 @media (prefers-reduced-motion: reduce) {
   .blk .marker::before,
@@ -508,10 +508,10 @@
 }
 /* 拖动中：整行变淡（`editor.ts` 加 `.drag-src`） */
 .blk.drag-src {
-  opacity: 0.35;
+  opacity: var(--ui-faint);
 }
 #editor.dragging .blk .handle {
-  opacity: 0.5;
+  opacity: var(--ui-quiet);
 }
 /*
  * **身份图标**：块标**之后**的一枚附加信息（这块是标签 / 是任务）。
@@ -613,7 +613,6 @@
 .blk .tx[data-ph]::before {
   content: attr(data-ph);
   color: var(--ui-text-tertiary);
-  opacity: 0.75;
   pointer-events: none;
 }
 /*
@@ -676,7 +675,7 @@
   opacity: 0;
 }
 .blk[data-type='core/divider'] .marker:hover .grip {
-  opacity: 0.85;
+  opacity: var(--ui-soft);
 }
 /*
  页 / 日记 / 被聚焦块作为**正文第一行**时更大一档（它是这一屏的「身份」，但不叫标题）。
@@ -711,7 +710,7 @@
   border-top: 1px solid var(--ui-border-subtle);
 }
 .blk.drag-src {
-  opacity: 0.35;
+  opacity: var(--ui-faint);
 }
 .blk[data-drop='before'] {
   box-shadow: inset 0 2px 0 0 var(--ui-accent);
@@ -725,7 +724,7 @@
   border-radius: var(--ui-radius-sm);
 }
 #editor.dragging .blk .handle {
-  opacity: 0.5;
+  opacity: var(--ui-quiet);
 }
 #editor.drop-end {
   box-shadow: inset 0 -2px 0 0 var(--ui-accent);
@@ -1221,7 +1220,7 @@
 }
 /* 拖拽重排的进行中态：拖动的那枚压暗（落点预览由 DOM 实时搬位表达，不再加线） */
 .props-tag[data-dragging] {
-  opacity: 0.4;
+  opacity: var(--ui-faint);
 }
 /*
   **只有名字可点**（`×` 不在里面）：与正文 chip 同一口径，点名字＝打开那个标签块。
@@ -1240,7 +1239,7 @@
   padding: 0;
   font: inherit;
   color: inherit;
-  opacity: 0.6;
+  opacity: var(--ui-quiet);
   cursor: pointer;
 }
 .props-tag-x:hover {
@@ -2106,7 +2105,7 @@
  * 与卡片/块的落点用同一个语义色，形状按排布方向选。
  */
 .mount-tabwrap[data-dragging='1'] {
-  opacity: 0.4;
+  opacity: var(--ui-faint);
 }
 .mount-tabwrap[data-drop-before='1'] {
   box-shadow: inset 2px 0 0 0 var(--ui-accent);
@@ -2419,7 +2418,7 @@
   display: inline-flex;
   align-items: center;
   vertical-align: -0.14em;
-  opacity: 0.7;
+  opacity: var(--ui-soft);
   font-size: 0.9em;
 }
 .atom-image {
@@ -2454,7 +2453,7 @@
 .asset-chip-ico {
   display: inline-flex;
   align-items: center;
-  opacity: 0.8;
+  opacity: var(--ui-soft);
 }
 .asset-chip-label {
   font-size: 0.93em;
@@ -2528,7 +2527,7 @@
 .atom.dangling {
   background: transparent;
   border: 1px dashed var(--ui-accent);
-  opacity: 0.85;
+  opacity: var(--ui-soft);
 }
 
 /*
@@ -2570,7 +2569,7 @@
      未配色的标签不吃这套槽，维持 accent 现状——色是叠加通道，不是唯一载体 */
   background: var(--chip-bg, var(--ui-accent-soft));
   color: var(--chip-c, var(--ui-accent));
-  opacity: 0.8;
+  opacity: var(--ui-soft);
   font-size: 0.93em;
   line-height: 1.5;
   vertical-align: baseline;
@@ -2589,7 +2588,7 @@
   cursor: grab;
 }
 .tag-chip[data-dragging] {
-  opacity: 0.4;
+  opacity: var(--ui-faint);
 }
 
 /* ：块选区（跨块拖拽/全选块）。
@@ -2609,9 +2608,6 @@
 */
 .sec[data-shell] {
   min-height: 100%;
-}
-.sec[data-shell] .shell-row .tx[data-ph]::before {
-  opacity: 0.7;
 }
 .sec[data-shell] .shell-row {
   cursor: text;
@@ -2736,7 +2732,7 @@
   height: var(--ui-marker-halo-size);
   border-radius: var(--ui-radius-pill);
   background: var(--identity-ring);
-  opacity: 0.45;
+  opacity: var(--ui-quiet);
 }
 .blk .marker.marker-query::before,
 .blk .marker.marker-schema::before,
@@ -2924,7 +2920,7 @@
   color: var(--ui-text);
 }
 .choice-x:disabled {
-  opacity: 0.35;
+  opacity: var(--ui-faint);
   cursor: default;
 }
 /* 选项图标：预览 + 选择入口；没图标时画虚线框（「这里可以选一个」） */

@@ -198,7 +198,7 @@ body[data-platform]:not([data-platform='darwin']) #topbar {
   color: var(--ui-text);
 }
 .topbar-btn:disabled {
-  opacity: 0.35;
+  opacity: var(--ui-faint);
   cursor: default;
   background: none;
 }

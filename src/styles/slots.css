@@ -220,7 +220,7 @@
 }
 /* 命令不可用：置灰但**不移除**——位置稳定优先于可用性过滤 */
 .dock-tile[data-missing='1'] .dock-tile-main {
-  opacity: 0.45;
+  opacity: var(--ui-quiet);
   box-shadow: none;
 }
 .dock-tile-x {
@@ -289,7 +289,7 @@
 .dock-card-grip {
   flex: 0 0 auto;
   color: var(--ui-text-tertiary);
-  opacity: 0.55;
+  opacity: var(--ui-quiet);
 }
 .dock-card[data-quiet-head='1'] > .dock-card-head > .dock-card-title {
   opacity: 0;

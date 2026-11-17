@@ -190,7 +190,7 @@
   opacity: 0;
 }
 .center-tab[data-active='1'] .center-tab-close {
-  opacity: 0.45;
+  opacity: var(--ui-quiet);
 }
 .center-tab:hover .center-tab-close,
 .center-tab-close:focus-visible {

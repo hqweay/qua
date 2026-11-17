@@ -88,7 +88,7 @@
    挂上关系短语（在…之下／其下有…／链上有…）才是真信息，恢复常色。hover/focus 亮起来，保证可发现。 */
 .qt-dir {
   color: var(--ui-text-tertiary);
-  opacity: 0.45;
+  opacity: var(--ui-quiet);
 }
 .qt-dir[data-set='1'] {
   color: var(--ui-text-secondary);
@@ -401,7 +401,7 @@ select.qt-value {
   background: var(--ui-bg-hover);
 }
 .qt-head .qt-apply[disabled] {
-  opacity: 0.45;
+  opacity: var(--ui-faint);
   cursor: default;
 }
 
@@ -562,7 +562,7 @@ select.qt-value {
 }
 
 .qsp-ops button:disabled {
-  opacity: 0.35;
+  opacity: var(--ui-faint);
   cursor: default;
 }
 

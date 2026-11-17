@@ -464,7 +464,7 @@
   content: '—';
   font-size: var(--ui-fs-xs);
   color: var(--ui-text-tertiary);
-  opacity: 0.45;
+  opacity: var(--ui-quiet);
 }
 /* 块操作：块标（打开这一块）／＋（加一项，仅表头）／×（删这一列/项）。
    容器只管排；**可见性由共用那一条决定**（见文件末尾「块操作按钮的显隐」）：
@@ -505,7 +505,7 @@
   cursor: pointer;
 }
 .lt-add {
-  opacity: 0.45;
+  opacity: var(--ui-quiet);
   /* 父容器关掉了 pointer-events（隐藏的块标不该吃掉正文点击）；这个动作是常显的 */
   pointer-events: auto;
 }
@@ -760,7 +760,7 @@ button.queryview-chip:hover {
   color: var(--ui-text-tertiary);
   cursor: pointer;
   /* 常显但压低：它是这一列唯一「能让它长大」的动作（与结构映射表的 ＋ 同一档） */
-  opacity: 0.45;
+  opacity: var(--ui-quiet);
 }
 .vcol-head:hover .vcol-add {
   opacity: 1;
@@ -782,7 +782,7 @@ button.queryview-chip:hover {
   text-align: left;
   color: var(--ui-text-tertiary);
   cursor: pointer;
-  opacity: 0.55;
+  opacity: var(--ui-quiet);
   border-radius: var(--ui-radius-sm);
 }
 .vcol-new:hover {
@@ -951,7 +951,7 @@ button.queryview-chip:hover {
   font-size: var(--ui-fs-sm);
   line-height: var(--ui-lh-tight);
   cursor: grab;
-  opacity: 0.35;
+  opacity: var(--ui-quiet);
   user-select: none;
 }
 .vcard:hover .vcard-grip {
@@ -1001,7 +1001,7 @@ button.queryview-chip:hover {
 }
 /* 前后补白：在格子外那几天仍然画（用户要看到「上月末」的那种连续感） */
 .vc-day[data-other='1'] {
-  opacity: 0.45;
+  opacity: var(--ui-quiet);
 }
 /* 今天有描边：一个没有「当前」的网格里，第一眼要找的就是今天 */
 .vc-day[data-today='1'] {

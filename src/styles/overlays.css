@@ -101,7 +101,7 @@
   background: var(--ui-accent-soft);
 }
 .layer-item[disabled] {
-  opacity: 0.45;
+  opacity: var(--ui-faint);
   cursor: default;
 }
 .layer-ico {
@@ -129,7 +129,6 @@
   font-size: var(--ui-fs-xs);
   font-family: var(--ui-font-mono);
   max-width: 58%;
-  opacity: 0.75;
 }
 .layer-key {
   flex: 0 0 auto;
@@ -608,7 +607,7 @@
   color: var(--ui-text-tertiary);
 }
 .alias-del:disabled {
-  opacity: 0.35;
+  opacity: var(--ui-faint);
   cursor: not-allowed;
 }
 .alias-add {
@@ -714,7 +713,7 @@
   color: var(--ui-text-secondary);
 }
 .fields-add:disabled {
-  opacity: 0.4;
+  opacity: var(--ui-faint);
   cursor: not-allowed;
 }
 .fields-hint {
@@ -938,8 +937,7 @@
   font-weight: var(--ui-fw-medium);
 }
 .lightbox-sub {
-  color: var(--ui-text-inverse);
-  opacity: 0.7;
+  color: var(--ui-text-inverse-dim);
   font-size: var(--ui-fs-xs);
   white-space: nowrap;
 }
