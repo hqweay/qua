@@ -2661,6 +2661,20 @@ await check('T194b 引用含属性引用：kind 过滤可切；标签页默认�
   assert(lens.group, '派生表格的镜头面板应有分组节')
   assert(lens.views.includes('table') && lens.views.includes('outline'), `镜头面板应能切回大纲：${JSON.stringify(lens.views)}`)
   assert(lens.extract, '派生栏的镜头面板应有「提取为查询」动作')
+
+  // 看法切换不收层（与面板里其它选项同一节奏）：弹层还在、选中态跟上、身体切回大纲
+  await page.locator('.popover.lenspop [data-derived-view="outline"]').click()
+  await page.waitForTimeout(300)
+  const back = await page.evaluate(() => ({
+    open: Boolean(document.querySelector('.popover.lenspop')),
+    active: document.querySelector('.popover.lenspop [data-derived-view][data-active="1"]')?.dataset.derivedView ?? '',
+    rows: document.querySelectorAll('#editor .mount .blk[data-depth="0"]').length,
+    tableRows: document.querySelectorAll('#editor .mount-view .tv-row').length,
+  }))
+  assert(back.open, '看法切换后镜头面板应保持打开（换着看不用反复开层）')
+  assert(back.active === 'outline', `选中态应跟到新看法：${JSON.stringify(back)}`)
+  assert(back.rows > 0 && back.tableRows === 0, `身体应切回大纲：${JSON.stringify(back)}`)
+
   await page.locator('.popover.lenspop [data-derived-slice]').click()
   await page.waitForTimeout(200)
   const sliceTree = await page.evaluate(() => ({

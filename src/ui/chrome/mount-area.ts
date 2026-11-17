@@ -1575,9 +1575,10 @@ export class MountArea {
       b.textContent = t(labels[k])
       b.addEventListener('click', () => {
         if (k === kind) return
-        // 看法切换会换整个身体：选完就收层，把屏幕交回结果
-        this.deps.closePopover?.()
+        // 与面板里其它选项同一节奏：看法换了身体也不收层——弹层自己重画跟上，
+        // 锚点每次现查（抬头重画、触发按钮被换掉都不碍），换着看不用反复开层
         this.deps.setDerivedKind?.(host, entry.source, k)
+        repaint()
       })
       views.appendChild(b)
     }
