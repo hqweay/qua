@@ -15,9 +15,14 @@
 **在线体验**：[qua.leay.net](https://qua.leay.net/) —— 打开就能写，不用安装。
 数据保存在你自己的浏览器里，不会上传到任何服务器。
 
-**macOS 桌面版**（Apple Silicon，SQLite 存储、全文搜索，功能更完整）：
-到 [Releases](https://github.com/hqweay/qua/releases) 下载最新的 `.dmg`，
-拖进「应用程序」即可。安装包没有签名，首次打开若被系统拦下，右键 →「打开」。
+**macOS 桌面版**（Apple Silicon）：到 [Releases](https://github.com/hqweay/qua/releases)
+下载最新的 `.dmg`，拖进「应用程序」即可。安装包没有签名，首次打开若被系统拦下，右键 →「打开」。
+
+**Windows 桌面版**（x64）：到 [Releases](https://github.com/hqweay/qua/releases)
+下载最新的 `.exe` 安装程序，双击安装即可。安装包没有签名，SmartScreen 若拦下，
+点「更多信息」→「仍要运行」。
+
+两个桌面版都是 SQLite 存储、全文搜索，功能比浏览器版完整。
 
 ### 关于 beta
 
