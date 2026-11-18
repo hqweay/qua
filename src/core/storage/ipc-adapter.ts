@@ -126,9 +126,10 @@ export function createIpcAdapter(bridge: LibraryBridge): StoragePort {
       if (res.status === 'empty') return { status: 'empty' }
       if (res.status === 'ok' && res.rows) {
         // 补回当前版本：库里不存版本（唯一真相是 user_version）
+        // 模型直出：不再 `JSON.stringify → JSON.parse`（两份全量拷贝；整库字符串有长度上限）
         return {
           status: 'ok',
-          raw: JSON.stringify(withVersion(rowsToWorkspace(res.rows))),
+          model: withVersion(rowsToWorkspace(res.rows)),
           search: searchOf(res.rows),
         }
       }

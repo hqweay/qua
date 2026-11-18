@@ -20,7 +20,7 @@ import type { Change, CommitBatch, LoadResult, StoragePort } from './port.ts'
 import type { Op } from '../kb/types.ts'
 import { changesOf } from '../kb/changes.ts'
 import { META_KEYS } from '../identity/library.ts'
-import { parseWorkspace, type ParseResult, type Workspace } from './shape.ts'
+import { parseWorkspace, parseWorkspaceValue, type ParseResult, type Workspace } from './shape.ts'
 import { rowWritesFor, workspaceToRowWrites } from './db-rows.ts'
 import type { FtsCommitPlan, FtsCommitSource, FtsLoadState } from './fts-port.ts'
 
@@ -70,7 +70,8 @@ export function judge(r: LoadResult): LoadedWorkspace {
   if (r.status === 'storage-error') return { status: 'storage-error', error: r.error }
   if (r.status === 'incompatible') return { status: 'storage-error', error: new Error(r.reason) }
   if (r.status === 'empty') return { status: 'empty' }
-  const parsed = parseWorkspace(r.raw)
+  // 行后端直出对象（省掉整库 JSON 的两份拷贝）；字节后端仍走 JSON.parse 那一份
+  const parsed = 'model' in r ? parseWorkspaceValue(r.model) : parseWorkspace(r.raw)
   return r.search === undefined ? parsed : { ...parsed, search: r.search }
 }
 

@@ -12,10 +12,11 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Block } from '../src/core/index.ts'
 import type { Op } from '../src/core/kb/types.ts'
-import { BlockStore, fingerprint, mkBlock, mkPropDef, mkTagBlock, rebuild, setValue, TASK_STATUS_PROP_ID, writeBlockContent } from '../src/core/index.ts'
+import { BlockStore, ensureIndexLists, fingerprint, indexFieldTable, mkBlock, mkPropDef, mkTagBlock, rebuild, setValue, TASK_STATUS_PROP_ID, writeBlockContent } from '../src/core/index.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
 import { seedWorkspace } from '../src/core/infra/seed.ts'
 import { plainText, textRuns, type Anno, type RefRun } from '../src/core/model/runs.ts'
+import { assertDerivedCaches } from './cache-probe.ts'
 
 const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({
   id,
@@ -580,7 +581,26 @@ test('索引随 tx 增量修补：任意一批写之后，增量结果与全量�
     // 与全量重建比：`rebuild` 是纯函数，直接拿森林算一份对照（不动 store 的索引）
     const full = fingerprint(rebuild(store.blocks))
     assert.equal(incremental, full, `第 ${i + 1} 笔写之后：索引增量修补必须与全量重建一致`)
+    assertDerivedCaches(store.index, store.blocks, `第 ${i + 1} 笔写之后`)
   }
   // tx 之后不作废索引：刚插入的块**不经重建**就在索引里（否则每次写都退化成全量重建）
   assert.equal(store.index.blocks.has(added.id), true)
+})
+
+test('派生缓存：内容/标签归属/别名/anno 写不重建列表与字段表（打字路径不许退化成 O(N)）', () => {
+  const { kb, store } = fixture()
+  const index = store.index
+  const lists = ensureIndexLists(index, store.blocks)
+  indexFieldTable(index, store.blocks)
+  const before = { ...index.cacheProbe }
+
+  // 这些写都不改「哪些块是页/标签/定义」，也不改声明与 kind
+  kb.tx((tx) => tx.patch('c1', (b) => { writeBlockContent(b, textRuns('只改正文')) }))
+  kb.tx((tx) => tx.setTags('c2', ['t1']))
+  kb.tx((tx) => tx.setAliases('p2', ['页面二', '别名二']))
+  kb.tx((tx) => tx.setAnnos('c1', [anno('q1')]))
+
+  assert.deepEqual(index.cacheProbe, before, '内容写不许触发列表/字段表重建')
+  assert.equal(ensureIndexLists(index, store.blocks), lists, '列表数组保持同一份（没有换引用）')
+  assert.equal(indexFieldTable(index, store.blocks), index.fields, '字段表保持同一份')
 })

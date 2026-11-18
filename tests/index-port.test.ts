@@ -27,6 +27,7 @@ import { BlockStore } from '../src/core/model/store.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
 import { applyOps as applyForestOps, diff } from '../src/core/kb/diff.ts'
 import type { Tx } from '../src/core/kb/types.ts'
+import { assertDerivedCaches } from './cache-probe.ts'
 
 const b = (id: string, text: string, extra: Partial<Block> = {}): Block => ({ id, content: textRuns(text), children: [], ...extra })
 
@@ -70,6 +71,8 @@ function txStep(kb: MemoryKb, store: BlockStore, idx: Index, fn: (tx: Tx) => voi
     fingerprint(rebuild(store.blocks)),
     `这批 op（${r.ops.length} 条）走增量后必须与全量重建逐字节一致`,
   )
+  // 派生缓存不是第二份真相：每批之后都必须与「从森林现算」一致
+  assertDerivedCaches(next, store.blocks, `这批 op（${r.ops.length} 条）`)
   return next
 }
 

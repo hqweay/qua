@@ -12,6 +12,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { WORKSPACE_VERSION } from '../../src/core/infra/workspace.ts'
 import { createIpcAdapter, IPC_BACKEND, withVersion, type LibraryBridge } from '../../src/core/storage/ipc-adapter.ts'
+import { judge } from '../../src/core/storage/index.ts'
 import type { RawLibraryRows } from '../../src/core/storage/db-rows.ts'
 
 /** 一片最小的行集：一个块 ＋ 库级两格（不带 version，库本来就不存它） */
@@ -72,7 +73,8 @@ test('load：行 → 模型（行里有 `parent`／`left`，读出来是 `childr
     .then((r) => {
       assert.equal(r.status, 'ok')
       if (r.status !== 'ok') return
-      const ws = JSON.parse(r.raw)
+      assert.ok('model' in r, '行后端直出模型：不再构造整库 JSON（两份全量拷贝 + 字符串长度上限）')
+      const ws = 'model' in r ? r.model : JSON.parse(r.raw)
       assert.equal(ws.version, WORKSPACE_VERSION, '装载时补回当前版本')
       assert.equal(ws.blocks.length, 1, '只有一个顶层根')
       assert.deepEqual(ws.blocks[0].children.map((x: { id: string }) => x.id), ['a', 'b'], '`left` 是源，`children` 是投影')
@@ -84,6 +86,24 @@ test('load：行 → 模型（行里有 `parent`／`left`，读出来是 `childr
 test('load：库里没有内容 ⇒ empty（不是 corrupt，也不是「库坏了」）', async () => {
   const { bridge } = fakeBridge({ status: 'empty' })
   assert.deepEqual(await createIpcAdapter(bridge).load(), { status: 'empty' })
+})
+
+test('judge：model 与 raw 两条载荷同解；版本门禁仍分型', async () => {
+  const { bridge } = fakeBridge({ status: 'ok', rows: rows() })
+  const r = await createIpcAdapter(bridge).load()
+  assert.equal(r.status, 'ok')
+  if (r.status !== 'ok') return
+  const model = 'model' in r ? r.model : JSON.parse(r.raw)
+  const fromModel = judge({ status: 'ok', model })
+  const fromRaw = judge({ status: 'ok', raw: JSON.stringify(model) })
+  assert.equal(fromModel.status, 'ok')
+  assert.equal(fromRaw.status, 'ok')
+  assert.deepEqual(fromModel, fromRaw, '两条路必须过同一份版本门禁与形状校验')
+  assert.deepEqual(judge({ status: 'ok', model: { ...model, version: WORKSPACE_VERSION + 1 } }), {
+    status: 'too-new',
+    version: WORKSPACE_VERSION + 1,
+  })
+  assert.deepEqual(judge({ status: 'ok', model: { ...model, blocks: [] } }), { status: 'corrupt', reason: 'shape' })
 })
 
 test('load：没有库 ⇒ incompatible（不是 corrupt：这是「这个窗口没有库」）', async () => {

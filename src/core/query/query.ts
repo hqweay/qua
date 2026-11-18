@@ -523,12 +523,18 @@ export function evaluateQuery(
   roots: readonly Block[],
   env: QueryEnv,
   forest: readonly Block[] = roots,
+  /**
+   * 可选**候选集**：必须是真命中的超集（如顶层单标签的成员集）。
+   * 它只跳过不可能命中的块——顺序、真实祖先链、去重、`excludeIds` 仍由下面的 walk 决定。
+   */
+  candidates?: ReadonlySet<string>,
 ): QueryHit[] {
   const matcher = createMatcher(forest, env)
   const hits: { blockId: string; path: string[]; block: Block; ancestors: readonly Block[] }[] = []
   /** 收窄过的候选集里，同一块可能既当「后代」又当「候选根」被走到——一条结果只许出现一次 */
   const seen = new Set<string>()
   walk(roots, (b, ancestors) => {
+    if (candidates && !candidates.has(b.id)) return
     if (env.excludeIds?.has(b.id)) return
     if (!matcher.matches(spec.where, b)) return
     if (seen.has(b.id)) return
@@ -1199,13 +1205,15 @@ export function runQuery(spec: QuerySpec, input: QueryRunInput): QueryHit[] {
   // 含 `$self` 却没有宿主 ⇒ 空结果。**不退回全库**：那会把「看不懂的指代」变成一次大范围命中，
   // 而用户看到的只是「结果不对」，没有任何线索指向条件。
   if (!host && usesSelf(spec.where)) return []
-  const q = host ? resolveSelfSpec(spec, host, input.blocks) : spec
+  // 字段表建一次传两处：`$self` 的 `{prop}` 分支与环境读同一份（旧写法会扫两趟）
+  const fields = fieldTableOf(input.blocks)
+  const q = host ? resolveSelfSpec(spec, host, input.blocks, fields) : spec
   const refTables = usesRef(q.where) ? refTablesOfForest(input.blocks) : undefined
   const env: QueryEnv = {
     refSources: refTables?.sources ?? NO_REF_SOURCES,
     ...(refTables && usesRefAny(q.where) ? { refFroms: refTables.froms } : {}),
     tags: collectTags(q.where, input.blocks),
-    fields: fieldTableOf(input.blocks),
+    fields,
     ...(input.today ? { today: input.today } : {}),
     ...(input.excludeIds && input.excludeIds.length > 0 ? { excludeIds: new Set(input.excludeIds) } : {}),
   }
@@ -1295,10 +1303,10 @@ export function resolveTodayBase(spec: QuerySpec, hostDate: string | undefined, 
  * ⚠️ `{tag}` 按**标签块 id**存（与 `_tags` 同一条口径），宿主的标签 id 直接进 `any`；
  *    森林仍要传（`eq:'$self'` 的字段表按需建）。
  */
-export function resolveSelfSpec(spec: QuerySpec, host: Block, forest: readonly Block[]): QuerySpec {
+export function resolveSelfSpec(spec: QuerySpec, host: Block, forest: readonly Block[], provided?: FieldTable): QuerySpec {
   const hostTagIds = tagIdsOf(host)
-  /** 字段表按需建：只有 `eq:'$self'` 需要它，普通条件不该为它付一次全库扫描 */
-  let fields: FieldTable | undefined
+  /** 字段表按需建：只有 `eq:'$self'` 需要它；调用方已有缓存时传进来，不重复扫两趟 */
+  let fields: FieldTable | undefined = provided
   const node = (n: QueryNode): QueryNode => {
     if ('all' in n) return { all: n.all.map(node) }
     if ('any' in n) return { any: n.any.map(node) }

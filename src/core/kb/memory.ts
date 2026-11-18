@@ -18,13 +18,12 @@
  */
 import { backrefBlocks, backrefsOf, type BackrefBlock, type BackrefSource } from '../relations/backrefs.ts'
 import type { RelationEdge } from '../relations/relations.ts'
-import { aliasesOf, DELETED_AT_PROP, hasList, isDeleted, type Block } from '../model/model.ts'
-import { findInForest, trashOf } from '../model/tree.ts'
+import { aliasesOf, DELETED_AT_PROP, isDeleted, type Block } from '../model/model.ts'
+import { findInForest } from '../model/tree.ts'
 import { walkForest } from '../model/walk.ts'
 import { findTagByName, tagsOf as tagsOfBlock } from '../identity/tags.ts'
-import { isPropDef } from '../props/props.ts'
 import { findJournalDay } from '../identity/journal.ts'
-import { blockIdByAlias, blockMatchesSpec, indexPathOf, queryByIndex, relationsFrom, relationsTo } from '../infra/index-port.ts'
+import { blockIdByAlias, blockMatchesSpec, ensureIndexLists, indexPathOf, queryByIndex, relationsFrom, relationsTo } from '../infra/index-port.ts'
 import {
   declaredFields,
   fieldRowsWithParent,
@@ -168,11 +167,7 @@ export class MemoryKb implements KbClient {
     // **库里的定义块**（引擎合成定义不进：它不是库对象，没有定义页；
     // 重名校验、新建集合、清单都以这一份为准）。行构造处的 defs 表吃
     // `allPropDefs`（含引擎），两份清单各自回答自己的问题。
-    const out: Block[] = []
-    walkForest(this.store.blocks, (b) => {
-      if (isPropDef(b)) out.push(b)
-    })
-    return out
+    return this.indexLists().propDefs
   }
 
   declaredFieldsOf(id: string): readonly Block[] {
@@ -181,23 +176,20 @@ export class MemoryKb implements KbClient {
   }
 
   pages(): readonly Block[] {
-    const out: Block[] = []
-    walkForest(this.store.blocks, (b) => {
-      if (hasList(b, 'page')) out.push(b)
-    })
-    return out
+    return this.indexLists().pages
   }
 
   tags(): readonly Block[] {
-    const out: Block[] = []
-    walkForest(this.store.blocks, (b) => {
-      if (hasList(b, 'tag')) out.push(b)
-    })
-    return out
+    return this.indexLists().tags
   }
 
   trash(): readonly Block[] {
-    return trashOf(this.store.blocks)
+    return this.indexLists().trash
+  }
+
+  /** 派生全局列表的缓存入口（见 `ensureIndexLists`：按 op 标脏、读时重建） */
+  private indexLists() {
+    return ensureIndexLists(this.store.index, this.store.blocks)
   }
 
   purgeTrash(ids: readonly string[]): readonly Op[] {

@@ -134,8 +134,9 @@ export function createDeviceStore(port: StoragePort, library?: LibrarySettingsPo
         port.load(),
         library ? library.get(LIBRARY_STATE_KEY) : Promise.resolve(null),
       ])
-      // 空 / 别的后端留下 / 存储不可用：都是「没有可用的设备状态」，不是错误
-      if (r.status !== 'ok') {
+      // 空 / 别的后端留下 / 存储不可用：都是「没有可用的设备状态」，不是错误。
+      // 设备状态只走 bytes 端口（localStorage）⇒ 只认 `raw`；`model` 是库内容的载荷。
+      if (r.status !== 'ok' || !('raw' in r)) {
         const fallback = defaultDevice()
         if (!library) return fallback
         // 库侧仍在：那四格照库侧来，设备格回默认

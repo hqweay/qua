@@ -22,6 +22,7 @@
 import type { Change, ChangeKind, Op } from '../kb/types.ts'
 import type { RowWrite } from './db-rows.ts'
 import type { FtsLoadState } from './fts-port.ts'
+import type { Workspace } from './shape.ts'
 
 export type { Change, ChangeKind }
 
@@ -95,6 +96,14 @@ export type LoadResult =
        */
       search?: FtsLoadState
     }
+  /**
+   * **行后端的模型直出**：`rowsToWorkspace` 已经拼好了对象，不要再
+   * `JSON.stringify → JSON.parse` 走一遍——那是两份全量拷贝，而且整库 JSON 在
+   * 1–2M 块处会撞 V8 的字符串长度上限（不是慢，是打不开）。
+   *
+   * 两条 `ok` 的版本门禁与形状校验必须同一份（`parseWorkspaceValue`）。
+   */
+  | { status: 'ok'; model: Workspace; search?: FtsLoadState }
   /** 从没保存过 */
   | { status: 'empty' }
   /**

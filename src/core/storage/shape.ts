@@ -316,6 +316,17 @@ export function parseWorkspace(raw: string | null): ParseResult {
   } catch {
     return { status: 'corrupt', reason: 'parse' }
   }
+  return parseWorkspaceValue(value)
+}
+
+/**
+ * **已经解析成对象**的库 → 校验结果。
+ *
+ * 行后端的 `rowsToWorkspace` 直接产出对象，不必先 `JSON.stringify` 再 `JSON.parse`
+ * （两份全量拷贝；整库字符串在 1–2M 块处还有长度上限）。两条路必须过同一份版本门禁
+ * 与形状校验——否则「行库」和「字节库」对同一份坏数据会给出两个答案。
+ */
+export function parseWorkspaceValue(value: unknown): ParseResult {
   if (!value || typeof value !== 'object') return { status: 'corrupt', reason: 'shape' }
   const ws = value as Partial<Workspace> & { version?: unknown }
   if (typeof ws.version !== 'number' || !Number.isInteger(ws.version)) return { status: 'corrupt', reason: 'shape' }

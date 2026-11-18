@@ -16,7 +16,17 @@ import type { Anno } from '../model/runs.ts'
 import { walkForest } from '../model/walk.ts'
 import { normalizeAlias } from '../identity/alias.ts'
 import { journalDate, isJournal } from '../identity/journal.ts'
-import { fieldTableOf, propKindOf, type PropKind } from '../props/props.ts'
+import {
+  CARDINALITY_PROP,
+  CHECK_PROP,
+  DEFAULT_PROP,
+  FIELD_DEFS_PROP,
+  USE_PROP,
+  fieldTableOf,
+  propKindOf,
+  type FieldTable,
+  type PropKind,
+} from '../props/props.ts'
 import {
   collectPropKinds,
   isRefKind,
@@ -124,6 +134,30 @@ export interface Index {
    * （否则「全量 == 增量」这条等式对它是瞎的）。
    */
   annos: Map<string, { hostId: string; anno: Anno }>
+  /**
+   * **派生全局列表**（森林先序）：页／标签／字段定义／回收站。
+   *
+   * 它们只在「成员／顺序／声明」变化时变，内容写在热路径上——所以按 op 标脏、
+   * 读时重建，而不是每次现扫。`null` ＝ 需重建（`ensureIndexLists` 的判据）。
+   *
+   * ⚠️ 不能用 `tags`／`propKinds` 表反推：`tags` 只收「有别名」的标签，同名非首个也不在
+   * values 里；列表是「森林里有哪些块」，必须按 `hasList`／`isPropDefBlock` 走一趟。
+   */
+  lists: {
+    pages: Block[] | null
+    tags: Block[] | null
+    propDefs: Block[] | null
+    trash: Block[] | null
+  }
+  /**
+   * **字段读取表**缓存（`fieldTableOf` 的两趟全林扫描）。
+   *
+   * 消费者是查询（`queryByIndex`／`blockMatchesSpec`）；内容写不失效，只随
+   * 标签声明／定义 kind／缺省值／用途／基数与标签/定义的结构变化失效。
+   */
+  fields: FieldTable | null
+  /** 派生缓存的重建计数（只增、不清零；给「打字不许触发重建」这类断言一个读数） */
+  cacheProbe: { listsBuilds: number; fieldBuilds: number }
 }
 
 function emptyIndex(): Index {
@@ -140,6 +174,9 @@ function emptyIndex(): Index {
     all: new Map(),
     parentOfAll: new Map(),
     annos: new Map(),
+    lists: { pages: null, tags: null, propDefs: null, trash: null },
+    fields: null,
+    cacheProbe: { listsBuilds: 0, fieldBuilds: 0 },
   }
 }
 
@@ -163,6 +200,73 @@ export function rebuild(forest: readonly Block[]): Index {
   for (const b of forest) indexSubtree(idx, b, b.id, null)
 
   return idx
+}
+
+/* ------------------------------------------------------------ 派生缓存 */
+
+/** `ensureIndexLists` 的返回值：四张表都保证已建好（`Index.lists` 的可空是「未建」标记） */
+export interface IndexLists {
+  pages: Block[]
+  tags: Block[]
+  propDefs: Block[]
+  trash: Block[]
+}
+
+/**
+ * **按需重建派生列表**（页／标签／字段定义／回收站）。
+ *
+ * 只填 `null` 的那些：一次 `block.exist` 只需重建 trash 时，已建好的 pages/tags 不换数组
+ * （换数组会让调用方手里的快照凭空过期，而它们本来没变）。
+ *
+ * 口径与 `MemoryKb` 原来那四个方法逐字一致：可见 `walkForest` 收前三张；`includeDeleted`
+ * 一趟 + `isDeleted` 收回收站——顺序都是森林先序，回收站与 `trashOf(forest)` 同解。
+ */
+export function ensureIndexLists(index: Index, forest: readonly Block[]): IndexLists {
+  const lists = index.lists
+  const wantPages = lists.pages === null
+  const wantTags = lists.tags === null
+  const wantDefs = lists.propDefs === null
+  const wantTrash = lists.trash === null
+  if (!wantPages && !wantTags && !wantDefs && !wantTrash) return lists as IndexLists
+
+  index.cacheProbe.listsBuilds++
+  if (wantPages) lists.pages = []
+  if (wantTags) lists.tags = []
+  if (wantDefs) lists.propDefs = []
+
+  if (wantPages || wantTags || wantDefs) {
+    walkForest(forest, (b) => {
+      if (wantPages && hasList(b, 'page')) lists.pages!.push(b)
+      if (wantTags && hasList(b, 'tag')) lists.tags!.push(b)
+      if (wantDefs && isPropDefBlock(b)) lists.propDefs!.push(b)
+    })
+  }
+
+  if (wantTrash) {
+    const trash: Block[] = []
+    walkForest(
+      forest,
+      (b) => {
+        if (isDeleted(b)) trash.push(b)
+      },
+      { includeDeleted: true },
+    )
+    lists.trash = trash
+  }
+
+  return lists as IndexLists
+}
+
+/**
+ * **字段读取表**缓存：`fieldTableOf` 是两趟全林（标签声明 ＋ 定义），查询/条件树会反复要。
+ *
+ * 只在成员/声明/顺序变化时由 `applyOps` 置 null；内容写不失效。
+ */
+export function indexFieldTable(index: Index, forest: readonly Block[]): FieldTable {
+  if (index.fields !== null) return index.fields
+  index.cacheProbe.fieldBuilds++
+  index.fields = fieldTableOf(forest)
+  return index.fields
 }
 
 /** 把一条关系边挂进两张表（同一条对象，两个方向共用） */
@@ -212,6 +316,63 @@ function refreshAllRelations(idx: Index): void {
 }
 
 /**
+ * **子树里有没有身份块／被删块**——决定派生列表要不要失效。
+ *
+ * 走 `includeDeleted`：可见子树里也可能挂着被单独软删的后代（标签/定义进了回收站），
+ * 移动/插入这棵子树会改变 trash 的顺序。普通单块插入只访问一块，成本可忽略。
+ */
+function invalidateForSubtree(index: Index, block: Block): void {
+  let pages = false
+  let tags = false
+  let defs = false
+  let trash = false
+  walkForest(
+    [block],
+    (b) => {
+      if (hasList(b, 'page')) pages = true
+      if (hasList(b, 'tag')) tags = true
+      if (isPropDefBlock(b)) defs = true
+      if (isDeleted(b)) trash = true
+    },
+    { includeDeleted: true },
+  )
+  if (pages) index.lists.pages = null
+  if (tags) {
+    index.lists.tags = null
+    index.fields = null
+  }
+  if (defs) {
+    index.lists.propDefs = null
+    index.fields = null
+  }
+  if (trash) index.lists.trash = null
+}
+
+/** 属性槽 → 派生缓存失效（只标脏，读时重建）。 */
+function invalidateForProp(index: Index, name: string): void {
+  if (name === LISTS_PROP) {
+    index.lists.pages = null
+    index.lists.tags = null
+    index.fields = null
+    return
+  }
+  if (name === '_kind') {
+    index.lists.propDefs = null
+    index.fields = null
+    return
+  }
+  if (
+    name === FIELD_DEFS_PROP ||
+    name === DEFAULT_PROP ||
+    name === USE_PROP ||
+    name === CHECK_PROP ||
+    name === CARDINALITY_PROP
+  ) {
+    index.fields = null
+  }
+}
+
+/**
  * **按 op 增量应用**（一批 op ＝ 一个事务的那批）。
  *
  * 修补的单位是 **op**（`MemoryKb.tx` 产出的持久化操作序列），不是 `Change`：
@@ -254,7 +415,26 @@ export function applyOps(index: Index, ops: readonly Op[], forest: readonly Bloc
         if (op.op === 'upsert') {
           if (op.value.parent !== undefined && !index.blocks.has(op.id)) fresh.add(op.id)
           applyBlockUpsert(index, op.id, op.value, forest)
-        } else applyBlockExist(index, op.id, op.state, forest)
+          /**
+           * 结构变化才可能动派生列表：普通插块（没有 page/tag/def 后代）不失效，
+           * 否则每次 Enter 都会把下一次 `pages()/tags()` 打回 O(N)。
+           */
+          if (op.value.parent !== undefined) {
+            const b = index.blocks.get(op.id) ?? index.all.get(op.id)
+            if (b) invalidateForSubtree(index, b)
+          }
+        } else {
+          applyBlockExist(index, op.id, op.state, forest)
+          /**
+           * 删除/恢复/清除会带走或带回整棵子树：里面可能有页/标签/定义，
+           * 也可能改变回收站的成员与顺序。低频动作，保守全失效。
+           */
+          index.lists.pages = null
+          index.lists.tags = null
+          index.lists.propDefs = null
+          index.lists.trash = null
+          index.fields = null
+        }
         break
       case 'prop':
         /**
@@ -265,6 +445,9 @@ export function applyOps(index: Index, ops: readonly Op[], forest: readonly Bloc
          *    曾经它确实在这里，而那时「软删」与「清除」共用一个 `block.delete`，
          *    撤销一次插入再重开会让块从回收站冒出来 —— 一个格只能有一种地址。
          */
+        // 派生缓存失效必须放在 `fresh` 跳过之前：新标签/新定义的 `_lists`/`_kind`
+        // 可能就在同一笔 genesis 里，而 `fresh` 会让下面的修补整段跳过。
+        invalidateForProp(index, op.name)
         if (fresh.has(op.block) && (op.name === ALIASES_PROP || op.name === LISTS_PROP || op.name === '_tags' || op.name === '_date' || op.name === '_kind')) break
         if (op.name === ALIASES_PROP || op.name === LISTS_PROP) {
           refreshTagsClaim(index, op.block, forest)
@@ -917,7 +1100,7 @@ export function queryByIndex(
   opts: { selfId?: string; excludeIds?: readonly string[]; today?: string } = {},
 ): QueryHit[] {
   const { q, env, memberRoots } = specContextOf(index, forest, spec, opts)
-  return evaluateQuery(q, memberRoots, env, forest)
+  return evaluateQuery(q, memberRoots, env, forest, exactTagCandidates(q.where, index))
 }
 
 /**
@@ -937,12 +1120,14 @@ function specContextOf(
    */
   const host = opts.selfId !== undefined ? lookupBlock(index, opts.selfId) : undefined
   if (!host && usesSelf(spec.where)) return { q: { where: { any: [] } }, env: neverEnv(), memberRoots: [] }
-  const q = host ? resolveSelfSpec(spec, host, forest) : spec
+  // 字段表是两趟全林：查询/条件树会反复要，走 Index 上的缓存；`$self` 的 `{prop}` 分支也吃这一份
+  const fields = indexFieldTable(index, forest)
+  const q = host ? resolveSelfSpec(spec, host, forest, fields) : spec
   const env: QueryEnv = {
     refSources: usesRef(q.where) ? refSourcesByIndex(index) : () => undefined,
     ...(usesRefAny(q.where) ? { refFroms: refFromsByIndex(index) } : {}),
     tags: tagsByIndex(q.where, index),
-    fields: fieldTableOf(forest),
+    fields,
     ...(opts.today ? { today: opts.today } : {}),
     ...(opts.excludeIds && opts.excludeIds.length > 0 ? { excludeIds: new Set(opts.excludeIds) } : {}),
   }
@@ -1032,6 +1217,14 @@ export function tagIdByName(index: Index, name: string): string | undefined {
   return index.tags.get(normalizeAlias(name))
 }
 
+/** 一个标签（含 `desc` 闭包）的成员 id 集合 */
+function tagMemberSetOf(tag: Block, desc: boolean, index: Index): Set<string> {
+  const out = new Set<string>()
+  const tags = desc ? descendantTagIdsOfIndex(index, tag.id) : [tag.id]
+  for (const tid of tags) for (const mid of tagMemberIdsOf(index, tid)) out.add(mid)
+  return out
+}
+
 /** `tag` 条件的目标块集合 —— id 解析成标签块，再查**成员表** */
 function tagsByIndex(node: QueryNode, index: Index): Set<string> {
   const out = new Set<string>()
@@ -1048,12 +1241,27 @@ function tagsByIndex(node: QueryNode, index: Index): Set<string> {
       const desc = typeof n.tag === 'string' ? false : n.tag.desc === true
       const tag = lookupBlock(index, id)
       if (!tag || !hasList(tag, 'tag')) return
-      const tags = desc ? descendantTagIdsOfIndex(index, tag.id) : [tag.id]
-      for (const tid of tags) for (const mid of tagMemberIdsOf(index, tid)) out.add(mid)
+      for (const mid of tagMemberSetOf(tag, desc, index)) out.add(mid)
     }
   }
   visit(node)
   return out
+}
+
+/**
+ * 顶层恰好是一个 `{tag}` 时的**精确候选集**；其他形状返回 `undefined`（不做收窄）。
+ *
+ * 这是候选集的第一小步：单标签条件的命中集就是成员集，用它当 `evaluateQuery` 的过滤器
+ * 不改变任何语义（顺序／路径／去重仍由 walk 决定），只把 matcher 的调用数从整库降到成员数。
+ * 不碰 `all/any/not` 的组合语义——那种收窄要等先序 rank 那一轮。
+ */
+function exactTagCandidates(node: QueryNode, index: Index): ReadonlySet<string> | undefined {
+  if (!('tag' in node)) return undefined
+  const id = typeof node.tag === 'string' ? node.tag : node.tag.id
+  const desc = typeof node.tag === 'string' ? false : node.tag.desc === true
+  const tag = lookupBlock(index, id)
+  if (!tag || !hasList(tag, 'tag')) return new Set()
+  return tagMemberSetOf(tag, desc, index)
 }
 
 /**
