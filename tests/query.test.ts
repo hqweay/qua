@@ -1485,22 +1485,25 @@ test('候选求值：属性定义子树不是内容行（定义块自己仍可�
   assert.deepEqual(hits, ['color', 'plain'], '选项不进结果；定义块自己可以命中')
 })
 
-test('候选求值：任一候选定不了位 ⇒ 整次回退（不拿半批结果）', () => {
+test('候选求值：不可见候选跳过（确定不命中）；可见却缺 rank ⇒ 整次回退', () => {
   const { blocks, todo } = fixture()
   const idx = rebuild(blocks)
-  assert.equal(
-    queryByIndexIds(idx, blocks, { where: { tag: todo.id } }, ['a', 'ghost']),
-    undefined,
-    '不存在的 id ⇒ 回退',
+  assert.deepEqual(
+    queryByIndexIds(idx, blocks, { where: { tag: todo.id } }, ['a', 'ghost'])!.map((x) => x.blockId),
+    ['a'],
+    '不存在/已删的候选不是「不知道」，是确定不命中——跳过，不回退',
   )
   const deleted = b('gone', '回收站', { props: { _deletedAt: 1, _tags: [todo.id] } })
   const withDeleted = [...blocks, deleted]
   const idx2 = rebuild(withDeleted)
-  assert.equal(
-    queryByIndexIds(idx2, withDeleted, { where: { tag: todo.id } }, ['a', 'gone']),
-    undefined,
-    '软删块不在可见索引里 ⇒ 回退（候选来源本身不该给出它）',
+  assert.deepEqual(
+    queryByIndexIds(idx2, withDeleted, { where: { tag: todo.id } }, ['a', 'gone'])!.map((x) => x.blockId),
+    ['a'],
+    '软删块不在可见索引里 ⇒ 跳过（候选来源本身不该给出它）',
   )
+  // 可见却缺 rank：索引分叉 ⇒ 回退，不猜一个顺序
+  idx.order.delete('a')
+  assert.equal(queryByIndexIds(idx, blocks, { where: { tag: todo.id } }, ['a']), undefined)
 })
 
 test('候选求值：空候选 = 空结果；方向原子 / children / refCount 排序 ⇒ 回退', () => {
@@ -1532,4 +1535,91 @@ test('顶层 {role:journal}：命中路径是真实祖先链（候选块不再�
     ['nestedDay', 'j'],
     '一天一个仍按森林先序；候选集不改变成员',
   )
+})
+
+/* ------------------------------------------------------------ 候选抽取与探针 */
+
+/** 跑一次查询，返回命中与两个计数器（候选/回退）的增量 */
+function probeOf(
+  spec: QuerySpec,
+  blocks: Block[],
+  opts: { selfId?: string; excludeIds?: readonly string[]; today?: string } = {},
+): { hits: ReturnType<typeof queryByIndex>; candidate: number; fallback: number } {
+  const idx = rebuild(blocks)
+  const before = { ...idx.cacheProbe }
+  const hits = queryByIndex(idx, blocks, spec, opts)
+  return {
+    hits,
+    candidate: idx.cacheProbe.candidateQueries - before.candidateQueries,
+    fallback: idx.cacheProbe.fallbackQueries - before.fallbackQueries,
+  }
+}
+
+test('候选抽取：可枚举形状走候选；不可枚举形状恰好回退一次（不许静默全林）', () => {
+  const { blocks, todo } = fixture()
+  const supported: QuerySpec[] = [
+    { where: { tag: todo.id } },
+    { where: { tag: { id: todo.id, desc: true } } },
+    { where: { ref: 'c' } },
+    { where: { ref: { to: 'c', kind: 'inline' } } },
+    { where: { all: [{ tag: todo.id }, { prop: { id: TASK_STATUS_PROP_ID, eq: false } }] } },
+    { where: { any: [{ tag: todo.id }, { is: 'c' }] } },
+    { where: { is: 'a' } },
+    { where: { role: 'page' } },
+    { where: { role: 'tag' } },
+    { where: { role: 'journal' } },
+    { where: { any: [] } },
+  ]
+  for (const spec of supported) {
+    const p = probeOf(spec, blocks)
+    assert.equal(p.candidate, 1, `应走候选：${JSON.stringify(spec)}`)
+    assert.equal(p.fallback, 0, `不该回退：${JSON.stringify(spec)}`)
+  }
+  const fallback: QuerySpec[] = [
+    { where: { text: '丙' } },
+    { where: { not: { tag: todo.id } } },
+    { where: { prop: { id: TASK_STATUS_PROP_ID, eq: true } } },
+    { where: { children: true } },
+    { where: { up: { is: 'p1' } } },
+    { where: { all: [{ tag: todo.id }, { up: { is: 'p1' } }] } },
+    { where: { role: 'note' } },
+    { where: { ref: { kind: 'inline' } } },
+    { where: { all: [] } },
+    { where: { tag: todo.id }, sort: [{ by: 'refCount', dir: 'desc' }] },
+  ]
+  for (const spec of fallback) {
+    const p = probeOf(spec, blocks)
+    assert.equal(p.candidate, 0, `不该走候选：${JSON.stringify(spec)}`)
+    assert.equal(p.fallback, 1, `应回退一次：${JSON.stringify(spec)}`)
+  }
+})
+
+test('候选抽取：标签并集是当前语义（all:[A,B] 命中 A∪B，候选不能取交集丢行）', () => {
+  const tagA = mkTagBlock('甲签')
+  const tagB = mkTagBlock('乙签')
+  const blocks = [
+    tagA,
+    tagB,
+    b('onlyA', '只带甲', { props: { _tags: [tagA.id] } }),
+    b('onlyB', '只带乙', { props: { _tags: [tagB.id] } }),
+    b('none', '都不带'),
+  ]
+  const p = probeOf({ where: { all: [{ tag: tagA.id }, { tag: tagB.id }] } }, blocks)
+  assert.equal(p.candidate, 1)
+  assert.deepEqual(p.hits.map((x) => x.blockId), ['onlyA', 'onlyB'], '当前语义是并集，不是交集')
+})
+
+test('候选抽取：顶层精确日记一天一个；组合里的日记不去重', () => {
+  const blocks = [
+    b('j1', '', { props: { _date: '2026-10-21' } }),
+    b('j2', '第二块', { props: { _date: '2026-10-21' } }),
+    b('j3', '', { props: { _date: '2026-10-22' } }),
+  ]
+  const exact = probeOf({ where: { role: 'journal' } }, blocks)
+  assert.equal(exact.candidate, 1)
+  assert.deepEqual(exact.hits.map((x) => x.blockId), ['j1', 'j3'], '顶层精确：一天一个、先序第一个')
+
+  const branch = probeOf({ where: { all: [{ role: 'journal' }, { text: { nonempty: true } }] } }, blocks)
+  assert.equal(branch.candidate, 1)
+  assert.deepEqual(branch.hits.map((x) => x.blockId), ['j2'], '组合里的日记是普通谓词，不去重')
 })

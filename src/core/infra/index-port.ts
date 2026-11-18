@@ -55,6 +55,7 @@ import {
   type RefFroms,
   type RefSources,
 } from '../query/query.ts'
+import { candidateIdsOf, type CandidateTables } from '../query/candidates.ts'
 
 /**
  * 一份索引。各表各答一类问题，**全是派生**：
@@ -1104,11 +1105,13 @@ export interface LocatedSite {
 /**
  * 候选 id 的**位置读面**：一次向上走查同时给出路径与先序 rank。
  *
+ * 三态：可见且链完整 ⇒ 站点；**不可见**（不存在／被软删）⇒ `null`（确定不命中，跳过）；
+ * 可见却缺 rank／断链 ⇒ `undefined`（索引分叉，调用方回退全林，不静默丢行、也不乱序）。
  * 路径与 rank 必须来自同一条真实祖先链——候选块不能被当成 root（那会把 `path` 截断，
- * 也会让 `_date` 排序看不到它所属的那一天）。任一环缺 rank／断链 ⇒ `undefined`
- * （调用方回退全林，不静默丢行、也不乱序）。
+ * 也会让 `_date` 排序看不到它所属的那一天）。
  */
-export function locateOf(index: Index, id: string): LocatedSite | undefined {
+export function locateOf(index: Index, id: string): LocatedSite | null | undefined {
+  if (!index.blocks.has(id)) return null
   const path = indexPathOf(index, id)
   if (path.length === 0) return undefined
   const ranks: number[] = []
@@ -1262,12 +1265,36 @@ export function queryByIndex(
   const { q, env } = specContextOf(index, forest, spec, opts)
   /**
    * 候选集只换「哪些块可能命中」，不换 roots：把候选块当 root 会截断 `QueryHit.path`。
-   * 顶层精确日记与顶层单标签互斥（where 只有一个节点），所以这里只有一个来源。
+   * 顶层精确日记与其它形状互斥（where 只有一个节点），所以这里只有一个来源。
    */
   const candidates = isExactRoleJournal(q.where)
     ? new Set(journalDaysOfIndex(index, forest).map((day) => day.id))
-    : exactTagCandidates(q.where, index)
-  return evaluateQuery(q, forest, env, forest, candidates)
+    : candidateIdsOf(q.where, candidateTablesOf(index, forest, env))
+  if (candidates !== undefined) {
+    const hits = evaluateQueryIds(q, candidates, env, (id) => locateOf(index, id))
+    if (hits !== undefined) {
+      index.cacheProbe.candidateQueries++
+      return hits
+    }
+  }
+  // 不可枚举 / 方向原子 / refCount 排序 / 任一候选定不了位 ⇒ 全林回退（可计数）
+  index.cacheProbe.fallbackQueries++
+  return evaluateQuery(q, forest, env, forest)
+}
+
+/**
+ * 抽取要的读数：全部取自索引已有表／派生列表，不为查询新建表。
+ * 列表按需重建（`ensureIndexLists`），与 `pages()/tags()` 的读面同一条失效口径。
+ */
+function candidateTablesOf(index: Index, forest: readonly Block[], env: QueryEnv): CandidateTables {
+  const lists = (): IndexLists => ensureIndexLists(index, forest)
+  return {
+    tagUnion: () => env.tags,
+    refSources: (targetId, kinds) => incomingIds(index, targetId, kinds),
+    pages: () => lists().pages.map((b) => b.id),
+    tags: () => lists().tags.map((b) => b.id),
+    journals: () => lists().journals.map((b) => b.id),
+  }
 }
 
 /**
@@ -1436,22 +1463,6 @@ function tagsByIndex(node: QueryNode, index: Index): Set<string> {
   }
   visit(node)
   return out
-}
-
-/**
- * 顶层恰好是一个 `{tag}` 时的**精确候选集**；其他形状返回 `undefined`（不做收窄）。
- *
- * 这是候选集的第一小步：单标签条件的命中集就是成员集，用它当 `evaluateQuery` 的过滤器
- * 不改变任何语义（顺序／路径／去重仍由 walk 决定），只把 matcher 的调用数从整库降到成员数。
- * 不碰 `all/any/not` 的组合语义——那种收窄要等先序 rank 那一轮。
- */
-function exactTagCandidates(node: QueryNode, index: Index): ReadonlySet<string> | undefined {
-  if (!('tag' in node)) return undefined
-  const id = typeof node.tag === 'string' ? node.tag : node.tag.id
-  const desc = typeof node.tag === 'string' ? false : node.tag.desc === true
-  const tag = lookupBlock(index, id)
-  if (!tag || !hasList(tag, 'tag')) return new Set()
-  return tagMemberSetOf(tag, desc, index)
 }
 
 /**

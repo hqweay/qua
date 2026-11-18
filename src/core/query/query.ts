@@ -584,8 +584,13 @@ export interface CandidateSite {
   ranks: readonly number[]
 }
 
-/** 候选 id → 位置；`undefined` ＝ 定不了位（调用方回退全林，不静默跳过/乱序） */
-export type CandidateLocator = (id: string) => CandidateSite | undefined
+/**
+ * 候选 id → 位置。三态，别合并：
+ *   · `CandidateSite`：可见、链完整；
+ *   · `null`：**确实不可见**（不存在／被软删）——它不是命中，跳过是确定的（walk 也不会走到它）；
+ *   · `undefined`：可见却拼不出链／缺 rank —— 索引分叉，整次回退，不猜。
+ */
+export type CandidateLocator = (id: string) => CandidateSite | null | undefined
 
 /**
  * **按候选 id 求值**：判定与顺序语义与 `evaluateQuery` 同一份，只是不遍历森林。
@@ -596,7 +601,8 @@ export type CandidateLocator = (id: string) => CandidateSite | undefined
  *   · 属性定义的子树不是内容行——用真实祖先链判，不是看直接父块；
  *   · 去重与 `excludeIds`。
  *
- * 任一候选定不了位 ⇒ 返回 `undefined`（整次回退），不返回半批结果。
+ * 可见却定不了位 ⇒ 返回 `undefined`（整次回退），不返回半批结果；**确实不可见**的候选
+ * （不存在／被软删）跳过——walk 也不会走到它，那不是「不知道」而是「确定不命中」。
  * `refCount` 排序与方向原子不接受（调用方先判 `needsForestWalk`／`refCountNeeds`）。
  */
 export function evaluateQueryIds(
@@ -614,7 +620,8 @@ export function evaluateQueryIds(
     seen.add(id)
     if (env.excludeIds?.has(id)) continue
     const site = locate(id)
-    if (!site) return undefined
+    if (site === undefined) return undefined
+    if (site === null) continue
     // 与 `walk()` 同一条：祖先链里有属性定义块 ⇒ 这行不是内容行（定义块自己仍可命中）
     if (site.ancestors.some(isPropDefBlock)) continue
     if (!matcher.matches(spec.where, site.block)) continue

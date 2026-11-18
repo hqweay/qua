@@ -973,6 +973,7 @@ function commandDecls() {
     'src/core/query/query.ts',
     'src/core/query/query-view.ts',
     'src/core/query/query-tree.ts',
+    'src/core/query/candidates.ts',
     'src/ui/query/query-tree.ts',
     'src/ui/query/query-builder.ts',
   ])
@@ -1020,7 +1021,7 @@ function commandDecls() {
     title: '列表判定只走 `hasList`（禁读单值 `.role` 与裸 `.roles`）',
     method: `AST 扫 src/**/*.ts 的 \`x.role\`／\`x.roles\` 属性访问、\`x["role"]\` 元素访问、\`const { role } = …\` 解构；\`el.dataset.role\` 豁免（DOM 属性，不是块的列表判定）`,
     scope: `src/**/*.ts（${srcFiles.length} 个文件）`,
-    whitelist: `\`el.dataset.role\`（写入 DOM 供 CSS 选择，承的是身份**外观**契约）· \`${ROLES_IMPL}\`（列表集合的唯一实现处）· 查询条件原子的键（\`{ role: 'journal' }\`，读的是 QueryNode 形状不是块）：src/core/query/query.ts ＋ src/core/query/query-view.ts · 列表**写入**请走 \`addList\`／\`removeList\``,
+    whitelist: `\`el.dataset.role\`（写入 DOM 供 CSS 选择，承的是身份**外观**契约）· \`${ROLES_IMPL}\`（列表集合的唯一实现处）· 查询条件原子的键（\`{ role: 'journal' }\`，读的是 QueryNode 形状不是块）：src/core/query/query.ts ＋ query-view.ts ＋ candidates.ts · 列表**写入**请走 \`addList\`／\`removeList\``,
     hits: hits.length,
     detail: hits,
     note: '为什么必须机检：列表住进属性袋之后，裸读 `.roles` 恒 `undefined`，表现是「所有块都成了无露面」——页、标签、日记的身份判据同时翻转，类型检查也看不出来',
