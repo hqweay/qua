@@ -90,6 +90,12 @@ import {
   type Prefs,
   type Workspace,
 } from './core/infra/workspace.ts'
+import type { DeviceState } from './core/storage/device.ts'
+import { WORKSPACE_VERSION } from './core/infra/workspace.ts'
+import { createLibraryClient, type LibraryClient } from './core/storage/library-client.ts'
+import { Workset, worksetClosureIds } from './core/storage/workset.ts'
+import { loadWorksetBoot, type WorksetBootResult } from './app/boot/workset-boot.ts'
+import type { LoadedWorkspace } from './core/storage/index.ts'
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
 
@@ -184,15 +190,72 @@ const assetStore = LIBRARY_BRIDGE ? createIpcAssetStore(LIBRARY_BRIDGE) : create
 useAssetStore(assetStore)
 
 /**
- * 读盘**是异步的**：上层不得依赖同步返回（写队列与读盘共用一条契约）。
- * 入口在文件末尾 `await` —— 模块顶层 await 在 Electron renderer / vite 下都没问题。
- */
-const boot = await store.load()
-/**
  * 读设备偏好同样要 `await`（同一个契约）。它**永远成功**：读不到就用默认值——
  * 偏好不是内容，不该因为一格坏了就打不开 app。
+ * 挪到装载之前：工作集装载的闭包要带上槽快捷卡指到的块（设备状态里那几个 id）。
  */
 const device = await deviceStore.load()
+
+/**
+ * **两条装载路，一份模型**：
+ *   · 桌面库**有内容** ⇒ 工作集装载（`catalog` ＋ `doc(今日窗口|active)` ＋ 引用闭包）——
+ *     启动不读全库，`reads.full` 归零是这条路的验收读数；
+ *   · 其余（web 单库、还没有内容的库、库读不了）⇒ 旧的全量装载路（web 是注册过的非对称）。
+ *
+ * store/kb 先于装载建好：它们只依赖一个空森林；装载路把块装进去之后，`ws` 再指到
+ * **同一个数组**上（`BlockStore.blocks` 与 `ws.blocks` 共用一份，`syncSections` 靠这个）。
+ */
+let ws: Workspace = { version: WORKSPACE_VERSION, blocks: [], activeId: '', savedAt: 0 }
+const blocks = new BlockStore(ws.blocks)
+const kb = new MemoryKb(blocks)
+/**
+ * **库读端口的窄面**：只把工作集读面（doc/blocks/catalog）交出去——
+ * `LibraryBridge` 的 `doc` 是可选格（测试可以造瘦桥），工作集装载只认**三个都在**的桥。
+ * 方法经桥转调（保住 `this` 绑定），装配层不直接持有 IPC 函数。
+ */
+const libraryClient: LibraryClient | null =
+  LIBRARY_BRIDGE && LIBRARY_BRIDGE.doc && LIBRARY_BRIDGE.catalog
+    ? createLibraryClient({
+        doc: (roots) => LIBRARY_BRIDGE.doc!(roots),
+        ...(LIBRARY_BRIDGE.blocks ? { blocks: (ids: readonly string[]) => LIBRARY_BRIDGE.blocks!(ids) } : {}),
+        catalog: () => LIBRARY_BRIDGE.catalog!(),
+      })
+    : null
+let workset: Workset | null = null
+/** 工作集装载的结果（`null` ＝ 这次启动没走工作集路） */
+let worksetBoot: Extract<WorksetBootResult, { status: 'ok' }> | null = null
+let boot: LoadedWorkspace
+{
+  const info =
+    libraryClient && LIBRARY_BRIDGE
+      ? ((await LIBRARY_BRIDGE.libraryInfo().catch(() => null)) as { status?: string; hasContent?: boolean } | null)
+      : null
+  if (info?.status === 'ok' && info.hasContent === true && libraryClient) {
+    const ws0 = new Workset(blocks)
+    workset = ws0
+    const r = await loadWorksetBoot({ client: libraryClient, workset: ws0, feedLimit: FEED_INITIAL })
+    if (r.status === 'ok') {
+      ws = { version: WORKSPACE_VERSION, blocks: blocks.blocks, activeId: r.catalog.meta.activeId, savedAt: r.catalog.meta.savedAt }
+      worksetBoot = r
+      boot = { status: 'ok', ws }
+    } else if (r.status === 'no-library') {
+      boot = { status: 'storage-error', error: new Error('workset boot: no library for this window') }
+    } else {
+      // 装载失败停在发生的那一层：宁可只读＋一句原因，也不静默回退全库装载
+      console.error('[boot] workset load failed:', r.error)
+      boot = { status: 'storage-error', error: new Error(`workset boot failed: ${r.error}`) }
+    }
+  } else if (info?.status === 'ok') {
+    // 有库面但还没有内容（新库）：走 seed（整份 genesis），下次启动就是工作集装载
+    boot = { status: 'empty' }
+  } else if (info && info.status !== 'ok') {
+    boot = { status: 'storage-error', error: new Error(`library: ${info.status}`) }
+  } else {
+    boot = await store.load()
+  }
+}
+if (worksetBoot) kb.setCatalog(worksetBoot.catalog)
+
 /**
  * 读盘结果分型：
  *   · `empty` / `expired` ⇒ 允许 seed 并落盘；
@@ -208,7 +271,11 @@ const bootState = {
   readOnly: boot.status === 'too-new' || boot.status === 'corrupt' || boot.status === 'storage-error',
   notice: null as string | null,
 }
-let ws: Workspace = boot.status === 'ok' ? boot.ws : seedWorkspace()
+if (!worksetBoot) {
+  ws = boot.status === 'ok' ? boot.ws : seedWorkspace()
+  // 整库路：这份模型就是库本身（换库语义清掉可能残留的工作集状态）
+  blocks.reset(ws.blocks)
+}
 /**
  * 种子库的**设备侧**演示配置：日记面板的演示栏 ＋ 左槽的演示收纳盘（`seedDock`）。
  * 它们住在设备状态里（日记面板是系统视图；槽布局「跟库走」但不属于任何一块）。
@@ -266,100 +333,133 @@ bootState.notice = bootNotice
 // 开发者日志（英文，不走 msg 字典）：排查「为什么是只读态」时这是唯一的第一手线索
 if (bootState.readOnly) console.warn('[boot] read-only prototype state:', boot.status)
 
-/**
- * 冷启动的**落点**：从没存过 / 旧库作废 ⇒ 进**今日**。
- *
- * ⚠️ **读到的正常库不抢 activeId**（2026-10-20 修）：原先无条件 `ensureTodayJournal` 覆盖
- *   `ws.activeId`，于是「昨天在稀疏态那一页打字 → 关页重开」后落点是今日、那页的字看起来全没了
- *   （盘上有，只是没被打开 = 另一种静默丢数据）。今日只负责**存在**，不负责**抢焦点**。
- * ⚠️ 旧形状的库（升级前没有 journal）也必须能直接进今日——否则用户找不到入口：
- *   2026-10-19 实机复现「旧存储冷启动后左槽没有『今日』、中心槽还停在旧页上」。
- * ⚠️ 这两条**会写模型**（幂等物化），所以要在装配编辑器之前做，且落盘一次。
- */
-const activeStillExists = Boolean(findInForest(ws.blocks, ws.activeId))
-const todayId = journalId(todayISO())
-const hadToday = Boolean(findInForest(ws.blocks, todayId))
-/**
- * 今天的块可能是**软删**状态（用户删过这一天）。它还在数组原位（id 由日期确定性派生），
- * 所以冷启动不能 `insert` 一个新的：那会得到两个同 id 的块，之后按 id 的读只看得到先序第一个。
- */
-const todayTomb = trashOf(ws.blocks).some((b) => b.id === todayId)
-
-/**
- * **共享 block store**（下一层）：块/anchors/undo 只有一份；
- * 正文、反链、查询视图都是它的投影。多个 `BlockEditor` 读同一份活块。
- *
- * ⚠️ 它必须早于冷启动物化：今日块与空天首子块现在走 `kb.tx`（有 op，可重放），
- *    不再是「事务之外补一块，落盘时整份兜底」。
- */
-const blocks = new BlockStore(ws.blocks)
-/**
- * **读入口**：渲染侧的读都该经它取，而不是自己去 `ws.blocks` 里找。
- *
- * 装配层先接上读面；换掉「整库在内存」的实现时，改的是这一个构造参数，
- * 而不是每个调用方。
- * ⚠️ **换库（`dev` 换演示数据）不换它**：门面只持有 store 这一个实例，
- *    `reset` 原地换内容 ⇒ 门面读到的永远是当前库（依赖注入才能按值传）。
- */
-const kb = new MemoryKb(blocks)
-
-/**
- * **冷启动物化走事务**：今日块、空天首子块都是真实编辑，
- * 所以它们有 op（`bootOps`）—— 落盘与重放看到的是同一件事。
- *
- * 没有这一步时，这两块只在内存里「凭空出现」，第一笔落盘要靠 `ensure` 整块补；
- * 日志里则完全缺了它们，`replay(log)` 永远对不上装载出来的库。
- *
- * ⚠️ 「有没有子块」判 `hasLiveChildren`：删除是原位软删，块还挂在 `children` 里，
- *    用长度判会让「删空过的天」每次冷启动都补不回来。
- */
-const bootOps: Op[] = []
-const bootFeed = feedDays(ws.blocks, FEED_INITIAL)
-if (!hadToday || todayTomb || bootFeed.some((d) => !hasLiveChildren(d))) {
-  const r = kb.tx((tx) => {
-    if (!hadToday) {
-      // 删过就复活原块（同 id、同位置），不要新建第二个今天
-      if (todayTomb) tx.restore(todayId)
-      else tx.insert(mkJournalBlock(todayISO()), null, 0)
+/** 槽快捷卡指到的块 id（设备状态里那几个）：它们不在任何 Doc 里，但首帧要显示名字 */
+function dockShortcutIds(device: DeviceState): string[] {
+  const out: string[] = []
+  for (const side of ['left', 'right'] as const) {
+    for (const card of device.prefs.dock[side].cards) {
+      if (card.kind === 'shortcut') out.push(card.block)
+      else if (card.kind === 'tray') for (const member of card.cards) if (member.kind === 'shortcut') out.push(member.block)
     }
-    for (const day of feedDays(ws.blocks, FEED_INITIAL)) {
-      if (!hasLiveChildren(day)) tx.insert(mkBlock(''), day.id, 0)
-    }
-  })
-  bootOps.push(...r.ops)
-}
-if (boot.status !== 'ok' || !activeStillExists) ws.activeId = todayId
-
-/**
- * **冷启动装哪几段**：日记流＝「今日 ＋ 存在的更早的天」，**装什么按落点的角色分叉**。
- * ⚠️ 原来是「无条件装日记流」：于是任何非 journal 的落点（页 / 稀疏态那种 page 块）都被
- *    `bootDays` 盖住，编辑落进一个「不是任何块的孩子」的数组 ⇒ 写不回森林（已知风险 3）。
- * ⚠️ 两条路径都只用 `rootsFor` 那条规则：journal ⇒ 每段保证有可编辑子块（否则打得开却打不了字）；
- *    别的块 ⇒ 只要**那一个**。
- * ⚠️ 这里就地找落点、不走 `activeBlock()`：后者是后文才声明的（装配阶段的时序）。
- */
-const bootActive = findInForest(ws.blocks, ws.activeId) ?? ws.blocks[0]
-const bootDays = bootActive && isJournal(bootActive) ? feedDays(ws.blocks, FEED_INITIAL) : []
-const bootRoots: Block[] = bootDays.length > 0 ? rootsForMany(bootDays) : bootActive ? rootsFor(bootActive) : []
-
-/**
- * **首帧读面探针（仅开发构建）**：用工作集读面取一次 `doc` ＋ `catalog`，看真机读数与
- * 主进程记的读行数（`libraryInfo.reads`）。它不改模型、不参与渲染，读回来的行直接丢掉。
- *
- * 跳过两种不诚实的时刻：
- *   · 新库／重 seed（`boot.status !== 'ok'`）：内容还没落盘，查出来是空的；
- *   · 这一轮冷启动刚物化了今日／空天首子块（`bootOps` 非空）：那些行要等首笔落盘才在库里。
- * 动态 import：产品构建里 `DEV_SURFACE` 为假，整段与这个模块都不进产物。
- */
-if (DEV_SURFACE && LIBRARY_BRIDGE) {
-  if (boot.status === 'ok' && bootOps.length === 0 && bootRoots.length > 0) {
-    const bridge = LIBRARY_BRIDGE
-    void import('./app/perf/boot-read-probe.ts')
-      .then(({ probeBootLibraryReads }) => probeBootLibraryReads(bridge, bootRoots.map((b) => b.id)))
-      .catch((e) => console.warn('[perf] boot read probe import failed', e))
-  } else {
-    console.info('[perf] boot read probe skipped (fresh library or pending boot writes)')
   }
+  return out
+}
+
+/**
+ * 冷启动的**落点**与**物化**。两条装载路的判据来源不同：
+ *   · **工作集**：存在性由 catalog 回答（全库的日期表）——「未加载」不当「不存在」，
+ *     物化只写操作根（op 自带值/位置）；
+ *   · **整库**：在森林里现找（旧行为，web／种子路径）。
+ *
+ * ⚠️ **读到的正常库不抢 activeId**（2026-10-20 修）：今日只负责**存在**，不负责**抢焦点**。
+ * ⚠️ 这一步**会写模型**（幂等物化），所以要在装配编辑器之前做，且落盘一次。
+ */
+const todayId = journalId(todayISO())
+const bootOps: Op[] = []
+let bootRoots: Block[] = []
+if (worksetBoot && libraryClient) {
+  // 这一支的前提就是 workset 已建好（worksetBoot 只在装载成功分支与 workset 一起赋值）
+  const bootWorkset = workset!
+  // —— 引用闭包预取 ——
+  // active 指向的日记天在窗口外时也要在内存里（当前对象/标题要它）
+  const activeJournalOutside = worksetBoot.catalog.journals.some(
+    (j) => j.id === ws.activeId && worksetBoot.mode === 'feed' && !worksetBoot.rootIds.includes(ws.activeId),
+  )
+  const closureIds = worksetClosureIds(blocks.blocks, [
+    ...dockShortcutIds(device),
+    ...(activeJournalOutside ? [ws.activeId] : []),
+  ])
+  const missing = closureIds.filter((id) => !blocks.isLoaded(id))
+  if (missing.length > 0) {
+    const r = await libraryClient.blocks(missing)
+    if (r.status === 'ok') bootWorkset.loadBlocks(r.value)
+    else console.warn('[boot] closure prefetch failed:', r.status === 'error' ? r.error : r.status)
+  }
+  // —— pin：首帧闭包全部钉住 ——
+  // 引用目标/标签/定义被淘汰会让首帧渲染拿到过期副本；预算淘汰从导航装载开始才有意义
+  bootWorkset.pin([...bootWorkset.loadedIds()])
+  // —— 物化（作用域写） ——
+  const hadToday = worksetBoot.today.exists
+  const todayTomb = worksetBoot.today.deleted
+  const days = worksetBoot.mode === 'feed' ? [...worksetBoot.roots] : []
+  if (!hadToday || todayTomb || days.some((d) => !hasLiveChildren(d))) {
+    const r = kb.tx((tx) => {
+      if (!hadToday) {
+        // 删过就复活原块（同 id、同位置），不要新建第二个今天
+        if (todayTomb) tx.restore(todayId)
+        else tx.insert(mkJournalBlock(todayISO()), null, 0)
+      }
+      for (const day of days) {
+        if (!hasLiveChildren(day)) tx.insert(mkBlock(''), day.id, 0)
+      }
+    })
+    bootOps.push(...r.ops)
+  }
+  // 物化之后今天一定在场（新建/复活）；窗口里没有它就放到最前（feed 的语义）
+  const todayBlock = blocks.find(todayId)
+  if (worksetBoot.mode === 'feed' && todayBlock && !days.some((d) => d.id === todayId)) days.unshift(todayBlock)
+  const activeStillExists = worksetBoot.mode === 'page' ? blocks.find(ws.activeId) !== undefined : true
+  if (boot.status !== 'ok' || !activeStillExists) ws.activeId = todayId
+  bootRoots = worksetBoot.mode === 'page' ? worksetBoot.roots : days.length > 0 ? rootsForMany(days) : []
+} else {
+  const activeStillExists = Boolean(findInForest(ws.blocks, ws.activeId))
+  const hadToday = Boolean(findInForest(ws.blocks, todayId))
+  /**
+   * 今天的块可能是**软删**状态（用户删过这一天）。它还在数组原位（id 由日期确定性派生），
+   * 所以冷启动不能 `insert` 一个新的：那会得到两个同 id 的块，之后按 id 的读只看得到先序第一个。
+   */
+  const todayTomb = trashOf(ws.blocks).some((b) => b.id === todayId)
+  /**
+   * **冷启动物化走事务**：今日块、空天首子块都是真实编辑，
+   * 所以它们有 op（`bootOps`）—— 落盘与重放看到的是同一件事。
+   *
+   * ⚠️ 「有没有子块」判 `hasLiveChildren`：删除是原位软删，块还挂在 `children` 里，
+   *    用长度判会让「删空过的天」每次冷启动都补不回来。
+   */
+  const bootFeed = feedDays(ws.blocks, FEED_INITIAL)
+  if (!hadToday || todayTomb || bootFeed.some((d) => !hasLiveChildren(d))) {
+    const r = kb.tx((tx) => {
+      if (!hadToday) {
+        if (todayTomb) tx.restore(todayId)
+        else tx.insert(mkJournalBlock(todayISO()), null, 0)
+      }
+      for (const day of feedDays(ws.blocks, FEED_INITIAL)) {
+        if (!hasLiveChildren(day)) tx.insert(mkBlock(''), day.id, 0)
+      }
+    })
+    bootOps.push(...r.ops)
+  }
+  if (boot.status !== 'ok' || !activeStillExists) ws.activeId = todayId
+  /**
+   * **冷启动装哪几段**：日记流＝「今日 ＋ 存在的更早的天」，**装什么按落点的角色分叉**。
+   * ⚠️ 两条路径都只用 `rootsFor` 那条规则：journal ⇒ 每段保证有可编辑子块；
+   *    别的块 ⇒ 只要**那一个**。
+   */
+  const bootActive = findInForest(ws.blocks, ws.activeId) ?? ws.blocks[0]
+  const bootDays = bootActive && isJournal(bootActive) ? feedDays(ws.blocks, FEED_INITIAL) : []
+  bootRoots = bootDays.length > 0 ? rootsForMany(bootDays) : bootActive ? rootsFor(bootActive) : []
+}
+
+/**
+ * **首帧读面探针（仅开发构建）**：工作集装载打印真机读数与主进程记的读行数。
+ *
+ * 验收看三个数：`full=0`（启动没读全库）、`loaded`（工作集块数＝Doc 闭包）与
+ * `doc/catalog/blocks` 的行数（这次首帧到底搬了多少行进渲染层）。
+ * `bootOps` 非空 ⇒ 这一轮刚物化了今日/空天首子块，那些行要等首笔落盘才在库里（照常打印）。
+ */
+if (DEV_SURFACE && LIBRARY_BRIDGE && worksetBoot) {
+  const bootCounts = worksetBoot.counts
+  void LIBRARY_BRIDGE.libraryInfo()
+    .then((raw) => {
+      const reads = (raw as { reads?: Record<string, number> } | null)?.reads
+      console.info(
+        `[perf] boot working set: mode=${worksetBoot!.mode} roots=${bootRoots.length} loaded=${blocks.loadedCount} ` +
+          `doc=${bootCounts.docReads}/${bootCounts.docRows} catalog=${bootCounts.catalogRows} ` +
+          `session full=${reads?.full ?? '?'} fullRows=${reads?.fullRows ?? '?'} ` +
+          `doc=${reads?.doc ?? '?'}/${reads?.docRows ?? '?'} catalog=${reads?.catalog ?? '?'} blocks=${reads?.blocks ?? '?'}/${reads?.blockRows ?? '?'}`,
+      )
+    })
+    .catch(() => console.warn('[perf] boot read probe: libraryInfo failed'))
 }
 
 const layers = new Layers(() => isMac())
@@ -562,7 +662,12 @@ const searchFaceDeps = (): SearchFaceDeps => {
       scheduleBadge()
     },
     // 引擎现取：索引状态会变（ready 才信 FTS，否则扫描降级——面自己把降级说明白）
-    query: (text, limit) => (search ?? { query: async () => ({ hits: [], mode: 'scan' as const }) }).query(text, limit),
+    // ⚠️ 工作集模式下查询给空：`scan` 会扫工作集而不是库（结果必然是错的另一半），
+    //    FTS 查询层接上之前宁可显式空（面有「降级」标记），不给一份假结果
+    query: (text, limit) =>
+      blocks.partial
+        ? Promise.resolve({ hits: [], mode: 'scan' as const })
+        : (search ?? { query: async () => ({ hits: [], mode: 'scan' as const }) }).query(text, limit),
     // 行怎么说与 ⌘K 浮层同一份
     describe: (hit, term) => describeHit(kb, hit, term),
     openBlock: (id, place) => app.openBlock(id, place ?? 'center'),
@@ -728,10 +833,17 @@ const assets = setupAssets({
 
 
 /**
+ * **工作集模式下搜索不重建**：重建会拿 `forest()`（＝工作集）当输入重铺**整张** FTS 表
+ * ——那不是变慢，是把全库索引写坏（写出去的行只覆盖工作集）。搜索层迁移完成之前，
+ * 工作集模式既不重建也不扫描，搜索面拿到的是显式空结果。
+ */
+const searchIndexable = (): boolean => search !== undefined && !blocks.partial
+
+/**
  * 打开的是盘上已有的库 ⇒ 现在就检查索引；种子／换库那条路要等第一笔 replace
  * 落盘（`onReplace`）之后才重建，否则会先给一份还没写进库的森林建索引。
  */
-if (boot.status === 'ok') search.start()
+if (searchIndexable()) search.start()
 
 /* ------------------------------------------------------------ 关闭握手（Electron 库面） */
 
@@ -1435,7 +1547,8 @@ const app: App = {
   openSearch: (place) => {
     if (!search) return
     // 第一次打开搜索时把索引排上（启动期不抢 CPU；用户按下 ⌘K 是最可靠的「现在可以建」信号）
-    search.start()
+    // ⚠️ 工作集模式下不排：重建会拿工作集重铺整张 FTS 表（见 `searchIndexable`）
+    if (searchIndexable()) search.start()
     if (place === 'dock') {
       addUtility('right', 'search')
       return

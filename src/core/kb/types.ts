@@ -273,6 +273,11 @@ export interface KbClient {
 
   /** 按地址找块（先序第一个命中，比较口径只在 `core/alias.ts` 里有一份） */
   resolveAlias(name: string): Block | undefined
+  /**
+   * **这个名字现在归谁**（只回答 id；目标块未装载也回答）。
+   * 创建路径的防重判据：把「未加载」当「不存在」去新建，就是第二个同名身份。
+   */
+  aliasTargetId(name: string): string | undefined
   allPaths(): readonly PathEntry[]
 
   fieldsOf(id: string): readonly FieldRow[]
@@ -319,6 +324,12 @@ export interface KbClient {
    *    不另开一条「从森林里数日期」的实现——两份答案迟早会分叉。
    */
   journalDates(): readonly string[]
+
+  /**
+   * **库里（含软删）存在哪几天的 id**：创建路径的防重判据。
+   * 日记块的 id 由日期确定性派生 ⇒ 「未加载就新建」会得到同 id 的第二块。
+   */
+  journalIds(): ReadonlySet<string>
 
   /** 这一块当前的可引用区间（通常为空——anno 只在被引用时存在） */
   annosOf(id: string): readonly Anno[]

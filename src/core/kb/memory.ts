@@ -24,6 +24,7 @@ import { walkForest } from '../model/walk.ts'
 import { findTagByName, tagsOf as tagsOfBlock } from '../identity/tags.ts'
 import { findJournalDay } from '../identity/journal.ts'
 import { blockIdByAlias, blockMatchesSpec, ensureIndexLists, indexPathOf, queryByIndex, relationsFrom, relationsTo } from '../infra/index-port.ts'
+import { normalizeAlias } from '../identity/alias.ts'
 import {
   declaredFields,
   fieldRowsWithParent,
@@ -83,11 +84,24 @@ function clone<T>(v: T): T {
 export class MemoryKb implements KbClient {
   private readonly store: BlockStore
   private readonly now: () => number
+  /**
+   * **catalog 摘要**（工作集装载喂进来的全局身份）：日记日期与全量地址表。
+   *
+   * 为什么挂在读门面上：日历的「哪几天写过」、`#名字` 的「这个名字归谁」都是
+   * **全局**问题，而工作集只有当前视图的闭包——不接 catalog，这两个读都会
+   * 只看见已装载的那一小片，创建路径就会把「未加载」当成「不存在」去新建。
+   */
+  private catalog: { journals: readonly { id: string; date: string; deleted: number | null }[]; aliases: readonly { name: string; block: string }[] } | null = null
 
   constructor(store: BlockStore, opts: { now?: () => number } = {}) {
     this.store = store
     // 时间注入只为让「op 带 at」可断言；默认就是墙钟
     this.now = opts.now ?? (() => Date.now())
+  }
+
+  /** 喂 catalog 摘要（整库模式下也可以喂：它只是读数的另一份来源，不改写面） */
+  setCatalog(catalog: { journals: readonly { id: string; date: string; deleted: number | null }[]; aliases: readonly { name: string; block: string }[] } | null): void {
+    this.catalog = catalog
   }
 
   /* ------------------------------------------------------------ 读面 */
@@ -139,8 +153,28 @@ export class MemoryKb implements KbClient {
    *    「地址 → id」这一格是快照，改名/删块由 `refreshTagsClaim`／`applyBlockDelete` 修补。
    */
   resolveAlias(name: string): Block | undefined {
-    const id = blockIdByAlias(this.store.index, name)
+    const id = this.aliasTargetId(name)
     return id === undefined ? undefined : this.store.find(id)
+  }
+
+  /**
+   * **这个名字现在归谁**（只回答 id，不要求块已装载）。
+   *
+   * 创建路径的防重判据：`#名字`／`[[名字]]` 在本地 miss 时，先问这一格——
+   * 名字可能属于一个还没装载的块，把「未加载」当「不存在」去新建就是第二个同名身份。
+   * catalog 在场 ⇒ 全量地址表回答；不在场（整库模式）⇒ 索引的地址表回答，语义同一条。
+   */
+  aliasTargetId(name: string): string | undefined {
+    const local = blockIdByAlias(this.store.index, name)
+    if (local !== undefined) return local
+    if (this.catalog) {
+      // 与索引表同一条规范化（`core/alias.ts` 那一份）：catalog 存的是原始名字
+      const want = normalizeAlias(name)
+      if (want === '') return undefined
+      const hit = this.catalog.aliases.find((a) => normalizeAlias(a.name) === want)
+      if (hit) return hit.block
+    }
+    return undefined
   }
 
   allPaths(): readonly PathEntry[] {
@@ -249,17 +283,40 @@ export class MemoryKb implements KbClient {
   }
 
   journalDay(date: string): Block | undefined {
+    // catalog 在场 ⇒ 按 catalog 的日期表找 id（工作集外的天没有索引答案）
+    if (this.catalog) {
+      const hit = this.catalog.journals.find((j) => j.date === date)
+      if (hit) return this.store.find(hit.id) ?? this.store.index.all.get(hit.id)
+    }
     return findJournalDay(this.store.blocks, date)
   }
 
   /**
    * 库里存在哪几天（升序）。
    *
-   * 走索引的 `journals` 表，不是遍历森林：日历一屏要问几十天，
-   * 而 `journalDay` 每次都会重建一张「日期 → 块」表。
+   * catalog 在场 ⇒ catalog 的日期表（工作集只有当前窗口，索引表答不了全库）；
+   * 不在场（整库模式）⇒ 走索引的 `journals` 表，不是遍历森林：日历一屏要问几十天。
    */
   journalDates(): readonly string[] {
+    if (this.catalog) {
+      return [...new Set(this.catalog.journals.filter((j) => j.deleted === null).map((j) => j.date))].sort()
+    }
     return [...this.store.index.journals.keys()].sort()
+  }
+
+  /**
+   * **库里（含软删）存在哪几天的 id**：创建路径的防重判据。
+   *
+   * 日记块的 id 由日期确定性派生 ⇒ 「未加载就新建」会得到同 id 的第二块。
+   * catalog 在场用它（全库的日期表）；不在场走含软删的索引块表（整库模式）。
+   */
+  journalIds(): ReadonlySet<string> {
+    if (this.catalog) return new Set(this.catalog.journals.map((j) => j.id))
+    const out = new Set<string>()
+    for (const b of this.store.index.all.values()) {
+      if (b.props?.['_date'] !== undefined) out.add(b.id)
+    }
+    return out
   }
 
   annosOf(id: string): readonly Anno[] {

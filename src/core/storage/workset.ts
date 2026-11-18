@@ -246,3 +246,51 @@ function insertOrdered(list: Block[], block: Block, siblings: readonly Block[], 
   }
   list.unshift(block)
 }
+
+/* ------------------------------------------------------------ 装载闭包 */
+
+/** 块 id 的形状（uuidv7Hex）：形状不对的字符串不进装载闭包（名字、地址、外链都不是 id） */
+const HEX32 = /^[0-9a-f]{32}$/
+
+/** 一个 JSON 值里出现的所有块 id 形状的字符串（数组/对象递归；覆盖 select 值、归属边、声明槽） */
+function collectValueIds(v: unknown, out: Set<string>): void {
+  if (typeof v === 'string') {
+    if (HEX32.test(v)) out.add(v)
+    return
+  }
+  if (Array.isArray(v)) {
+    for (const x of v) collectValueIds(x, out)
+    return
+  }
+  if (v !== null && typeof v === 'object') {
+    for (const x of Object.values(v as Record<string, unknown>)) collectValueIds(x, out)
+  }
+}
+
+/**
+ * **装载闭包**：要让这一片工作集**显示正确**还缺哪些块。
+ *
+ * 工作集装载的是视图子树；但正文里的引用、身上的标签、声明/值指向的定义块与
+ * 选项块都住在子树外。不装它们，首帧的引用会显示成悬空、chip 没有名字——
+ * 不是错误，是「少装了一层」。闭包只装**块自己**（不带子树），成本跟着
+ * 这一屏的引用数走，不跟库大小走。
+ *
+ * @param extra 调用方自己知道的 id（槽快捷卡、当前对象这些不在 Doc 里的目标）
+ */
+export function worksetClosureIds(blocks: readonly Block[], extra: readonly string[] = []): string[] {
+  const out = new Set<string>()
+  for (const id of extra) if (HEX32.test(id)) out.add(id)
+  walkForest(
+    blocks,
+    (b) => {
+      for (const r of b.content) {
+        if (r.t === 'ref' && typeof r.to === 'string' && r.to !== '') out.add(r.to)
+      }
+      if (b.props) {
+        for (const v of Object.values(b.props)) collectValueIds(v, out)
+      }
+    },
+    { includeDeleted: true },
+  )
+  return [...out]
+}
