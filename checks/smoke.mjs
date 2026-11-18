@@ -31779,6 +31779,124 @@ await check('T331 记录面右键＝同一张块菜单：只放块级动作，�
   return `右键开「${menu.title}」；删除 ${first.id.slice(0, 6)} 后撤销恢复`
 })
 
+await check(
+  'T332 只读行上的粘贴不让撤销栈失联：落点被拒绝（entryDepth 0、正文不动），随后正常粘贴一次撤销复原',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    const ids = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const flat = []
+      const walk = (l) => l.forEach((b) => { flat.push(b); walk(b.children) })
+      // 日记块从**整个库**找（它不在当前页的装载里）；可编辑叶子从**当前视图**找
+      walk(ed.store.blocks)
+      const journal = flat.find((b) => b.props?._date)
+      const inView = []
+      const walkView = (l) => l.forEach((b) => { inView.push(b); walkView(b.children) })
+      walkView(ed.doc.roots)
+      const leaf = inView.find((b) => !b.children.length && b.content.some((r) => r.t === 'text'))
+      const plain = (b) => (b ? b.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : null)
+      return { journal: journal?.id ?? '', leaf: leaf?.id ?? '', journalText: plain(journal) }
+    })
+    assert(ids.journal && ids.leaf, `前置：库里应有日记块与可编辑叶子：${JSON.stringify(ids)}`)
+
+    // ① 直接调 pasteAt：只读落点被拒绝，不开撤销条目
+    const rejected = await page.evaluate((jid) => {
+      const ed = window.__qua.__editor
+      const plain = (b) => b.content.filter((r) => r.t === 'text').map((r) => r.v).join('')
+      try {
+        ed.clip.pasteAt(jid, 0, '不应落进去')
+        return { threw: false, entryDepth: ed.entryDepth, text: plain(ed.store.find(jid)) }
+      } catch (e) {
+        return { threw: true, message: String(e?.message ?? e), entryDepth: ed.entryDepth }
+      }
+    }, ids.journal)
+    assert(!rejected.threw, `只读行上粘贴不该抛：${JSON.stringify(rejected)}`)
+    assert(rejected.entryDepth === 0, `被拒绝的粘贴不该留下半截撤销条目：${JSON.stringify(rejected)}`)
+    assert(rejected.text === ids.journalText, `日记正文不该被改：${JSON.stringify(rejected.text)}`)
+
+    // ② 事件路径同样：把日记那一段装载出来（只读行的 `.tx` 才会在 DOM 里），
+    //    光标放在只读行上，paste 事件也不该让条目悬着
+    await page.evaluate((jid) => window.__qua.invoke('core.page/open', { pageId: jid }), ids.journal)
+    await page.waitForTimeout(400)
+    const ev = await page.evaluate((jid) => {
+      const ed = window.__qua.__editor
+      const plain = (b) => b.content.filter((r) => r.t === 'text').map((r) => r.v).join('')
+      window.__qua.focusBlock(jid, 0)
+      const tx = document.querySelector(`.blk[data-block-id="${jid}"] > .tx`)
+      if (!tx) return { noTx: true }
+      const dt = new DataTransfer()
+      dt.setData('text/plain', '事件粘贴')
+      try {
+        tx.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
+        return { threw: false, entryDepth: ed.entryDepth, text: plain(ed.store.find(jid)) }
+      } catch (e) {
+        return { threw: true, message: String(e?.message ?? e), entryDepth: ed.entryDepth }
+      }
+    }, ids.journal)
+    assert(!ev.noTx, '日记行应有 .tx')
+    assert(!ev.threw && ev.entryDepth === 0, `事件路径的只读粘贴也不该留下半截条目：${JSON.stringify(ev)}`)
+    assert(ev.text === ids.journalText, `日记正文仍不该被改：${JSON.stringify(ev.text)}`)
+
+    // ③ 撤销栈还在：回到第一页（正常行要在本视图里），正常粘贴 → 一次撤销复原
+    await page.evaluate(() => window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[0].id }))
+    await page.waitForTimeout(400)
+    const leafText = () =>
+      page.evaluate((id) => {
+        const b = window.__qua.__editor.store.find(id)
+        return b ? b.content.filter((r) => r.t === 'text').map((r) => r.v).join('') : null
+      }, ids.leaf)
+    const before = await leafText()
+    await page.evaluate((id) => window.__qua.__editor.clip.pasteAt(id, 0, '正常粘贴'), ids.leaf)
+    await page.waitForTimeout(150)
+    const afterPaste = await leafText()
+    assert(afterPaste === '正常粘贴' + before, `正常粘贴应落进去：${JSON.stringify(afterPaste)}`)
+    await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+    await page.waitForTimeout(180)
+    const afterUndo = await leafText()
+    assert(afterUndo === before, `一次撤销应复原（撤销栈没有失联）：${JSON.stringify(afterUndo)}`)
+
+    await ctx.close()
+    return `只读行粘贴被拒（entryDepth 0、正文不动）；随后正常粘贴一次撤销复原`
+  },
+)
+
+await check(
+  'T333 表单字段里的 ⌘Z 归原生：别名输入框的粘贴可撤销，模型撤销栈不被它动',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    const cfgBtn = page.locator('.blk[data-depth="0"][data-role~="page"] .blk-alias-btn[data-alias-action="config"]').first()
+    assert((await cfgBtn.count()) > 0, '前置：页行应有块配置入口')
+    await cfgBtn.click()
+    await page.waitForTimeout(250)
+    const input = page.locator('.alias-input').first()
+    assert((await input.count()) === 1, '前置：块配置里应有别名输入框')
+
+    await input.click()
+    await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base })
+    await page.evaluate(() => navigator.clipboard.writeText('粘贴的别名'))
+    await page.keyboard.press(kbd('mod+v'))
+    await page.waitForTimeout(180)
+    assert((await input.inputValue()) === '粘贴的别名', '前置：粘贴应落进输入框')
+    const depth0 = await page.evaluate(() => window.__qua.__editor.undo.depth())
+
+    await page.keyboard.press(kbd('mod+z'))
+    await page.waitForTimeout(180)
+    const undone = await input.inputValue()
+    assert(undone === '', `⌘Z 应一次撤掉输入框里的粘贴（归原生撤销）：${JSON.stringify(undone)}`)
+    const depth1 = await page.evaluate(() => window.__qua.__editor.undo.depth())
+    assert(depth1 === depth0, `模型撤销栈不该被输入框的 ⌘Z 动过：${depth0} → ${depth1}`)
+
+    await ctx.close()
+    return `别名输入框里粘贴后 ⌘Z 回到空；模型撤销栈深度 ${depth0} 不变`
+  },
+)
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

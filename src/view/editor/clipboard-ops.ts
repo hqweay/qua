@@ -9,6 +9,7 @@
 import {
   bareExternalUrl,
   blankRowKind,
+  canDirectEditText,
   hasDescendant,
   isDeleted,
   isFolded,
@@ -46,6 +47,13 @@ export class ClipboardOps {
   pasteTarget(): { blockId: string; offset: number; cut: { from: number; to: number } | null } | null {
     const blockId = this.ed.sel?.aBlock ?? this.ed.rows()[0]?.block.id
     if (!blockId) return null
+    /**
+     * **只读行不是粘贴落点**：日记／字段定义／只读类型的正文是名字或投影，不接受内容写。
+     * 不在这里挡住的话，事务会在 `write` 里抛 protected —— 而 `beginUndoEntry` 已经开袋，
+     * 那个异常会把 `entryDepth` 永久留在 1：此后所有编辑都记不进撤销栈（⌘Z 看着像坏了）。
+     */
+    const target = locate(this.ed.doc, blockId)?.block ?? this.ed.store.find(blockId)
+    if (!target || !canDirectEditText(target)) return null
     const s = this.ed.sel
     const cut =
       s && s.aBlock === blockId && s.hBlock === blockId && s.aOff !== s.hOff
@@ -57,6 +65,8 @@ export class ClipboardOps {
   pasteAt(id: string, offset: number, text: string, cut?: { from: number; to: number } | null): void {
     const loc = locate(this.ed.doc, id)
     if (!loc) return
+    // 只读行不落内容：调用方可能绕过 `pasteTarget` 直接调这里（命令／测试），判据同一份
+    if (!canDirectEditText(loc.block)) return
     // 区间选中＝先删后贴，插入点就是范围起点；两步在**同一笔**内容写里落
     const at = cut ? Math.min(cut.from, cut.to) : offset
     const cutTo = cut ? Math.max(cut.from, cut.to) : offset
@@ -68,12 +78,20 @@ export class ClipboardOps {
     const bare = bareExternalUrl(text)
     if (bare) {
       const anchor = cut ? plainText(sliceRuns(loc.block.content, at, cutTo)).trim() : ''
-      this.ed.beginUndoEntry()
       const inserted = linkRunOf(bare, anchor)
       const next = spliceRuns(loc.block.content, at, cutTo, [inserted])
-      // 与单行粘贴同档（把内容落进这一行）；原子各占 1 格 ⇒ 光标落在原子后面
-      this.ed.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)), undefined, { directEdit: true })
-      this.ed.finishUndoEntry('insert', Date.now(), { standalone: true })
+      this.ed.beginUndoEntry()
+      try {
+        // 与单行粘贴同档（把内容落进这一行）；原子各占 1 格 ⇒ 光标落在原子后面
+        this.ed.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)), undefined, { directEdit: true })
+      } finally {
+        /**
+         * `begin` 与 `finish` **必须配对**：写抛异常（落点在这一笔里变成只读等）时也要收口。
+         * 少这一下，`entryDepth` 会永久留下 1 ⇒ 此后所有编辑都记不进撤销栈，
+         * 用户看到的是「粘贴之后 ⌘Z 什么都不做」。
+         */
+        this.ed.finishUndoEntry('insert', Date.now(), { standalone: true })
+      }
       this.ed.renderAll()
       this.ed.placeCaret(id, at + plainLen([inserted]))
       this.ed.emitChange('text')
@@ -84,35 +102,38 @@ export class ClipboardOps {
      *  不能拿原始文本长度——`((id))` 记号进来会变成一枚 1 格宽的引用原子。 */
     const firstLine = this.runsWithRefs(lines[0]!)
     this.ed.beginUndoEntry()
-    if (lines.length === 1) {
-      const next = spliceRuns(loc.block.content, at, cutTo, firstLine)
-      // 单行粘贴与打字同档（把字落进这一行）；多行分支含拆块，归结构路径（下面不标记）
-      this.ed.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)), undefined, { directEdit: true })
-    } else {
-      // 光标处切两半：首行接在左半后面，余下各成新块，**原右半接到最后一块尾部**
-      const base = cut ? spliceRuns(loc.block.content, at, cutTo, []) : loc.block.content
-      const [head, tail] = splitRuns(base, at)
-      const first = joinRuns(head, firstLine)
-      const created: Block[] = []
-      for (let i = 1; i < lines.length; i++) created.push(mkBlock(lines[i]!))
-      const last = created[created.length - 1]!
-      // 这是**刚造出来、还没进树**的新块（上面 `mkBlock` 那批）⇒ 不走内容写入入口，
-      // 它的内容随构造一次给定；那里管的是「改写一个已经存在的地址」
-      if (tail.length > 0) writeBlockContent(last, joinRuns(last.content, tail))
-      const list = loc.parent ? loc.parent.children : this.ed.doc.roots
-      /**
-       * 落点与 `insertBlockAfter` 同一条规则：section 根没有兄弟位，余下行成为它的**子块**
-       * （往 `roots` 里插兄弟就是「看得见、写不回去」的死区）。其余块插在它后面的同级位。
-       */
-      const parentId = loc.parent ? loc.parent.id : loc.block.id
-      const baseIndex = loc.parent ? list.indexOf(loc.block) + 1 : 0
-      this.ed.write((tx) => {
-        tx.patch(id, (b) => writeBlockContent(b, first))
-        created.forEach((c, i) => tx.insert(c, parentId, baseIndex + i))
-      })
+    try {
+      if (lines.length === 1) {
+        const next = spliceRuns(loc.block.content, at, cutTo, firstLine)
+        // 单行粘贴与打字同档（把字落进这一行）；多行分支含拆块，归结构路径（下面不标记）
+        this.ed.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)), undefined, { directEdit: true })
+      } else {
+        // 光标处切两半：首行接在左半后面，余下各成新块，**原右半接到最后一块尾部**
+        const base = cut ? spliceRuns(loc.block.content, at, cutTo, []) : loc.block.content
+        const [head, tail] = splitRuns(base, at)
+        const first = joinRuns(head, firstLine)
+        const created: Block[] = []
+        for (let i = 1; i < lines.length; i++) created.push(mkBlock(lines[i]!))
+        const last = created[created.length - 1]!
+        // 这是**刚造出来、还没进树**的新块（上面 `mkBlock` 那批）⇒ 不走内容写入入口，
+        // 它的内容随构造一次给定；那里管的是「改写一个已经存在的地址」
+        if (tail.length > 0) writeBlockContent(last, joinRuns(last.content, tail))
+        const list = loc.parent ? loc.parent.children : this.ed.doc.roots
+        /**
+         * 落点与 `insertBlockAfter` 同一条规则：section 根没有兄弟位，余下行成为它的**子块**
+         * （往 `roots` 里插兄弟就是「看得见、写不回去」的死区）。其余块插在它后面的同级位。
+         */
+        const parentId = loc.parent ? loc.parent.id : loc.block.id
+        const baseIndex = loc.parent ? list.indexOf(loc.block) + 1 : 0
+        this.ed.write((tx) => {
+          tx.patch(id, (b) => writeBlockContent(b, first))
+          created.forEach((c, i) => tx.insert(c, parentId, baseIndex + i))
+        })
+      }
+    } finally {
+      // 同上一档：粘贴独占一个撤销条目，且 `begin`／`finish` 在任何路径上都配对
+      this.ed.finishUndoEntry('insert', Date.now(), { standalone: true })
     }
-    // 粘贴是**用户按的一下**，不是「连续打字的下一次按键」：独占一个撤销条目
-    this.ed.finishUndoEntry('insert', Date.now(), { standalone: true })
     this.ed.renderAll()
     this.ed.placeCaret(id, at + plainLen(firstLine))
     this.ed.emitChange('text')
@@ -214,15 +235,20 @@ export class ClipboardOps {
     if (refs.move) return this.moveClipboardRun(refs.ids, target.blockId, 'after')
     const loc = locate(this.ed.doc, target.blockId)
     if (!loc) return 'gone'
+    // 只读行不落内容（与 `pasteTarget`／`pasteAt` 同一判据）
+    if (!canDirectEditText(loc.block)) return 'refused'
     const runs = refs.ids.map((rid) => this.refRunTo(rid, refs.anchor))
     const at = target.cut ? Math.min(target.cut.from, target.cut.to) : target.offset
     const cutTo = target.cut ? Math.max(target.cut.from, target.cut.to) : target.offset
-    this.ed.beginUndoEntry()
     const next = spliceRuns(loc.block.content, at, cutTo, runs)
-    // 与单行粘贴同档：把内容落进这一行（directEdit，过内容闸的同一道豁口）
-    this.ed.write((tx) => tx.patch(target.blockId, (b) => writeBlockContent(b, next)), undefined, { directEdit: true })
-    // 粘贴独占一步（不并进前后打字）：否则「打了字紧接着贴引用」按一次 ⌘Z 会连刚打的字一起吃掉
-    this.ed.finishUndoEntry('insert', Date.now(), { standalone: true })
+    this.ed.beginUndoEntry()
+    try {
+      // 与单行粘贴同档：把内容落进这一行（directEdit，过内容闸的同一道豁口）
+      this.ed.write((tx) => tx.patch(target.blockId, (b) => writeBlockContent(b, next)), undefined, { directEdit: true })
+    } finally {
+      // 粘贴独占一步（不并进前后打字）：否则「打了字紧接着贴引用」按一次 ⌘Z 会连刚打的字一起吃掉
+      this.ed.finishUndoEntry('insert', Date.now(), { standalone: true })
+    }
     this.ed.renderAll()
     // 光标落在**引用后面**：原子在 plain 偏移里各占 1 格（`plainText` 投影不含原子，不能拿它算）
     this.ed.placeCaret(target.blockId, at + plainLen(runs))
@@ -255,7 +281,13 @@ export class ClipboardOps {
     const floc = locate({ roots: this.ed.store.blocks }, afterId)
     if (!floc) return 'gone'
     this.ed.beginUndoEntry()
-    this.ed.write((tx) => blocks.forEach((b, i) => tx.insert(b, floc.parent?.id ?? null, floc.index + 1 + i)))
+    try {
+      this.ed.write((tx) => blocks.forEach((b, i) => tx.insert(b, floc.parent?.id ?? null, floc.index + 1 + i)))
+    } catch (e) {
+      // 失败也要收口（`structTail` 只在成功路径上跑），否则 `entryDepth` 会永久留下
+      this.ed.finishUndoEntry('structural')
+      throw e
+    }
     this.ed.structTail()
     this.ed.bsel.paintBlockSel()
     return 'pasted'
@@ -328,22 +360,28 @@ export class ClipboardOps {
     const inherited = takeOver && row === 'container' ? liveChildren(tgt.block).map((b) => b.id) : []
     const wasFolded = inherited.length > 0 && isFolded(this.ed.doc, targetId)
     this.ed.beginUndoEntry()
-    this.ed.write((tx) => {
-      /** 原位软删即可（与库里所有删除同一条路径，撤销一步全回）：空行不留在中间 */
-      if (takeOver) tx.remove(targetId)
-      /**
-       * 接住的子块先在**原位** no-op 记一笔改前落点：不记的话，K1 搬走之后 K2
-       * 会把「E 的首位」当成自己的原位，撤销时两块都往首位插 ⇒ 次序翻转。
-       * 这条与下面搬动整组时的 no-op 是同一本次序账，不是第二套规则。
-       */
-      inherited.forEach((kid, i) => tx.move(kid, targetId, i))
-      // 再按原序追加到 host 尾部（host 自带的子块在前，两棵子树各自成段）
-      for (const kid of inherited) tx.move(kid, host.id, Number.MAX_SAFE_INTEGER)
-      for (const { id, loc } of live) if (loc.parent) tx.move(id, loc.parent.id, loc.index)
-      for (const { id } of live) tx.move(id, siteParent, Number.MAX_SAFE_INTEGER)
-      for (let i = live.length - 1; i >= 0; i--) tx.move(live[i]!.id, siteParent, Math.max(0, index))
-      for (const { id } of live) tx.patch(id, (x) => (x.modified = Date.now()))
-    })
+    try {
+      this.ed.write((tx) => {
+        /** 原位软删即可（与库里所有删除同一条路径，撤销一步全回）：空行不留在中间 */
+        if (takeOver) tx.remove(targetId)
+        /**
+         * 接住的子块先在**原位** no-op 记一笔改前落点：不记的话，K1 搬走之后 K2
+         * 会把「E 的首位」当成自己的原位，撤销时两块都往首位插 ⇒ 次序翻转。
+         * 这条与下面搬动整组时的 no-op 是同一本次序账，不是第二套规则。
+         */
+        inherited.forEach((kid, i) => tx.move(kid, targetId, i))
+        // 再按原序追加到 host 尾部（host 自带的子块在前，两棵子树各自成段）
+        for (const kid of inherited) tx.move(kid, host.id, Number.MAX_SAFE_INTEGER)
+        for (const { id, loc } of live) if (loc.parent) tx.move(id, loc.parent.id, loc.index)
+        for (const { id } of live) tx.move(id, siteParent, Number.MAX_SAFE_INTEGER)
+        for (let i = live.length - 1; i >= 0; i--) tx.move(live[i]!.id, siteParent, Math.max(0, index))
+        for (const { id } of live) tx.patch(id, (x) => (x.modified = Date.now()))
+      })
+    } catch (e) {
+      // `structTail` 只在成功路径上跑；失败时这里收口，别把 `entryDepth` 留下
+      this.ed.finishUndoEntry('structural')
+      throw e
+    }
     // 折叠态跟着子树走：换父不该把用户折起来的子树自动摊开（折叠态不进撤销）
     if (wasFolded) setCollapsed(this.ed.doc, host.id, true)
     const caret = takeOver && !this.ed.bsel.hasBlockSelection()

@@ -2497,6 +2497,16 @@ export class BlockEditor {
    */
   // 协作对象 `InsertOps` 也走这里落内容（插引用/外链/资产）；可见性为它放宽
   commitContent(id: string, next: readonly InlineRun[], undo: UndoKind, caret?: number): void {
+    const b = this.store.find(id)
+    /**
+     * **只读行不落内容，但仍要收口撤销条目**：日记／字段定义／只读类型的正文是名字或投影。
+     * 写进去事务会抛 protected，而调用方已经 `beginUndoEntry` —— 一走了之会把
+     * `entryDepth` 永久留在 1，此后所有编辑都记不进撤销栈（⌘Z 看着像坏了）。
+     */
+    if (!b || !canDirectEditText(b)) {
+      this.finishUndoEntry(undo)
+      return
+    }
     // 这里是**行内 run 编辑**的统一落点（插引用/图片/外链、改锚文本、摘原子……）——
     // 全部是用户正对着这一行发起的直接编辑，与打字同档；结构写路径不走这里。
     this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)), undefined, { directEdit: true })

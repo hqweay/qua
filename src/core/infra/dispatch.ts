@@ -69,8 +69,8 @@ export function dispatchKey(e: KeyboardEvent, env: DispatchEnv): boolean {
  * 全局按键入口：装一次 `document` 的 keydown。
  *
  * 两段处理：
- * 1. **`⌘Z` 族**：capture 阶段先判；编辑器里交给绑定表、并吞掉原生撤销；标题框里走模型栈；
- *    焦点在别处则放行。
+ * 1. **`⌘Z` 族**：capture 阶段先判；编辑区里交给绑定表、并吞掉原生撤销；
+ *    表单字段（input／textarea）里的文本不属于模型，撤销归原生；焦点在别处则放行。
  * 2. **其余按键**：bubble 阶段走绑定表；覆盖层打开时不碰（覆盖层有自己的一份 capture）。
  */
 export function installKeydown(env: DispatchEnv, opts: { editorEl: HTMLElement }): void {
@@ -84,7 +84,15 @@ export function installKeydown(env: DispatchEnv, opts: { editorEl: HTMLElement }
       const inTextInput = Boolean(target && (target.closest('input, textarea') || target.isContentEditable))
       const inEditor = opts.editorEl.contains(target)
       if (!inTextInput && !inEditor) return // 焦点在别处：不拦
-      if (!inEditor) dispatchKey(e, env) // 标题框里：走模型栈，不做 input 原生撤销
+      if (!inEditor) {
+        /**
+         * **表单字段里的文本不属于模型**（别名、筛选、查询草稿都在字段里）：撤销该归输入框自己。
+         * 只有**真的派发到一条命令**时才吞掉这个键 —— 否则「模型没接、原生也被拦」= 死键
+         * （实测：别名输入框里粘贴后按 ⌘Z，一个字都不退）。
+         */
+        if (dispatchKey(e, env)) e.preventDefault()
+        return
+      }
       e.preventDefault() // 编辑器里：绑定表已派发过，原生撤销永不上场
     },
     true,

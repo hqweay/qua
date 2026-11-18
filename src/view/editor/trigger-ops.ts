@@ -208,6 +208,9 @@ export class TriggerOps {
     try {
       ok = this.ed.write((tx) => apply(tx, loc.block), undefined, { directEdit: true })
     } catch (e) {
+      // 失败也要收口（本方法在 `write` 之前已经 `beginUndoEntry`）：
+      // begin/finish 不配对会让此后所有编辑都记不进撤销栈
+      this.ed.finishUndoEntry('other')
       // 名字被一个未装载的块占着 ⇒ 不新建（否则地址空间出现第二个同名身份）；这次落点取消
       if (e instanceof UnloadedAliasError) {
         console.warn(`[trigger] "${e.aliasName}" exists on an unloaded block; pick cancelled`)
@@ -215,7 +218,10 @@ export class TriggerOps {
       }
       throw e
     }
-    if (!ok) return false
+    if (!ok) {
+      this.ed.finishUndoEntry('other')
+      return false
+    }
     /**
      * 撤销合并窗口的陷阱：打字那笔（`insert`）与这一笔若同 kind 且落在 1200ms 内，
      * 会被并成一步 —— 一次撤销就回到「输入前」，跳过落点那一格。所以这里一律记
