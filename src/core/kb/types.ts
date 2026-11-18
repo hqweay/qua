@@ -326,10 +326,11 @@ export interface KbClient {
   journalDates(): readonly string[]
 
   /**
-   * **库里（含软删）存在哪几天的 id**：创建路径的防重判据。
+   * **这一天在库里的记录**（含软删）：创建路径的防重判据。
    * 日记块的 id 由日期确定性派生 ⇒ 「未加载就新建」会得到同 id 的第二块。
+   * `undefined` ＝ 这一天真的没有块；`deleted` 非空 ＝ 存在但被软删（打开要复活同一块）。
    */
-  journalIds(): ReadonlySet<string>
+  journalRecord(date: string): { id: string; deleted: number | null } | undefined
 
   /** 这一块当前的可引用区间（通常为空——anno 只在被引用时存在） */
   annosOf(id: string): readonly Anno[]

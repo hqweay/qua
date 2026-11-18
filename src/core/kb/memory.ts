@@ -310,13 +310,17 @@ export class MemoryKb implements KbClient {
    * 日记块的 id 由日期确定性派生 ⇒ 「未加载就新建」会得到同 id 的第二块。
    * catalog 在场用它（全库的日期表）；不在场走含软删的索引块表（整库模式）。
    */
-  journalIds(): ReadonlySet<string> {
-    if (this.catalog) return new Set(this.catalog.journals.map((j) => j.id))
-    const out = new Set<string>()
-    for (const b of this.store.index.all.values()) {
-      if (b.props?.['_date'] !== undefined) out.add(b.id)
+  journalRecord(date: string): { id: string; deleted: number | null } | undefined {
+    if (this.catalog) {
+      const hit = this.catalog.journals.find((j) => j.date === date)
+      return hit ? { id: hit.id, deleted: hit.deleted } : undefined
     }
-    return out
+    for (const b of this.store.index.all.values()) {
+      if (b.props?.['_date'] === date) {
+        return { id: b.id, deleted: isDeleted(b) ? Number(b.props?.[DELETED_AT_PROP] ?? 0) : null }
+      }
+    }
+    return undefined
   }
 
   annosOf(id: string): readonly Anno[] {

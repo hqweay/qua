@@ -49,6 +49,8 @@ import type { PageDeps } from '../commands-impl.ts'
 export type PagesDeps = {
   kb: MemoryKb
   blocks: BlockStore
+  /** 工作集装载：按 id 装一批块（子树＋祖先链）再继续（整库模式＝同步 then） */
+  loadDocThen: (ids: readonly string[], then: () => void) => void
   txRun: <R>(fn: (tx: Tx) => R, source?: unknown) => { ops: Op[]; changes: Change[]; result: R; undo: UndoCapture }
   run: <R>(fn: (tx: Tx) => R, source?: unknown) => R
   syncSections: () => void
@@ -588,6 +590,7 @@ export function setupPages(deps: PagesDeps) {
    */
   const pageDeps: PageDeps = {
     kb,
+    loadDocThen: deps.loadDocThen,
     // 命令层开事务：装配层补撤销条目（零 op 的事务不记——没写东西就没有可撤销的），
     // 并重画这批改动碰到的行（标签 chip／别名头住在一行自己的 DOM 里，等整页重渲染就晚了）
     run: (fn) => {
@@ -848,14 +851,9 @@ export function setupPages(deps: PagesDeps) {
     if (!tab) return false
     const from = dir === 'back' ? nav.back : nav.forward
     const to = dir === 'back' ? nav.forward : nav.back
-    while (from.length > 0) {
-      const point = from.pop()!
-      const feed = tab.feed
-      // 同 id 但形态不同（feed ↔ 单日）也是一次真实导航，不能跳过
-      if (point.id === tab.activeId && point.feed === feed) continue
-      if (!findInForest(deps.getWs().blocks, point.id)) continue // 目标在历史里被删了：跳过，别把人送到空处
+    const replay = (point: NavPoint): void => {
       const state = captureActive() ?? emptyViewState()
-      to.push({ id: tab.activeId, feed, state })
+      to.push({ id: tab.activeId, feed: tab.feed, state })
       /**
        * 历史点带回离开那一刻的 `state`：
        *   · 有选区 ⇒ 回放时把焦点与光标一起交回正文；
@@ -878,6 +876,22 @@ export function setupPages(deps: PagesDeps) {
         }
       }
       scheduleBadge()
+    }
+    while (from.length > 0) {
+      const point = from.pop()!
+      const feed = tab.feed
+      // 同 id 但形态不同（feed ↔ 单日）也是一次真实导航，不能跳过
+      if (point.id === tab.activeId && point.feed === feed) continue
+      const inForest = findInForest(deps.getWs().blocks, point.id) !== undefined
+      if (!inForest && deps.kb.isLoaded(point.id)) continue // 已装载还找不到 ⇒ 真被删了：跳过，别把人送到空处
+      if (!inForest) {
+        // 工作集装载下「不在森林」可能是没装：先装再回放（装载完它就在森林里）
+        deps.loadDocThen([point.id], () => {
+          replay(point)
+        })
+        return true
+      }
+      replay(point)
       return true
     }
     return false

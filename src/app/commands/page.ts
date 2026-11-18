@@ -31,7 +31,6 @@ import {
   type Block,
 } from '../../core/index.ts'
 import { ensureTagInTx } from '../../core/kb/ensure-tag.ts'
-import { FEED_SPEC, feedWindow } from '../../core/query/feed.ts'
 import { t } from '../../core/infra/msg.ts'
 import type { App } from '../../core/infra/ports.ts'
 import type { Row } from '../../ui/overlay/layers.ts'
@@ -101,6 +100,49 @@ export function pageCommands(d: PageDeps): Pick<
    */
   const pages = (): readonly Block[] => d.kb.pages()
 
+  /**
+   * 打开一页（左槽页清单／命令面共用）。工作集装载下目标可能未装载 ⇒
+   * 先装再打开——把未加载当不存在丢掉这次导航，比打开失败更糟。
+   * 「今天」是入口不是普通块：从左槽点它 ＝ 回今日日记流（今日在顶、更早的天往下）。
+   */
+  const openPageNow = (id: string): void => {
+    if (!d.kb.isLoaded(id)) {
+      d.loadDocThen([id], () => {
+        openPageNow(id)
+      })
+      return
+    }
+    const p = d.kb.get(id)
+    if (!p) return
+    d.flush()
+    const isTodayEntry = isJournal(p) && journalDate(p) === todayISO()
+    d.setActiveId(isTodayEntry ? journalId(todayISO()) : id, {
+      feed: isTodayEntry,
+      restore: 'saved',
+      // 左槽打开页：恢复位置，但焦点留在左槽（用户是点导航来的）
+      focusRestore: false,
+    })
+    // 今日入口的窗口判据：先剔未来再截首屏；「哪几天存在」由日期表回答，未装载先装
+    const feedDays = isTodayEntry
+      ? d
+          .kb.journalDates()
+          .filter((dt) => dt <= todayISO())
+          .slice(-FEED_INITIAL)
+          .reverse()
+          .map(journalId)
+      : []
+    const loadAndShow = (blocks: readonly Block[]): void => {
+      d.loadPage(isTodayEntry ? rootsForMany(blocks) : rootsFor(p))
+      d.refreshList()
+      d.refreshTitle()
+      d.saveNow()
+    }
+    if (isTodayEntry) d.loadDocThen(feedDays, () => {
+      loadAndShow(feedDays.map((bid) => d.kb.get(bid)).filter((b): b is Block => b !== undefined))
+    })
+    else loadAndShow([])
+  }
+
   return {
     // ⚠️ **只列 `page` 露面**：journal 也是一块，但它不是「页」的不变量是「一天一个」），
     //    混进来会让「页数」「下一页」这类语义变成说不清的数。
@@ -126,45 +168,7 @@ export function pageCommands(d: PageDeps): Pick<
       d.focusFirstBlock()
     },
 
-    openPage: (id) => {
-      // 页可以嵌在别的块下面（露面位不要求顶层）⇒ 整库按 id 解析，不只看顶层
-      const p = d.kb.get(id)
-      if (!p) return
-      d.flush()
-      /**
-       * **今天**是一个「入口」，不是一个普通的块：从左槽点它 = **回今日日记流**，
-       * 与冷启动 / 「回今日」同一条规则（今日在顶，更早存在的天往下）。
-       * 只装这一天会把日记流收成一段 —— 用户点的明明是「Daily note」这个入口。
-       * ⚠️ 历史里的其它日记天仍走单日（左槽只有「今天」这一个入口）。
-       */
-      /**
-       * ⚠️ 落到**今天** ⇒ 当前对象是**今天这一块**（不是流的第一段）。
-       *    库里若留着更早的未打开的一天（它不是今天），「回今日」却停在昨天，落点很怪。
-       *    装载顺序由一份 QuerySpec 字面量负责（今日在顶 ＋ 存在的更早的天）。
-       */
-      const isTodayEntry = isJournal(p) && journalDate(p) === todayISO()
-      d.setActiveId(isTodayEntry ? journalId(todayISO()) : id, {
-        feed: isTodayEntry,
-        restore: 'saved',
-        // 左槽打开页：恢复位置，但焦点留在左槽（用户是点导航来的）
-        focusRestore: false,
-      })
-      // 与冷启动／「回今日」同一处窗口判据：先剔未来再截首屏
-      const feedDays = isTodayEntry
-        ? feedWindow(
-            d
-              .kb.query(FEED_SPEC)
-              .map((h) => d.kb.get(h.blockId))
-              .filter((b): b is Block => b !== undefined),
-            todayISO(),
-            FEED_INITIAL,
-          )
-        : []
-      d.loadPage(isTodayEntry ? rootsForMany(feedDays) : rootsFor(p))
-      d.refreshList()
-      d.refreshTitle()
-      d.saveNow()
-    },
+    openPage: (id) => openPageNow(id),
 
     deletePage: (id) => {
       const before = pages()

@@ -4,9 +4,8 @@
  * 只对**日记流**生效（roots 全是 journal 且 >1）；单日页不加载。
  * 视图状态（加载到第几屏）不入库；用「已加载的 root id 集合」判断，避免索引漂移。
  */
-import { feedDays, isJournal, FEED_MAX, FEED_STEP, type Block } from '../../core/index.ts'
+import { isJournal, FEED_MAX, FEED_STEP, type Block } from '../../core/index.ts'
 import { rootsForMany } from '../../app/commands/roots.ts'
-import type { Workspace } from '../../core/infra/workspace.ts'
 import type { BlockEditor } from '../../view/editor/editor.ts'
 
 export interface FeedDeps {
@@ -14,14 +13,19 @@ export interface FeedDeps {
   blankAreaEl: HTMLElement
   markBooted: () => void
   getMainEd: () => BlockEditor
-  getWs: () => Workspace
   activeBlock: () => Block
+  /**
+   * **取更早的一批天**（工作集装载）：窗口宽度 `limit`、已装载的天不重复给；
+   * 返回按日期降序的天块（已装进工作集，可直接交给编辑器）。
+   * 整库模式下它就是从内存日期表现取。
+   */
+  loadOlder: (limit: number, loaded: ReadonlySet<string>) => Promise<Block[]>
   /** 天 → 可编辑根（pages 分片「装载单位」的物化，那里持有编辑器装配的时序） */
   materialize: (days: Block[]) => void
 }
 
 export function setupFeed(deps: FeedDeps): void {
-  const { blankAreaEl, markBooted, getMainEd, getWs, activeBlock, materialize } = deps
+  const { blankAreaEl, markBooted, getMainEd, activeBlock, materialize } = deps
 
   /**
    * 滚到接近底部 ⇒ 追加一批**存在的**更早日记；不造空天，上限 `FEED_MAX`。
@@ -30,7 +34,7 @@ export function setupFeed(deps: FeedDeps): void {
    *    **之前**返回——那一步会物化根并改模型，而渲染会被 `appendRoots` 推迟，两者就分叉了。
    *    推迟到组合结束：用户下一次滚到底会再触发一次。
    */
-  const appendMoreFeed = (): boolean => {
+  const appendMoreFeed = async (): Promise<boolean> => {
     const mainEd = getMainEd()
     const roots = mainEd.doc.roots
     if (mainEd.probe.isComposing) return false
@@ -41,9 +45,8 @@ export function setupFeed(deps: FeedDeps): void {
     if (roots.length >= FEED_MAX) return false
     const loaded = new Set(roots.map((r) => r.id))
     const limit = Math.min(roots.length + FEED_STEP, FEED_MAX)
-    const more = feedDays(getWs().blocks, limit)
-      .filter((d) => !loaded.has(d.id))
-      .slice(0, limit - roots.length)
+    // 更早的天按目录取（全库的日期表），未装载的先装再给——不再扫内存森林
+    const more = await deps.loadOlder(limit, loaded)
     if (more.length === 0) return false
     materialize(more)
     mainEd.appendRoots(rootsForMany(more))
@@ -58,11 +61,9 @@ export function setupFeed(deps: FeedDeps): void {
         if (appending) return
         if (blankAreaEl.scrollTop + blankAreaEl.clientHeight < blankAreaEl.scrollHeight - 120) return
         appending = true
-        try {
-          appendMoreFeed()
-        } finally {
+        void appendMoreFeed().finally(() => {
           appending = false
-        }
+        })
       },
       { passive: true },
     )
@@ -73,9 +74,11 @@ export function setupFeed(deps: FeedDeps): void {
   // 首屏填满：如果 3 天还撑不满视口（短日记），补到能滚为止 —— 否则「下滚加载」没有触发条件。
   // 教训：初始只装 1 条连第一屏都撑不满，用户不会去「加载更多」。
   requestAnimationFrame(() => {
-    for (let i = 0; i < 6; i++) {
-      if (blankAreaEl.scrollHeight > blankAreaEl.clientHeight + 8) break
-      if (!appendMoreFeed()) break
-    }
+    void (async () => {
+      for (let i = 0; i < 6; i++) {
+        if (blankAreaEl.scrollHeight > blankAreaEl.clientHeight + 8) break
+        if (!(await appendMoreFeed())) break
+      }
+    })()
   })
 }

@@ -43,8 +43,8 @@ export type WorksetBootResult =
   | { status: 'no-library' }
   | { status: 'error'; error: string }
 
-/** doc 的祖先块行并进行缓存要用的那一份行 */
-function withAncestors(doc: LibraryDocRows): RawLibraryRows {
+/** doc 的祖先块行并进行缓存要用的那一份行（导航装载也用它） */
+export function withAncestors(doc: LibraryDocRows): RawLibraryRows {
   return {
     blocks: [...doc.rows.blocks, ...doc.ancestors],
     props: doc.rows.props,

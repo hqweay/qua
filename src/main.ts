@@ -94,7 +94,7 @@ import type { DeviceState } from './core/storage/device.ts'
 import { WORKSPACE_VERSION } from './core/infra/workspace.ts'
 import { createLibraryClient, type LibraryClient } from './core/storage/library-client.ts'
 import { Workset, worksetClosureIds } from './core/storage/workset.ts'
-import { loadWorksetBoot, type WorksetBootResult } from './app/boot/workset-boot.ts'
+import { loadWorksetBoot, withAncestors, type WorksetBootResult } from './app/boot/workset-boot.ts'
 import type { LoadedWorkspace } from './core/storage/index.ts'
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
@@ -343,6 +343,44 @@ function dockShortcutIds(device: DeviceState): string[] {
     }
   }
   return out
+}
+
+/**
+ * **按 id 装一批块进工作集**（导航装载的唯一咽喉）。
+ *
+ * 工作集装载下「`kb.get` 拿不到」只说明没装；打开/聚焦一个未装载的目标必须
+ * 先装再继续——把未加载当不存在去新建（或静默丢弃点击）都是事故。同一批 id 的
+ * 并发装载只发一次 IPC；装载进来的根钉住（它马上要成为某个视图的当前对象）。
+ * 整库模式下所有块都在内存里，直接 `then()`。
+ */
+const pendingDocs = new Map<string, Promise<void>>()
+function ensureDocsLoaded(ids: readonly string[], then: () => void): void {
+  if (!libraryClient || !workset) {
+    then()
+    return
+  }
+  const missing = [...new Set(ids)].filter((id) => !blocks.isLoaded(id))
+  if (missing.length === 0) {
+    then()
+    return
+  }
+  const key = [...missing].sort().join(',')
+  const inflight = pendingDocs.get(key)
+  const run = (async () => {
+    const r = await libraryClient.doc(missing)
+    if (r.status === 'ok') {
+      workset.loadDoc(withAncestors(r.value), r.value.rootIds)
+      workset.pin(r.value.rootIds)
+    } else {
+      console.warn('[workset] doc load failed:', r.status === 'error' ? r.error : r.status)
+    }
+  })().finally(() => pendingDocs.delete(key))
+  if (inflight) {
+    void inflight.then(then)
+    return
+  }
+  pendingDocs.set(key, run)
+  void run.then(then)
 }
 
 /**
@@ -924,6 +962,7 @@ const dispatchEnv = installDispatch({
 const { pageDeps, activeBlock, activeTrail, pageTitle, nav, historyGo, firstEditableRoot, materializeEditableRoots, initTabs, resetTabs, listTabs, activateTab, openInNewTab, openSurfaceTab, newTab, closeTab, nextTab, prevTab, canGoBack, canGoForward, refreshTabs } = setupPages({
   kb,
   blocks,
+  loadDocThen: ensureDocsLoaded,
   txRun,
   run,
   syncSections,
@@ -1373,6 +1412,11 @@ const app: App = {
    * ⚠️ `inspect` 放在最前：它是**目标自己的面**，不是「去哪」，先分流掉才不会落进导航。
    */
   openBlock: (id, action = 'center', opts) => {
+    // 工作集装载下「点一个未加载的目标」＝先装再打开（不丢点击、不把未加载当不存在）
+    if (blocks.partial && !kb.isLoaded(id)) {
+      ensureDocsLoaded([id], () => app.openBlock(id, action, opts))
+      return
+    }
     if (action === 'inspect') {
       app.openPropertiesDrawer(id)
       return
@@ -2249,11 +2293,32 @@ badge.update()
 
 /* ------------------------------------------------- 日记流下滚加载（wiring/feed） */
 
+/**
+ * **日记流下滚的取天**：窗口宽度 `limit`、已装载的不重复给，返回降序的天块。
+ * 「哪几天存在」由 catalog/索引的日期表回答（全库），未装载的经 `ensureDocsLoaded`
+ * 装进来再交编辑器——工作集模式下滚动装载的不是「内存里碰巧有的天」。
+ */
+async function loadOlderFeedDays(limit: number, loaded: ReadonlySet<string>): Promise<Block[]> {
+  const ids = kb
+    .journalDates()
+    .filter((dt) => dt <= todayISO())
+    .slice(-limit)
+    .reverse()
+    .map(journalId)
+    .filter((id) => !loaded.has(id))
+  if (ids.length === 0) return []
+  return await new Promise<Block[]>((resolve) => {
+    ensureDocsLoaded(ids, () => {
+      resolve(ids.map((id) => kb.get(id)).filter((b): b is Block => b !== undefined))
+    })
+  })
+}
+
 setupFeed({
   blankAreaEl: chrome.blankAreaEl,
   markBooted,
   getMainEd: () => mainEd,
-  getWs: () => ws,
   activeBlock,
+  loadOlder: loadOlderFeedDays,
   materialize: materializeEditableRoots,
 })

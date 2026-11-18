@@ -3,8 +3,6 @@
  */
 import {
   FEED_INITIAL,
-  FEED_SPEC,
-  feedWindow,
   isJournal,
   journalDate,
   journalId,
@@ -54,6 +52,16 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
   const ensure = (date: string): string => {
     const id = journalId(date)
     if (d.kb.get(id)) return id
+    /**
+     * **「库里有没有这一天」由 catalog/索引回答，不由「装载了没有」回答**：
+     * 存在（哪怕软删、哪怕未装载）就绝不新建——新建会得到同 id 的第二块。
+     * 未装载的块由打开路由先装载；软删且已装载 ⇒ 复活原块。
+     */
+    const rec = d.kb.journalRecord(date)
+    if (rec) {
+      if (rec.deleted && d.kb.isLoaded(rec.id)) d.run((tx) => tx.restore(rec.id))
+      return rec.id
+    }
     if (d.kb.trash().some((b) => b.id === id)) {
       d.run((tx) => tx.restore(id))
       return id
@@ -61,6 +69,41 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
     d.insertBlock(mkJournalBlock(date), null, 0)
     return id
   }
+
+  /**
+   * **装载再打开**：目标天未装载 ⇒ 先装（子树＋祖先链）再继续；
+   * catalog 说这一天不存在 ⇒ 物化（同步）再继续。软删的天装载后复活。
+   */
+  const ensureLoaded = (date: string, then: (id: string) => void): void => {
+    const id = journalId(date)
+    if (d.kb.get(id)) {
+      const rec = d.kb.journalRecord(date)
+      if (rec?.deleted) d.run((tx) => tx.restore(rec.id))
+      then(id)
+      return
+    }
+    if (d.kb.journalRecord(date) === undefined) {
+      then(ensure(date))
+      return
+    }
+    d.loadDocThen([id], () => {
+      const rec = d.kb.journalRecord(date)
+      if (rec?.deleted) d.run((tx) => tx.restore(rec.id))
+      then(id)
+    })
+  }
+
+  /**
+   * **日记流窗口的 id 序列**（日期降序）：catalog/索引的日期表回答「哪几天存在」，
+   * 不再对森林求值 FEED_SPEC。工作集模式下这里给出的是**全库**的天，
+   * 未装载的由 `loadDocThen` 补齐。
+   */
+  const feedIds = (anchorDate: string, limit: number): string[] =>
+    d.kb
+      .journalDates()
+      .filter((dt) => dt <= anchorDate)
+      .slice(-limit)
+      .reverse()
 
   /**
    * 最近一次复盘的参数：空天格子里落笔要**按同一参数重开**（格子变成真实段、其余格子原样）。
@@ -104,49 +147,46 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
    */
   const openFeed = (date: string, opts?: { days?: number; layout?: SecLayout; focusDate?: string }): void => {
     d.flush()
-    const anchorId = ensure(date)
-    const anchor = d.kb.get(anchorId)
-    const days = opts?.days ?? FEED_INITIAL
-    /**
-     * ⚠️ 「回今日」把**今天**设成当前对象，而不是流的**第一段**：库里若留着更早的
-     *    未打开的一天（它不是今天），按下「回今日」人却停在昨天，是很怪的落点。
-     *    装载顺序不变（按日期降序），只是当前对象归今天。
-     */
-    d.setActiveId(anchorId, {
-      feed: true,
-      // 普通「回今日/前一天」是返回（用最后位置）；复盘带参＝一次新的视图（从顶部）
-      restore: opts ? 'none' : 'saved',
-      focusRestore: true,
-      fallbackCaret: true,
+    ensureLoaded(date, (anchorId) => {
+      const anchor = d.kb.get(anchorId)
+      const days = opts?.days ?? FEED_INITIAL
+      /**
+       * ⚠️ 「回今日」把**今天**设成当前对象，而不是流的**第一段**：库里若留着更早的
+       *    未打开的一天（它不是今天），按下「回今日」人却停在昨天，是很怪的落点。
+       *    装载顺序不变（按日期降序），只是当前对象归今天。
+       */
+      // 先把窗口里的天装进工作集，再把根交给编辑器（未装载的天不再当「不存在」）
+      d.loadDocThen(feedIds(date, days), () => {
+        d.setActiveId(anchorId, {
+          feed: true,
+          // 普通「回今日/前一天」是返回（用最后位置）；复盘带参＝一次新的视图（从顶部）
+          restore: opts ? 'none' : 'saved',
+          focusRestore: true,
+          fallbackCaret: true,
+        })
+        // 流的形态＝「date 在顶、更早存在的天往下」；窗口判据在 feedIds（先剔未来再截段）
+        let dayBlocks = feedIds(date, days)
+          .map((id) => d.kb.get(id))
+          .filter((b): b is Block => b !== undefined)
+        /**
+         * 复盘的窗口是「今天往回 N 天」：比窗口更早的存在天不该混进格子（spec 没有
+         * 日期范围原子——那是后置项；这里先由装载路径收窄，代价登记在案）。
+         */
+        if (opts?.days !== undefined) {
+          const oldest = shiftISO(date, -(days - 1))
+          dayBlocks = dayBlocks.filter((b) => journalDate(b) >= oldest)
+        }
+        d.loadPage(anchor ? rootsForMany(dayBlocks) : [])
+        d.applyLayout(opts?.layout ?? d.feedLayoutPref())
+        // 复盘：窗口里没写过的天渲染空壳格子（纯视图兜底，落笔才物化）；普通流恒清空
+        d.setShells(opts?.days !== undefined ? reviewShells(date, days, dayBlocks) : [])
+        d.refreshList()
+        d.refreshTitle()
+        d.saveNow()
+        if (opts?.focusDate) d.focusDay(opts.focusDate)
+        else d.focusFirstBlock()
+      })
     })
-    // 流的形态＝「date 在顶、更早存在的天往下」：选天是查询的事，「怎么排」是装载的事
-    // ⚠️ 先剔未来再截前 days 段：反过来的话，引用日期物化的未来天会占满名额，
-    //    滤完一段不剩（点「回到今日」进空白页）。判据收在 feedWindow 一处。
-    let dayBlocks = feedWindow(
-      d
-        .kb.query(FEED_SPEC)
-        .map((h) => d.kb.get(h.blockId))
-        .filter((b): b is Block => b !== undefined),
-      date,
-      days,
-    )
-    /**
-     * 复盘的窗口是「今天往回 N 天」：比窗口更早的存在天不该混进格子（spec 没有
-     * 日期范围原子——那是后置项；这里先由装载路径收窄，代价登记在案）。
-     */
-    if (opts?.days !== undefined) {
-      const oldest = shiftISO(date, -(days - 1))
-      dayBlocks = dayBlocks.filter((b) => journalDate(b) >= oldest)
-    }
-    d.loadPage(anchor ? rootsForMany(dayBlocks) : [])
-    d.applyLayout(opts?.layout ?? d.feedLayoutPref())
-    // 复盘：窗口里没写过的天渲染空壳格子（纯视图兜底，落笔才物化）；普通流恒清空
-    d.setShells(opts?.days !== undefined ? reviewShells(date, days, dayBlocks) : [])
-    d.refreshList()
-    d.refreshTitle()
-    d.saveNow()
-    if (opts?.focusDate) d.focusDay(opts.focusDate)
-    else d.focusFirstBlock()
   }
 
   /**
@@ -170,13 +210,53 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
     return shells
   }
 
+  /**
+   * 删除一天。与页/标签同一套：**软删**（回收站可恢复），再打开这一天会**复活同一块**
+   * （`ensure` 认 id，见那里的注释）。
+   *
+   * 两条前置：
+   *   · **今天不让删** —— 冷启动会把今天物化回来（它是落点），入口只会在下一次启动时
+   *     「删了又回来」，那比不给更糟；
+   *   · 删的是**正装载着的那一天** ⇒ 删完回日记流，别让中心留着一个已删的根。
+   */
+  const deleteJournal = (id: string): boolean => {
+    // 删一天要看它的子树有多大（确认框）⇒ 未装载先装载（软删块也读得回来）
+    if (!d.kb.isLoaded(id)) {
+      d.loadDocThen([id], () => {
+        deleteJournal(id)
+      })
+      return true
+    }
+    const b = d.kb.get(id)
+    if (!b || !isJournal(b) || journalDate(b) === todayISO()) return false
+    // 爆炸半径：删一天带走整棵子树（日期行＋所有内容），与删页/删标签同一判据确认
+    const blocks = countBlocks(b)
+    d.confirm({
+      title: t('ui.confirm.deleteJournalTitle'),
+      body: t('ui.confirm.deleteJournalBody', { count: String(blocks) }),
+      confirmLabel: t('ui.confirm.delete'),
+      danger: true,
+      onConfirm: () => {
+        const loaded = d.activeId() === id || d.rootIds().includes(id)
+        d.removeBlock(id)
+        if (loaded) openFeed(todayISO())
+        else {
+          d.refreshList()
+          d.saveNow()
+        }
+        d.toast(t('ui.toast.journalDeleted'))
+      },
+    })
+    return true
+  }
+
   return {
     // 「引用日期」与「打开那天」共用同一份物化：两份拼装会出现两个「哪天是哪个块」的答案
     ensureJournal: ensure,
     journalToday: (date) => {
       const ok = typeof date === 'string' && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)
       // 「去某一天」＝只打开那一天（选日期是落点，不是筛选）；「回今日」＝今天在顶的日记流
-      if (ok) openBlock(ensure(date as string))
+      if (ok) ensureLoaded(date as string, (id) => openBlock(id))
       else openFeed(todayISO())
     },
     journalShift: (days) => {
@@ -184,7 +264,7 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
       // 从「当前对象」的日期出发；当前不是 journal 就从今天出发（翻日永远有起点）
       const from = b && isJournal(b) ? journalDate(b) : todayISO()
       // 单日模式：翻到相邻的一天（流里的「翻一天」是另一种动作）
-      openBlock(ensure(shiftISO(from, days)))
+      ensureLoaded(shiftISO(from, days), (id) => openBlock(id))
     },
     /**
      * 打开某一天：先**幂等物化**，再按落点分流。
@@ -195,11 +275,12 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
      */
     openJournal: (date, place = 'center') => {
       if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)) return
-      const id = ensure(date)
-      if (place === 'inspect') d.openPropertiesDrawer(id)
-      else if (place === 'dock') d.openInDock(id)
-      else if (place === 'tab' || place === 'tabWide') d.openInNewTab(id)
-      else openBlock(id)
+      ensureLoaded(date, (id) => {
+        if (place === 'inspect') d.openPropertiesDrawer(id)
+        else if (place === 'dock') d.openInDock(id)
+        else if (place === 'tab' || place === 'tabWide') d.openInNewTab(id)
+        else openBlock(id)
+      })
     },
     /** 复盘＝带参的日记流：同 spec 换 `days`，首版横排（三天／周各成一屏） */
     journalReview: (days) => {
@@ -212,8 +293,9 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
      * 其余格子原样）→ 光标落进那一天的首个子块。首子块由装载边界补（经事务）。
      */
     journalShellWrite: (date) => {
-      ensure(date)
-      openFeed(todayISO(), { days: lastReview?.days ?? FEED_INITIAL, layout: 'row', focusDate: date })
+      ensureLoaded(date, () => {
+        openFeed(todayISO(), { days: lastReview?.days ?? FEED_INITIAL, layout: 'row', focusDate: date })
+      })
     },
     /**
      * 删除一天。与页/标签同一套：**软删**（回收站可恢复），再打开这一天会**复活同一块**
@@ -224,28 +306,6 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
      *     「删了又回来」，那比不给更糟；
      *   · 删的是**正装载着的那一天** ⇒ 删完回日记流，别让中心留着一个已删的根。
      */
-    deleteJournal: (id) => {
-      const b = d.kb.get(id)
-      if (!b || !isJournal(b) || journalDate(b) === todayISO()) return false
-      // 爆炸半径：删一天带走整棵子树（日期行＋所有内容），与删页/删标签同一判据确认
-      const blocks = countBlocks(b)
-      d.confirm({
-        title: t('ui.confirm.deleteJournalTitle'),
-        body: t('ui.confirm.deleteJournalBody', { count: String(blocks) }),
-        confirmLabel: t('ui.confirm.delete'),
-        danger: true,
-        onConfirm: () => {
-          const loaded = d.activeId() === id || d.rootIds().includes(id)
-          d.removeBlock(id)
-          if (loaded) openFeed(todayISO())
-          else {
-            d.refreshList()
-            d.saveNow()
-          }
-          d.toast(t('ui.toast.journalDeleted'))
-        },
-      })
-      return true
-    },
+    deleteJournal,
   }
 }
