@@ -5671,18 +5671,27 @@ await check('T28 日记流＝今日在顶＋存在的历史天；历史天可编
 await check('T29 滚到底加载更早的日记（只加载存在的天）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   const before = await page.evaluate(() => document.querySelectorAll('#editor > .sec > .blk[data-role="journal"]').length)
-  const after = await page.evaluate(() => {
+  const scrolled = await page.evaluate(() => {
     const el = document.querySelector('#scroll')
     el.scrollTop = el.scrollHeight
     el.dispatchEvent(new Event('scroll'))
+    return { scrollable: el.scrollHeight > el.clientHeight }
+  })
+  assert(scrolled.scrollable, `首屏 3 天应可滚（否则滚动加载不会触发）：${JSON.stringify(scrolled)}`)
+  // 下滚加载经装载咽喉（先取目录、未装载的先装再交编辑器）：追加落 DOM 在异步链之后，
+  // 等「段数真的变多」再读，不在滚动事件的同一个同步栈里读
+  await page.waitForFunction(
+    (n) => document.querySelectorAll('#editor > .sec > .blk[data-role="journal"]').length > n,
+    before,
+    { timeout: 8000 },
+  )
+  const after = await page.evaluate(() => {
     const roots = [...document.querySelectorAll('#editor > .sec > .blk[data-role="journal"]')]
     return {
       roots: roots.length,
       dates: roots.map((x) => x.querySelector('.tx')?.dataset.ph ?? ''),
-      scrollable: el.scrollHeight > el.clientHeight,
     }
   })
-  assert(after.scrollable, `首屏 3 天应可滚（否则滚动加载不会触发）：${JSON.stringify(after)}`)
   assert(after.roots > before, `滚到底应追加更早的天：${before} → ${after.roots}`)
   assert(after.roots <= 6, `只应加载存在的 6 天（不造空天）：${after.roots}`)
   assert(new Set(after.dates).size === after.dates.length, `日记流不应出现重复的天：${JSON.stringify(after.dates)}`)
