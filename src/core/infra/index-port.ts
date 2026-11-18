@@ -41,6 +41,7 @@ import {
 import type { Op } from '../kb/types.ts'
 import {
   evaluateQuery,
+  evaluateQueryIds,
   createMatcher,
   isExactRoleJournal,
   resolveSelfSpec,
@@ -1258,8 +1259,32 @@ export function queryByIndex(
   spec: QuerySpec,
   opts: { selfId?: string; excludeIds?: readonly string[]; today?: string } = {},
 ): QueryHit[] {
-  const { q, env, memberRoots } = specContextOf(index, forest, spec, opts)
-  return evaluateQuery(q, memberRoots, env, forest, exactTagCandidates(q.where, index))
+  const { q, env } = specContextOf(index, forest, spec, opts)
+  /**
+   * 候选集只换「哪些块可能命中」，不换 roots：把候选块当 root 会截断 `QueryHit.path`。
+   * 顶层精确日记与顶层单标签互斥（where 只有一个节点），所以这里只有一个来源。
+   */
+  const candidates = isExactRoleJournal(q.where)
+    ? new Set(journalDaysOfIndex(index, forest).map((day) => day.id))
+    : exactTagCandidates(q.where, index)
+  return evaluateQuery(q, forest, env, forest, candidates)
+}
+
+/**
+ * **候选求值**：从一组 id 出发，不遍历森林；环境与 `queryByIndex` 同一份。
+ *
+ * `undefined` ＝ 这份条件不该由候选路径回答（方向原子／`refCount` 排序，或任一候选
+ * 定不了位）——调用方回退 `queryByIndex`，不拿半批结果。
+ */
+export function queryByIndexIds(
+  index: Index,
+  forest: readonly Block[],
+  spec: QuerySpec,
+  ids: Iterable<string>,
+  opts: { selfId?: string; excludeIds?: readonly string[]; today?: string } = {},
+): QueryHit[] | undefined {
+  const { q, env } = specContextOf(index, forest, spec, opts)
+  return evaluateQueryIds(q, ids, env, (id) => locateOf(index, id))
 }
 
 /**
@@ -1272,13 +1297,13 @@ function specContextOf(
   forest: readonly Block[],
   spec: QuerySpec,
   opts: { selfId?: string; excludeIds?: readonly string[]; today?: string } = {},
-): { q: QuerySpec; env: QueryEnv; memberRoots: readonly Block[] } {
+): { q: QuerySpec; env: QueryEnv } {
   /**
    * `'$self'` 的解析与纯函数路径**共用同一份**（`resolveSelfSpec`），
    * 连「没有宿主 ⇒ 空结果」这条也在同一个判据上：两条路径只许在「环境怎么来」上不同。
    */
   const host = opts.selfId !== undefined ? lookupBlock(index, opts.selfId) : undefined
-  if (!host && usesSelf(spec.where)) return { q: { where: { any: [] } }, env: neverEnv(), memberRoots: [] }
+  if (!host && usesSelf(spec.where)) return { q: { where: { any: [] } }, env: neverEnv() }
   // 字段表是两趟全林：查询/条件树会反复要，走 Index 上的缓存；`$self` 的 `{prop}` 分支也吃这一份
   const fields = indexFieldTable(index, forest)
   const q = host ? resolveSelfSpec(spec, host, forest, fields) : spec
@@ -1290,14 +1315,7 @@ function specContextOf(
     ...(opts.today ? { today: opts.today } : {}),
     ...(opts.excludeIds && opts.excludeIds.length > 0 ? { excludeIds: new Set(opts.excludeIds) } : {}),
   }
-  const roots: readonly Block[] = forest
-  /**
-   * 成员条件的候选集：顶层就是 `{role:'journal'}` 时，从**全部日记块列表**按日期去重
-   * （一天一个、先序第一个），不用全库逐块判定。它与纯函数路径的 `journalDays` 同口径，
-   * 等式由测试钉住；不是范围条件，判定不做特殊处理。
-   */
-  const memberRoots = isExactRoleJournal(q.where) ? journalDaysOfIndex(index, forest) : roots
-  return { q, env, memberRoots }
+  return { q, env }
 }
 
 /**

@@ -39,7 +39,9 @@ import {
   isQuerySpec,
   specChanged,
   queryByIndex,
+  queryByIndexIds,
   rebuild,
+  walkForest,
   BlockStore,
   ENGINE_CREATED,
   ENGINE_MODIFIED,
@@ -1409,4 +1411,125 @@ test('_type 读 blockTypeOf：eq 默认类型命中没写过 _type 的块；exis
   assert.deepEqual(ids({ prop: { id: '_type', neq: 'outline' } }), ['v'], '「非默认类型」＝ neq')
   assert.deepEqual(ids({ prop: { id: '_type', eq: 'core/divider' } }), ['v'])
   assert.deepEqual(ids({ prop: { id: '_type', exists: true } }), ['v', 'p'], '每块都有类型：exists 恒真')
+})
+
+/* ------------------------------------------------------------ 候选迭代求值 */
+
+/** 森林里所有**可见**块 id —— 候选超集的通用取法（与 walk 的可见性同一条） */
+function visibleIds(blocks: readonly Block[]): string[] {
+  const out: string[] = []
+  walkForest(blocks, (x) => {
+    out.push(x.id)
+  })
+  return out
+}
+
+/** 三条路逐条相等：纯函数 / 索引 walk / 索引候选。候选路径必须返回结果（不是回退） */
+function assertCandidateSame(
+  spec: QuerySpec,
+  blocks: Block[],
+  ids: Iterable<string>,
+  opts: { selfId?: string; excludeIds?: readonly string[]; today?: string } = {},
+): void {
+  const idx = rebuild(blocks)
+  const walked = queryByIndex(idx, blocks, spec, opts)
+  const candidated = queryByIndexIds(idx, blocks, spec, ids, opts)
+  assert.ok(candidated !== undefined, '这份条件应由候选路径回答（没有方向原子/refCount）')
+  assert.deepEqual(candidated, walked, '候选路径必须与 walk 路径逐条相等（含 path 与顺序）')
+  assert.deepEqual(walked, runQuery(spec, { blocks, ...opts }), 'walk 路径仍与纯函数同解')
+}
+
+test('候选求值：tag / ref / all / 属性 / 排序 / limit / excludeIds 与 walk 逐条相等', () => {
+  const { blocks, todo } = fixture()
+  const ids = visibleIds(blocks)
+  assertCandidateSame({ where: { tag: todo.id } }, blocks, ids)
+  assertCandidateSame({ where: { ref: 'c' } }, blocks, ids)
+  assertCandidateSame(
+    { where: { all: [{ tag: todo.id }, { prop: { id: TASK_STATUS_PROP_ID, eq: false } }] } },
+    blocks,
+    ids,
+  )
+  assertCandidateSame({ where: { tag: todo.id } }, blocks, ids, { excludeIds: ['a', 'e'] })
+  assertCandidateSame({ where: { tag: todo.id } }, blocks, ids, { selfId: 'p1' })
+  // `_date` 排序看真实祖先链：j1b 自己不是日记，但住在 j1 下面
+  assertCandidateSame({ where: { tag: todo.id }, sort: [{ by: '_date', dir: 'desc' }] }, blocks, ids)
+  assertCandidateSame(
+    { where: { tag: todo.id }, sort: [{ by: '_date', dir: 'desc' }], limit: 2 },
+    blocks,
+    ids,
+  )
+  // 候选传入顺序不影响结果：输入是乱序/重复的 id 流
+  assertCandidateSame({ where: { tag: todo.id } }, blocks, [...ids].reverse())
+  assertCandidateSame({ where: { tag: todo.id } }, blocks, [...ids, ...ids])
+})
+
+test('候选求值：$self 解析与「没有宿主 ⇒ 空结果」都不是回退', () => {
+  const { blocks, todo } = fixture()
+  const ids = visibleIds(blocks)
+  assertCandidateSame({ where: { ref: '$self' } }, blocks, ids, { selfId: 'c' })
+  assertCandidateSame({ where: { tag: '$self' } }, blocks, ids, { selfId: 'a' })
+  const idx = rebuild(blocks)
+  assert.deepEqual(queryByIndexIds(idx, blocks, { where: { ref: '$self' } }, ids), [], '没有宿主 ⇒ 空结果（不是回退）')
+})
+
+test('候选求值：属性定义子树不是内容行（定义块自己仍可命中）', () => {
+  const { todo } = fixture()
+  const def = mkPropDef('颜色', 'text', {}, 'color')
+  def.props = { ...(def.props ?? {}), _tags: [todo.id] }
+  def.children = [b('opt1', '选项一', { props: { _tags: [todo.id] } })]
+  const blocks = [todo, def, b('plain', '普通块', { props: { _tags: [todo.id] } })]
+  const ids = visibleIds(blocks)
+  assertCandidateSame({ where: { tag: todo.id } }, blocks, ids)
+  const idx = rebuild(blocks)
+  const hits = queryByIndexIds(idx, blocks, { where: { tag: todo.id } }, ids)!.map((x) => x.blockId)
+  assert.deepEqual(hits, ['color', 'plain'], '选项不进结果；定义块自己可以命中')
+})
+
+test('候选求值：任一候选定不了位 ⇒ 整次回退（不拿半批结果）', () => {
+  const { blocks, todo } = fixture()
+  const idx = rebuild(blocks)
+  assert.equal(
+    queryByIndexIds(idx, blocks, { where: { tag: todo.id } }, ['a', 'ghost']),
+    undefined,
+    '不存在的 id ⇒ 回退',
+  )
+  const deleted = b('gone', '回收站', { props: { _deletedAt: 1, _tags: [todo.id] } })
+  const withDeleted = [...blocks, deleted]
+  const idx2 = rebuild(withDeleted)
+  assert.equal(
+    queryByIndexIds(idx2, withDeleted, { where: { tag: todo.id } }, ['a', 'gone']),
+    undefined,
+    '软删块不在可见索引里 ⇒ 回退（候选来源本身不该给出它）',
+  )
+})
+
+test('候选求值：空候选 = 空结果；方向原子 / children / refCount 排序 ⇒ 回退', () => {
+  const { blocks, todo } = fixture()
+  const idx = rebuild(blocks)
+  assert.deepEqual(queryByIndexIds(idx, blocks, { where: { tag: todo.id } }, []), [])
+  assert.deepEqual(queryByIndexIds(idx, blocks, { where: { any: [] } }, visibleIds(blocks)), [])
+  assert.equal(queryByIndexIds(idx, blocks, { where: { up: { is: 'p1' } } }, visibleIds(blocks)), undefined)
+  assert.equal(queryByIndexIds(idx, blocks, { where: { children: true } }, visibleIds(blocks)), undefined)
+  assert.equal(queryByIndexIds(idx, blocks, { where: { not: { down: { text: '丙' } } } }, visibleIds(blocks)), undefined)
+  assert.equal(
+    queryByIndexIds(idx, blocks, { where: { tag: todo.id }, sort: [{ by: 'refCount', dir: 'desc' }] }, visibleIds(blocks)),
+    undefined,
+  )
+})
+
+test('顶层 {role:journal}：命中路径是真实祖先链（候选块不再被当成 root）', () => {
+  const nested = b('nestedDay', '', { props: { _date: '2026-10-23' }, children: [b('n1', '里面')] })
+  const outer = b('outer', '外壳', { children: [nested] })
+  const blocks = [outer, b('j', '', { props: { _date: '2026-10-24' } })]
+  const idx = rebuild(blocks)
+  const hits = queryByIndex(idx, blocks, { where: { role: 'journal' } })
+  const n = hits.find((x) => x.blockId === 'nestedDay')
+  assert.ok(n)
+  assert.deepEqual(n!.path, ['outer'], '嵌套的日记块要给出真实祖先链')
+  assert.deepEqual(hits, runQuery({ where: { role: 'journal' } }, { blocks }), '两条路径路径也要相等')
+  assert.deepEqual(
+    hits.map((x) => x.blockId),
+    ['nestedDay', 'j'],
+    '一天一个仍按森林先序；候选集不改变成员',
+  )
 })

@@ -22,6 +22,7 @@ import { displayTextOf } from '../identity/alias.ts'
 import { fieldTableOf, isQueryableField, readField, type FieldTable } from '../props/props.ts'
 import { isRefKind, relationEdgesOfForest, REFERENCE_KINDS, type RefKind, type RelationKind } from '../relations/relations.ts'
 import { annotatesPairsOf } from '../relations/annotates.ts'
+import { compareRanks } from '../infra/order.ts'
 import type { KbClient } from '../kb/types.ts'
 
 /* ------------------------------------------------------------ 条件形状 */
@@ -541,9 +542,91 @@ export function evaluateQuery(
     seen.add(b.id)
     hits.push({ blockId: b.id, path: ancestors.map((a) => a.id), block: b, ancestors })
   })
-  applySort(hits, spec.sort, forest)
+  applySort(hits, spec.sort, refCountNeeds(spec.sort) ? refTargetCounts(forest) : undefined)
   const size = typeof spec.limit === 'number' ? Math.max(0, spec.limit) : hits.length
   return hits.slice(0, size).map(({ blockId, path }) => ({ blockId, path }))
+}
+
+/** 这份排序要不要 `refCount`（全林边扫描）——两条求值路径各自决定从哪里取 */
+export function refCountNeeds(sort: readonly SortKey[] | undefined): boolean {
+  return sort?.some((s) => s.by === 'refCount') === true
+}
+
+/** 目标 → 指向它的边条数（现状口径：**全部关系边**，不只是引用；与 `inboundRefCount` 不同） */
+function refTargetCounts(forest: readonly Block[]): ReadonlyMap<string, number> {
+  const m = new Map<string, number>()
+  for (const e of relationEdgesOfForest(forest).edges) m.set(e.to, (m.get(e.to) ?? 0) + 1)
+  return m
+}
+
+/* ------------------------------------------------------------ 候选迭代 */
+
+/**
+ * 这份条件**只能按森林回答**：方向原子要真实祖先/子树，`children` 要子块表。
+ *
+ * 候选迭代的契约是「求值不碰森林」——所以整份 spec 只要出现其中任何一个，就整次回退
+ * 全林（`evaluateQueryIds` 返回 `undefined`）。这比「只让这个原子不产出候选」更严：
+ * 后者会让候选路径在 `all:[tag, {up:…}]` 里悄悄建一棵全库可见树，而 `candidateQueries`
+ * 计数还在说「没走全林」。
+ */
+export function needsForestWalk(node: QueryNode): boolean {
+  if ('all' in node) return node.all.some(needsForestWalk)
+  if ('any' in node) return node.any.some(needsForestWalk)
+  if ('not' in node) return needsForestWalk(node.not)
+  if ('up' in node || 'down' in node || 'near' in node) return true
+  return 'children' in node
+}
+
+/** 候选块的一站：块本体、真实祖先链（root→父）、逐层先序 rank（root→自己） */
+export interface CandidateSite {
+  block: Block
+  ancestors: readonly Block[]
+  ranks: readonly number[]
+}
+
+/** 候选 id → 位置；`undefined` ＝ 定不了位（调用方回退全林，不静默跳过/乱序） */
+export type CandidateLocator = (id: string) => CandidateSite | undefined
+
+/**
+ * **按候选 id 求值**：判定与顺序语义与 `evaluateQuery` 同一份，只是不遍历森林。
+ *
+ * 必须原样保留的四条（与 walk 路径逐条相等，测试钉住）：
+ *   · 顺序：先按**真实先序 rank** 排（不是候选传入顺序），再 `sort`，最后 `limit`；
+ *   · 路径：`QueryHit.path` 是真实 root→parent 链（候选块不能被当成 root）；
+ *   · 属性定义的子树不是内容行——用真实祖先链判，不是看直接父块；
+ *   · 去重与 `excludeIds`。
+ *
+ * 任一候选定不了位 ⇒ 返回 `undefined`（整次回退），不返回半批结果。
+ * `refCount` 排序与方向原子不接受（调用方先判 `needsForestWalk`／`refCountNeeds`）。
+ */
+export function evaluateQueryIds(
+  spec: QuerySpec,
+  ids: Iterable<string>,
+  env: QueryEnv,
+  locate: CandidateLocator,
+): QueryHit[] | undefined {
+  if (needsForestWalk(spec.where) || refCountNeeds(spec.sort)) return undefined
+  const matcher = createMatcher(undefined, env)
+  const rows: CandidateSite[] = []
+  const seen = new Set<string>()
+  for (const id of ids) {
+    if (seen.has(id)) continue
+    seen.add(id)
+    if (env.excludeIds?.has(id)) continue
+    const site = locate(id)
+    if (!site) return undefined
+    // 与 `walk()` 同一条：祖先链里有属性定义块 ⇒ 这行不是内容行（定义块自己仍可命中）
+    if (site.ancestors.some(isPropDefBlock)) continue
+    if (!matcher.matches(spec.where, site.block)) continue
+    rows.push(site)
+  }
+  rows.sort((a, b) => compareRanks(a.ranks, b.ranks))
+  applySort(rows, spec.sort, undefined)
+  const size = typeof spec.limit === 'number' ? Math.max(0, spec.limit) : rows.length
+  return rows.slice(0, size).map((site) => ({
+    blockId: site.block.id,
+    path: site.ancestors.map((a) => a.id),
+  }))
 }
 
 /**
@@ -560,16 +643,9 @@ export function evaluateQuery(
 function applySort(
   hits: { block: Block; ancestors: readonly Block[] }[],
   sort: readonly SortKey[] | undefined,
-  forest: readonly Block[],
+  refCounts: ReadonlyMap<string, number> | undefined,
 ): void {
   if (!sort || sort.length === 0) return
-  const refCounts = sort.some((s) => s.by === 'refCount')
-    ? (() => {
-        const m = new Map<string, number>()
-        for (const e of relationEdgesOfForest(forest).edges) m.set(e.to, (m.get(e.to) ?? 0) + 1)
-        return m
-      })()
-    : undefined
   for (let i = sort.length - 1; i >= 0; i--) {
     const { by, dir, seed } = sort[i]!
     const sign = dir === 'desc' ? -1 : 1
@@ -657,7 +733,12 @@ interface Matcher {
   matches(node: QueryNode, block: Block): boolean
 }
 
-export function createMatcher(forest: readonly Block[], env: QueryEnv): Matcher {
+/**
+ * 判定器。`forest` 只在条件含方向原子（`up`/`down`/`near`/`children`）时才用到；
+ * **候选求值不传它**（`evaluateQueryIds` 已把这类形状挡掉）——结构上防止候选路径
+ * 偷偷建一棵全库可见树。
+ */
+export function createMatcher(forest: readonly Block[] | undefined, env: QueryEnv): Matcher {
   /** 位置事实（祖先／子孙）**按需**建：纯 `tag`／`text` 查询不该为方向原子付一次全树遍历 */
   interface VisibleTree {
     byId: Map<string, Block>
@@ -667,6 +748,10 @@ export function createMatcher(forest: readonly Block[], env: QueryEnv): Matcher 
   let tree: VisibleTree | undefined
   const visibleTree = (): VisibleTree => {
     if (tree) return tree
+    if (!forest) {
+      // 内部不变量：候选求值必须先被 `needsForestWalk` 挡掉。走到这里说明守卫漏了
+      throw new Error('candidate evaluation cannot build a visible tree')
+    }
     const byId = new Map<string, Block>()
     const parentOf = new Map<string, string | null>()
     const childrenOf = new Map<string, Block[]>()
@@ -1223,9 +1308,14 @@ export function runQuery(spec: QuerySpec, input: QueryRunInput): QueryHit[] {
    * 成员条件的候选集：顶层就是 `{role:'journal'}` 时，「库里有哪些天」的**一天一个**
    * 口径就是候选集（同一天多块的坏数据只取先序第一个）。
    * 它不是范围条件：判定不做任何特殊处理，换掉的只是同一批块去掉重复后的集合。
+   *
+   * ⚠️ 用**候选集**而不是 `roots`：把候选块当 root 会把 `QueryHit.path` 截成 `[]`。
+   *    路径是真实 root→parent 链（`pathFixture` 的嵌套日用例钉住）。
    */
-  const memberRoots = isExactRoleJournal(q.where) ? journalDays(input.blocks) : roots
-  return evaluateQuery(q, memberRoots, env, input.blocks)
+  const journalCandidates = isExactRoleJournal(q.where)
+    ? new Set(journalDays(input.blocks).map((day) => day.id))
+    : undefined
+  return evaluateQuery(q, roots, env, input.blocks, journalCandidates)
 }
 
 /* ------------------------------------------------------------ `$self`：相对条件 */
