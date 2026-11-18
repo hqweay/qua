@@ -1464,7 +1464,7 @@ test('候选求值：tag / ref / all / 属性 / 排序 / limit / excludeIds 与 
 })
 
 test('候选求值：$self 解析与「没有宿主 ⇒ 空结果」都不是回退', () => {
-  const { blocks, todo } = fixture()
+  const { blocks } = fixture()
   const ids = visibleIds(blocks)
   assertCandidateSame({ where: { ref: '$self' } }, blocks, ids, { selfId: 'c' })
   assertCandidateSame({ where: { tag: '$self' } }, blocks, ids, { selfId: 'a' })
