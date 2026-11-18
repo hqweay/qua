@@ -26,6 +26,12 @@
 import { DB_TABLES } from '../identity/library.ts'
 import type { RawLibraryRows } from './db-rows.ts'
 
+/**
+ * 行形状经这一份**再导出**给主进程：`electron/**` 的 import 白名单只认少数 core 模块，
+ * 行编码的形状从具名查询这一层走（主进程不该直接摸 `db-rows` 的编码细节）。
+ */
+export type { RawLibraryRows }
+
 const B = DB_TABLES.block
 const P = DB_TABLES.property
 const A = DB_TABLES.alias
@@ -42,6 +48,15 @@ export const LIBRARY_READS = {
       select b.id from ${B} b join sub s on b.parent = s.id
     )
     select ${BLOCK_COLUMNS} from ${B} b join sub s on b.id = s.id`,
+
+  /**
+   * **一批块自己的行**（不带子树）：引用目标、标签、字段定义、槽快捷卡这些
+   * 「按 id 装一块」的读面。
+   *
+   * 与 `docSubtree` 分开：这些目标可能是一整张大页，装它的子树会把工作集从
+   * 「当前视图闭包」变成「引用目标的整棵树」，首帧成本跟着被引用的页大小走。
+   */
+  blocksByIds: `select ${BLOCK_COLUMNS} from ${B} b where b.id in (select value from json_each(?1))`,
 
   /** 子树里的属性行（一格一行；顺序由 pos 表达） */
   docProps: `select block, name, pos, multi, value from ${P} where block in (select value from json_each(?1))`,
@@ -60,8 +75,14 @@ export const LIBRARY_READS = {
     )
     select ${BLOCK_COLUMNS} from ${B} b join anc a on b.id = a.id`,
 
-  /** 日记日期（槽的日历／日记流窗口） */
-  catalogJournals: `select id, date from ${B} where date is not null and deleted is null order by date desc`,
+  /**
+   * 日记日期（槽的日历／日记流窗口）。
+   *
+   * **含软删天**：`_date` 派生身份，删掉的一天仍是「这一天存在过」的块；
+   * 打开它要走「恢复同一块」而不是新建（新建会得到同 id 的第二块）。
+   * 过滤可见性由调用方判（feed 只取 `deleted === null`）。
+   */
+  catalogJournals: `select id, date, deleted from ${B} where date is not null order by date desc`,
 
   /** 标签（id ＋ 主名）：`#` 补全与标签 chip 的显示名 */
   catalogTags: `select b.id as id, a.name as name from ${L} l
@@ -75,6 +96,16 @@ export const LIBRARY_READS = {
     left join ${A} a on a.block = b.id and a.pos = 0
     where b.kind is not null and b.deleted is null
     order by a.name`,
+
+  /**
+   * **全量地址表**（name → block）：创建路径的防重判据。
+   *
+   * 打字里出现的 `#名字`／`[[名字]]` 在本地工作集里 miss 时，不能当成「库里没有」
+   * 去新建：名字可能属于一个还没加载的块，新建就是第二个同名身份。这张表回答
+   * 「这个名字已经归谁」，与 `Index.aliases` 同一口径（全局唯一；重复只可能来自
+   * 历史脏数据，取任一都指向同一个名字空间）。
+   */
+  catalogAliases: `select name, block from ${A} order by block, pos`,
 
   /**
    * 回收站：被软删的操作根（子孙不各写标记，所以这里就是整座回收站）。
@@ -95,16 +126,20 @@ export type LibraryDocRows = {
   rootIds: string[]
 }
 
-export type CatalogJournal = { id: string; date: string }
+export type CatalogJournal = { id: string; date: string; deleted: number | null }
 export type CatalogTag = { id: string; name: string }
 export type CatalogPropDef = { id: string; kind: string; name: string | null }
 export type CatalogTrashRoot = { id: string; deleted: number }
+export type CatalogAlias = { name: string; block: string }
 
 /** 槽的全局身份摘要；页列表刻意不在这里（它是查询视图，按页查） */
 export type LibraryCatalog = {
+  /** 库级 meta 里首帧真需要的两格（当前对象与保存时刻） */
+  meta: { activeId: string; savedAt: number }
   journals: CatalogJournal[]
   tags: CatalogTag[]
   propDefs: CatalogPropDef[]
+  aliases: CatalogAlias[]
   trash: CatalogTrashRoot[]
 }
 

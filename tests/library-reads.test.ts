@@ -15,7 +15,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openLibraryDb, applyRowWrites, type RowWrite } from '../electron/library/sqlite.ts'
-import { readCatalogRows, readDocRows } from '../electron/library/reads.ts'
+import { readBlockRows, readCatalogRows, readDocRows } from '../electron/library/reads.ts'
 import { rowsToWorkspace } from '../src/core/storage/db-rows.ts'
 
 function block(
@@ -143,10 +143,36 @@ test('catalog：只回槽要显示的全局身份，不含页列表', () => {
     const catalog = readCatalogRows(db)
     // node:sqlite 的行是 null-prototype 对象；比较前摊平成普通对象（只比较值，不比较原型）
     const plain = <T extends object>(rows: readonly T[]): T[] => rows.map((r) => ({ ...r }))
-    assert.deepEqual(plain(catalog.journals), [{ id: 'j', date: '2026-11-18' }])
+    assert.deepEqual(catalog.meta, { activeId: '', savedAt: 0 })
+    assert.deepEqual(plain(catalog.journals), [{ id: 'j', date: '2026-11-18', deleted: null }], '日记含 deleted：打开软删天要能认出「这一天存在过」')
     assert.deepEqual(plain(catalog.tags), [{ id: 'tag', name: 'Tag' }])
     assert.deepEqual(plain(catalog.propDefs), [{ id: 'def', kind: 'text', name: 'Def' }])
+    assert.deepEqual(
+      plain(catalog.aliases).sort((a, b) => (a.block < b.block ? -1 : a.block > b.block ? 1 : 0)),
+      [
+        { name: 'Child', block: 'a' },
+        { name: 'Def', block: 'def' },
+        { name: 'Page', block: 'p' },
+        { name: 'Tag', block: 'tag' },
+      ],
+      '全量地址表：未加载名字的创建路径靠它防重复',
+    )
     assert.deepEqual(plain(catalog.trash), [{ id: 'x', deleted: 1 }])
     assert.ok(!('pages' in catalog), '页列表是查询视图，不在首帧目录')
+  })
+})
+
+test('blocks：一批块自己的行，不带子树', () => {
+  withDb((db) => {
+    const rows = readBlockRows(db, ['p', 'tag'])
+    assert.deepEqual(
+      rows.blocks.map((b) => String(b.id)).sort(),
+      ['p', 'tag'],
+      '按 id 装：只回块自己，不含它的子树与祖先',
+    )
+    const aliases = rows.aliases.map((r) => String(r.name)).sort()
+    assert.deepEqual(aliases, ['Page', 'Tag'])
+    const props = rows.props.map((r) => String(r.block))
+    assert.ok(!props.includes('tag'), 'tag 块的 _tags 属性行属于别的块，不在这里')
   })
 })

@@ -40,8 +40,8 @@ import {
   type LibraryManifest,
 } from '../../src/core/identity/library.ts'
 import { createFolderAssetStore, type AssetStore } from './assets.ts'
-import { readCatalogRows, readDocRows } from './reads.ts'
-import type { LibraryCatalog, LibraryDocRows } from '../../src/core/storage/library-reads.ts'
+import { readBlockRows, readCatalogRows, readDocRows } from './reads.ts'
+import type { LibraryCatalog, LibraryDocRows, RawLibraryRows } from '../../src/core/storage/library-reads.ts'
 import {
   applyRowWrites,
   hasContent,
@@ -102,6 +102,8 @@ export interface RepoSession {
     docRows: number
     catalog: number
     catalogRows: number
+    blocks: number
+    blockRows: number
   }
   /**
    * 这个会话**累计写进去多少行**（`saveContent` 的返回值累加）。
@@ -182,7 +184,7 @@ function makeSession(id: string, dir: string, db: Db, deviceId: string): RepoSes
     assets,
     windows: new Set<number>(),
     deviceId,
-    reads: { full: 0, fullRows: 0, doc: 0, docRows: 0, catalog: 0, catalogRows: 0 },
+    reads: { full: 0, fullRows: 0, doc: 0, docRows: 0, catalog: 0, catalogRows: 0, blocks: 0, blockRows: 0 },
     writes: { rows: 0, ftsRows: 0, saves: 0 },
     close: () => {
       try {
@@ -283,15 +285,39 @@ export function loadContent(session: RepoSession): ReturnType<typeof readContent
 export function readDoc(session: RepoSession, roots: readonly string[]): LibraryDocRows {
   const doc = readDocRows(session.db, roots)
   session.reads.doc += 1
-  session.reads.docRows += doc.rows.blocks.length + doc.rows.props.length + doc.rows.aliases.length + doc.rows.lists.length
+  session.reads.docRows +=
+    doc.rows.blocks.length +
+    doc.rows.props.length +
+    doc.rows.aliases.length +
+    doc.rows.lists.length +
+    doc.ancestors.length
   return doc
 }
 
-/** 槽要显示的全局身份摘要（日记／标签／字段定义／回收站根）：与 Doc 分开计行 */
+/**
+ * **一批块自己的行**（不带子树）：引用目标／标签／字段定义／槽快捷卡的装载单位。
+ *
+ * 与 `readDoc` 分开记账：它回答的是「把 N 个按 id 的目标装进工作集要读多少行」，
+ * 与打开一个视图根是两件事。
+ */
+export function readBlocks(session: RepoSession, blockIds: readonly string[]): RawLibraryRows {
+  const rows = readBlockRows(session.db, blockIds)
+  session.reads.blocks += 1
+  session.reads.blockRows +=
+    rows.blocks.length + rows.props.length + rows.aliases.length + rows.lists.length
+  return rows
+}
+
+/** 槽要显示的全局身份摘要（页列表不在这里：它是查询视图，按页查）：与 Doc 分开计行 */
 export function readCatalog(session: RepoSession): LibraryCatalog {
   const catalog = readCatalogRows(session.db)
   session.reads.catalog += 1
-  session.reads.catalogRows += catalog.journals.length + catalog.tags.length + catalog.propDefs.length + catalog.trash.length
+  session.reads.catalogRows +=
+    catalog.journals.length +
+    catalog.tags.length +
+    catalog.propDefs.length +
+    catalog.aliases.length +
+    catalog.trash.length
   return catalog
 }
 

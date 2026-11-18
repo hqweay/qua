@@ -54,11 +54,13 @@ export interface LibraryBridge {
   /**
    * **工作集读面**（可选：web 宿主没有库面，测试也能造瘦桥）。
    *
-   * 两个具名查询：`doc(roots)` 回子树＋祖先链，`catalog()` 回槽的全局身份摘要。
+   * 三个具名查询：`doc(roots)` 回子树＋祖先链，`blocks(ids)` 回一批块自己的行
+   * （**不带子树**——引用目标/标签/定义按 id 装一块），`catalog()` 回槽的全局身份摘要。
    * 主进程只执行 `core/storage/library-reads.ts` 的 SQL，不认块语义；
-   * 参数只有 root id，没有任意 SQL 过桥的口子。
+   * 参数只有 id 列表，没有任意 SQL 过桥的口子。
    */
   doc?(roots: readonly string[]): Promise<unknown>
+  blocks?(ids: readonly string[]): Promise<unknown>
   catalog?(): Promise<unknown>
 
   /**

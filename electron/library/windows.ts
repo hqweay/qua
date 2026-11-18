@@ -29,8 +29,8 @@ import {
   type LibraryEntry,
 } from '../../src/core/identity/library.ts'
 import { libraryDir, loadRegistry, markOpened, saveRegistry, type RegistryIo } from './registry.ts'
-import { loadContent, openSession, readCatalog, readDoc, saveContent, type OpenFailure, type RepoSession } from './session.ts'
-import { readSeq, searchFts, snapshotLibrary, type RowWrite } from './sqlite.ts'
+import { loadContent, openSession, readBlocks, readCatalog, readDoc, saveContent, type OpenFailure, type RepoSession } from './session.ts'
+import { hasContent, readSeq, searchFts, snapshotLibrary, type RowWrite } from './sqlite.ts'
 
 /** 关窗握手等 renderer 回话的上限。超时就强关——卡住比丢一句话更糟。 */
 const CLOSE_ACK_TIMEOUT_MS = 1500
@@ -355,13 +355,20 @@ export class LibraryManager {
         schemaVersion: DB_SCHEMA_VERSION,
         seq: readSeq(s.db),
         /**
+         * **库里有内容吗**（一条 `exists` 级的查询，不读行）。
+         *
+         * 工作集装载用它判「该 seed 还是该装」：判空不需要把整库读回来，
+         * 那正是要消灭的那个 O(N)。
+         */
+        hasContent: hasContent(s.db),
+        /**
          * 这个库到目前为止**写过多少行**（`saveContent` 累加）。
          *
          * 给诊断面与自检脚本用：`rows` 是「写成本」的直接证据 ——
          * 「打一个字写几行」只能靠它回答，而「行数随库体量增长」正是要消灭的形状。
          */
         writes: { ...s.writes },
-        /** 读成本：`full` 是全库装载次数（旧路径）；`doc`／`catalog` 是工作集读面 */
+        /** 读成本：`full` 是全库装载次数（旧路径）；`doc`／`catalog`／`blocks` 是工作集读面 */
         reads: { ...s.reads },
       }
     })
@@ -432,7 +439,25 @@ export class LibraryManager {
       }
     })
 
-    /** **工作集读面：槽的全局身份摘要**（日记／标签／字段定义／回收站根；不含页列表） */
+    /**
+     * **工作集读面：一批块自己的行**（不带子树）。
+     *
+     * 参数是 block id 列表，形状校验与 `doc` 同一条（非空、有上限）：
+     * 上限挡的是「一次问整库」——引用闭包／候选页一次几百块是正常量，
+     * 一次几万块是调用方的 bug，宁可让它红。
+     */
+    ipcMain.handle('qua:library/blocks', (e, ids: unknown) => {
+      const s = sessionOf(e)
+      if (!s) return { status: 'no-library' }
+      if (!isRootList(ids)) return { status: 'bad-args' }
+      try {
+        return { status: 'ok', rows: readBlocks(s, ids) }
+      } catch (err) {
+        return { status: 'error', error: String(err) }
+      }
+    })
+
+    /** **工作集读面：槽的全局身份摘要**（日记／标签／字段定义／地址表／回收站根；不含页列表） */
     ipcMain.handle('qua:library/catalog', (e) => {
       const s = sessionOf(e)
       if (!s) return { status: 'no-library' }

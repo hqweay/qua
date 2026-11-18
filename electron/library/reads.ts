@@ -12,13 +12,16 @@
 import type { DatabaseSync } from 'node:sqlite'
 import {
   LIBRARY_READS,
+  type CatalogAlias,
   type CatalogJournal,
   type CatalogPropDef,
   type CatalogTag,
   type CatalogTrashRoot,
   type LibraryCatalog,
   type LibraryDocRows,
+  type RawLibraryRows,
 } from '../../src/core/storage/library-reads.ts'
+import { META_KEYS } from '../../src/core/identity/library.ts'
 
 type Row = Record<string, unknown>
 
@@ -27,14 +30,7 @@ export function readDocRows(db: DatabaseSync, rootIds: readonly string[]): Libra
   if (rootIds.length === 0) {
     return { rows: { blocks: [], props: [], aliases: [], lists: [], meta: {} }, ancestors: [], rootIds: [] }
   }
-  const rootJson = JSON.stringify(rootIds)
-  const blocks = db.prepare(LIBRARY_READS.docSubtree).all(rootJson) as Row[]
-  const ids = blocks.map((b) => String(b.id))
-  const idJson = JSON.stringify(ids)
-  const props = db.prepare(LIBRARY_READS.docProps).all(idJson) as Row[]
-  const aliases = db.prepare(LIBRARY_READS.docAliases).all(idJson) as Row[]
-  const lists = db.prepare(LIBRARY_READS.docLists).all(idJson) as Row[]
-
+  const blocks = db.prepare(LIBRARY_READS.docSubtree).all(JSON.stringify(rootIds)) as Row[]
   /**
    * 祖先按 root 逐个向上查，结果按 id 去重。
    * 不把祖先并进 `docSubtree`：那会把祖先前面的兄弟/兄弟子树也带进来，
@@ -50,14 +46,56 @@ export function readDocRows(db: DatabaseSync, rootIds: readonly string[]): Libra
       ancestors.push(row)
     }
   }
+  /**
+   * 附属行按「子树 ∪ 祖先链」取：祖先也要有名字，否则面包屑只能显示正文
+   * （页名住在 `_aliases` 里，而块行只带内容）。祖先的附属行与子树行同一形状，
+   * 一起交给编码层；`rows.blocks` 仍只含子树行 —— 要不要把祖先接进树是装载方的决定。
+   */
+  const allIds = [...blocks.map((b) => String(b.id)), ...ancestors.map((a) => String(a.id))]
+  const idJson = JSON.stringify([...new Set(allIds)])
+  const props = db.prepare(LIBRARY_READS.docProps).all(idJson) as Row[]
+  const aliases = db.prepare(LIBRARY_READS.docAliases).all(idJson) as Row[]
+  const lists = db.prepare(LIBRARY_READS.docLists).all(idJson) as Row[]
   return { rows: { blocks, props, aliases, lists, meta: {} }, ancestors, rootIds: [...rootIds] }
+}
+
+/**
+ * **一批块自己的行**（不带子树）：引用目标／标签／字段定义／槽快捷卡的装载单位。
+ *
+ * 与 `readDocRows` 同一套附属行查询，只是 block 集合由 id 直接给。
+ * 上限由调用方（IPC handler）校验：这里不做「一次问整库」的口子。
+ */
+export function readBlockRows(db: DatabaseSync, blockIds: readonly string[]): RawLibraryRows {
+  if (blockIds.length === 0) return { blocks: [], props: [], aliases: [], lists: [], meta: {} }
+  const idJson = JSON.stringify([...new Set(blockIds)])
+  const blocks = db.prepare(LIBRARY_READS.blocksByIds).all(idJson) as Row[]
+  const props = db.prepare(LIBRARY_READS.docProps).all(idJson) as Row[]
+  const aliases = db.prepare(LIBRARY_READS.docAliases).all(idJson) as Row[]
+  const lists = db.prepare(LIBRARY_READS.docLists).all(idJson) as Row[]
+  return { blocks, props, aliases, lists, meta: {} }
 }
 
 /** 默认槽要显示的全局身份摘要（页列表不在这里：它是查询视图，按页查） */
 export function readCatalogRows(db: DatabaseSync): LibraryCatalog {
+  const meta = new Map<string, string>()
+  for (const row of db.prepare('select key, value from meta').all() as { key: string; value: string }[]) {
+    meta.set(row.key, row.value)
+  }
+  const savedAt = Number(meta.get(META_KEYS.savedAt) ?? 0)
   const journals = db.prepare(LIBRARY_READS.catalogJournals).all() as CatalogJournal[]
   const tags = db.prepare(LIBRARY_READS.catalogTags).all() as CatalogTag[]
   const propDefs = db.prepare(LIBRARY_READS.catalogPropDefs).all() as CatalogPropDef[]
+  const aliases = db.prepare(LIBRARY_READS.catalogAliases).all() as CatalogAlias[]
   const trash = db.prepare(LIBRARY_READS.catalogTrash).all() as CatalogTrashRoot[]
-  return { journals, tags, propDefs, trash }
+  return {
+    meta: {
+      activeId: meta.get(META_KEYS.activeId) ?? '',
+      savedAt: Number.isFinite(savedAt) ? savedAt : 0,
+    },
+    journals,
+    tags,
+    propDefs,
+    aliases,
+    trash,
+  }
 }

@@ -16,7 +16,7 @@ import { join } from 'node:path'
 import { libraryId } from '../src/core/identity/library.ts'
 import { createLibraryClient, type LibraryReadBridge } from '../src/core/storage/library-client.ts'
 import type { LibraryCatalog, LibraryDocRows } from '../src/core/storage/library-reads.ts'
-import { loadContent, openSession, readCatalog, readDoc, saveContent } from '../electron/library/session.ts'
+import { loadContent, openSession, readBlocks, readCatalog, readDoc, saveContent } from '../electron/library/session.ts'
 import type { RowWrite } from '../electron/library/sqlite.ts'
 
 function doc(root = 'p'): LibraryDocRows {
@@ -24,16 +24,20 @@ function doc(root = 'p'): LibraryDocRows {
 }
 
 function catalog(): LibraryCatalog {
-  return { journals: [], tags: [], propDefs: [], trash: [] }
+  return { meta: { activeId: '', savedAt: 0 }, journals: [], tags: [], propDefs: [], aliases: [], trash: [] }
 }
 
-function bridgeOf(replies: { doc?: unknown; catalog?: unknown }): LibraryReadBridge & { calls: string[][] } {
+function bridgeOf(replies: { doc?: unknown; blocks?: unknown; catalog?: unknown }): LibraryReadBridge & { calls: string[][] } {
   const calls: string[][] = []
   return {
     calls,
     doc: async (roots) => {
       calls.push([...roots])
       return replies.doc
+    },
+    blocks: async (ids) => {
+      calls.push([...ids])
+      return replies.blocks
     },
     catalog: async () => replies.catalog,
   }
@@ -56,6 +60,44 @@ test('client：doc 原样转发 root 列表并解包；catalog 同', async () =>
   const c = await client.catalog()
   assert.equal(c.status, 'ok')
   if (c.status === 'ok') assert.deepEqual(c.value.tags, [])
+})
+
+test('client：blocks 按 id 转发并解包；空列表不问桥', async () => {
+  const rows = { blocks: [{ id: 'p' }], props: [], aliases: [], lists: [], meta: {} }
+  const bridge = bridgeOf({ blocks: { status: 'ok', rows } })
+  const client = createLibraryClient(bridge)
+  const r = await client.blocks(['p', 'p'])
+  assert.equal(r.status, 'ok')
+  if (r.status === 'ok') assert.deepEqual(r.value.blocks.map((b) => String(b.id)), ['p'])
+  assert.deepEqual(bridge.calls, [['p']], '同一批里重复的 id 去重后再问')
+
+  const empty = await client.blocks([])
+  assert.equal(empty.status, 'ok')
+  assert.deepEqual(bridge.calls, [['p']], '空列表在客户端就结束，不发 IPC')
+})
+
+test('client：blocks 超过单次上限 ⇒ 分片；任何一片失败 ⇒ 整次失败', async () => {
+  const replies: unknown[] = []
+  const calls: string[][] = []
+  const bridge: LibraryReadBridge & { calls: string[][] } = {
+    calls,
+    doc: async () => ({ status: 'no-library' }),
+    blocks: async (ids) => {
+      calls.push([...ids])
+      return replies[calls.length - 1]
+    },
+    catalog: async () => ({ status: 'no-library' }),
+  }
+  const client = createLibraryClient(bridge)
+  const many = Array.from({ length: 1025 }, (_, i) => `id-${i}`)
+  replies.push(
+    { status: 'ok', rows: { blocks: [], props: [], aliases: [], lists: [], meta: {} } },
+    { status: 'error', error: 'db boom' },
+  )
+  const r = await client.blocks(many)
+  assert.equal(r.status, 'error', '半批不算答案：调用方要的是这批目标都可读')
+  assert.equal(calls.length, 2, '第一片 512 问出去了')
+  assert.equal(calls[0]!.length, 512)
 })
 
 /* ------------------------------------------------------------ ② 失败分型 */
@@ -132,15 +174,19 @@ test('session 读计数：doc/catalog 不增 full；全库装载单独记行数'
 
   const d = readDoc(s!, ['p'])
   const c = readCatalog(s!)
+  const b = readBlocks(s!, ['tag'])
   assert.equal(d.rows.blocks.length, 2, 'Doc 只有 P 的子树（p／a）')
   assert.equal(c.tags.length, 1)
+  assert.equal(b.blocks.length, 1, 'blocks 只回点名的那几块')
   assert.deepEqual(s!.reads, {
     full: 0,
     fullRows: 0,
     doc: 1,
-    docRows: 5, // blocks 2 + props 1 + aliases 1 + lists 1
+    docRows: 5, // blocks 2 + props 1 + aliases 1 + lists 1（祖先链 0）
     catalog: 1,
-    catalogRows: 1, // tags 1
+    catalogRows: 3, // tags 1 + aliases 2（P／Tag）
+    blocks: 1,
+    blockRows: 3, // blocks 1 + aliases 1 + lists 1
   })
 
   const all = loadContent(s!)
