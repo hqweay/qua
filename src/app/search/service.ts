@@ -74,6 +74,8 @@ export interface SearchDeps {
   loadBlocks?: (ids: readonly string[]) => Promise<void>
   /** FTS 映射按块查（增量索引的现有 rowid；整库模式省略——映射已全量在内存） */
   ftsMapOf?: (ids: readonly string[]) => Promise<Map<string, number>>
+  /** 依赖方查询（全库口径）：改名/清除的重铺用 */
+  dependentsOf?: (id: string) => Promise<{ content: readonly string[]; tag: readonly string[]; prop: readonly string[] }>
 }
 
 export function createSearchService(deps: SearchDeps): SearchService {
@@ -105,7 +107,11 @@ export function createSearchService(deps: SearchDeps): SearchService {
         return client.tokenize(items)
       }
 
-  const indexer = new SearchIndexer(snapshot, tokenize, { ftsMapOf: deps.ftsMapOf })
+  const indexer = new SearchIndexer(snapshot, tokenize, {
+  ftsMapOf: deps.ftsMapOf,
+  dependentsOf: deps.dependentsOf,
+  loadBlocks: deps.loadBlocks,
+})
   const canFts = Boolean(bridge?.search)
 
   function clearTimer(): void {

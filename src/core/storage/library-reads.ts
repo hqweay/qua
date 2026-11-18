@@ -106,6 +106,21 @@ export const LIBRARY_READS = {
        or b.kind is not null
        or exists (select 1 from ${L} l where l.block = b.id and l.list in ('page','tag'))`,
 
+  /**
+   * **依赖方查询**（改名／清除的低频路径）：谁引用了这一块——正文引用、标签成员、
+   * 属性值三路分类（与 FTS 重铺的来源分类同一条口径）。全库口径：未装载的依赖方
+   * 也要拿到（它们的 FTS 行里住着旧名字）。
+   */
+  dependentsOf: `select b.id as id, 'content' as kind from ${B} b where b.deleted is null and exists (
+      select 1 from json_each(b.content) j
+      where json_extract(j.value,'$.t') = 'ref' and json_extract(j.value,'$.to') = ?1
+    )
+    union all
+    select p.block as id, 'tag' as kind from ${P} p where p.name = '_tags' and p.value = ?2
+    union all
+    select p.block as id, 'prop' as kind from ${P} p
+      where p.name not like '\_%' escape '\' and p.value = ?2`,
+
   /** **FTS 映射按块查**（增量索引不再把整张映射搬进内存）：一块最多几行（每来源一行） */
   ftsMapOf: `select block_id, source, fts_rowid from ${DB_TABLES.blockFtsMap}
     where block_id in (select value from json_each(?1))`,

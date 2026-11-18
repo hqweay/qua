@@ -29,7 +29,7 @@ import {
   type LibraryEntry,
 } from '../../src/core/identity/library.ts'
 import { libraryDir, loadRegistry, markOpened, saveRegistry, type RegistryIo } from './registry.ts'
-import { loadContent, openSession, readBlocks, readCatalog, readCandidates, readDoc, readFtsMap, readIdentity, readTree, saveContent, type OpenFailure, type RepoSession } from './session.ts'
+import { loadContent, openSession, readBlocks, readCatalog, readCandidates, readDependentIds, readDoc, readFtsMap, readIdentity, readTree, saveContent, type OpenFailure, type RepoSession } from './session.ts'
 import { hasContent, readSeq, searchFts, snapshotLibrary, type RowWrite } from './sqlite.ts'
 import { isCandidatePlan } from '../../src/core/storage/library-reads.ts'
 
@@ -506,6 +506,18 @@ export class LibraryManager {
       if (!isRootList(ids)) return { status: 'bad-args' }
       try {
         return { status: 'ok', rows: readFtsMap(s, ids) }
+      } catch (err) {
+        return { status: 'error', error: String(err) }
+      }
+    })
+
+    /** **依赖方查询**（正文引用/标签成员/属性值三路分类）：FTS 重铺与反链共用 */
+    ipcMain.handle('qua:library/dependents', (e, targetId: unknown) => {
+      const s = sessionOf(e)
+      if (!s) return { status: 'no-library' }
+      if (typeof targetId !== 'string' || targetId === '') return { status: 'bad-args' }
+      try {
+        return { status: 'ok', dependents: readDependentIds(s, targetId) }
       } catch (err) {
         return { status: 'error', error: String(err) }
       }

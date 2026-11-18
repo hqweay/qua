@@ -163,3 +163,22 @@ export function readFtsMapRows(db: DatabaseSync, blockIds: readonly string[]): {
     fts_rowid: number
   }[]
 }
+
+/** 依赖方（正文引用／标签成员／属性值三路分类）：FTS 重铺与反链共用这一份口径 */
+export function readDependents(
+  db: DatabaseSync,
+  targetId: string,
+): { content: string[]; tag: string[]; prop: string[] } {
+  const rows = db.prepare(LIBRARY_READS.dependentsOf).all(targetId, JSON.stringify(targetId)) as {
+    id: string
+    kind: string
+  }[]
+  const out = { content: [] as string[], tag: [] as string[], prop: [] as string[] }
+  for (const r of rows) {
+    const id = String(r.id)
+    if (r.kind === 'content') out.content.push(id)
+    else if (r.kind === 'tag') out.tag.push(id)
+    else if (r.kind === 'prop') out.prop.push(id)
+  }
+  return out
+}

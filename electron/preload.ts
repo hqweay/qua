@@ -114,6 +114,8 @@ const qua = {
   identity: (): Promise<unknown> => ipcRenderer.invoke('qua:library/identity'),
   /** FTS 映射按块查（增量索引用） */
   ftsMap: (ids: readonly string[]): Promise<unknown> => ipcRenderer.invoke('qua:library/fts-map', ids),
+  /** 依赖方查询（正文引用/标签成员/属性值三路分类） */
+  dependents: (targetId: string): Promise<unknown> => ipcRenderer.invoke('qua:library/dependents', targetId),
 
   /** 全文检索（match 由渲染层编译；主进程只做参数绑定与 bm25 排序） */
   search: (match: string, limit: number, offset = 0): Promise<unknown> =>

@@ -332,6 +332,13 @@ search = createSearchService({
     if (r.status === 'ok') workset.loadBlocks(r.value, true)
     else console.warn('[search] hit load failed:', r.status === 'error' ? r.error : r.status)
   },
+  // 依赖方走全库（改名/清除的低频路径）：未装载依赖块的 FTS 行也住着旧名字
+  dependentsOf: async (id) => {
+    if (!libraryClient) return { content: [], tag: [], prop: [] }
+    const r = await libraryClient.dependents(id)
+    if (r.status !== 'ok') throw new Error(r.status === 'error' ? r.error : r.status)
+    return r.value
+  },
   // 增量索引的现有 rowid 按块查（不再把整张映射搬进内存）
   ftsMapOf: async (ids) => {
     if (!libraryClient) return new Map()

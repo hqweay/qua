@@ -76,7 +76,7 @@ function subtreeIds(root: Block): string[] {
  * ⚠️ 只认**存下来的值**：定义块上的缺省槽不是任何块存过的值，选项改名不牵连它
  *    （「带缺省未填」的块本来就没有属性行）。
  */
-interface IdDependents {
+export interface IdDependents {
   /** 正文里有 ref run 指向它（link 行；`flavor '#'` 的同时进 tag 行） */
   content: Set<string>
   /** `_tags` 里带着它（tag 行） */
@@ -114,7 +114,8 @@ function dependentsOf(ws: StoredWorkspace, id: string): IdDependents {
 }
 
 /** 把依赖方的行按来源重铺（改名／存在性变化共用这一条） */
-function addDependentIndex(targets: FtsTargets, dep: IdDependents): void {
+/** 把依赖方的行按来源重铺（改名／存在性变化共用这一条）；indexer 的 SQL 依赖方合并也用它 */
+export function addDependentIndex(targets: FtsTargets, dep: IdDependents): void {
   for (const id of dep.content) {
     addIn(targets.index, 'link', id)
     // 不按 flavor 细分：普通引用重铺 tag 行只会得到同一份文本，

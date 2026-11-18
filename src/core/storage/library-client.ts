@@ -37,6 +37,7 @@ export interface LibraryReadBridge {
   identity?(): Promise<unknown>
   /** FTS 映射按块查（增量索引用） */
   ftsMap?(ids: readonly string[]): Promise<unknown>
+  dependents?(targetId: string): Promise<unknown>
 }
 
 /**
@@ -55,6 +56,8 @@ export interface LibraryClient {
   identity(): Promise<LibraryReadResult<RawLibraryRows>>
   /** FTS 映射按块查（增量索引的装配单位） */
   ftsMap(ids: readonly string[]): Promise<LibraryReadResult<{ block_id: string; source: string | null; fts_rowid: number }[]>>
+  /** 依赖方查询（全库口径）：改名/清除的 FTS 重铺用 */
+  dependents(targetId: string): Promise<LibraryReadResult<{ content: string[]; tag: string[]; prop: string[] }>>
   /** 查询候选 id（计划是超集；matcher 仍是判定来源）。失败分型与 doc 同一条 */
   candidates(plan: CandidatePlan): Promise<LibraryReadResult<string[]>>
   /** 候选装载：块＋全部祖先链（可选一层子级） */
@@ -159,6 +162,26 @@ function createClient(bridge: LibraryReadBridge): LibraryClient {
       if (r.status !== 'ok') return clientError('library/doc', `bad reply status: ${String(r.status)}`)
       if (!isDocRows(r.doc)) return clientError('library/doc', 'bad reply shape')
       return { status: 'ok', value: r.doc }
+    },
+
+    async dependents(targetId) {
+      if (!bridge.dependents) return clientError('library/dependents', 'bridge has no dependents read')
+      let raw: unknown
+      try {
+        raw = await bridge.dependents(targetId)
+      } catch (e) {
+        return clientError('library/dependents', e instanceof Error ? e.message : String(e))
+      }
+      const r = replyStatus(raw)
+      if (r.status === 'no-library') return { status: 'no-library' }
+      if (r.status === 'error') return clientError('library/dependents', String(r.error ?? 'unknown'))
+      if (r.status !== 'ok') return clientError('library/dependents', `bad reply status: ${String(r.status)}`)
+      const deps = (r as { dependents?: unknown }).dependents
+      if (!isRecord(deps) || !Array.isArray(deps.content) || !Array.isArray(deps.tag) || !Array.isArray(deps.prop)) {
+        return clientError('library/dependents', 'bad reply shape')
+      }
+      const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
+      return { status: 'ok', value: { content: strs(deps.content), tag: strs(deps.tag), prop: strs(deps.prop) } }
     },
 
     async ftsMap(ids) {

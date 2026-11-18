@@ -10,7 +10,8 @@ import type { FtsCommitPlan, FtsCommitSource } from '../../core/storage/fts-port
 import type { FtsSource } from '../../core/search/sources.ts'
 import { META_KEYS } from '../../core/identity/library.ts'
 import type { TokenizedText } from '../../core/search/tokenizer.ts'
-import { buildFtsWrites, ftsSourceTexts, ftsTargets } from '../../core/search/rows.ts'
+import { addDependentIndex, buildFtsWrites, ftsSourceTexts, ftsTargets } from '../../core/search/rows.ts'
+import { ALIASES_PROP } from '../../core/model/model.ts'
 import { ftsRowKey, parseFtsRowKey } from '../../core/search/sources.ts'
 
 /** `pending`／`building` 时查询降级扫描；只有 `ready` 才相信索引 */
@@ -67,11 +68,20 @@ export class SearchIndexer implements FtsCommitSource {
    * 增量写只碰「这批目标块」的现有 rowid：按块查一次，不再把整张映射搬进内存。
    */
   private readonly ftsMapOf: ((ids: readonly string[]) => Promise<Map<string, number>>) | undefined
+  /** **依赖方查询**（全库口径）：改名/清除后，未装载依赖块的 FTS 行也住着旧名字/旧可解析性 */
+  private readonly dependentsOf:
+    | ((id: string) => Promise<{ content: readonly string[]; tag: readonly string[]; prop: readonly string[] }>)
+    | undefined
+  private readonly loadBlocks: ((ids: readonly string[]) => Promise<void>) | undefined
 
   constructor(
     snapshot: SearchSnapshot | undefined,
     tokenize: TokenizeMany,
-    opts: { ftsMapOf?: (ids: readonly string[]) => Promise<Map<string, number>> } = {},
+    opts: {
+      ftsMapOf?: (ids: readonly string[]) => Promise<Map<string, number>>
+      dependentsOf?: (id: string) => Promise<{ content: readonly string[]; tag: readonly string[]; prop: readonly string[] }>
+      loadBlocks?: (ids: readonly string[]) => Promise<void>
+    } = {},
   ) {
     this.map = new Map(snapshot?.map ?? [])
     /**
@@ -88,6 +98,8 @@ export class SearchIndexer implements FtsCommitSource {
     this.tokenizer = snapshot?.tokenizer ?? ''
     this.tokenize = tokenize
     this.ftsMapOf = opts.ftsMapOf
+    this.dependentsOf = opts.dependentsOf
+    this.loadBlocks = opts.loadBlocks
   }
 
   /** 现在能不能相信 FTS（查询路径读它） */
@@ -194,6 +206,29 @@ export class SearchIndexer implements FtsCommitSource {
       return null
     }
     const targets = ftsTargets(ws, ops)
+    /**
+     * **依赖方走全库**：改名/清除时，未装载依赖块的 FTS 行也住着旧名字——
+     * SQL 拿全库依赖方，先装载再并入重铺（装载后 ftsSourceTexts 找得到它们）。
+     * 工作集内已并入的依赖方会被同一集合去重。
+     */
+    if (this.dependentsOf && this.loadBlocks) {
+      const depTargets: string[] = []
+      for (const op of ops) {
+        if (op.e === 'block' && op.op === 'exist' && op.state === 'purged') depTargets.push(op.id)
+        else if (op.e === 'prop' && op.name === ALIASES_PROP) depTargets.push(op.block)
+      }
+      if (depTargets.length > 0) {
+        try {
+          const results = await Promise.all(depTargets.map((id) => this.dependentsOf!(id)))
+          const loadIds = new Set<string>()
+          for (const d of results) for (const id of [...d.content, ...d.tag, ...d.prop]) loadIds.add(id)
+          if (loadIds.size > 0) await this.loadBlocks([...loadIds])
+          for (const d of results) addDependentIndex(targets, { content: new Set(d.content), tag: new Set(d.tag), prop: new Set(d.prop) })
+        } catch (e) {
+          console.warn(`[search] dependents fetch failed: ${e instanceof Error ? e.message : String(e)}`)
+        }
+      }
+    }
     if (targets.index.size === 0 && targets.remove.size === 0) return null
 
     const want = new Set<string>()
