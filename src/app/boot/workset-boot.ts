@@ -38,7 +38,13 @@ export type WorksetBootResult =
       mode: 'feed' | 'page'
       /** 「今天」在不在库里、是不是软删（物化判据；写不在这里做） */
       today: { exists: boolean; deleted: boolean }
-      counts: { docReads: number; docRows: number; catalogRows: number; loadedBlocks: number }
+      counts: {
+        docReads: number
+        docRows: number
+        catalogRows: number
+        identityRows: number
+        loadedBlocks: number
+      }
     }
   | { status: 'no-library' }
   | { status: 'error'; error: string }
@@ -91,6 +97,14 @@ export async function loadWorksetBoot(deps: WorksetBootDeps): Promise<WorksetBoo
 
   const first = await loadOnce(rootIds)
   if (first.status !== 'ok') return first
+  // 全局身份块（页/标签/定义/回收站根）：catalog 的块对象面——
+  // kb.pages()/tags()/propDefs()/trash() 这些同步全局读靠它在工作集模式下保持正确
+  const idn = await deps.client.identity()
+  if (idn.status !== 'ok') {
+    return idn.status === 'no-library' ? { status: 'no-library' } : { status: 'error', error: `identity: ${describe(idn)}` }
+  }
+  deps.workset.loadBlocks(idn.value)
+
   let doc = first.doc
   let roots = first.roots
   if (mode === 'page' && roots.length === 0) {
@@ -118,6 +132,8 @@ export async function loadWorksetBoot(deps: WorksetBootDeps): Promise<WorksetBoo
         catalog.propDefs.length +
         catalog.aliases.length +
         catalog.trash.length,
+      identityRows:
+        idn.value.blocks.length + idn.value.props.length + idn.value.aliases.length + idn.value.lists.length,
       loadedBlocks: deps.workset.size,
     },
   }

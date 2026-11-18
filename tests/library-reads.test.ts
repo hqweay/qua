@@ -15,7 +15,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openLibraryDb, applyRowWrites, type RowWrite } from '../electron/library/sqlite.ts'
-import { readBlockRows, readCatalogRows, readDocRows } from '../electron/library/reads.ts'
+import { readBlockRows, readCatalogRows, readDocRows, readIdentityRows } from '../electron/library/reads.ts'
 import { rowsToWorkspace } from '../src/core/storage/db-rows.ts'
 
 function block(
@@ -174,5 +174,23 @@ test('blocks：一批块自己的行，不带子树', () => {
     assert.deepEqual(aliases, ['Page', 'Tag'])
     const props = rows.props.map((r) => String(r.block))
     assert.ok(!props.includes('tag'), 'tag 块的 _tags 属性行属于别的块，不在这里')
+  })
+})
+
+
+test('identity：全局身份块＝页/标签露面、字段定义、回收站根（不含普通内容块）', () => {
+  withDb((db) => {
+    const rows = readIdentityRows(db)
+    const ids = rows.blocks.map((b) => String(b.id)).sort()
+    assert.deepEqual(
+      ids,
+      ['def', 'p', 'tag', 'x'],
+      '页 p（page 露面）、标签 tag、定义 def（kind）、回收站根 x（软删）；日记 j 的身份由 _date 推出、靠 catalog 日期表答，不在这批里',
+    )
+    // p 有 page 露面 ⇒ 带 _aliases；tag 有 tag 露面 ⇒ 名字在这份行里
+    const names = rows.aliases.map((r) => String(r.name)).sort()
+    assert.ok(names.includes('Page'), '页名随身份块一起装（选择器要显示名字）')
+    assert.ok(!ids.includes('a') && !ids.includes('a1'), '普通内容块不是身份块')
+    assert.ok(ids.includes('x'), '回收站根（软删）也是身份块——回收站卡要列它')
   })
 })

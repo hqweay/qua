@@ -33,6 +33,8 @@ export interface LibraryReadBridge {
   tree?(ids: readonly string[], withChildren: boolean): Promise<unknown>
   /** 槽要显示的全局身份摘要（日记／标签／字段定义／地址表／回收站根） */
   catalog(): Promise<unknown>
+  /** 全局身份块（页/标签/定义/回收站根） */
+  identity?(): Promise<unknown>
 }
 
 /**
@@ -47,6 +49,8 @@ export type LibraryReadResult<T> =
 
 export interface LibraryClient {
   doc(roots: readonly string[]): Promise<LibraryReadResult<LibraryDocRows>>
+  /** 全局身份块（页/标签/定义/回收站根）：catalog 的块对象面 */
+  identity(): Promise<LibraryReadResult<RawLibraryRows>>
   /** 查询候选 id（计划是超集；matcher 仍是判定来源）。失败分型与 doc 同一条 */
   candidates(plan: CandidatePlan): Promise<LibraryReadResult<string[]>>
   /** 候选装载：块＋全部祖先链（可选一层子级） */
@@ -151,6 +155,22 @@ function createClient(bridge: LibraryReadBridge): LibraryClient {
       if (r.status !== 'ok') return clientError('library/doc', `bad reply status: ${String(r.status)}`)
       if (!isDocRows(r.doc)) return clientError('library/doc', 'bad reply shape')
       return { status: 'ok', value: r.doc }
+    },
+
+    async identity() {
+      if (!bridge.identity) return clientError('library/identity', 'bridge has no identity read')
+      let raw: unknown
+      try {
+        raw = await bridge.identity()
+      } catch (e) {
+        return clientError('library/identity', e instanceof Error ? e.message : String(e))
+      }
+      const r = replyStatus(raw)
+      if (r.status === 'no-library') return { status: 'no-library' }
+      if (r.status === 'error') return clientError('library/identity', String(r.error ?? 'unknown'))
+      if (r.status !== 'ok') return clientError('library/identity', `bad reply status: ${String(r.status)}`)
+      if (!isBlockRows(r.rows)) return clientError('library/identity', 'bad reply shape')
+      return { status: 'ok', value: r.rows as RawLibraryRows }
     },
 
     async candidates(plan) {

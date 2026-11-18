@@ -550,6 +550,7 @@ if (DEV_SURFACE && LIBRARY_BRIDGE && worksetBoot) {
       console.info(
         `[perf] boot working set: mode=${worksetBoot!.mode} roots=${bootRoots.length} loaded=${blocks.loadedCount} ` +
           `doc=${bootCounts.docReads}/${bootCounts.docRows} catalog=${bootCounts.catalogRows} ` +
+          `identity=${bootCounts.identityRows} ` +
           `session full=${reads?.full ?? '?'} fullRows=${reads?.fullRows ?? '?'} ` +
           `doc=${reads?.doc ?? '?'}/${reads?.docRows ?? '?'} catalog=${reads?.catalog ?? '?'} blocks=${reads?.blocks ?? '?'}/${reads?.blockRows ?? '?'}`,
       )

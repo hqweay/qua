@@ -10,6 +10,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { BlockStore } from '../src/core/model/store.ts'
 import { Workset } from '../src/core/storage/workset.ts'
+import { MemoryKb } from '../src/core/kb/memory.ts'
 import type { RawLibraryRows } from '../src/core/storage/db-rows.ts'
 
 type Row = Record<string, unknown>
@@ -18,8 +19,8 @@ function row(id: string, parent: string | null = null, left: string | null = nul
   return { id, parent, left, content: '[]', created: 1, modified: 1 }
 }
 
-function rows(blocks: Row[], aliases: Row[] = []): RawLibraryRows {
-  return { blocks, props: [], aliases, lists: [], meta: {} }
+function rows(blocks: Row[], aliases: Row[] = [], lists: Row[] = []): RawLibraryRows {
+  return { blocks, props: [], aliases, lists, meta: {} }
 }
 
 function fixture(): { store: BlockStore; ws: Workset } {
@@ -79,4 +80,40 @@ test('顶层兄弟按 left 链保持顺序；已加载块重排时按前兄弟�
   ws.loadBlocks(rows([row('b', 'p')]))
   ws.loadBlocks(rows([row('a', 'p'), row('b', 'p', 'a')]))
   assert.deepEqual(ids(store.find('p')!.children), ['a', 'b'])
+})
+
+
+test('全局身份块装载后，同步全局读（pages/tags/propDefs/trash）在工作集模式下正确', () => {
+  const { store, ws } = fixture()
+  const kb = new MemoryKb(store)
+  // 今日文档里的一块（引用了 TAG_A）＋ 全局身份块（页/标签/定义/回收站根）
+  ws.loadDoc(
+    rows(
+      [row('day'), row('note', 'day')],
+      [],
+    ),
+    ['day'],
+  )
+  ws.loadBlocks(
+    rows(
+      [
+        { id: 'PAGE_X', parent: null, left: null, content: '[]', created: 1, modified: 1 },
+        { id: 'TAG_A', parent: null, left: 'PAGE_X', content: '[]', created: 1, modified: 1 },
+        { id: 'DEF', parent: null, left: 'TAG_A', content: '[]', created: 1, modified: 1, kind: 'text' },
+        { id: 'gone', parent: null, left: 'DEF', content: '[]', created: 1, modified: 1, deleted: 5 },
+      ],
+      [],
+      [
+        { block: 'PAGE_X', list: 'page' },
+        { block: 'TAG_A', list: 'tag' },
+      ],
+    ),
+  )
+  assert.deepEqual(kb.pages().map((b) => b.id), ['PAGE_X'])
+  assert.deepEqual(kb.tags().map((b) => b.id), ['TAG_A'])
+  assert.deepEqual(kb.propDefs().map((b) => b.id), ['DEF'])
+  assert.deepEqual(kb.trash().map((b) => b.id), ['gone'])
+  // 成员解析（tagsOf）也吃这份身份块：文档里的块带 _tags ⇒ chip 有名字
+  store.find('note')!.props = { _tags: ['TAG_A'] }
+  assert.deepEqual(kb.tagsOf('note').map((b) => b.id), ['TAG_A'])
 })

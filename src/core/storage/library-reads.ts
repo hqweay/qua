@@ -94,6 +94,19 @@ export const LIBRARY_READS = {
     where b.parent in (select value from json_each(?1))`,
 
   /**
+   * **全局身份块**（catalog 的块对象面）：页/标签露面、字段定义、回收站根。
+   *
+   * catalog 摘要（§`catalogTags` 等）只回答 id 与名字；选择器、页清单、回收站卡
+   * 要的是**块对象**。这一批是「库的身份清单」——体量跟身份数走，不跟块数走
+   * （1M 块的库通常几千个身份）。装载后 `kb.pages()/tags()/propDefs()/trash()`
+   * 这些同步全局读在工作集模式下依然正确。
+   */
+  catalogIdentity: `select ${BLOCK_COLUMNS} from ${B} b
+    where b.deleted is not null
+       or b.kind is not null
+       or exists (select 1 from ${L} l where l.block = b.id and l.list in ('page','tag'))`,
+
+  /**
    * 日记日期（槽的日历／日记流窗口）。
    *
    * **含软删天**：`_date` 派生身份，删掉的一天仍是「这一天存在过」的块；

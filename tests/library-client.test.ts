@@ -27,7 +27,7 @@ function catalog(): LibraryCatalog {
   return { meta: { activeId: '', savedAt: 0 }, journals: [], tags: [], propDefs: [], aliases: [], trash: [] }
 }
 
-function bridgeOf(replies: { doc?: unknown; blocks?: unknown; catalog?: unknown }): LibraryReadBridge & { calls: string[][] } {
+function bridgeOf(replies: { doc?: unknown; blocks?: unknown; catalog?: unknown; identity?: unknown }): LibraryReadBridge & { calls: string[][] } {
   const calls: string[][] = []
   return {
     calls,
@@ -40,6 +40,7 @@ function bridgeOf(replies: { doc?: unknown; blocks?: unknown; catalog?: unknown 
       return replies.blocks
     },
     catalog: async () => replies.catalog,
+    identity: async () => replies.identity,
   }
 }
 
@@ -49,6 +50,7 @@ test('client：doc 原样转发 root 列表并解包；catalog 同', async () =>
   const bridge = bridgeOf({
     doc: { status: 'ok', doc: doc() },
     catalog: { status: 'ok', catalog: catalog() },
+    identity: { status: 'ok', rows: { blocks: [], props: [], aliases: [], lists: [], meta: {} } },
   })
   const client = createLibraryClient(bridge)
 
@@ -60,6 +62,10 @@ test('client：doc 原样转发 root 列表并解包；catalog 同', async () =>
   const c = await client.catalog()
   assert.equal(c.status, 'ok')
   if (c.status === 'ok') assert.deepEqual(c.value.tags, [])
+
+  const idn = await client.identity()
+  assert.equal(idn.status, 'ok')
+  if (idn.status === 'ok') assert.deepEqual(idn.value.blocks, [])
 })
 
 test('client：blocks 按 id 转发并解包；空列表不问桥', async () => {
@@ -189,6 +195,8 @@ test('session 读计数：doc/catalog 不增 full；全库装载单独记行数'
     blockRows: 3, // blocks 1 + aliases 1 + lists 1
     candidates: 0,
     candidateIds: 0,
+    identity: 0,
+    identityRows: 0,
   })
 
   const all = loadContent(s!)

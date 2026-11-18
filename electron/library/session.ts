@@ -40,7 +40,7 @@ import {
   type LibraryManifest,
 } from '../../src/core/identity/library.ts'
 import { createFolderAssetStore, type AssetStore } from './assets.ts'
-import { readBlockRows, readBlockTreeRows, readCandidateIds, readCatalogRows, readDocRows } from './reads.ts'
+import { readBlockRows, readBlockTreeRows, readCandidateIds, readCatalogRows, readDocRows, readIdentityRows } from './reads.ts'
 import type { CandidatePlan, LibraryCatalog, LibraryDocRows, RawLibraryRows } from '../../src/core/storage/library-reads.ts'
 import {
   applyRowWrites,
@@ -106,6 +106,8 @@ export interface RepoSession {
     blockRows: number
     candidates: number
     candidateIds: number
+    identity: number
+    identityRows: number
   }
   /**
    * 这个会话**累计写进去多少行**（`saveContent` 的返回值累加）。
@@ -186,7 +188,7 @@ function makeSession(id: string, dir: string, db: Db, deviceId: string): RepoSes
     assets,
     windows: new Set<number>(),
     deviceId,
-    reads: { full: 0, fullRows: 0, doc: 0, docRows: 0, catalog: 0, catalogRows: 0, blocks: 0, blockRows: 0, candidates: 0, candidateIds: 0 },
+    reads: { full: 0, fullRows: 0, doc: 0, docRows: 0, catalog: 0, catalogRows: 0, blocks: 0, blockRows: 0, candidates: 0, candidateIds: 0, identity: 0, identityRows: 0 },
     writes: { rows: 0, ftsRows: 0, saves: 0 },
     close: () => {
       try {
@@ -376,5 +378,13 @@ export function readTree(session: RepoSession, blockIds: readonly string[], with
   const rows = readBlockTreeRows(session.db, blockIds, withChildren)
   session.reads.blocks += 1
   session.reads.blockRows += rows.blocks.length + rows.props.length + rows.aliases.length + rows.lists.length
+  return rows
+}
+
+/** 全局身份块装载（catalog 的块对象面）：与 catalog 分开记账（它带的是块行） */
+export function readIdentity(session: RepoSession): RawLibraryRows {
+  const rows = readIdentityRows(session.db)
+  session.reads.identity += 1
+  session.reads.identityRows += rows.blocks.length + rows.props.length + rows.aliases.length + rows.lists.length
   return rows
 }

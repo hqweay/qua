@@ -29,7 +29,7 @@ import {
   type LibraryEntry,
 } from '../../src/core/identity/library.ts'
 import { libraryDir, loadRegistry, markOpened, saveRegistry, type RegistryIo } from './registry.ts'
-import { loadContent, openSession, readBlocks, readCatalog, readCandidates, readDoc, readTree, saveContent, type OpenFailure, type RepoSession } from './session.ts'
+import { loadContent, openSession, readBlocks, readCatalog, readCandidates, readDoc, readIdentity, readTree, saveContent, type OpenFailure, type RepoSession } from './session.ts'
 import { hasContent, readSeq, searchFts, snapshotLibrary, type RowWrite } from './sqlite.ts'
 import { isCandidatePlan } from '../../src/core/storage/library-reads.ts'
 
@@ -491,6 +491,17 @@ export class LibraryManager {
       if (!s) return { status: 'no-library' }
       try {
         return { status: 'ok', catalog: readCatalog(s) }
+      } catch (err) {
+        return { status: 'error', error: String(err) }
+      }
+    })
+
+    /** **全局身份块**（页/标签露面、字段定义、回收站根 ＋附属行）：catalog 的块对象面 */
+    ipcMain.handle('qua:library/identity', (e) => {
+      const s = sessionOf(e)
+      if (!s) return { status: 'no-library' }
+      try {
+        return { status: 'ok', rows: readIdentity(s) }
       } catch (err) {
         return { status: 'error', error: String(err) }
       }

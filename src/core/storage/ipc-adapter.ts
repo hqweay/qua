@@ -66,6 +66,8 @@ export interface LibraryBridge {
   /** 候选装载：块＋全部祖先链（可选一层子级） */
   tree?(ids: readonly string[], withChildren: boolean): Promise<unknown>
   catalog?(): Promise<unknown>
+  /** 全局身份块（页/标签/定义/回收站根） */
+  identity?(): Promise<unknown>
 
   /**
    * 资产面（内容寻址；字节走 ArrayBuffer，主进程写进库目录的 `assets/`）。

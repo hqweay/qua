@@ -137,3 +137,14 @@ export function readBlockTreeRows(db: DatabaseSync, blockIds: readonly string[],
   const lists = db.prepare(LIBRARY_READS.docLists).all(allJson) as Row[]
   return { blocks: all, props, aliases, lists, meta: {} }
 }
+
+/** 全局身份块（页/标签露面、字段定义、回收站根）＋附属行：catalog 的块对象面 */
+export function readIdentityRows(db: DatabaseSync): RawLibraryRows {
+  const blocks = db.prepare(LIBRARY_READS.catalogIdentity).all() as Row[]
+  if (blocks.length === 0) return { blocks: [], props: [], aliases: [], lists: [], meta: {} }
+  const idJson = JSON.stringify(blocks.map((r) => String(r.id)))
+  const props = db.prepare(LIBRARY_READS.docProps).all(idJson) as Row[]
+  const aliases = db.prepare(LIBRARY_READS.docAliases).all(idJson) as Row[]
+  const lists = db.prepare(LIBRARY_READS.docLists).all(idJson) as Row[]
+  return { blocks, props, aliases, lists, meta: {} }
+}
