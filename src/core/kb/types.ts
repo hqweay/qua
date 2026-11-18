@@ -256,6 +256,15 @@ export interface PathEntry {
  */
 export interface KbClient {
   get(id: string): Block | undefined
+  /**
+   * **这块当前在不在内存里**（与「在不在库里」是两件事）。
+   *
+   * 部分装载下 `get` 返回 `undefined` 只说明「没装」，不说明「不存在」；
+   * 需要区分这两件事的读路径（打开引用、创建同名块、诊断）必须问这一格。
+   */
+  isLoaded(id: string): boolean
+  /** 这一份读门面是不是只装了库的一个工作集（浏览器全量实现恒 false） */
+  readonly partial: boolean
   children(id: string): readonly Block[]
   roots(): readonly Block[]
   parentOf(id: string): Block | undefined

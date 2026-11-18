@@ -103,6 +103,14 @@ export class MemoryKb implements KbClient {
     return this.store.find(id) ?? findInForest(this.store.blocks, id)
   }
 
+  isLoaded(id: string): boolean {
+    return this.store.isLoaded(id)
+  }
+
+  get partial(): boolean {
+    return this.store.partial
+  }
+
   children(id: string): readonly Block[] {
     return this.get(id)?.children ?? []
   }

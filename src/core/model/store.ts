@@ -24,6 +24,12 @@ import type { UndoCapture } from '../kb/scoped.ts'
 import { scopedOps } from '../kb/scoped.ts'
 import type { ForestLookup } from '../kb/types.ts'
 import { changesOf, structuralOf } from '../kb/changes.ts'
+import { walkForest } from './walk.ts'
+
+/** 子树里的每一块（含软删）：淘汰与钉住判据共用「子树」这一条口径 */
+function walkSubtree(root: Block, fn: (b: Block) => void): void {
+  walkForest([root], (b) => fn(b), { includeDeleted: true })
+}
 
 /**
  * 订阅者收到的信号。
@@ -62,6 +68,31 @@ export function isOwnEdit(source: unknown, mine: unknown): boolean {
   return mine != null && source === mine
 }
 
+/**
+ * **工作集状态**：这一份 store 里到底装了库的多少。
+ *
+ * | 模式 | `blocks` | `isLoaded` | 谁在用 |
+ * |---|---|---|---|
+ * | 整库（旧路径／web） | 整片森林 | 索引里有它就算 | 浏览器单库、种子库、换库 |
+ * | 工作集（桌面启动） | 当前视图闭包 | `loaded` 集合里有它才算 | 首帧之后的所有桌面读 |
+ *
+ * 为什么把「有没有加载」放在 store 而不是另造一层：多个视图共享**同一份块对象**
+ * （I3）。如果工作集是第二个对象表，同一个 id 就会有两个对象；把 loaded 挂在
+ * 唯一持有块对象的 store 上，`find` 与 `isLoaded` 天然回答同一个问题。
+ *
+ * ⚠️ 部分模式下 `blocks` **不是库**：顶层只代表「这些块的父没被装载」。
+ * 任何把 `roots()` 当「库的页清单／顶层身份」的读都必须换实现，不能在这里猜。
+ */
+export type WorksetState = {
+  /** `null` ＝ 整库在内存（旧路径）；非 null ＝ 已加载块 id 集合 */
+  loaded: Set<string> | null
+  /** 不可淘汰的块（打开着的视图、它们引用的身份块与祖先链） */
+  pinned: Set<string>
+  /** 装载顺序（LRU 淘汰的读数；`find` 命中会刷新） */
+  order: Map<string, number>
+  tick: number
+}
+
 export class BlockStore {
   blocks: Block[]
   undoStack = new UndoStack()
@@ -90,6 +121,12 @@ export class BlockStore {
    * 界面只是慢一点；没有读数就只能靠推理，而推理验不出「修复是否真的生效」。
    */
   readonly probe = { rebuildCount: 0, notifyCount: 0 }
+  /**
+   * **工作集读数**（只增、不清零）：给「首帧到底装了多少、淘汰过没有」一个可判定的数。
+   * `loaded`／`pinned` 是当前值，不是累计值。
+   */
+  readonly worksetProbe = { merges: 0, evictions: 0, loaded: 0, pinned: 0 }
+  private workset: WorksetState = { loaded: null, pinned: new Set(), order: new Map(), tick: 0 }
 
   constructor(blocks: Block[]) {
     this.blocks = blocks
@@ -140,9 +177,152 @@ export class BlockStore {
     return this.idx
   }
 
-  /** 按 id 找块（整片森林；zoom 后当前对象可能在任意深度）—— 走索引，O(1) */
+  /** 按 id 找块（当前工作集；zoom 后当前对象可能在任意深度）—— 走索引，O(1) */
   find(id: string): Block | undefined {
-    return lookupBlock(this.index, id)
+    const b = lookupBlock(this.index, id)
+    // 命中就刷新 LRU：淘汰该先淘汰「更久没被读到」的那一批
+    if (b !== undefined && this.workset.loaded !== null) this.touch(id)
+    return b
+  }
+
+  /* ------------------------------------------------------------ 工作集 */
+
+  /**
+   * **这一份 store 是不是只装了一个工作集**。
+   *
+   * 判据只有一个：`loaded` 不为 null。读侧据此决定「读不到就是未加载，不是不存在」，
+   * 不能靠「blocks 少」去猜——小库的工作集与整库在形状上完全一样。
+   */
+  get partial(): boolean {
+    return this.workset.loaded !== null
+  }
+
+  /** 工作集里有多少块（整库模式返回索引里的全部块，含软删） */
+  get loadedCount(): number {
+    return this.workset.loaded?.size ?? this.index.all.size
+  }
+
+  /**
+   * **这块在不在内存里**（与「在不在库里」是两件事）。
+   *
+   * 整库模式：索引里有它就算加载（含软删——撤销/修复要按 id 找回被删块）。
+   * 工作集模式：只有 `loaded` 集合里的才算。未加载的块**没有对象**，
+   * 不造占位块：占位块会让同一个 id 出现第二份对象（I3）。
+   */
+  isLoaded(id: string): boolean {
+    if (this.workset.loaded !== null) return this.workset.loaded.has(id)
+    return this.index.all.has(id)
+  }
+
+  /**
+   * 钉住一批块：淘汰不许动它们。
+   *
+   * 钉的是**对象所在的子树**：视图打开着的根、它引用的身份块、以及为面包屑加载的
+   * 祖先链都要钉，否则一次淘汰会让正在显示的视图拿到过期副本（I3）。
+   */
+  pin(ids: Iterable<string>): void {
+    for (const id of ids) this.workset.pinned.add(id)
+    this.worksetProbe.pinned = this.workset.pinned.size
+  }
+
+  unpin(ids: Iterable<string>): void {
+    for (const id of ids) this.workset.pinned.delete(id)
+    this.worksetProbe.pinned = this.workset.pinned.size
+  }
+
+  isPinned(id: string): boolean {
+    return this.workset.pinned.has(id)
+  }
+
+  /**
+   * **换工作集的根**（装载器算好之后交给 store）。
+   *
+   * 两个口径由调用方保证、这里只执行：
+   *   · `roots` 里的块对象必须是**已经共享的那一个**（已在工作集里的 id 不许换对象）；
+   *   · `ids` 是这次装完后的全部已加载 id（含工作集里的软删块）。
+   *
+   * 为什么原地 `splice` 而不是换数组：`ws.blocks` 与 store 共用同一个数组
+   * （装配层的 `syncSections` 直接搬引用）。换数组会让装配层手里的那份当场过期，
+   * 下一次读就可能读到旧的根集合。
+   *
+   * 不通知订阅者：装载是**读**，不是一次编辑。把新载入的页画出来是装载方的事；
+   * 这里通知只会让其它视图白重画一遍（还可能把它们的选区/折叠打断）。
+   */
+  setWorkset(roots: Block[], ids: ReadonlySet<string>): void {
+    this.blocks.splice(0, this.blocks.length, ...roots)
+    const previous = this.workset.loaded
+    this.workset.loaded = new Set(ids)
+    // 只给**新装进来的**块盖装载时刻：否则每次再装一页都会把所有块刷成“刚用过”，LRU 失真
+    for (const id of ids) if (!previous?.has(id)) this.touch(id)
+    this.worksetProbe.merges++
+    this.worksetProbe.loaded = ids.size
+    this.discardIndex()
+  }
+
+  /**
+   * **按内存预算淘汰**未钉住的块，返回淘汰了多少块。
+   *
+   * 只在工作集模式下有作用；整库模式返回 0（旧路径的预算不在这里）。
+   * 淘汰单位是**整棵子树**：摘一个父块却不摘子块，会留下「父不在、子还在顶层」的
+   * 半截树；留下一个到处都在按 id 读的孤儿比少几块更糟。
+   *
+   * 顺序按 LRU（`order`）：最久没被 `find`/装载碰过的先走。钉住的块即使最旧也不走。
+   */
+  trimWorkset(budget: number): number {
+    const loaded = this.workset.loaded
+    if (loaded === null || loaded.size <= budget) return 0
+    /**
+     * 收集候选：子树里**没有**被钉住的块。父块被摘时子块一起走，所以候选表里
+     * 只需要「可以整棵摘掉」的那些；按 LRU 排，逐个摘到预算内。
+     */
+    const parentOf = new Map<string, Block | null>()
+    const listOf = new Map<string, Block[]>()
+    walkForest(
+      this.blocks,
+      (b, ctx) => {
+        parentOf.set(b.id, ctx.parent)
+        listOf.set(b.id, ctx.parent ? ctx.parent.children : this.blocks)
+      },
+      { includeDeleted: true },
+    )
+    const candidates = [...loaded].filter((id) => this.workset.pinned.size === 0 || !this.hasPinnedInSubtree(id))
+    candidates.sort((a, b) => (this.workset.order.get(a) ?? 0) - (this.workset.order.get(b) ?? 0))
+    let evicted = 0
+    for (const id of candidates) {
+      if (loaded.size <= budget) break
+      if (!loaded.has(id)) continue // 已经被父块的淘汰带走
+      const b = this.index.all.get(id)
+      const list = listOf.get(id)
+      if (!b || !list) continue
+      // 父块还留着（没被摘）才算一次真实摘除；父已摘 ⇒ 这块已经随之上路
+      if (parentOf.get(id) && !loaded.has(parentOf.get(id)!.id)) continue
+      list.splice(list.indexOf(b), 1)
+      let n = 0
+      walkSubtree(b, (node) => {
+        if (loaded.delete(node.id)) n++
+      })
+      evicted += n
+    }
+    if (evicted > 0) {
+      this.worksetProbe.evictions++
+      this.worksetProbe.loaded = loaded.size
+      this.discardIndex()
+    }
+    return evicted
+  }
+
+  private touch(id: string): void {
+    this.workset.order.set(id, ++this.workset.tick)
+  }
+
+  private hasPinnedInSubtree(id: string): boolean {
+    const root = this.index.all.get(id)
+    if (!root) return false
+    let pinned = false
+    walkSubtree(root, (b) => {
+      if (this.workset.pinned.has(b.id)) pinned = true
+    })
+    return pinned
   }
 
   /**
@@ -182,6 +362,14 @@ export class BlockStore {
   reset(blocks: Block[]): void {
     this.replaced++
     this.blocks = blocks
+    /**
+     * **换库回到整库模式**：`reset` 的输入是一份完整模型（种子／演示状态），
+     * 它没有「未加载」这部分语义。工作集模式下的 pin/loaded 若留着，会把整库
+     * 里不在旧工作集的块判成「未加载」——那正是两份模型会打架的地方。
+     */
+    this.workset = { loaded: null, pinned: new Set(), order: new Map(), tick: 0 }
+    this.worksetProbe.loaded = 0
+    this.worksetProbe.pinned = 0
     this.discardIndex()
     this.undoStack.clear()
     this.notify()
