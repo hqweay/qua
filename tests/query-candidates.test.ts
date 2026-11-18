@@ -21,7 +21,7 @@ import { candidateBuildOf } from '../src/core/storage/query-candidates.ts'
 import { BlockStore } from '../src/core/model/store.ts'
 import { Workset } from '../src/core/storage/workset.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
-import { runQuery, type QuerySpec, type QueryContext, type Block } from '../src/core/index.ts'
+import type { QuerySpec, QueryContext, Block } from '../src/core/index.ts'
 
 const TODAY = '2026-11-19'
 
