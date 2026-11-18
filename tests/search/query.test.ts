@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import { cut } from 'jieba-wasm'
 import { pinyin } from 'pinyin-pro'
 import { charsOf, tokenizeText } from '../../src/core/search/tokenizer.ts'
-import { compileMatch, highlightSnippet, scanSearch } from '../../src/core/search/query.ts'
+import { compileMatch, highlightSnippet, markTerms, scanSearch, termsMatch } from '../../src/core/search/query.ts'
 import { mkBlock } from '../../src/core/model/model.ts'
 import { uuidv7Hex } from '../../src/core/model/ids.ts'
 import { mkTagBlock } from '../../src/core/identity/tags.ts'
@@ -111,4 +111,34 @@ test('高亮与内容投影同一口径：引用原子不进片段（不凭空�
   assert.equal(plainText(b.content), '看这个笔记')
   const parts = highlightSnippet(plainText(b.content), '笔记')
   assert.equal(parts.map((p) => p.text).join(''), '看这个笔记')
+})
+
+/* ------------------------------------------------------------ 候选面的词法 */
+
+test('termsMatch：按空白切词、全部出现（AND）、大小写不敏感、词序无关', () => {
+  assert.equal(termsMatch('项目计划表', '项目 计划'), true)
+  assert.equal(termsMatch('项目计划表', '计划 项目'), true, '词序无关')
+  assert.equal(termsMatch('项目计划表', '项目 预算'), false)
+  assert.equal(termsMatch('Project Plan', 'plan project'), true)
+  assert.equal(termsMatch('Project Plan', '  '), true, '空查询恒真')
+})
+
+test('markTerms：不截窗、整段保留、所有命中都标出', () => {
+  const text = '项目计划：项目 A 和 计划 B'
+  const parts = markTerms(text, '项目 计划')
+  assert.equal(parts.map((p) => p.text).join(''), text, '整段不许丢字')
+  assert.deepEqual(
+    parts.filter((p) => p.mark).map((p) => p.text),
+    ['项目', '计划', '项目', '计划'],
+  )
+})
+
+test('highlightSnippet：多词命中都标出，窗口按首个命中', () => {
+  const text = '前面很长很长很长很长很长很长很长很长很长很长的一段话，然后项目与计划出现。'
+  const parts = highlightSnippet(text, '计划 项目', 20)
+  assert.deepEqual(
+    parts.filter((p) => p.mark).map((p) => p.text),
+    ['项目', '计划'],
+  )
+  assert.equal(parts[0]?.text, '…', '窗口起点不在开头')
 })

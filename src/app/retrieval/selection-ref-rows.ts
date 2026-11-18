@@ -5,8 +5,9 @@
  * 这里是「已经选好一段字，要给它挑一个去处」。所以排序按**意图概率**：
  *   精确同名地址（默认项）→ 名字含该词的页/标签 → 正文含该词的块 → 新建。
  *
- * 行的 `parts` 直接吃 `highlightSnippet` 的结构化片段 —— 浮层的 `<mark>` 渲染
- * 就是为这个形状准备的，不需要在第二处再拼一遍高亮。
+ * 行的 `parts` 吃结构化片段：块行走 `highlightSnippet`（以命中为中心开窗），
+ * 名字行走 `markTerms`（短文本不截窗）——浮层的 `<mark>` 渲染就是为这个形状准备的，
+ * 不需要在第二处再拼一遍高亮。
  *
  * ⚠️ 只回答「列出哪些候选」，**不写库**：选中之后走 `core.editor/selection-to-ref`，
  *    建目标与替换正文在那一笔事务里。查询过程中零副作用（撤销栈里不该有搜索步）。
@@ -15,7 +16,6 @@
  *    接索引时换掉这一处即可，接口与两个调用点都不变。
  */
 import {
-  addressesOf,
   blockLabel,
   displayNameOf,
   flatten,
@@ -26,7 +26,8 @@ import {
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import type { KbClient } from '../../core/kb/types.ts'
-import { highlightSnippet } from '../../core/search/query.ts'
+import { highlightSnippet, markTerms, termsMatch } from '../../core/search/query.ts'
+import { matchedNameOf } from '../../core/search/match-source.ts'
 import type { Row } from '../../ui/overlay/layers.ts'
 
 /** 一组最多列这么多：划选的是一两个词，正文命中可能成百上千 */
@@ -59,37 +60,39 @@ export function selectionRefRows(deps: SelectionRefRowsDeps): (query: string) =>
 
   return (query: string): Row[] => {
     const raw = query.trim()
-    const q = raw.toLowerCase()
     const rows: Row[] = []
 
     /** ① 精确同名地址：老的一键行为在这里成为**默认项**（打开即选中，↵ 即完成） */
     const exact = raw === '' ? undefined : kb.resolveAlias(raw)
     if (exact && exact.id !== selfId) {
+      const name = matchedNameOf(exact, raw)?.text ?? nameOf(exact)
       rows.push({
         id: `selref/exact/${exact.id}`,
-        label: nameOf(exact),
+        label: name,
+        parts: markTerms(name, raw),
         hint: t('ui.selRef.exactHint'),
         icon: iconOf(exact) ?? '',
         group: 'selref/1-exact',
-        pick: { kind: 'block', id: exact.id, name: nameOf(exact) },
+        pick: { kind: 'block', id: exact.id, name },
       })
     }
 
-    /** ② 名字含该词的页／标签：身份块，显示名就是它们的身份 */
+    /** ② 名字含该词的页／标签：身份块，显示名就是它们的身份（多词按同一名字里全含） */
     let named = 0
     for (const b of all) {
       if (b.id === exact?.id || !(hasList(b, 'page') || hasList(b, 'tag'))) continue
-      if (q !== '' && !addressesOf(b).some((a) => a.toLowerCase().includes(q)) && !nameOf(b).toLowerCase().includes(q)) {
-        continue
-      }
+      const hit = raw === '' ? null : matchedNameOf(b, raw)
+      if (raw !== '' && !hit) continue
       if (named++ >= CAP) break
+      const name = hit?.text ?? nameOf(b)
       rows.push({
         id: `selref/page/${b.id}`,
-        label: nameOf(b),
+        label: name,
+        parts: markTerms(name, raw),
         hint: trailOf(b),
         icon: iconOf(b) ?? '',
         group: 'retrieval/1-page',
-        pick: { kind: 'block', id: b.id, name: nameOf(b) },
+        pick: { kind: 'block', id: b.id, name },
       })
     }
 
@@ -99,9 +102,9 @@ export function selectionRefRows(deps: SelectionRefRowsDeps): (query: string) =>
       if (b.id === exact?.id || hasList(b, 'page') || hasList(b, 'tag')) continue
       const text = plainText(b.content)
       if (text.trim() === '') continue
-      if (q !== '' && !text.toLowerCase().includes(q)) continue
+      if (!termsMatch(text, raw)) continue
       if (content++ >= CAP) break
-      const parts = q === '' ? [{ text: snippet(text) }] : highlightSnippet(text, raw, 72)
+      const parts = raw === '' ? [{ text: snippet(text) }] : highlightSnippet(text, raw, 72)
       rows.push({
         id: `selref/block/${b.id}`,
         label: snippet(text),

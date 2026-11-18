@@ -118,6 +118,20 @@ export function scanTerms(input: string): string[] {
 }
 
 /**
+ * 一段文本是否命中查询词：按空白切词、**全部出现**（AND）、大小写不敏感。
+ * 空查询恒真（与 `scanSearch` 的 `terms.every` 同一口径）。
+ *
+ * 候选面（`@` / 划选转引用 / 标签选择）共用这一份——同一个查询词在哪个入口
+ * 都该是同一个意思，不能这里 AND、那里按字面短语（带空格就假零结果）。
+ */
+export function termsMatch(text: string, input: string): boolean {
+  const terms = scanTerms(input)
+  if (terms.length === 0) return true
+  const low = text.toLowerCase()
+  return terms.every((t) => low.includes(t))
+}
+
+/**
  * 扫描时这一块的可搜文本：正文投影 ＋ **标签名**。
  *
  * 为什么标签要单独补：正文投影只收 text run（`plainText` 的既定口径），
@@ -181,18 +195,8 @@ interface Range {
   end: number
 }
 
-/**
- * 从正文里截一段结果片段，并标出命中位置。
- *
- * 只在**字面**命中的词上打标：拼音命中没有字面对应，片段从开头截、不硬标
- * （宁可少一个高亮，也不要标错一段字）。
- */
-export function highlightSnippet(text: string, input: string, max = 96): TextPart[] {
-  const terms = input
-    .trim()
-    .split(/\s+/)
-    .map((x) => x.toLowerCase())
-    .filter(Boolean)
+/** 查询词在文本里的**全部**出现位置（按起点排序；重叠的由切片时跳过） */
+function termRanges(text: string, terms: readonly string[]): Range[] {
   const lower = text.toLowerCase()
   const ranges: Range[] = []
   for (const term of terms) {
@@ -204,29 +208,53 @@ export function highlightSnippet(text: string, input: string, max = 96): TextPar
       from = at + term.length
     }
   }
-  ranges.sort((a, b) => a.start - b.start)
+  return ranges.sort((a, b) => a.start - b.start)
+}
 
+/** 把 `[from, to)` 按命中区间切开；窗口外的省略号由调用方补 */
+function partsIn(text: string, ranges: readonly Range[], from: number, to: number): TextPart[] {
+  const parts: TextPart[] = []
+  let cursor = from
+  for (const r of ranges) {
+    if (r.end <= from || r.start >= to) continue
+    const s = Math.max(r.start, from)
+    const e = Math.min(r.end, to)
+    if (s < cursor) continue
+    if (s > cursor) parts.push({ text: text.slice(cursor, s) })
+    parts.push({ text: text.slice(s, e), mark: true })
+    cursor = e
+  }
+  if (cursor < to) parts.push({ text: text.slice(cursor, to) })
+  return parts
+}
+
+/**
+ * 从正文里截一段结果片段，并标出**所有**词的全部出现位置。
+ *
+ * 只在**字面**命中的词上打标：拼音命中没有字面对应，片段从开头截、不硬标
+ * （宁可少一个高亮，也不要标错一段字）。
+ */
+export function highlightSnippet(text: string, input: string, max = 96): TextPart[] {
+  const ranges = termRanges(text, scanTerms(input))
   const first = ranges[0]?.start ?? 0
   const start = first > 24 ? first - 16 : 0
   let end = Math.min(text.length, start + max)
   // 不让窗口正好切在命中片段中间：命中尾巴超出时把窗口往后推
   const overflowing = ranges.find((r) => r.start < end && r.end > end)
   if (overflowing) end = Math.min(text.length, overflowing.end)
-  const slice = text.slice(start, end)
 
-  const parts: TextPart[] = []
-  if (start > 0) parts.push({ text: '…' })
-  let cursor = 0
-  for (const r of ranges) {
-    if (r.end <= start || r.start >= end) continue
-    const s = Math.max(r.start, start) - start
-    const e = Math.min(r.end, end) - start
-    if (s < cursor) continue
-    if (s > cursor) parts.push({ text: slice.slice(cursor, s) })
-    parts.push({ text: slice.slice(s, e), mark: true })
-    cursor = e
-  }
-  if (cursor < slice.length) parts.push({ text: slice.slice(cursor) })
+  const parts = partsIn(text, ranges, start, end)
+  if (start > 0) parts.unshift({ text: '…' })
   if (end < text.length) parts.push({ text: '…' })
-  return parts.length > 0 ? parts : [{ text: slice }]
+  return parts.length > 0 ? parts : [{ text: text.slice(start, end) }]
+}
+
+/**
+ * **不截窗**的命中标记：整段文本保留，所有命中都标出（名字/标签名这类短文本）。
+ *
+ * 与 `highlightSnippet` 共用同一份「哪些位置算命中」——一个用来扫读长正文，
+ * 一个用来标名字；它们不该对「同一个词命中哪里」给出两种答案。
+ */
+export function markTerms(text: string, input: string): TextPart[] {
+  return partsIn(text, termRanges(text, scanTerms(input)), 0, text.length)
 }

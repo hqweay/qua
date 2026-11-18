@@ -103,8 +103,9 @@ test('按 id 查表：100k 库、命中在末尾时，查表次数不随库规�
  * **名字搜索的「命中名」**：查询词点中了这块的哪个名字。
  *
  * 「点过名的地方用点名的字读出来」共用这一份判据——`@` 浮层的页行与
- * 搜索面的别名命中行。钉五件事：主名优先、别名命中带原始大小写、
- * 路径别名显示取叶子（叶子不含词退全名）、都不命中给 null、空词给 null。
+ * 搜索面的别名命中行。钉六件事：主名优先、别名命中带原始大小写、
+ * 路径别名显示取叶子（叶子不含词退全名）、多词按同一名字里全含（不跨别名凑词）、
+ * 都不命中给 null、空词给 null。
  */
 import { matchedNameOf } from '../../src/core/search/match-source.ts'
 
@@ -149,4 +150,24 @@ test('命中名：名字都没命中 ⇒ null；空词 ⇒ null', () => {
   const b = withAlias('正文', ['AI'])
   assert.equal(matchedNameOf(b, '不存在的名字'), null)
   assert.equal(matchedNameOf(b, '  '), null)
+})
+
+test('命中名：多词按同一个名字里全含（词序无关）', () => {
+  const b = withAlias('正文', ['Project Plan', 'PP'])
+  assert.deepEqual(matchedNameOf(b, 'plan project'), { text: 'Project Plan', isPrimary: true })
+})
+
+test('命中名：多词只在一处别名里全含 ⇒ 显那条别名', () => {
+  const b = withAlias('正文', ['AI', 'project/ai-notes'])
+  assert.deepEqual(matchedNameOf(b, 'notes ai'), { text: 'ai-notes', isPrimary: false })
+})
+
+test('命中名：词分散在两个别名 ⇒ 不凑成一页', () => {
+  const b = withAlias('正文', ['项目', '计划'])
+  assert.equal(matchedNameOf(b, '项目 计'), null)
+})
+
+test('命中名：尾随/多余空白不改变命中', () => {
+  const b = withAlias('正文', ['AI'])
+  assert.deepEqual(matchedNameOf(b, '  ai  '), { text: 'AI', isPrimary: true })
 })

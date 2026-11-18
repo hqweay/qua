@@ -27,6 +27,7 @@ import { aliasesOf } from '../model/model.ts'
 import { aliasLeaf, displayNameOf, normalizeAlias } from '../identity/alias.ts'
 import { sourceTextsOf } from './rows.ts'
 import { parseFtsRowKey, type FtsSource } from './sources.ts'
+import { scanTerms } from './query.ts'
 
 export interface MatchSource {
   source: FtsSource
@@ -42,6 +43,10 @@ export interface MatchSource {
  * 归一化只用于比较）。别名带 `/` 时显示取叶子，叶子不含查询词（命中落在
  * 路径段上）退全名——别让高亮落空。
  *
+ * **多词是 AND，但只在同一个名字里全含**（`scanTerms` 的口径）：一个页有
+ * 「项目」「计划」两个别名，`项目 计` 不该把它凑成一页——查询要能指出**一个名字**，
+ * 而不是「这块碰巧有过这几个词」。
+ *
  * 「点过名的地方用点名的字读出来」两个消费者共用这一份判据：
  * `@` 浮层的页行（命中别名 ⇒ 行显别名、插入写 `anchor` 覆盖层）与
  * 搜索面的别名命中行（行显命中的名字而不是不含词的正文片段）。
@@ -55,14 +60,19 @@ export interface MatchedName {
 }
 
 export function matchedNameOf(b: Block, term: string): MatchedName | null {
-  const q = term.trim().toLowerCase()
-  if (q === '') return null
+  const terms = scanTerms(term)
+  if (terms.length === 0) return null
+  /** 同一个名字里**全部**出现才算命中（不跨别名凑词） */
+  const hit = (name: string): boolean => {
+    const low = name.toLowerCase()
+    return terms.every((t) => low.includes(t))
+  }
   const primary = displayNameOf(b)
-  if (primary !== '' && primary.toLowerCase().includes(q)) return { text: primary, isPrimary: true }
-  const hit = aliasesOf(b).find((a) => normalizeAlias(a).includes(q))
-  if (!hit) return null
-  const leaf = aliasLeaf(hit)
-  return { text: leaf.toLowerCase().includes(q) ? leaf : hit.trim(), isPrimary: false }
+  if (primary !== '' && hit(primary)) return { text: primary, isPrimary: true }
+  const alias = aliasesOf(b).find((a) => hit(normalizeAlias(a)))
+  if (!alias) return null
+  const leaf = aliasLeaf(alias)
+  return { text: hit(leaf) ? leaf : alias.trim(), isPrimary: false }
 }
 
 /** 按 id 找块：`kb.get` 走索引表（O(1)），不要传「遍历森林」的实现 */

@@ -68,6 +68,21 @@ test('① 过滤：任一地址命中（第二别名、大小写、空白规范�
   assert.deepEqual(labels(tagRows(choice.rows('places'))), ['#places'])
 })
 
+test('①b 多词：同一个名字里全含才命中（不跨别名凑词）', () => {
+  const forest = [tag('a', ['project plan']), tag('b', ['project']), tag('c', ['project', 'plan'])]
+  const choice = createTagChoice(forest)
+  const rows = choice.rows('plan project')
+
+  assert.deepEqual(labels(tagRows(rows)), ['#project plan'], '词序无关；两个别名各含一个词不算')
+  const row = rows.find((r) => r.label === '#project plan')
+  assert.deepEqual(
+    row?.parts?.filter((p) => p.mark).map((p) => p.text),
+    ['project', 'plan'],
+  )
+  assert.deepEqual(labels(tagRows(choice.rows('project   plan'))), ['#project plan'], '多余空白不改变')
+  assert.deepEqual(labels(tagRows(choice.rows('project missing'))), [])
+})
+
 test('② 排序：按主地址而不是显示叶子（`A/B` 与 `C/B` 的叶子相同）', () => {
   const forest = [tag('z', ['C/B']), tag('a', ['A/B']), tag('m', ['B'])]
   const choice = createTagChoice(forest)

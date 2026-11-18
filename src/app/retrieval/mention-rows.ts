@@ -8,6 +8,10 @@
  * 三组是**「你要引谁」的三档确定性**：查询词恰好是一个地址 ⇒ 最匹配（置顶）；
  * 名字里有它 ⇒ 页；正文里有它 ⇒ 块。
  *
+ * **词法只有一份**：按空白切词、全部出现（AND，`scanTerms`/`termsMatch`），
+ * 与全局搜索同一个意思。行里的 `parts` 标出每个命中——候选行必须自证为什么命中，
+ * 否则用户得打开每一行去确认。
+ *
  * ⚠️ 线性扫：接口保持 `query => Row[]`，接全文索引时换这一个函数，浮层与落点都不动。
  * ⚠️ 身份块不进「块」这一栏：标签的正文就是它的名字、日记的正文是那天的描述，
  *    它们被引用时的显示名不是这段字（引用它们有各自的入口），列在这里只会点出怪结果。
@@ -27,6 +31,7 @@ import {
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import { TRIGGER_QUERY_MAX } from '../../core/infra/trigger.ts'
+import { highlightSnippet, markTerms, termsMatch } from '../../core/search/query.ts'
 import { matchedNameOf } from '../../core/search/match-source.ts'
 import type { Row } from '../../ui/overlay/layers.ts'
 
@@ -63,6 +68,7 @@ function exactRowOf(b: Block, raw: string, deps: MentionDeps): Row {
   return {
     id: `retrieval/exact/${b.id}`,
     label: name,
+    parts: markTerms(name, raw),
     // 与划选转引用的「最匹配」同一句：这是同一个状态，不该有两种说法
     hint: t('ui.selRef.exactHint'),
     icon: isPage ? 'lucide:file' : 'lucide:list-tree',
@@ -78,7 +84,6 @@ function exactRowOf(b: Block, raw: string, deps: MentionDeps): Row {
 
 export function mentionRows(query: string, deps: MentionDeps): Row[] {
   const raw = query.trim().slice(0, TRIGGER_QUERY_MAX)
-  const q = raw.toLowerCase()
   const forest = deps.forest()
   const pages: Row[] = []
   const blocks: Row[] = []
@@ -105,7 +110,7 @@ export function mentionRows(query: string, deps: MentionDeps): Row[] {
     // 已经置顶 ⇒ 不再出现在页 / 块组里（同一个目标只给一行）
     if (b.id === exact?.id) return
     const text = plainText(b.content)
-    const named = hasList(b, 'page') ? matchedNameOf(b, q) : null
+    const named = hasList(b, 'page') ? matchedNameOf(b, raw) : null
     if (named) {
       if (pages.length < MENTION_CAP) {
         // 行显**命中的名字**：主名命中仍是主名（blockLabel 兜底防形状坏——页恒有地址）；
@@ -115,6 +120,8 @@ export function mentionRows(query: string, deps: MentionDeps): Row[] {
         pages.push({
           id: `retrieval/page/${b.id}`,
           label: name,
+          // 名字是短文本：不截窗，所有查询词都标出来（与块行的片段高亮同一份判据）
+          parts: markTerms(name, raw),
           hint: addressesOf(b).find((a) => a.includes('/')) ?? '',
           icon: 'lucide:file',
           group: 'retrieval/1-page',
@@ -125,7 +132,8 @@ export function mentionRows(query: string, deps: MentionDeps): Row[] {
     }
     if (hasList(b, 'tag') || isJournal(b)) return
     if (text.trim() === '') return
-    if (q !== '' && !text.toLowerCase().includes(q)) return
+    // 多词是 AND（与全局搜索/扫描同一份语义）：空格不再被当成字面字符
+    if (!termsMatch(text, raw)) return
     if (blocks.length >= MENTION_CAP) return
     // 来源根（块住在哪个顶层根）作为提示：同一段字可能出现在几处，用户要能分清
     const root = ctx.path[0]
@@ -136,6 +144,10 @@ export function mentionRows(query: string, deps: MentionDeps): Row[] {
     blocks.push({
       id: `retrieval/block/${b.id}`,
       label: snippet(text),
+      // 片段以**首个命中**为中心开窗并标出全部词——行必须自证为什么命中：
+      // 只截正文头 N 字时，命中靠后的行看起来根本不含查询词。空查询没有命中可标，
+      // 保留头部摘要（`label` 兜底），不必为一屏「全部」多算一份高亮。
+      ...(raw === '' ? {} : { parts: highlightSnippet(text, raw, 72) }),
       hint,
       icon: 'lucide:list-tree',
       group: 'retrieval/2-block',

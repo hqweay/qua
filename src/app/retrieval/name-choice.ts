@@ -38,6 +38,8 @@ import {
   type ForestWalker,
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
+import { markTerms } from '../../core/search/query.ts'
+import { matchedNameOf } from '../../core/search/match-source.ts'
 import type { Layers, Row } from '../../ui/overlay/layers.ts'
 
 /** 行的显示名：呈现摘要 ＋ 唯一兜底（标签/页恒有地址；防形状坏时不露裸 id） */
@@ -119,13 +121,9 @@ function candidates(forest: readonly Block[], kind: NameChoiceKind): Block[] {
   }
 }
 
-/** 查询词命中：任一地址包含它，或显示名包含它（规范化只有一处：`normalizeAlias`） */
+/** 查询词命中：任一地址或显示名命中（多词按同一名字里全含，与 `@` 页行共用一份判据） */
 function matches(b: Block, want: string): boolean {
-  if (want === '') return true
-  return (
-    addressesOf(b).some((a) => a.includes(want)) ||
-    normalizeAlias(displayNameOf(b)).includes(want)
-  )
+  return want === '' || matchedNameOf(b, want) !== null
 }
 
 /** 这个输入词对应的同名页（新建行会说明「复用它」；身份块的查找口径只有这一份） */
@@ -198,12 +196,17 @@ export function createNameChoice(
    * 图标统一走 `iconOf`（指位链）：标签显式配了图标，改一处全库的候选行都跟随；
    * 普通块＝空白但占位（`''`）——页/块的区分由有图标/无图标继续承载。
    */
-  const rowFor = (b: Block): Row => {
+  const rowFor = (b: Block, query: string): Row => {
     const icon = iconOf(b) ?? ''
+    const name = rowName(b)
+    /** 命中标在名字上（`#` 是标签行的前缀，不参与匹配、也不标） */
+    const marked = markTerms(name, query)
+    const withHash = [{ text: '#' }, ...marked]
     if (kind === 'tag') {
       return {
         id: `${idPrefix}/${b.id}`,
-        label: `#${rowName(b)}`,
+        label: `#${name}`,
+        parts: withHash,
         hint: [parentHint(b), countHint(b)].filter((s) => s !== '').join(' · '),
         icon,
         group: tagGroup,
@@ -213,21 +216,22 @@ export function createNameChoice(
     }
     if (kind === 'ref') {
       const isPage = hasList(b, 'page')
-      const title = rowName(b)
       return {
         id: `${idPrefix}/${b.id}`,
-        label: title,
+        label: name,
+        parts: marked,
         hint: isPage ? t('ui.props.refIsPage') : t('ui.props.refIsBlock'),
         icon,
         group: isPage ? 'ref/1-page' : 'ref/2-block',
         keyHint: keyHintOf(b),
-        pick: { kind: 'block', id: b.id, name: title },
+        pick: { kind: 'block', id: b.id, name },
       }
     }
     const isTag = hasList(b, 'tag')
     return {
       id: `${idPrefix}/${b.id}`,
-      label: isTag ? `#${rowName(b)}` : rowName(b),
+      label: isTag ? `#${name}` : name,
+      parts: isTag ? withHash : marked,
       hint: parentHint(b),
       icon,
       group: isTag ? 'pick/2' : 'pick/1',
@@ -252,7 +256,7 @@ export function createNameChoice(
     const hits = scoped
       .filter((b) => subtree === null || subtree.has(b.id))
       .filter((b) => matches(b, want))
-      .map(rowFor)
+      .map((b) => rowFor(b, query))
 
     // 「新建」行是 tag 源独有的：页/归属/引用都是选已有，不该顺手造身份
     const trimmed = query.trim()

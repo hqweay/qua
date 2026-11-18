@@ -23,6 +23,7 @@ import {
   walkForest,
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
+import { termsMatch } from '../../core/search/query.ts'
 import type { Block } from '../../core/index.ts'
 import type { Row } from '../../ui/overlay/layers.ts'
 
@@ -48,8 +49,9 @@ export function memberRows(tag: MemberTagRef, query: string, deps: MemberDeps): 
       const name = plainText(b.content).trim()
       if (name === '') return
       if (name.toLowerCase() === want) exactExists.hit = true
-      if (want !== '' && !name.toLowerCase().includes(want)) return
-      // 呈现摘要 ＋ 唯一兜底（匹配语义不动：上面按 plainText 过滤的口径照旧）
+      // 多词是 AND（与全局搜索同一份语义）；空词仍列该标签的全部成员
+      if (!termsMatch(name, want)) return
+      // 呈现摘要 ＋ 唯一兜底（过滤仍按 `plainText`；多词按 AND，与其它候选面同一份词法）
       const label = blockLabel(b, (id) => findInForest(deps.forest(), id))
       hits.push({
         modified: b.modified,

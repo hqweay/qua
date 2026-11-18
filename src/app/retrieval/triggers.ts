@@ -14,7 +14,6 @@
  *    在不支持的行上画这个徽标，等于告诉用户一个按了没用的键。
  */
 import {
-  addressesOf,
   blockLabel,
   displayNameOf,
   findInForest,
@@ -30,6 +29,7 @@ import {
 import { resolveBindings } from '../../core/infra/bindings.ts'
 import { t } from '../../core/infra/msg.ts'
 import type { TriggerChar } from '../../core/infra/trigger.ts'
+import { matchedNameOf } from '../../core/search/match-source.ts'
 import { rowsFromBindings, type Row } from '../../ui/overlay/layers.ts'
 import { createTagChoice } from './name-choice.ts'
 // 第二段（成员搜索）的判据住在 `member-rows.ts`（纯函数，可单测）；这里只取成员上限常量，
@@ -97,10 +97,9 @@ function slashRows(query: string, deps: TriggerDeps): Row[] {
 
 /* ------------------------------------------------------------ 标签（`#` 源）*/
 
-/** 名字命中：主名叶子或**任一**别名（规范化只有一处：`normalizeAlias`） */
+/** 名字命中：主名或任一别名（多词按同一个名字里全含，与页行共用 `matchedNameOf`） */
 function matchesName(b: Block, want: string): boolean {
-  if (want === '') return true
-  return addressesOf(b).some((a) => normalizeAlias(a).includes(want)) || displayNameOf(b).toLowerCase().includes(want)
+  return want === '' || matchedNameOf(b, want) !== null
 }
 
 /**

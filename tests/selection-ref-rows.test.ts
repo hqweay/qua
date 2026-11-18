@@ -72,3 +72,27 @@ test('宿主自己不进候选；空查询词不给新建行', () => {
   assert.ok(!blank.some((r) => r.id === 'selref/new'), '没有名字的新建没有身份')
   assert.ok(blank.length > 0, '空查询仍能浏览块（改打字就从这里挑）')
 })
+
+test('多词：按词 AND，名字与正文都标出每个词', () => {
+  const forest: Block[] = [
+    b('page-plan', '描述', { props: { _aliases: ['Project Plan'], _lists: ['page'] } }),
+    b('block-plan', '这里是项目计划的正文'),
+  ]
+  const kb = new MemoryKb(new BlockStore(forest))
+  const rowsFor = selectionRefRows({ kb, selfId: 'host' })
+
+  const page = rowsFor('plan project').find((r) => r.id === 'selref/page/page-plan')
+  assert.ok(page, '页名同一个名字里全含要命中')
+  assert.equal(page!.label, 'Project Plan')
+  assert.deepEqual(
+    page!.parts?.filter((p) => p.mark).map((p) => p.text),
+    ['Project', 'Plan'],
+  )
+
+  const block = rowsFor('项目 计划').find((r) => r.id === 'selref/block/block-plan')
+  assert.ok(block, '正文两个词都出现要命中')
+  assert.deepEqual(
+    block!.parts?.filter((p) => p.mark).map((p) => p.text),
+    ['项目', '计划'],
+  )
+})

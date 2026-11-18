@@ -49,6 +49,15 @@ test('memberRows：查询词匹配成员文本，不匹配的成员不出现', (
   assert.ok(labels[0]!.includes('switch'), `命中 switch：${JSON.stringify(labels)}`)
 })
 
+test('memberRows：多词按 AND（词序无关）', () => {
+  blocks = forest()
+  const tag = blocks[0]!
+  const labels = memberRows({ tagId: tag.id, name: '玩具' }, '主机 switch', deps(null))
+    .filter((r) => r.group === 'retrieval/1-instance')
+    .map((r) => r.label)
+  assert.equal(labels.length, 1, `两个词都在同一成员里：${JSON.stringify(labels)}`)
+})
+
 test('memberRows：空查询列出全部成员、不给新建行；非空且无同名才给新建行', () => {
   blocks = forest()
   const tag = blocks[0]!
