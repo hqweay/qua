@@ -6,7 +6,7 @@
  *
  * 每个源都是 `source(query) => Row[]`：**同步、只读内存森林**。
  * 判据是「换实现不改调用方」——`@` 今天是 `walkForest` ＋ `plainText` 线性扫，
- * 将来接全文索引时，换的是这个文件里的 `mentionRows`，浮层与落点一行都不用动。
+ * 将来接全文索引时，换的是 `mention-rows.ts` 的 `mentionRows`，浮层与落点一行都不用动。
  *
  * ⚠️ 行上只放「选中了**谁**」（`Row.pick`），不放「选中之后插什么」：
  *    同一条 `#名` 行按 Enter 与 ⌥Enter 落到两个不同的结果，那是触发字符那一栏的事。
@@ -14,14 +14,11 @@
  *    在不支持的行上画这个徽标，等于告诉用户一个按了没用的键。
  */
 import {
-  blockLabel,
-  findInForest,
   addressesOf,
+  blockLabel,
   displayNameOf,
-  findByAlias,
+  findInForest,
   hasIdentity,
-  hasList,
-  isJournal,
   normalizeAlias,
   plainText,
   primaryAliasOf,
@@ -31,14 +28,15 @@ import {
   type CtxKeys,
 } from '../../core/index.ts'
 import { resolveBindings } from '../../core/infra/bindings.ts'
-import { matchedNameOf } from '../../core/search/match-source.ts'
 import { t } from '../../core/infra/msg.ts'
-import { TRIGGER_QUERY_MAX, type TriggerChar } from '../../core/infra/trigger.ts'
+import type { TriggerChar } from '../../core/infra/trigger.ts'
 import { rowsFromBindings, type Row } from '../../ui/overlay/layers.ts'
 import { createTagChoice } from './name-choice.ts'
 // 第二段（成员搜索）的判据住在 `member-rows.ts`（纯函数，可单测）；这里只取成员上限常量，
 // 并把形状转发给装配层（`main.ts` 从这里拿 `memberRows`，与 `createTriggers` 同一个门面）。
 import { INSTANCE_CAP } from './member-rows.ts'
+// `@` 源的行也住在自己那份（纯判据，可单测——测试环境跑不了浮层那一份 DOM 装配）
+import { mentionRows } from './mention-rows.ts'
 export { INSTANCE_CAP, memberRows, type MemberTagRef } from './member-rows.ts'
 
 /** 源能问到的东西：整片森林（现取）与浮层要用到的上下文键 */
@@ -176,105 +174,6 @@ function tagRows(query: string, deps: TriggerDeps): Row[] {
     createHint: (page) => (page ? t('ui.tagPicker.reuseHint') : t('ui.retrieval.newTagHint')),
   })
   return [...instanceRows(choice.blocks, normalizeAlias(query), deps), ...choice.rows(query)]
-}
-
-/* -------------------------------------------------------- 页与块（`@` 源）*/
-
-/** 每组最多列这么多：`@` 空查询就是「全部」，没有上限的话浮层永远滚不到底 */
-const MENTION_CAP = 20
-
-/** 行上用一段正文当名字：截短，别把一行撑成一段 */
-function snippet(text: string): string {
-  const s = text.trim().replace(/\s+/g, ' ')
-  return s.length > 60 ? `${s.slice(0, 60)}…` : s
-}
-
-/**
- * `@` 源：**页** ＋ **块**。
- *
- * 页 ＝ `_lists` 里有 `page` 的块，按**名字**命中（主名或任一别名，`matchedNameOf`）；
- * 块 ＝ 正文命中查询词的块。
- * 「正文」是投影（`plainText`）：行内标签那一格不进正文，也就不会被 `@` 搜出来
- * （引用一枚标签该走 `#`，不走这里）。
- *
- * ⚠️ 这是**临时实现**：整片森林线性扫一遍。块数上千会慢；接上索引时换这一个函数，
- *    接口（`query => Row[]`）与两个调用点都不变。
- * ⚠️ 身份块不进「块」这一栏：标签的正文就是它的名字、日记的正文是那天的描述，
- *    它们被引用时的显示名不是这段字（引用它们有各自的入口），列在这里只会点出怪结果。
- */
-function mentionRows(query: string, deps: TriggerDeps): Row[] {
-  const raw = query.trim().slice(0, TRIGGER_QUERY_MAX)
-  const q = raw.toLowerCase()
-  const forest = deps.forest()
-  const pages: Row[] = []
-  const blocks: Row[] = []
-  const selfId = deps.selfBlockId()
-  walkForest(forest, (b, ctx) => {
-    // 正在打字的这一块不进候选：它的正文里还留着 `@查询词`，而且「引用自己」没有意义
-    if (b.id === selfId) return
-    const text = plainText(b.content)
-    const named = hasList(b, 'page') ? matchedNameOf(b, q) : null
-    if (named) {
-      if (pages.length < MENTION_CAP) {
-        // 行显**命中的名字**：主名命中仍是主名（blockLabel 兜底防形状坏——页恒有地址）；
-        // 别名命中显别名——用户是用这个名字把它找出来的，选中之后落进正文的那一格
-        // 也该读这个名字（`anchor` 覆盖层由落点写入，主名路径不带、改名继续跟随）。
-        const name = named.isPrimary ? blockLabel(b, (id) => findInForest(deps.forest(), id)) : named.text
-        pages.push({
-          id: `retrieval/page/${b.id}`,
-          label: name,
-          hint: addressesOf(b).find((a) => a.includes('/')) ?? '',
-          icon: 'lucide:file',
-          group: 'retrieval/1-page',
-          pick: { kind: 'page', id: b.id, name, ...(named.isPrimary ? {} : { anchor: named.text }) },
-        })
-      }
-      return
-    }
-    if (hasList(b, 'tag') || isJournal(b)) return
-    if (text.trim() === '') return
-    if (q !== '' && !text.toLowerCase().includes(q)) return
-    if (blocks.length >= MENTION_CAP) return
-    // 来源根（块住在哪个顶层根）作为提示：同一段字可能出现在几处，用户要能分清
-    const root = ctx.path[0]
-    const rootName = root && root.id !== b.id && hasList(root, 'page') ? displayNameOf(root) : ''
-    // 被引用的次数缀在出处旁（0 次不占位）：区分「同一段字出现在几块」
-    const refs = deps.refCount(b.id)
-    const hint = refs > 0 ? [rootName, t('ui.retrieval.refCount', { n: refs })].filter(Boolean).join(' · ') : rootName
-    blocks.push({
-      id: `retrieval/block/${b.id}`,
-      label: snippet(text),
-      hint,
-      icon: 'lucide:list-tree',
-      group: 'retrieval/2-block',
-      pick: { kind: 'block', id: b.id, name: snippet(text) },
-    })
-  })
-  /**
-   * **无同名页 ⇒ 建页**。判据用「地址」而不是「这一屏有没有行」：
-   * 正文命中了几行，不代表用户想引用的那个名字已经存在；`Foo` 对 `Foobar`
-   * 只是正文包含，不能拦住建 `Foo` 这个页。
-   *
-   * 同名地址已经存在（页 / 标签 / 普通块）⇒ 这一行改说「会复用」，不建第二个。
-   */
-  const newRows: Row[] = []
-  if (raw !== '') {
-    const existingPage = findByAlias(forest, raw, (b) => hasList(b, 'page'))
-    if (!existingPage) {
-      const existing = findByAlias(forest, raw)
-      newRows.push({
-        id: `retrieval/newPage/${raw}`,
-        label: t('ui.retrieval.newPage', { name: raw }),
-        hint: existing ? t('ui.retrieval.newPageReuseHint') : t('ui.retrieval.newPageHint'),
-        icon: 'lucide:plus',
-        group: 'retrieval/3-new',
-        // 第二落点画在行上（↵ 建页是默认，不必说）；⌥↵ 建普通块，与划选转引用同键同义
-        keyHint: deps.newPageAltHint,
-        pick: { kind: 'newPage', name: raw },
-      })
-    }
-  }
-  return [...pages, ...blocks, ...newRows]
 }
 
 /* ------------------------------------------------------------ 触发表 */

@@ -30,6 +30,8 @@ const GROUP_TITLES: Record<string, string> = {
   'retrieval/1-instance': t('menu.group.instance'),
   'retrieval/2-tag': t('menu.group.pickTag'),
   'retrieval/3-new': t('menu.group.new'),
+  // `@` 的置顶组与划选转引用同义（同一个「查询词就是地址」状态），标题也共用
+  'retrieval/1-exact': t('menu.group.selRefExact'),
   'retrieval/1-page': t('menu.group.pickPage'),
   'retrieval/2-block': t('menu.group.block'),
   'selref/1-exact': t('menu.group.selRefExact'),
