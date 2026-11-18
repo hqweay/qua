@@ -12,6 +12,7 @@
  */
 import { findByAlias } from './alias.ts'
 import type { Tx } from '../kb/types.ts'
+import { UnloadedAliasError } from '../kb/unsupported.ts'
 import {
   ALIASES_PROP,
   DISPLAY_PROP,
@@ -65,6 +66,9 @@ export function nearestPageInChain(b: Block, ancestors: readonly Block[]): Block
 export interface PageLookup {
   resolveAlias(name: string): Block | undefined
   roots(): readonly Block[]
+  /** 防重判据（工作集装载）：命中但目标未装载 ⇒ 拒绝新建，见 `UnloadedAliasError` */
+  aliasTargetId?: (name: string) => string | undefined
+  isLoaded?: (id: string) => boolean
 }
 
 /**
@@ -83,6 +87,9 @@ export function ensurePageInTx(lookup: PageLookup, name: string, tx: Tx): Block 
     if (prop(existing, DISPLAY_PROP) === undefined) tx.setProp(existing.id, DISPLAY_PROP, 'alias')
     return existing
   }
+  // 名字被一个未装载的块占着 ⇒ 不新建（否则地址空间出现第二个同名身份）
+  const known = lookup.aliasTargetId?.(title)
+  if (known !== undefined && lookup.isLoaded?.(known) === false) throw new UnloadedAliasError(title, known)
   const block = mkPageBlock(title)
   tx.insert(block, null, lookup.roots().length)
   return block

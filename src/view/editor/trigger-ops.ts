@@ -22,6 +22,7 @@ import {
 } from '../../core/index.ts'
 import { fromProjection, plainText, projectOff, spliceRuns, type RefRun } from '../../core/model/runs.ts'
 import { ensureTagInTx, tagLookupOf } from '../../core/kb/ensure-tag.ts'
+import { UnloadedAliasError } from '../../core/kb/unsupported.ts'
 import type { Tx } from '../../core/kb/types.ts'
 import type { AcceptPick, BlockEditor } from './editor.ts'
 
@@ -107,7 +108,7 @@ export class TriggerOps {
 
       const needTag = pick.kind === 'tag' || pick.kind === 'newTag'
       if (needTag) {
-        const tag = ensureTagInTx(tagLookupOf(this.ed.store.blocks), pick.name, tx)
+        const tag = ensureTagInTx(tagLookupOf(this.ed.store.blocks, this.ed.store), pick.name, tx)
         if (!tag) return false
         tagId = tag.id
       }
@@ -123,7 +124,7 @@ export class TriggerOps {
       }
 
       if (pick.kind === 'newPage') {
-        const page = ensurePageInTx(tagLookupOf(this.ed.store.blocks), pick.name, tx)
+        const page = ensurePageInTx(tagLookupOf(this.ed.store.blocks, this.ed.store), pick.name, tx)
         if (!page) return false
         pageId = page.id
         // 页落在森林顶层，可能不在当前视图里；整片重画一次，让索引/页数跟上
@@ -188,7 +189,17 @@ export class TriggerOps {
     }
 
     // 落点改的是「正在打字的这一行」的正文（抹触发词＋插 run），与打字同档
-    const ok = this.ed.write((tx) => apply(tx, loc.block), undefined, { directEdit: true })
+    let ok = false
+    try {
+      ok = this.ed.write((tx) => apply(tx, loc.block), undefined, { directEdit: true })
+    } catch (e) {
+      // 名字被一个未装载的块占着 ⇒ 不新建（否则地址空间出现第二个同名身份）；这次落点取消
+      if (e instanceof UnloadedAliasError) {
+        console.warn(`[trigger] "${e.aliasName}" exists on an unloaded block; pick cancelled`)
+        return false
+      }
+      throw e
+    }
     if (!ok) return false
     /**
      * 撤销合并窗口的陷阱：打字那笔（`insert`）与这一笔若同 kind 且落在 1200ms 内，

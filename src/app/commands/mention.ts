@@ -117,11 +117,7 @@ export function mentionCommands(d: MentionDeps): Pick<App, 'convertMention' | 'c
           const existing = d.kb.resolveAlias(spot.text)
           target =
             existing ??
-            ensurePageInTx(
-              { resolveAlias: (name) => d.kb.resolveAlias(name), roots: () => d.kb.roots() },
-              spot.text,
-              tx,
-            )
+            ensurePageInTx(d.kb, spot.text, tx)
           if (!existing && target) made.kind = 'page'
         }
         if (!target) return false

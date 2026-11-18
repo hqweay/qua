@@ -713,7 +713,7 @@ const searchFaceDeps = (): SearchFaceDeps => {
     promote: (term) => app.createQuery(term, { where: { text: term } }),
     // 无结果的创建入口：找到或创建页（与引用浮层同一条创建路径），建好当场打开
     createPage: (name) => {
-      const r = pageDeps.run((tx) => ensurePageInTx({ resolveAlias: (n) => kb.resolveAlias(n), roots: () => kb.roots() }, name, tx)?.id ?? '')
+      const r = pageDeps.run((tx) => ensurePageInTx(kb, name, tx)?.id ?? '')
       if (r.result !== '') app.openBlock(r.result, 'center')
     },
     copyRef: (id) => {

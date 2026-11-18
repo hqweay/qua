@@ -16,9 +16,11 @@
  */
 import { UndoStack, type DeviceUndoStep, type UndoKind } from './undo.ts'
 import type { Block } from './model.ts'
+import { DELETED_AT_PROP, isDeleted } from './model.ts'
 import type { Op } from '../kb/types.ts'
 import type { Sel } from './selection.ts'
-import { applyOps as patchIndex, lookupBlock, rebuild, type Index } from '../infra/index-port.ts'
+import { applyOps as patchIndex, blockIdByAlias, lookupBlock, rebuild, type Index } from '../infra/index-port.ts'
+import { normalizeAlias } from '../identity/alias.ts'
 import { applyOps } from '../kb/diff.ts'
 import type { UndoCapture } from '../kb/scoped.ts'
 import { scopedOps } from '../kb/scoped.ts'
@@ -323,6 +325,66 @@ export class BlockStore {
       if (this.workset.pinned.has(b.id)) pinned = true
     })
     return pinned
+  }
+
+  /* ------------------------------------------------------------ catalog（工作集外的全库身份摘要） */
+
+  /**
+   * **catalog 摘要**：全库的地址表与日记日期（由装载器喂进来，整库模式也可以喂）。
+   *
+   * 为什么挂在 store 上：创建路径的防重判据（`#名字` 归谁、这一天在不在）是
+   * **全局**问题，而工作集只有当前视图的闭包。store 是编辑器、命令、读门面
+   * 共同持有的唯一对象——把摘要放这里，三层都不必各自传一份。
+   */
+  private catalogAliases: Map<string, string> | null = null
+  private catalogJournals: { id: string; date: string; deleted: number | null }[] | null = null
+
+  setCatalog(catalog: { aliases: readonly { name: string; block: string }[]; journals: readonly { id: string; date: string; deleted: number | null }[] } | null): void {
+    if (catalog === null) {
+      this.catalogAliases = null
+      this.catalogJournals = null
+      return
+    }
+    // 地址表按**规范化名字**建（与索引表同一条规范化）：查表不再各自 trim
+    const aliases = new Map<string, string>()
+    for (const a of catalog.aliases) {
+      const key = normalizeAlias(a.name)
+      if (key !== '' && !aliases.has(key)) aliases.set(key, a.block)
+    }
+    this.catalogAliases = aliases
+    this.catalogJournals = [...catalog.journals]
+  }
+
+  /**
+   * **这个名字现在归谁**（只回答 id；目标块未装载也回答）。
+   * 索引的地址表优先（它反映**已装载块**的最新名字），miss 才问 catalog。
+   */
+  aliasTargetId(name: string): string | undefined {
+    const local = blockIdByAlias(this.index, name)
+    if (local !== undefined) return local
+    return this.catalogAliases?.get(normalizeAlias(name))
+  }
+
+  /** 这一天在库里的记录（含软删）；catalog 在场回答全库，不在场走含软删的索引块表 */
+  journalRecord(date: string): { id: string; deleted: number | null } | undefined {
+    if (this.catalogJournals) {
+      const hit = this.catalogJournals.find((j) => j.date === date)
+      return hit ? { id: hit.id, deleted: hit.deleted } : undefined
+    }
+    for (const b of this.index.all.values()) {
+      if (b.props?.['_date'] === date) {
+        return { id: b.id, deleted: isDeleted(b) ? Number(b.props?.[DELETED_AT_PROP] ?? 0) : null }
+      }
+    }
+    return undefined
+  }
+
+  /** 全部可见日记天（升序）；catalog 在场回答全库（工作集只有当前窗口） */
+  journalDates(): readonly string[] {
+    if (this.catalogJournals) {
+      return [...new Set(this.catalogJournals.filter((j) => j.deleted === null).map((j) => j.date))].sort()
+    }
+    return [...this.index.journals.keys()].sort()
   }
 
   /**

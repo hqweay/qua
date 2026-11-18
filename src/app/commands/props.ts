@@ -530,11 +530,7 @@ export function propsCommands(
       if (title === '') return ''
       const made: { id: string } = { id: '' }
       d.run((tx) => {
-        const target = ensurePageInTx(
-          { resolveAlias: (n) => d.kb.resolveAlias(n), roots: () => d.kb.roots() },
-          title,
-          tx,
-        )
+        const target = ensurePageInTx(d.kb, title, tx)
         if (!target) return
         made.id = target.id
         tx.patch(blockId, (b) => {

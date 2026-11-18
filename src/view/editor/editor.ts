@@ -126,6 +126,7 @@ import { mergeCapture, type UndoCapture } from '../../core/kb/scoped.ts'
 import type { AssetView } from '../../core/infra/assets.ts'
 // 标签块的「找到或创建」有两种落地（直写 / 事务），判据只有一份
 import { ensureTagInTx, tagLookupOf } from '../../core/kb/ensure-tag.ts'
+import { UnloadedAliasError } from '../../core/kb/unsupported.ts'
 // 任务状态定义块的事务内按需物化：落值之前保证定义在，面板才有行可画
 import { ensureTaskStatusInTx } from '../../core/kb/ensure-task.ts'
 // 用户可见文案一律走 t
@@ -1898,12 +1899,22 @@ export class BlockEditor {
     this.beginUndoEntry()
     // 建标签块（可能）＋写归属是同一笔：拆开就会留下「只有标签、没有归属」的半批。
     // 名字为空／已挂 ⇒ 事务里什么都不写（零 op）
-    const ok = this.write((tx) => {
-      const tag = ensureTagInTx(tagLookupOf(this.store.blocks), name, tx)
-      if (!tag || hasTag(b, tag.id)) return false
-      tx.setTags(blockId, [...tagIdsOf(b), tag.id])
-      return true
-    })
+    let ok = false
+    try {
+      ok = this.write((tx) => {
+        const tag = ensureTagInTx(tagLookupOf(this.store.blocks, this.store), name, tx)
+        if (!tag || hasTag(b, tag.id)) return false
+        tx.setTags(blockId, [...tagIdsOf(b), tag.id])
+        return true
+      })
+    } catch (e) {
+      // 名字被一个未装载的块占着 ⇒ 不新建（否则地址空间出现第二个同名身份）；留成纯文本
+      if (e instanceof UnloadedAliasError) {
+        console.warn(`[editor] tag "${e.aliasName}" exists on an unloaded block; left as text`)
+        return false
+      }
+      throw e
+    }
     if (!ok) return false
     this.finishUndoEntry('other', Date.now())
     if (locate(this.doc, blockId)) this.renderBlock(blockId)
@@ -2549,8 +2560,18 @@ export class BlockEditor {
       // 重建要改**宿主块**的 run（`to` 指过去）：只读行（journal 日期等）不写；
       // 可直接编辑的行（普通块／查询标题）都修——引用能进标题，修复就要跟得上
       if (!canDirectEditText(hit.block)) return false
-      const lookup = tagLookupOf(this.store.blocks)
-      const target = run.flavor === '#' ? ensureTagInTx(lookup, label, tx) : ensurePageInTx(lookup, label, tx)
+      const lookup = tagLookupOf(this.store.blocks, this.store)
+      let target: Block | null = null
+      try {
+        target = run.flavor === '#' ? ensureTagInTx(lookup, label, tx) : ensurePageInTx(lookup, label, tx)
+      } catch (e) {
+        // 名字被一个未装载的块占着 ⇒ 不按名字新建（新 id 指不到原来的目标）；留作 dangling
+        if (e instanceof UnloadedAliasError) {
+          console.warn(`[editor] repair target "${e.aliasName}" exists on an unloaded block; not repointed`)
+          return false
+        }
+        throw e
+      }
       if (!target) return false
       tx.patch(hit.block.id, (b) =>
         writeBlockContent(
