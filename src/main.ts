@@ -96,6 +96,8 @@ import { createLibraryClient, type LibraryClient } from './core/storage/library-
 import { Workset, worksetClosureIds } from './core/storage/workset.ts'
 import { UnloadedAliasError } from './core/kb/unsupported.ts'
 import { loadWorksetBoot, withAncestors, type WorksetBootResult } from './app/boot/workset-boot.ts'
+import { candidateBuildOf } from './core/storage/query-candidates.ts'
+import type { QueryContext, QuerySpec } from './core/query/query.ts'
 import type { LoadedWorkspace } from './core/storage/index.ts'
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
@@ -354,6 +356,60 @@ function dockShortcutIds(device: DeviceState): string[] {
  * 并发装载只发一次 IPC；装载进来的根钉住（它马上要成为某个视图的当前对象）。
  * 整库模式下所有块都在内存里，直接 `then()`。
  */
+const pendingQueries = new Map<string, Promise<boolean>>()
+/**
+ * **按条件装载查询候选**（查询层的装配侧）。
+ *
+ * 候选 id 从 SQL 计划来（超集），未装载的按 id 连祖先链（`{children:true}` 再加一层
+ * 子级）装进工作集；matcher 仍是判定来源。返回「这次真的装进了新块」——视图据此
+ * 决定要不要重算冻结结果（整库模式恒 false：求值天然完整）。
+ */
+async function ensureQueryLoaded(
+  spec: QuerySpec,
+  ctx: QueryContext,
+  host: Block | undefined,
+): Promise<boolean> {
+  if (!libraryClient || !workset || !blocks.partial) return false
+  const build = candidateBuildOf(spec, host, blocks.blocks, ctx)
+  // 条件里点名的块（标签／字段定义）先装：matcher 的环境要它们在场
+  const namedMissing = build.loadIds.filter((id) => !blocks.isLoaded(id))
+  if (namedMissing.length > 0) {
+    const r = await libraryClient.blocks(namedMissing)
+    if (r.status === 'ok') workset.loadBlocks(r.value)
+    else console.warn('[workset] named blocks load failed:', r.status === 'error' ? r.error : r.status)
+  }
+  const key = JSON.stringify(build.plan) + (build.children ? '\u0001c' : '')
+  const inflight = pendingQueries.get(key)
+  const run = (async (): Promise<boolean> => {
+    const r = await libraryClient.candidates(build.plan)
+    if (r.status !== 'ok') {
+      console.warn('[workset] candidate query failed:', r.status === 'error' ? r.error : r.status)
+      return false
+    }
+    const missing = r.value.filter((id) => !blocks.isLoaded(id))
+    if (missing.length > 0) {
+      const tr = await libraryClient.tree(missing, build.children)
+      if (tr.status === 'ok') workset.loadBlocks(tr.value)
+      else {
+        console.warn('[workset] candidate load failed:', tr.status === 'error' ? tr.error : tr.status)
+        return false
+      }
+    }
+    // matcher 环境的第二跳：候选身上的标签/字段定义/引用目标（闭包只走候选那几块）
+    const candBlocks = r.value.map((id) => blocks.find(id)).filter((b): b is Block => b !== undefined)
+    const closure = worksetClosureIds(candBlocks, build.loadIds).filter((id) => !blocks.isLoaded(id))
+    if (closure.length > 0) {
+      const cr = await libraryClient.blocks(closure)
+      if (cr.status === 'ok') workset.loadBlocks(cr.value)
+      else console.warn('[workset] closure load failed:', cr.status === 'error' ? cr.error : cr.status)
+    }
+    return namedMissing.length > 0 || missing.length > 0 || closure.length > 0
+  })().finally(() => pendingQueries.delete(key))
+  if (inflight) return inflight
+  pendingQueries.set(key, run)
+  return run
+}
+
 const pendingDocs = new Map<string, Promise<void>>()
 function ensureDocsLoaded(ids: readonly string[], then: () => void): void {
   if (!libraryClient || !workset) {
@@ -1988,6 +2044,7 @@ const {
   app,
   layers,
   owners,
+  ensureQueryLoaded,
   journalMounts: () => prefs().journalMounts,
   prefs,
   scheduleDeviceSave: () => scheduleDeviceSave(),

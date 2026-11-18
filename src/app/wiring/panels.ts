@@ -141,6 +141,12 @@ export type PanelsDeps = {
   project: (block: Block, into: HTMLElement) => void
   /** 点标题里的一枚非引用原子（图片/外链）：默认动作 / ⌥ 详情（与正文同一份） */
   atomClick?: (atom: { runId: string; kind: string; hash?: string }, el: HTMLElement, mods: ClickMods) => void
+  /**
+   * **按条件装载查询候选**（工作集装载；装配层注入）。
+   * 候选 id 从 SQL 来、按 id 连祖先链装进工作集；视图装完重算冻结结果。
+   * 省略 ＝ 整库模式（求值天然完整）。
+   */
+  ensureQueryLoaded?: (spec: QuerySpec, ctx: QueryContext, host: Block | undefined) => Promise<boolean>
 }
 
 export function setupPanels(deps: PanelsDeps) {
@@ -1136,6 +1142,7 @@ export function setupPanels(deps: PanelsDeps) {
       store: blocks,
       write: editorRun(run, () => opts?.source?.() ?? edOfMount(hostId)),
       kb,
+      ...(deps.ensureQueryLoaded ? { ensureQueryLoaded: deps.ensureQueryLoaded } : {}),
       owners,
       owner,
       ...(binding ? { binding } : {}),

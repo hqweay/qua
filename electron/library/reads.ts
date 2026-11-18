@@ -11,7 +11,9 @@
  */
 import type { DatabaseSync } from 'node:sqlite'
 import {
+  candidatePlanSql,
   LIBRARY_READS,
+  type CandidatePlan,
   type CatalogAlias,
   type CatalogJournal,
   type CatalogPropDef,
@@ -98,4 +100,40 @@ export function readCatalogRows(db: DatabaseSync): LibraryCatalog {
     aliases,
     trash,
   }
+}
+
+/* ------------------------------------------------------------ 查询候选 */
+
+/**
+ * **候选计划的执行**：SQL 由 `core/storage` 编译（`candidatePlanSql`），这里只跑它。
+ *
+ * 计划是**超集**（⊇ 真命中）：matcher 在渲染层仍是判定的唯一来源，这里少给一行
+ * 就是静默丢结果，多给只是多装几块。
+ */
+export function readCandidateIds(db: DatabaseSync, plan: CandidatePlan): string[] {
+  const { sql, params } = candidatePlanSql(plan)
+  const rows = db.prepare(sql).all(...params) as { id: unknown }[]
+  return rows.map((r) => String(r.id)).filter((id) => id !== '' && id !== 'null')
+}
+
+/**
+ * **一批块 ＋ 全部祖先链（＋一层子级）**：查询候选的装载单位。
+ *
+ * 候选判定要看上下文（`{up}`、`_date` 贴着的天、面包屑）；`{children:true}` 还要
+ * 看子块在不在。祖先链是一条路径不是祖先的兄弟子树——成本跟候选数 × 深度走。
+ */
+export function readBlockTreeRows(db: DatabaseSync, blockIds: readonly string[], withChildren: boolean): RawLibraryRows {
+  if (blockIds.length === 0) return { blocks: [], props: [], aliases: [], lists: [], meta: {} }
+  const idJson = JSON.stringify([...new Set(blockIds)])
+  const byId = new Map<string, Row>()
+  for (const r of db.prepare(LIBRARY_READS.treeAncestors).all(idJson) as Row[]) byId.set(String(r.id), r)
+  if (withChildren) {
+    for (const r of db.prepare(LIBRARY_READS.treeChildren).all(idJson) as Row[]) byId.set(String(r.id), r)
+  }
+  const all = [...byId.values()]
+  const allJson = JSON.stringify(all.map((r) => String(r.id)))
+  const props = db.prepare(LIBRARY_READS.docProps).all(allJson) as Row[]
+  const aliases = db.prepare(LIBRARY_READS.docAliases).all(allJson) as Row[]
+  const lists = db.prepare(LIBRARY_READS.docLists).all(allJson) as Row[]
+  return { blocks: all, props, aliases, lists, meta: {} }
 }

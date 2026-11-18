@@ -187,6 +187,8 @@ test('session 读计数：doc/catalog 不增 full；全库装载单独记行数'
     catalogRows: 3, // tags 1 + aliases 2（P／Tag）
     blocks: 1,
     blockRows: 3, // blocks 1 + aliases 1 + lists 1
+    candidates: 0,
+    candidateIds: 0,
   })
 
   const all = loadContent(s!)

@@ -179,6 +179,13 @@ export interface ViewHostDeps {
   host: () => Block
   /** 求值的上下文：`$self` 指谁、结果剔除谁 */
   context: QueryContext
+  /**
+   * **按条件装载候选**（工作集装载；装配层注入）。
+   *
+   * 候选 id 从 SQL 来、按 id 连祖先链装进工作集；装完返回 true ⇒ 视图重算冻结结果。
+   * 省略 ＝ 整库模式（所有块都在内存里，求值天然完整）。
+   */
+  ensureQueryLoaded?: (spec: QuerySpec, ctx: QueryContext, host: Block | undefined) => Promise<boolean>
   surface: ViewSurface
   /**
    * **名字画到哪**（只有投影给）。
@@ -1003,6 +1010,24 @@ export class ViewHost {
     if (!spec) return
     const ctx = this.evalContext(spec)
     if (!frozenStale(this.frozen, spec, ctx, this.viewKey)) return
+    /**
+     * **候选先装载**：候选 id 从 SQL 来（超集），未装载的按 id 连祖先链装进来；
+     * 装完重算这一份。本帧先按已装载求值（可能少几行），装载完成重置冻结重画——
+     * 这是「候选页」的装载节奏，不是静默少结果（重算之后的成员是完整的）。
+     */
+    if (this.deps.ensureQueryLoaded) {
+      const host = this.deps.host()
+      void this.deps
+        .ensureQueryLoaded(spec, ctx, host)
+        .then((loaded) => {
+          // 真装进了新块才重算；整库模式/候选已齐 ⇒ 本次求值已经完整
+          if (loaded) {
+            this.frozen = null
+            this.sync(true)
+          }
+        })
+        .catch((e) => this.deps.toast?.(t('ui.query.refreshFailed', { message: e instanceof Error ? e.message : String(e) }), 'warn'))
+    }
     const before = this.frozen?.hits ?? []
     this.frozen = freezeResult(spec, this.deps.kb, ctx, this.viewKey)
     const dropped = droppedFrom(before, this.frozen.hits)

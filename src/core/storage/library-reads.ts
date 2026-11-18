@@ -76,6 +76,24 @@ export const LIBRARY_READS = {
     select ${BLOCK_COLUMNS} from ${B} b join anc a on b.id = a.id`,
 
   /**
+   * **一批块 ＋ 它们的全部祖先链**（查询候选的装载单位）。
+   *
+   * 候选块的判定要看上下文（`{up}` 的祖先链、`_date` 排序贴着的那一天、面包屑），
+   * 所以按 id 装候选必须连祖先一起装。祖先链是**一条路径**，不是祖先的兄弟子树
+   * ——成本跟「候选数 × 深度」走，不跟库走。
+   */
+  treeAncestors: `with recursive want(id) as (
+      select value from json_each(?1)
+      union
+      select b.parent from ${B} b join want w on b.id = w.id where b.parent is not null
+    )
+    select ${BLOCK_COLUMNS} from ${B} b join want w on b.id = w.id`,
+
+  /** 一批块的**直接子级**（`{children:true}` 的判定要看子块在不在，一层就够） */
+  treeChildren: `select ${BLOCK_COLUMNS} from ${B} b
+    where b.parent in (select value from json_each(?1))`,
+
+  /**
    * 日记日期（槽的日历／日记流窗口）。
    *
    * **含软删天**：`_date` 派生身份，删掉的一天仍是「这一天存在过」的块；
@@ -151,4 +169,238 @@ export type LibraryCatalog = {
  */
 export function isLibraryReadName(v: unknown): v is LibraryReadName {
   return typeof v === 'string' && Object.prototype.hasOwnProperty.call(LIBRARY_READS, v)
+}
+
+/* ------------------------------------------------------------ 查询候选计划 */
+
+/**
+ * **候选计划**（JSON 可序列化）：查询条件 → 「哪些块**可能**命中」的 SQL 形状。
+ *
+ * 计划是**超集**（⊇ 真命中）：matcher 仍是判定的唯一来源，SQL 只负责把候选从
+ * 全库收窄到「值得装载的那一批」。收窄不了的形状（`not`／`mark`／`link`）给
+ * `visible`（全部可见块）——正确性优先，成本随命中面走，这是已登记的代价。
+ *
+ * 计划由 `query-candidates.ts` 从条件树编译；这里只有「计划 → SQL」的投影，
+ * 与具名查询同一层（主进程执行，不解释块语义）。
+ */
+export type CandidatePlan =
+  | { k: 'none' }
+  | { k: 'visible' }
+  | { k: 'ids'; ids: string[] }
+  | { k: 'tags'; ids: string[] }
+  | { k: 'list'; list: 'page' | 'tag' }
+  | { k: 'journal' }
+  | { k: 'note' }
+  | { k: 'ref'; to?: string }
+  | { k: 'prop'; name: string }
+  | { k: 'kind' }
+  | { k: 'aliased' }
+  | { k: 'tagged' }
+  | { k: 'journalDay'; date: string }
+  | { k: 'parents' }
+  | { k: 'text'; needle: string; nonempty?: boolean }
+  | { k: 'descendantsOf'; plan: CandidatePlan }
+  | { k: 'ancestorsOf'; plan: CandidatePlan }
+  | { k: 'near'; plan: CandidatePlan }
+  | { k: 'all'; plans: CandidatePlan[] }
+  | { k: 'any'; plans: CandidatePlan[] }
+
+/** IPC 参数的形状校验（只验容器；值是绑定参数，不进 SQL 文本） */
+export function isCandidatePlan(v: unknown, depth = 0): v is CandidatePlan {
+  if (!isRecord(v) || depth > 32) return false
+  switch (v.k) {
+    case 'none':
+    case 'visible':
+    case 'kind':
+    case 'aliased':
+    case 'tagged':
+    case 'parents':
+      return true
+    case 'ids':
+    case 'tags':
+      return Array.isArray(v.ids) && v.ids.every((x) => typeof x === 'string')
+    case 'list':
+      return v.list === 'page' || v.list === 'tag'
+    case 'journal':
+    case 'note':
+      return true
+    case 'ref':
+      return v.to === undefined || typeof v.to === 'string'
+    case 'prop':
+      return typeof v.name === 'string' && v.name !== ''
+    case 'journalDay':
+      return typeof v.date === 'string' && v.date !== ''
+    case 'text':
+      return typeof v.needle === 'string' && (v.nonempty === undefined || v.nonempty === true)
+    case 'descendantsOf':
+    case 'ancestorsOf':
+    case 'near':
+      return isCandidatePlan(v.plan, depth + 1)
+    case 'all':
+    case 'any':
+      return Array.isArray(v.plans) && v.plans.every((p) => isCandidatePlan(p, depth + 1))
+    default:
+      return false
+  }
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+/**
+ * 计划 → SQL。参数一律匿名 `?`、按文本出现顺序绑定（嵌套计划的参数先深后浅拼在后面）。
+ *
+ * 计划是超集 ⇒ 这里的 SQL **宁可多给**：`instr`／值比较这类窄化都不做
+ * （值在行里是 JSON 编码，按编码值窄会漏掉跨行拼接的命中），交给 matcher 判。
+ */
+export function candidatePlanSql(plan: CandidatePlan): { sql: string; params: (string | number)[] } {
+  const wrap = (inner: string, params: (string | number)[]): { sql: string; params: (string | number)[] } => ({ sql: inner, params })
+  switch (plan.k) {
+    case 'none':
+      return wrap('select null as id where 0', [])
+    case 'visible':
+      return wrap(`select id from ${B} where deleted is null`, [])
+    case 'ids':
+      // json_each 吃 JSON 文本（与 docSubtree 同一条绑定口径）
+      return wrap('select value as id from json_each(?)', [JSON.stringify(plan.ids)])
+    case 'tags':
+      // 标签成员并集（matcher 的 `{tag}` 语义就是并集）；子标签沿树展开（`desc:true` 也被覆盖）
+      return wrap(
+        `with tags(id) as (
+          select value from json_each(?)
+          union
+          select c.id from ${B} c join tags t on c.parent = t.id join ${L} l on l.block = c.id and l.list = 'tag'
+        )
+        select distinct p.block as id from ${P} p join tags on p.name = '_tags' and p.value = '"' || tags.id || '"'`,
+        [JSON.stringify(plan.ids)],
+      )
+    case 'list':
+      return wrap(
+        `select l.block as id from ${L} l join ${B} b on b.id = l.block where l.list = ? and b.deleted is null`,
+        [plan.list],
+      )
+    case 'journal':
+      return wrap(`select id from ${B} where date is not null and deleted is null`, [])
+    case 'note':
+      return wrap(
+        `select p.block as id from ${P} p join ${B} b on b.id = p.block and b.deleted is null where p.name = '_annotates'`,
+        [],
+      )
+    case 'ref':
+      return plan.to === undefined
+        ? wrap(
+            `select b.id as id from ${B} b where b.deleted is null and exists (
+              select 1 from json_each(b.content) j where json_extract(j.value,'$.t') = 'ref'
+            )`,
+            [],
+          )
+        : wrap(
+            `select b.id as id from ${B} b where b.deleted is null and exists (
+              select 1 from json_each(b.content) j
+              where json_extract(j.value,'$.t') = 'ref' and json_extract(j.value,'$.to') = ?
+            )`,
+            [plan.to],
+          )
+    case 'prop':
+      // 「有这一栏」＝ 值 ∪ 自有槽 ∪ 标签声明（matcher 的 readField 三来源）——
+      // 只给「有值行」的块会漏掉标签声明进场的成员，候选就不再是超集
+      return wrap(
+        `select p.block as id from ${P} p join ${B} b on b.id = p.block and b.deleted is null where p.name = ?
+        union
+        select p.block as id from ${P} p join ${B} b on b.id = p.block and b.deleted is null
+          where p.name = '_ownProps' and p.value = ?
+        union
+        select m.block as id from ${P} m join ${B} b on b.id = m.block and b.deleted is null
+          where m.name = '_tags' and m.value in (
+            select '"' || d.block || '"' from ${P} d where d.name = '_fieldDefs' and d.value = ?
+          )`,
+        [plan.name, `"${plan.name}"`, `"${plan.name}"`],
+      )
+    case 'kind':
+      return wrap(`select id from ${B} where kind is not null and deleted is null`, [])
+    case 'aliased':
+      return wrap(
+        `select distinct a.block as id from ${A} a join ${B} b on b.id = a.block and b.deleted is null`,
+        [],
+      )
+    case 'tagged':
+      return wrap(
+        `select distinct p.block as id from ${P} p join ${B} b on b.id = p.block and b.deleted is null where p.name = '_tags'`,
+        [],
+      )
+    case 'journalDay':
+      return wrap(`select id from ${B} where date = ? and deleted is null`, [plan.date])
+    case 'parents':
+      return wrap(
+        `select distinct b.parent as id from ${B} b where b.parent is not null and b.deleted is null`,
+        [],
+      )
+    case 'text':
+      return plan.nonempty === true
+        ? wrap(
+            `select b.id as id from ${B} b where b.deleted is null and exists (
+              select 1 from json_each(b.content) j
+              where json_extract(j.value,'$.t') = 'text' and trim(json_extract(j.value,'$.v')) <> ''
+            )`,
+            [],
+          )
+        : wrap(
+            `select b.id as id from ${B} b where b.deleted is null and exists (
+              select 1 from (
+                select group_concat(json_extract(j.value,'$.v'), '') as txt
+                from json_each(b.content) j where json_extract(j.value,'$.t') = 'text'
+              ) where instr(txt, ?) > 0
+            )`,
+            [plan.needle],
+          )
+    case 'descendantsOf': {
+      const inner = candidatePlanSql(plan.plan)
+      return wrap(
+        `with m(id) as (${inner.sql}), sub(id) as (
+          select id from m union select c.id from ${B} c join sub s on c.parent = s.id
+        )
+        select id from sub`,
+        inner.params,
+      )
+    }
+    case 'ancestorsOf': {
+      const inner = candidatePlanSql(plan.plan)
+      return wrap(
+        `with m(id) as (${inner.sql}), anc(id) as (
+          select id from m union select b.parent from ${B} b join anc a on b.id = a.id where b.parent is not null
+        )
+        select id from anc`,
+        inner.params,
+      )
+    }
+    case 'near': {
+      const inner = candidatePlanSql(plan.plan)
+      return wrap(
+        `with m(id) as (${inner.sql}), all_(id) as (
+          select id from m
+          union select b.parent from ${B} b join all_ a on b.id = a.id where b.parent is not null
+          union select c.id from ${B} c join all_ a on c.parent = a.id
+        )
+        select id from all_`,
+        inner.params,
+      )
+    }
+    case 'all': {
+      if (plan.plans.length === 0) return candidatePlanSql({ k: 'visible' })
+      const parts = plan.plans.map(candidatePlanSql)
+      return wrap(
+        parts.map((p) => `select id from (${p.sql})`).join(' intersect '),
+        parts.flatMap((p) => p.params),
+      )
+    }
+    case 'any': {
+      if (plan.plans.length === 0) return candidatePlanSql({ k: 'none' })
+      const parts = plan.plans.map(candidatePlanSql)
+      return wrap(
+        parts.map((p) => `select id from (${p.sql})`).join(' union '),
+        parts.flatMap((p) => p.params),
+      )
+    }
+  }
 }

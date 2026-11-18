@@ -1,0 +1,167 @@
+/**
+ * **条件树 → 候选计划**：把「哪些块**可能**命中」编译成 SQL 计划（`library-reads.ts`
+ * 的 `CandidatePlan`），候选从数据库收窄，matcher 仍是判定的唯一来源。
+ *
+ * ## 与 `candidateIdsOf`（内存候选）的关系
+ *
+ * 同一个问题（条件 → 候选超集）的两条投影：内存版从 `Index` 抽取，这一版从条件树
+ * 编译 SQL。两者都受同一条铁律约束：**返回的集合必须 ⊇ 真命中**，否则候选迭代会
+ * 静默丢行。收窄不了的形状（`not`／`mark`／`link`）给 `visible`（全部可见块）——
+ * 宁可多装，不少装。
+ *
+ * ## matcher 环境需要的「点名块」
+ *
+ * 候选只装块自己（＋祖先链）；但 matcher 的环境要看**条件里点名的块**：
+ * `{tag}` 的标签块（chip 显示名）、`{prop}` 的定义块（`readField` 的判据）。
+ * 这些 id 由这里收集（`loadIds`），装载方在装候选时一并装上。
+ *
+ * ## `$self`
+ *
+ * 解析只有一份判据（`resolveSelfSpec`）：有宿主先解析，解析成 `NEVER` 的分支
+ * 编译成空计划（`{k:'none'}`）——**不退回全库**：看不懂的指代不该变成大范围命中。
+ */
+import { resolveSelfSpec, usesSelf, type QueryNode, type QuerySpec, type QueryContext } from '../query/query.ts'
+import { shiftISO } from '../identity/journal.ts'
+import type { Block } from '../model/model.ts'
+import type { CandidatePlan } from './library-reads.ts'
+
+const NONE: CandidatePlan = { k: 'none' }
+
+export interface CandidateBuild {
+  plan: CandidatePlan
+  /** 条件里点名的标签块／字段定义（matcher 环境要它们在场） */
+  loadIds: string[]
+  /** 条件里有 `{children:true}` ⇒ 候选要连一层子级一起装（判定要看子块在不在） */
+  children: boolean
+}
+
+/** 收集条件树里点名的块（标签 id、属性定义 id）与形状标记 */
+function collect(
+  node: QueryNode,
+  out: { tags: Set<string>; fields: Set<string>; children: boolean },
+): void {
+  if ('all' in node) {
+    for (const n of node.all) collect(n, out)
+    return
+  }
+  if ('any' in node) {
+    for (const n of node.any) collect(n, out)
+    return
+  }
+  if ('not' in node) return collect(node.not, out)
+  if ('up' in node) return collect(node.up, out)
+  if ('down' in node) return collect(node.down, out)
+  if ('near' in node) return collect(node.near, out)
+  if ('tag' in node) {
+    const id = typeof node.tag === 'string' ? node.tag : node.tag.id
+    if (id !== '') out.tags.add(id)
+    return
+  }
+  if ('prop' in node) {
+    const id = node.prop.id
+    // 系统槽（`_` 开头）与 `core/*` 不住在定义块上；定义 id 才要点名装载
+    if (!id.startsWith('_') && !id.startsWith('core/')) out.fields.add(id)
+    return
+  }
+  if ('ref' in node) {
+    const to = typeof node.ref === 'string' ? node.ref : node.ref.to
+    if (to !== undefined && to !== '') out.tags.add(to) // 目标块也点名装载（视图里要显示名字）
+    return
+  }
+  if ('children' in node) out.children = true
+}
+
+/** 系统槽的候选计划（`_date`／`_kind` 住在列上，不在属性行里） */
+function propPlan(id: string): CandidatePlan {
+  if (id === '_date') return { k: 'journal' }
+  if (id === '_kind') return { k: 'kind' }
+  if (id === '_aliases') return { k: 'aliased' }
+  if (id === '_tags') return { k: 'tagged' }
+  if (id.startsWith('core/')) return { k: 'visible' }
+  return { k: 'prop', name: id }
+}
+
+function planOf(
+  node: QueryNode,
+  env: { selfId?: string; today?: string },
+  seen: { tags: Set<string>; fields: Set<string>; children: boolean },
+): CandidatePlan {
+  if ('all' in node) {
+    if (node.all.length === 0) return { k: 'visible' } // 恒真
+    const plans = node.all.map((n) => planOf(n, env, seen))
+    if (plans.some((p) => p.k === 'none')) return NONE
+    return plans.every((p) => p.k === 'visible') ? { k: 'visible' } : { k: 'all', plans }
+  }
+  if ('any' in node) {
+    if (node.any.length === 0) return NONE // 恒假
+    const plans = node.any.map((n) => planOf(n, env, seen))
+    return plans.every((p) => p.k === 'none') ? NONE : { k: 'any', plans }
+  }
+  if ('not' in node) return { k: 'visible' } // 否定的补集不是候选
+  if ('is' in node) return node.is === '' ? NONE : { k: 'ids', ids: [node.is] }
+  if ('up' in node) return { k: 'descendantsOf', plan: planOf(node.up, env, seen) }
+  if ('down' in node) return { k: 'ancestorsOf', plan: planOf(node.down, env, seen) }
+  if ('near' in node) return { k: 'near', plan: planOf(node.near, env, seen) }
+  if ('role' in node) {
+    if (node.role === 'page' || node.role === 'tag') return { k: 'list', list: node.role }
+    if (node.role === 'journal') return { k: 'journal' }
+    if (node.role === 'note') return { k: 'note' }
+    return { k: 'visible' }
+  }
+  if ('today' in node) {
+    // 没有基准日 ⇒ matcher 也判不命中（见 matcher 的 `{today}` 支）：这里同样给空集
+    if (env.today === undefined) return NONE
+    return { k: 'journalDay', date: shiftISO(env.today, node.today.offset) }
+  }
+  if ('ref' in node) {
+    const to = typeof node.ref === 'string' ? node.ref : node.ref.to
+    return { k: 'ref', ...(to !== undefined && to !== '' ? { to } : {}) }
+  }
+  if ('tag' in node) {
+    // matcher 的 `{tag}` 读**整份 where 的标签并集**（文档化的已知语义）；
+    // 候选也按并集给，否则交集条件会悄悄丢行。ids 由调用方用 seen.tags 填。
+    return { k: 'tags', ids: [...seen.tags] }
+  }
+  if ('text' in node) {
+    if (typeof node.text === 'string') {
+      return node.text === '' ? { k: 'visible' } : { k: 'text', needle: node.text }
+    }
+    return { k: 'text', needle: '', nonempty: true }
+  }
+  if ('children' in node) return { k: 'parents' }
+  if ('prop' in node) {
+    const op = node.prop
+    // 「没有这一栏」是补集，收窄不了（有值行/声明槽的反面没法用一张表答）
+    if ('exists' in op && op.exists === false) return { k: 'visible' }
+    return propPlan(op.id)
+  }
+  // mark／link／不认识的形状：收窄不了 ⇒ 全部可见块（matcher 判）
+  return { k: 'visible' }
+}
+
+/**
+ * 编译一份候选计划。`host` 是 `$self` 的宿主（查询块／挂载宿主）；
+ * 条件用了 `$self` 却没有宿主 ⇒ 空计划（与 matcher 的「不退回全库」同一条口径）。
+ */
+export function candidateBuildOf(
+  spec: QuerySpec,
+  host: Block | undefined,
+  forest: readonly Block[],
+  ctx: QueryContext,
+): CandidateBuild {
+  const seen = { tags: new Set<string>(), fields: new Set<string>(), children: false }
+  const empty: CandidateBuild = { plan: NONE, loadIds: [], children: false }
+  let where = spec.where
+  if (usesSelf(where)) {
+    if (!host) return empty
+    where = resolveSelfSpec(spec, host, forest).where
+  }
+  collect(where, seen)
+  const env = { selfId: ctx.selfId, ...(ctx.today ? { today: ctx.today } : {}) }
+  const plan = planOf(where, env, seen)
+  return {
+    plan,
+    loadIds: [...seen.tags, ...seen.fields],
+    children: seen.children,
+  }
+}

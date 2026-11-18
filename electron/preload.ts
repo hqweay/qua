@@ -104,6 +104,11 @@ const qua = {
    */
   doc: (roots: readonly string[]): Promise<unknown> => ipcRenderer.invoke('qua:library/doc', roots),
   blocks: (ids: readonly string[]): Promise<unknown> => ipcRenderer.invoke('qua:library/blocks', ids),
+  /** 查询候选 id（计划 JSON 由 core 编译；主进程只执行） */
+  candidates: (plan: unknown): Promise<unknown> => ipcRenderer.invoke('qua:library/candidates', plan),
+  /** 候选装载：块＋祖先链（可选一层子级） */
+  tree: (ids: readonly string[], withChildren: boolean): Promise<unknown> =>
+    ipcRenderer.invoke('qua:library/tree', ids, withChildren),
   catalog: (): Promise<unknown> => ipcRenderer.invoke('qua:library/catalog'),
 
   /** 全文检索（match 由渲染层编译；主进程只做参数绑定与 bm25 排序） */

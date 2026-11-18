@@ -29,8 +29,9 @@ import {
   type LibraryEntry,
 } from '../../src/core/identity/library.ts'
 import { libraryDir, loadRegistry, markOpened, saveRegistry, type RegistryIo } from './registry.ts'
-import { loadContent, openSession, readBlocks, readCatalog, readDoc, saveContent, type OpenFailure, type RepoSession } from './session.ts'
+import { loadContent, openSession, readBlocks, readCatalog, readCandidates, readDoc, readTree, saveContent, type OpenFailure, type RepoSession } from './session.ts'
 import { hasContent, readSeq, searchFts, snapshotLibrary, type RowWrite } from './sqlite.ts'
+import { isCandidatePlan } from '../../src/core/storage/library-reads.ts'
 
 /** 关窗握手等 renderer 回话的上限。超时就强关——卡住比丢一句话更糟。 */
 const CLOSE_ACK_TIMEOUT_MS = 1500
@@ -452,6 +453,33 @@ export class LibraryManager {
       if (!isRootList(ids)) return { status: 'bad-args' }
       try {
         return { status: 'ok', rows: readBlocks(s, ids) }
+      } catch (err) {
+        return { status: 'error', error: String(err) }
+      }
+    })
+
+    /**
+     * **查询候选 id**：计划由 `core/storage` 从条件树编译（超集语义），这里只执行 SQL。
+     * 参数形状校验（`isCandidatePlan`）挡的是「任意计划过桥」，值全是绑定参数。
+     */
+    ipcMain.handle('qua:library/candidates', (e, plan: unknown) => {
+      const s = sessionOf(e)
+      if (!s) return { status: 'no-library' }
+      if (!isCandidatePlan(plan)) return { status: 'bad-args' }
+      try {
+        return { status: 'ok', ids: readCandidates(s, plan) }
+      } catch (err) {
+        return { status: 'error', error: String(err) }
+      }
+    })
+
+    /** **候选装载**：块＋全部祖先链（可选一层子级）。参数与 `doc` 同一条形状校验 */
+    ipcMain.handle('qua:library/tree', (e, ids: unknown, withChildren: unknown) => {
+      const s = sessionOf(e)
+      if (!s) return { status: 'no-library' }
+      if (!isRootList(ids)) return { status: 'bad-args' }
+      try {
+        return { status: 'ok', rows: readTree(s, ids, withChildren === true) }
       } catch (err) {
         return { status: 'error', error: String(err) }
       }

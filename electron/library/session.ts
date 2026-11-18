@@ -40,8 +40,8 @@ import {
   type LibraryManifest,
 } from '../../src/core/identity/library.ts'
 import { createFolderAssetStore, type AssetStore } from './assets.ts'
-import { readBlockRows, readCatalogRows, readDocRows } from './reads.ts'
-import type { LibraryCatalog, LibraryDocRows, RawLibraryRows } from '../../src/core/storage/library-reads.ts'
+import { readBlockRows, readBlockTreeRows, readCandidateIds, readCatalogRows, readDocRows } from './reads.ts'
+import type { CandidatePlan, LibraryCatalog, LibraryDocRows, RawLibraryRows } from '../../src/core/storage/library-reads.ts'
 import {
   applyRowWrites,
   hasContent,
@@ -104,6 +104,8 @@ export interface RepoSession {
     catalogRows: number
     blocks: number
     blockRows: number
+    candidates: number
+    candidateIds: number
   }
   /**
    * 这个会话**累计写进去多少行**（`saveContent` 的返回值累加）。
@@ -184,7 +186,7 @@ function makeSession(id: string, dir: string, db: Db, deviceId: string): RepoSes
     assets,
     windows: new Set<number>(),
     deviceId,
-    reads: { full: 0, fullRows: 0, doc: 0, docRows: 0, catalog: 0, catalogRows: 0, blocks: 0, blockRows: 0 },
+    reads: { full: 0, fullRows: 0, doc: 0, docRows: 0, catalog: 0, catalogRows: 0, blocks: 0, blockRows: 0, candidates: 0, candidateIds: 0 },
     writes: { rows: 0, ftsRows: 0, saves: 0 },
     close: () => {
       try {
@@ -358,3 +360,21 @@ export function saveViewState(session: RepoSession, key: string, value: unknown)
 
 export { LIBRARY_KIND }
 export type { LibraryEntry }
+
+/* ------------------------------------------------------------ 查询候选 */
+
+/** 候选 id（SQL 计划在 core 编译；这里是执行与记账） */
+export function readCandidates(session: RepoSession, plan: CandidatePlan): string[] {
+  const ids = readCandidateIds(session.db, plan)
+  session.reads.candidates += 1
+  session.reads.candidateIds += ids.length
+  return ids
+}
+
+/** 候选装载（块＋祖先链，可选一层子级）：与 `readBlocks` 分开记账 */
+export function readTree(session: RepoSession, blockIds: readonly string[], withChildren: boolean): RawLibraryRows {
+  const rows = readBlockTreeRows(session.db, blockIds, withChildren)
+  session.reads.blocks += 1
+  session.reads.blockRows += rows.blocks.length + rows.props.length + rows.aliases.length + rows.lists.length
+  return rows
+}

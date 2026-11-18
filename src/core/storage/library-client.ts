@@ -19,7 +19,7 @@
  * `library-reads.ts` 的具名查询与主进程执行分支，再在这里加一格——三处各写一份 SQL
  * 就是「同一件事有多个答案」。
  */
-import type { LibraryCatalog, LibraryDocRows, RawLibraryRows } from './library-reads.ts'
+import type { CandidatePlan, LibraryCatalog, LibraryDocRows, RawLibraryRows } from './library-reads.ts'
 
 /** 桥面：桌面由 preload 提供；web 宿主根本没有库面（`undefined`） */
 export interface LibraryReadBridge {
@@ -27,6 +27,10 @@ export interface LibraryReadBridge {
   doc(roots: readonly string[]): Promise<unknown>
   /** 一批块自己的行（**不带子树**；引用目标/标签/定义按 id 装一块） */
   blocks?(ids: readonly string[]): Promise<unknown>
+  /** 查询候选 id（计划 JSON 由 core 编译，主进程只执行 SQL） */
+  candidates?(plan: unknown): Promise<unknown>
+  /** 候选装载：块＋全部祖先链（可选一层子级） */
+  tree?(ids: readonly string[], withChildren: boolean): Promise<unknown>
   /** 槽要显示的全局身份摘要（日记／标签／字段定义／地址表／回收站根） */
   catalog(): Promise<unknown>
 }
@@ -43,6 +47,10 @@ export type LibraryReadResult<T> =
 
 export interface LibraryClient {
   doc(roots: readonly string[]): Promise<LibraryReadResult<LibraryDocRows>>
+  /** 查询候选 id（计划是超集；matcher 仍是判定来源）。失败分型与 doc 同一条 */
+  candidates(plan: CandidatePlan): Promise<LibraryReadResult<string[]>>
+  /** 候选装载：块＋全部祖先链（可选一层子级） */
+  tree(ids: readonly string[], withChildren: boolean): Promise<LibraryReadResult<RawLibraryRows>>
   /**
    * 装一批**不带子树**的块。闭包可能超过单次 IPC 的上限（主进程 512）⇒
    * 这里按片切开发；任何一片失败都让整次失败（不返回半批——调用方要的是
@@ -143,6 +151,47 @@ function createClient(bridge: LibraryReadBridge): LibraryClient {
       if (r.status !== 'ok') return clientError('library/doc', `bad reply status: ${String(r.status)}`)
       if (!isDocRows(r.doc)) return clientError('library/doc', 'bad reply shape')
       return { status: 'ok', value: r.doc }
+    },
+
+    async candidates(plan) {
+      if (!bridge.candidates) return clientError('library/candidates', 'bridge has no candidates read')
+      let raw: unknown
+      try {
+        raw = await bridge.candidates(plan)
+      } catch (e) {
+        return clientError('library/candidates', e instanceof Error ? e.message : String(e))
+      }
+      const r = replyStatus(raw)
+      if (r.status === 'no-library') return { status: 'no-library' }
+      if (r.status === 'bad-args') return { status: 'bad-args' }
+      if (r.status === 'error') return clientError('library/candidates', String(r.error ?? 'unknown'))
+      if (r.status !== 'ok') return clientError('library/candidates', `bad reply status: ${String(r.status)}`)
+      const reply = r as { ids?: unknown }
+      if (!Array.isArray(reply.ids) || !reply.ids.every((x) => typeof x === 'string')) {
+        return clientError('library/candidates', 'bad reply shape')
+      }
+      return { status: 'ok', value: reply.ids }
+    },
+
+    async tree(ids, withChildren) {
+      if (!bridge.tree) return clientError('library/tree', 'bridge has no tree read')
+      const uniq = [...new Set(ids.filter((x) => typeof x === 'string' && x !== ''))]
+      if (uniq.length === 0) {
+        return { status: 'ok', value: { blocks: [], props: [], aliases: [], lists: [], meta: {} } }
+      }
+      let raw: unknown
+      try {
+        raw = await bridge.tree(uniq, withChildren)
+      } catch (e) {
+        return clientError('library/tree', e instanceof Error ? e.message : String(e))
+      }
+      const r = replyStatus(raw)
+      if (r.status === 'no-library') return { status: 'no-library' }
+      if (r.status === 'bad-args') return { status: 'bad-args' }
+      if (r.status === 'error') return clientError('library/tree', String(r.error ?? 'unknown'))
+      if (r.status !== 'ok') return clientError('library/tree', `bad reply status: ${String(r.status)}`)
+      if (!isBlockRows(r.rows)) return clientError('library/tree', 'bad reply shape')
+      return { status: 'ok', value: r.rows as RawLibraryRows }
     },
 
     async blocks(ids) {

@@ -61,6 +61,10 @@ export interface LibraryBridge {
    */
   doc?(roots: readonly string[]): Promise<unknown>
   blocks?(ids: readonly string[]): Promise<unknown>
+  /** 查询候选 id（计划由 core 编译，主进程只执行 SQL） */
+  candidates?(plan: unknown): Promise<unknown>
+  /** 候选装载：块＋全部祖先链（可选一层子级） */
+  tree?(ids: readonly string[], withChildren: boolean): Promise<unknown>
   catalog?(): Promise<unknown>
 
   /**
