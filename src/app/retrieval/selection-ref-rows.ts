@@ -21,6 +21,7 @@ import {
   flatten,
   hasList,
   iconOf,
+  isAddressable,
   plainText,
   type Block,
 } from '../../core/index.ts'
@@ -96,16 +97,38 @@ export function selectionRefRows(deps: SelectionRefRowsDeps): (query: string) =>
       })
     }
 
-    /** ③ 正文含该词的普通块：片段高亮 ＋ 住哪（祖先链），同一段字出现几处也分得清 */
-    let content = 0
+    /**
+     * ③ 块：**名字命中**（带地址的普通块）与**正文命中**都收在块组；
+     *    名字命中在前——它比「正文碰巧含这几个字」精确，不能被同组上限挤掉。
+     *    正文行：片段高亮 ＋ 住哪（祖先链），同一段字出现几处也分得清。
+     */
+    const namedBlocks: Row[] = []
+    const textBlocks: Row[] = []
     for (const b of all) {
       if (b.id === exact?.id || hasList(b, 'page') || hasList(b, 'tag')) continue
+      if (isAddressable(b)) {
+        const hit = raw === '' ? null : matchedNameOf(b, raw)
+        if (hit) {
+          if (namedBlocks.length < CAP) {
+            namedBlocks.push({
+              id: `selref/block/${b.id}`,
+              label: hit.text,
+              parts: markTerms(hit.text, raw),
+              hint: trailOf(b),
+              icon: iconOf(b) ?? '',
+              group: 'retrieval/2-block',
+              pick: { kind: 'block', id: b.id, name: hit.text },
+            })
+          }
+          continue
+        }
+      }
       const text = plainText(b.content)
       if (text.trim() === '') continue
       if (!termsMatch(text, raw)) continue
-      if (content++ >= CAP) break
+      if (textBlocks.length >= CAP) continue
       const parts = raw === '' ? [{ text: snippet(text) }] : highlightSnippet(text, raw, 72)
-      rows.push({
+      textBlocks.push({
         id: `selref/block/${b.id}`,
         label: snippet(text),
         parts,
@@ -116,6 +139,7 @@ export function selectionRefRows(deps: SelectionRefRowsDeps): (query: string) =>
         pick: { kind: 'block', id: b.id, name: snippet(text) },
       })
     }
+    rows.push(...[...namedBlocks, ...textBlocks].slice(0, CAP))
 
     /**
      * ④ 新建：↵ 与一键默认同义（没有同名地址时就是建页），⌥↵ 强制建普通块。

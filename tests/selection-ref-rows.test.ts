@@ -96,3 +96,30 @@ test('多词：按词 AND，名字与正文都标出每个词', () => {
     ['项目', '计划'],
   )
 })
+
+test('普通块的别名可搜：行显名字、落点是块、标出命中', () => {
+  const forest: Block[] = [b('block-alias', '与查询无关的正文', { props: { _aliases: ['术语卡'] } })]
+  const kb = new MemoryKb(new BlockStore(forest))
+  const rows = selectionRefRows({ kb, selfId: 'host' })('术语')
+  const row = rows.find((r) => r.id === 'selref/block/block-alias')
+  assert.ok(row, `别名命中要进块组：${JSON.stringify(rows.map((r) => r.id))}`)
+  assert.equal(row!.group, 'retrieval/2-block')
+  assert.equal(row!.label, '术语卡')
+  assert.deepEqual(row!.pick, { kind: 'block', id: 'block-alias', name: '术语卡' })
+  assert.deepEqual(
+    row!.parts?.filter((p) => p.mark).map((p) => p.text),
+    ['术语'],
+  )
+})
+
+test('名字命中排在正文命中之前', () => {
+  const forest: Block[] = [
+    b('block-text', '术语 出现在这里的正文'),
+    b('block-alias', '无关正文', { props: { _aliases: ['术语卡'] } }),
+  ]
+  const kb = new MemoryKb(new BlockStore(forest))
+  const ids = selectionRefRows({ kb, selfId: 'host' })('术语')
+    .filter((r) => r.group === 'retrieval/2-block')
+    .map((r) => r.id)
+  assert.deepEqual(ids, ['selref/block/block-alias', 'selref/block/block-text'])
+})

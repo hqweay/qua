@@ -7,6 +7,9 @@
  *
  * 第二件：空格是**词分隔**，不是字面字符；行里的 `parts` 必须标出每一个命中，
  * 且命中在长块尾部时片段要以它为中心开窗（否则行看起来「没有这个词」）。
+ *
+ * 第三件：名字是**地址**的属性——带地址的普通块按别名命中，行显名字、落在块组，
+ * 且排在正文命中之前（比「正文碰巧含这几个字」精确）。
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -163,4 +166,48 @@ test('精确地址带空格：逐字相等仍置顶，并按词标出', () => {
     rows[0]?.parts?.filter((p) => p.mark).map((p) => p.text),
     ['Project', 'Plan'],
   )
+})
+
+/* ------------------------------------------------------------ 名字是地址的属性 */
+
+test('普通块的别名可搜：行显名字、落点是块、标出命中', () => {
+  const forest = [b('block-alias', '与查询无关的正文', { props: { _aliases: ['术语卡'] } })]
+  const rows = rowsOf(forest, '术语')
+  const row = rows.find((r) => r.id === 'retrieval/block/block-alias')
+  assert.ok(row, `别名命中要进块组：${JSON.stringify(rows.map((r) => r.id))}`)
+  assert.equal(row!.group, 'retrieval/2-block')
+  assert.equal(row!.label, '术语卡')
+  assert.deepEqual(row!.pick, { kind: 'block', id: 'block-alias', name: '术语卡' })
+  assert.deepEqual(
+    row!.parts?.filter((p) => p.mark).map((p) => p.text),
+    ['术语'],
+  )
+})
+
+test('名字命中排在正文命中之前（同组上限不能把它挤掉）', () => {
+  const forest = [
+    b('block-text', '术语 出现在这里的正文'),
+    b('block-alias', '无关正文', { props: { _aliases: ['术语卡'] } }),
+  ]
+  const ids = rowsOf(forest, '术语')
+    .filter((r) => r.group === 'retrieval/2-block')
+    .map((r) => r.id)
+  assert.deepEqual(ids, ['retrieval/block/block-alias', 'retrieval/block/block-text'])
+})
+
+test('同一块别名与正文都命中 ⇒ 只出一行（名字命中优先）', () => {
+  const forest = [b('block-both', '术语 也在正文里', { props: { _aliases: ['术语卡'] } })]
+  const rows = rowsOf(forest, '术语')
+  assert.equal(rows.filter((r) => r.id === 'retrieval/block/block-both').length, 1)
+  assert.equal(rows.find((r) => r.id === 'retrieval/block/block-both')?.label, '术语卡')
+})
+
+test('页仍进页面组；带地址的普通块进块组（名字不改变身份分组）', () => {
+  const forest = [
+    b('page-x', '页描述', { props: { _aliases: ['术语页'], _lists: ['page'] } }),
+    b('block-x', '无关', { props: { _aliases: ['术语块'] } }),
+  ]
+  const rows = rowsOf(forest, '术语')
+  assert.equal(rows.find((r) => r.id === 'retrieval/page/page-x')?.group, 'retrieval/1-page')
+  assert.equal(rows.find((r) => r.id === 'retrieval/block/block-x')?.group, 'retrieval/2-block')
 })
