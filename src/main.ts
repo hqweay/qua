@@ -21,7 +21,7 @@ import {
   setUserKeys,
 } from './core/infra/bindings.ts'
 import {
-  COMMANDS,
+  ALL_COMMANDS,
   Registry,
   type App,
 } from './core/commands/index.ts'
@@ -102,10 +102,7 @@ const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) 
  *   · 验收（`check` / `check:dock` / `check:electron` / `shots`）读的是 `window.__qua`
  *     与夹具命令，所以它们跑的那份构建要带 flag。
  */
-const DEV_SURFACE = import.meta.env.DEV || __QUA_TEST__
-
-/** 开发命令的前缀：声明表里只有这几条是「只在测试面存在」的 */
-const DEV_COMMAND_PREFIX = 'dev.'
+const DEV_SURFACE = __QUA_DEV_SURFACE__
 
 /** 页名：**只读投影**（中间没有页标题，页名就是那个块的正文） */
 const stateMenuBtn = $('state-menu-btn')
@@ -1927,9 +1924,10 @@ window.addEventListener('beforeunload', () => {
 registry = new Registry(
   app,
   HANDLERS,
-  // 产品构建只去掉 `dev.` 开头那几条**声明**；处理器表原样注入 ——
-  // 没有声明的命令从命令面板、斜杠菜单里就看不见，`invoke` 也仍是唯一入口。
-  DEV_SURFACE ? COMMANDS : COMMANDS.filter((d) => !d.name.startsWith(DEV_COMMAND_PREFIX)),
+  // dev.* 的声明与处理器都在各自文件里按编译期判据分叉（见 handlers.ts 与
+  // decls.ts 的注释）：产品构建里 ALL_COMMANDS 就是基表、dev 处理器被摇出
+  // 产物——这里只管把装配面那一份交出去，不再自己过滤一遍。
+  ALL_COMMANDS,
 )
 
 // 让「块菜单」这类命令也能从面板/键盘走到
@@ -2035,7 +2033,6 @@ setWindows({
 menus.bindResize('left', dockLeft)
 menus.bindResize('right', dockRight)
 diag = setupDiagnostics({
-  DEV_SURFACE,
   store,
   kb,
   boot,

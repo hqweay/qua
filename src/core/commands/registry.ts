@@ -54,8 +54,9 @@ export class Registry {
    */
   invoke(name: string, args: Record<string, unknown> = {}, via = 'api', ctx?: CtxKeys): InvokeResult {
     const h = this.handlers.get(name)
-    // **没有声明也算没注册**：产品构建会裁掉 `dev.*` 声明；处理器表仍注入，
-    // 但调用面必须以声明表为准，否则「只从菜单里藏起来」会被一次 invoke 绕过。
+    // **没有声明也算没注册**：装配传来的声明表就是「这次构建有哪些命令」的唯一
+    // 口径（产品构建里 dev.* 连声明带处理器都不在），调用面以它为准，
+    // 否则「只从菜单里藏起来」会被一次 invoke 绕过。
     if (!h || !this.decls.has(name)) return { ok: false, handled: false, error: t('err.cmd.notRegistered', { name }) }
     if (via === 'keymap' && ctx?.composing) {
       this.log.push({ name, via: 'keymap(blocked:composing)', at: Date.now() })

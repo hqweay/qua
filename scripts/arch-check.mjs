@@ -347,33 +347,35 @@ const ORDER = ['core', 'view', 'ui', 'app', 'host']
    ║ 15 · 命令 decl 不得含 context / host / key（声明是纯语义，落点归绑定表）  ║
    ╚═══════════════════════════════════════════════════════ */
 
-/** 从 AST 里取 `COMMANDS` 数组的字面量对象 */
+/** 从 AST 里取命令声明数组的字面量：`COMMANDS`（基表）＋ `DEV_COMMANDS`（测试面声明） */
 function commandDecls() {
   const { sf } = tsFile(join(ROOT, 'src/core/commands/decls.ts'))
-  let arr = null
+  const arrays = []
   const visit = (node) => {
     if (
       ts.isVariableDeclaration(node) &&
       ts.isIdentifier(node.name) &&
-      node.name.text === 'COMMANDS' &&
+      (node.name.text === 'COMMANDS' || node.name.text === 'DEV_COMMANDS') &&
       node.initializer &&
       ts.isArrayLiteralExpression(node.initializer)
     ) {
-      arr = node.initializer
+      arrays.push(node.initializer)
     }
     ts.forEachChild(node, visit)
   }
   visit(sf)
-  if (!arr) return { sf, decls: [] }
-  const decls = arr.elements.filter(ts.isObjectLiteralExpression).map((o) => {
-    const props = new Map()
-    for (const p of o.properties) {
-      if (ts.isPropertyAssignment(p) && (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name))) {
-        props.set(p.name.text, p.initializer)
+  if (arrays.length === 0) return { sf, decls: [] }
+  const decls = arrays.flatMap((arr) =>
+    arr.elements.filter(ts.isObjectLiteralExpression).map((o) => {
+      const props = new Map()
+      for (const p of o.properties) {
+        if (ts.isPropertyAssignment(p) && (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name))) {
+          props.set(p.name.text, p.initializer)
+        }
       }
-    }
-    return { obj: o, props, line: sf.getLineAndCharacterOfPosition(o.getStart(sf)).line + 1 }
-  })
+      return { obj: o, props, line: sf.getLineAndCharacterOfPosition(o.getStart(sf)).line + 1 }
+    }),
+  )
   return { sf, decls }
 }
 

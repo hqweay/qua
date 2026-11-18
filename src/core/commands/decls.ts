@@ -295,12 +295,35 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core/bindings/list', title: t('cmd.bindings.list'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.diag'), expose: { cli: { aliases: ['kb help'] } } },
   { name: 'core/help/shortcuts', title: t('cmd.help.shortcuts'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.diag') },
   { name: 'core/debug/dump-model', title: t('cmd.debug.dump-model'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.diag') },
-
-  /* ---- 演示（demo 专用，不在真实产品里） ---- */
-  { name: 'dev.fixture/load', title: t('cmd.dev.load-state'), capability: 'admin', undoable: false, version: '0.1', category: t('menu.cat.dev'), args: { state: { type: 'string', enum: ['seed', 'empty', 'sparse', 'degraded'] } } },
-  { name: 'dev.ime/simulate', title: t('cmd.dev.simulate-ime'), capability: 'read', undoable: false, version: '0.1', category: t('menu.cat.dev') },
-  { name: 'dev.workspace/reset', title: t('cmd.dev.reset-all'), capability: 'admin', undoable: false, version: '0.1', category: t('menu.cat.dev') },
-  { name: 'dev.workspace/blank', title: t('cmd.dev.blank'), capability: 'admin', undoable: false, version: '0.1', category: t('menu.cat.dev') },
 ]
 
-export const DECL_BY_NAME: Map<string, CommandDecl> = new Map(COMMANDS.map((c) => [c.name, c]))
+/**
+ * dev.* 声明只在**带测试面的构建**里进命令面。单独一张字面量的原因：
+ * 产品构建里 `DEV_SURFACE` 被编译期常量折叠成假 ⇒ 这四条声明（连同标题串）
+ * 整个被 tree-shake 出产物——「清库」「换夹具」在打包时**不存在**，而不是光从
+ * 菜单里藏起来。arch-check 对命令表的扫描认 `COMMANDS` 与 `DEV_COMMANDS`
+ * 两个名字：新增 dev 声明落在这里，别再往 `COMMANDS` 里塞。
+ *
+ * ⚠️ 每个字段值都要标注纯调用（`#__PURE__`）：声明不被引用时 rollup 会丢掉
+ * 对象、但把字面量里的函数调用当潜在副作用留下来（变成一串裸语句，命令名
+ * 还在产物里）——标注之后它才肯整段扔。
+ */
+export const DEV_COMMANDS: CommandDecl[] = [
+  { name: 'dev.fixture/load', title: /*#__PURE__*/ t('cmd.dev.load-state'), capability: 'admin', undoable: false, version: '0.1', category: /*#__PURE__*/ t('menu.cat.dev'), args: { state: { type: 'string', enum: ['seed', 'empty', 'sparse', 'degraded'] } } },
+  { name: 'dev.ime/simulate', title: /*#__PURE__*/ t('cmd.dev.simulate-ime'), capability: 'read', undoable: false, version: '0.1', category: /*#__PURE__*/ t('menu.cat.dev') },
+  { name: 'dev.workspace/reset', title: /*#__PURE__*/ t('cmd.dev.reset-all'), capability: 'admin', undoable: false, version: '0.1', category: /*#__PURE__*/ t('menu.cat.dev') },
+  { name: 'dev.workspace/blank', title: /*#__PURE__*/ t('cmd.dev.blank'), capability: 'admin', undoable: false, version: '0.1', category: /*#__PURE__*/ t('menu.cat.dev') },
+]
+
+/**
+ * 「这次构建带不带测试面」的 core 侧判据。node 环境（单测／机检脚本）没有
+ * define 注入 ⇒ 守卫后按产品形状；vite 构建里被编译期折叠。判据的单一来源
+ * 是 vite.config 的 `__QUA_DEV_SURFACE__` define（core 不反向 import 装配层）。
+ */
+const DEV_SURFACE =
+  typeof __QUA_DEV_SURFACE__ !== 'undefined' && __QUA_DEV_SURFACE__ === true
+
+/** 装配面传给 Registry 的一张表；产品构建里与 `COMMANDS` 同一份（无 dev） */
+export const ALL_COMMANDS: CommandDecl[] = DEV_SURFACE ? [...COMMANDS, ...DEV_COMMANDS] : COMMANDS
+
+export const DECL_BY_NAME: Map<string, CommandDecl> = new Map(ALL_COMMANDS.map((c) => [c.name, c]))

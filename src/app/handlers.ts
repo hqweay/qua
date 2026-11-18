@@ -27,6 +27,15 @@ import { VIEW_HANDLERS } from './handlers/view.ts'
 
 /* ------------------------------------------------------------ 处理器 */
 
+/**
+ * dev.* 处理器只在**带测试面的构建**里注入（dev server 恒带；产物要显式
+ * `VITE_QUA_TEST=1`）。产品构建里这个判据被编译期常量折叠成假 ⇒ 整个
+ * `handlers/dev.ts`（「清库」「换夹具」这类入口）被 tree-shake 出产物——
+ * 测试面在打包时**不存在**，而不是光把命令声明藏起来。判据的单一来源是
+ * vite.config 的 `__QUA_DEV_SURFACE__` define（注释在那边）。
+ */
+const DEV_SURFACE = __QUA_DEV_SURFACE__
+
 export const HANDLERS: Record<string, Handler> = {
   ...STRUCT_HANDLERS,
   ...PROPS_HANDLERS,
@@ -38,5 +47,5 @@ export const HANDLERS: Record<string, Handler> = {
   ...VIEW_HANDLERS,
   ...VIEW_CONFIG_HANDLERS,
   ...SEARCH_HANDLERS,
-  ...DEV_HANDLERS,
+  ...(DEV_SURFACE ? DEV_HANDLERS : {}),
 }

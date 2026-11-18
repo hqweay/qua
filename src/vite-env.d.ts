@@ -10,6 +10,14 @@
 declare const __QUA_TEST__: boolean
 
 /**
+ * 「测试面在不在这次构建里」的编译期常量（vite.config 的 define 注入）：
+ * dev server 恒真；产物只在显式 `VITE_QUA_TEST=1` 时为真。判据的完整说明在
+ * vite.config 的 define 注释里——消费方就地取这个常量，别经参数传布尔
+ * （运行时值不参与摇树，假分支摇不掉）。
+ */
+declare const __QUA_DEV_SURFACE__: boolean
+
+/**
  * 分词 WASM 的**内联字节**（Vite 的 `?inline` 把文件变成 data URL 字符串）。
  *
  * 类型只在这里声明一次：worker 与将来可能的主线程适配器共用同一个别名，

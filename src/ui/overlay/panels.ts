@@ -12,7 +12,7 @@ import type { RunWithId } from '../../core/model/runs.ts'
 import { resolveRef } from '../../core/relations/ref.ts'
 import { checkExternalUrl, rejectText } from '../../core/relations/link.ts'
 import { markDescriptors, plainText } from '../../core/model/runs.ts'
-import { COMMANDS } from '../../core/commands/index.ts'
+import { ALL_COMMANDS } from '../../core/commands/index.ts'
 import { BINDINGS, keyLabel, keymapRows, referencedKeys } from '../../core/infra/bindings.ts'
 import { assetMetaOf, assetViewOf } from '../../view/asset-views.ts'
 import { t } from '../../core/infra/msg.ts'
@@ -664,7 +664,7 @@ export function openDrawerFor(deps: PanelDeps, kind: PanelKind): void {
       }
       host.appendChild(table)
       const h = document.createElement('h5')
-      h.textContent = t('ui.drawer.contextSnapshot', { commands: COMMANDS.length, bindings: BINDINGS.length })
+      h.textContent = t('ui.drawer.contextSnapshot', { commands: ALL_COMMANDS.length, bindings: BINDINGS.length })
       host.appendChild(h)
       const pre = document.createElement('pre')
       pre.textContent = JSON.stringify(ctx, null, 2)
@@ -677,7 +677,7 @@ export function openDrawerFor(deps: PanelDeps, kind: PanelKind): void {
       const intro = document.createElement('p')
       intro.style.color = 'var(--ui-text-tertiary)'
       intro.textContent =
-        t('ui.drawer.bindingsIntro1', { commands: COMMANDS.length, bindings: BINDINGS.length }) + t('ui.drawer.bindingsIntro2')
+        t('ui.drawer.bindingsIntro1', { commands: ALL_COMMANDS.length, bindings: BINDINGS.length }) + t('ui.drawer.bindingsIntro2')
       host.appendChild(intro)
       for (const kind of ['keymap', 'menu', 'slash', 'selection'] as const) {
         const rows = BINDINGS.filter((b) => b.kind === kind)

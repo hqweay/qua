@@ -68,9 +68,14 @@ function dockEntryKey(e: DockEntry): string | { tray: string; title: string | nu
   return { tray: dockKey(e), title: e.title ?? null, cards: e.cards.map(dockKey) }
 }
 
+/**
+ * 测试面开关取**编译期常量**（vite.config 的 `__QUA_DEV_SURFACE__`）而不是
+ * 经 deps 传布尔：产品构建里它折叠成假，`if (DEV_SURFACE)` 的调试菜单行、
+ * `__qua` 门面连字符串一起被摇出产物——经参数传的值参与不了摇树。
+ */
+const DEV_SURFACE = __QUA_DEV_SURFACE__
+
 export type DiagnosticsDeps = {
-  /** 测试面开关：构建时由 env 决定（dev server 恒开，产物要显式带 flag） */
-  DEV_SURFACE: boolean
   store: WorkspaceStore
   boot: LoadedWorkspace
   /** 只读门面：探针的属性区与属性面板同一口径（含 `_childProps` 声明链） */
@@ -314,7 +319,6 @@ function atomicRuns(ed: BlockEditor): { blockId: string; run: RunWithId; start: 
 
 export function setupDiagnostics(deps: DiagnosticsDeps) {
   const {
-    DEV_SURFACE,
     store,
     boot,
     getReadOnly,
@@ -447,7 +451,13 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
 
   /* ------------------------------------------------------------ 给截图脚本/检查台的口子 */
 
-  const api = {
+  /**
+   * api 的构造走**表达式级**分叉（rollup 只折叠表达式、不折叠 if 语句）：
+   * 产品构建里这一整只对象连同里面的命令名串被摇出产物；经 `if` 包住的话，
+   * 赋值折掉了、字面量还会留下（实测踩过）。
+   */
+  const api = DEV_SURFACE
+    ? {
     snapshot() {
       const st = domStats()
       const ws = deps.getWs()
@@ -878,11 +888,11 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
       // 行内视图宿主（表格/卡片身体）不重画，规模断言量到旧的那一份。
       mainEd.store.reset(mainEd.store.blocks)
     },
-  }
+  } : undefined
 
   // ⚠️ 只在测试面挂上去：诊断口能直接调 `invoke`（含换库、清存储），
   //    接上真库之后留在产品构建里＝把「一键清掉真实数据」放在用户的 F12 里。
-  if (DEV_SURFACE) window.__qua = api
+  if (api) window.__qua = api
 
   return { domStats, api }
 }

@@ -21,7 +21,7 @@ function inlineWasm(): Plugin {
   }
 }
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   base: './',
   plugins: [inlineWasm()],
   build: {
@@ -47,7 +47,16 @@ export default defineConfig({
    * 为什么不在运行期判 `import.meta.env.DEV`：验收跑在**构建产物**上，那里它恒为 false。
    * 反过来，产品构建不带这个 flag ⇒ 整个测试面在打包时就没了，不是「藏起来」而是不存在。
    */
-  define: { __QUA_TEST__: JSON.stringify(process.env.VITE_QUA_TEST === '1') },
+  define: {
+    __QUA_TEST__: JSON.stringify(process.env.VITE_QUA_TEST === '1'),
+    /**
+     * 「测试面在不在这次构建里」的**唯一**编译期判据：dev server（command === 'serve'）
+     * 恒真，构建产物看 `VITE_QUA_TEST`。消费方就地写 `const DEV_SURFACE = __QUA_DEV_SURFACE__`
+     * ——define 注入的是字面量，esbuild 折叠、rollup 把假分支整个摇出产物；
+     * 经参数传布尔做不到这一点（运行时值不参与摇树）。
+     */
+    __QUA_DEV_SURFACE__: JSON.stringify(command === 'serve' || process.env.VITE_QUA_TEST === '1'),
+  },
   /**
    * `jieba-wasm` 的 web 构建用 `new URL('…wasm', import.meta.url)` 延迟取 wasm。
    * dev 预打包会把这个相对 URL 改写掉，所以显式排除；worker 里用 `?inline` 直接
@@ -62,4 +71,4 @@ export default defineConfig({
   // 固定端口 5180（README 写死的那个）
   server: { port: 5180, strictPort: true },
   preview: { port: 5180, strictPort: true },
-})
+}))
