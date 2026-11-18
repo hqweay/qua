@@ -199,7 +199,7 @@ test('parseRegistry：lastOpenedId 指向不存在的库 ⇒ 清掉（不是 cor
 test('judgeDbVersion：等于当前版本 ⇒ ok；偏大 ⇒ too-new（拒绝打开）；偏小 ⇒ migrate', () => {
   assert.deepEqual(judgeDbVersion(DB_SCHEMA_VERSION), { status: 'ok' })
   assert.deepEqual(judgeDbVersion(DB_SCHEMA_VERSION + 1), { status: 'too-new', found: DB_SCHEMA_VERSION + 1 })
-  // 用显式的 target 验「偏小」：`DB_SCHEMA_VERSION - 1` 现在正好是 0，那是「全新库」不是迁移
+  // 用显式的 target 验「偏小」：0 永远是「全新库」，1→2 才是迁移
   assert.deepEqual(judgeDbVersion(1, 2), { status: 'migrate', found: 1 })
   assert.deepEqual(judgeDbVersion(0, 2), { status: 'fresh' }, '0 永远是「全新库」，与 target 无关')
 })

@@ -680,6 +680,13 @@ function commandDecls() {
      * 后缀由入库那侧算、地址由协议那侧认，各写一份就是「两份答案」。
      */
     /^(\.\.\/)+src\/core\/infra\/assets(\.ts)?$/,
+    /**
+     * `src/core/storage/library-reads.ts` 是**纯查询计划**：只有具名 SQL 与类型，
+     * 没有块模型、没有渲染、没有存储实现。工作集装载要主进程执行 core 定义的只读查询计划，
+     * 这个叶子就必须进来——运行时只拖进 SQL 字符串与表名常量；「哪些列算页/标签/日记」
+     * 仍住在 core，主进程不解释它们。
+     */
+    /^(\.\.\/)+src\/core\/storage\/library-reads(\.ts)?$/,
   ]
   const hits = []
   for (const f of electronFiles) {
@@ -698,12 +705,12 @@ function commandDecls() {
   }
   add({
     id: '2+',
-    title: '主进程准入白名单：只许 node:* / electron / core/infra/msg / core/identity/library / core/infra/assets（块语义、查询、渲染一律不许）',
+    title: '主进程准入白名单：只许 node:* / electron / core/infra/msg / core/identity/library / core/infra/assets / core/storage/library-reads（纯查询计划）（块语义、查询、渲染一律不许）',
     method:
-      'AST 遍历 electron/**/*.ts 的 import/export-from，**白名单**逐条比：`node:*`／`electron`／`src/core/infra/msg`／`src/core/identity/library`／`src/core/infra/assets`；其余一律命中',
+      'AST 遍历 electron/**/*.ts 的 import/export-from，**白名单**逐条比：`node:*`／`electron`／`src/core/infra/msg`／`src/core/identity/library`／`src/core/infra/assets`／`src/core/storage/library-reads`（纯 SQL 计划）；其余一律命中',
     scope: `electron/**/*.ts（${electronFiles.length} 个文件：${electronFiles.map(rel).join(' · ')}）`,
     whitelist:
-      '`node:*`（fs／sqlite／path）· `electron`（壳本体）· `./x.ts`（主进程自己目录内）· `src/core/infra/msg`（纯文案字典）· `src/core/identity/library`（库身份与版本判据，零依赖、两进程共读）· `src/core/infra/assets`（字节→类型/后缀/地址的纯函数，同一份判据给协议两端）',
+      '`node:*`（fs／sqlite／path）· `electron`（壳本体）· `./x.ts`（主进程自己目录内）· `src/core/infra/msg`（纯文案字典）· `src/core/identity/library`（库身份与版本判据，零依赖、两进程共读）· `src/core/infra/assets`（字节→类型/后缀/地址的纯函数，同一份判据给协议两端）· `src/core/storage/library-reads`（只读查询计划：具名 SQL＋类型，无块模型/渲染/存储实现）',
     hits: hits.length,
     detail: hits,
     note: '为什么是白名单：黑名单版本实测放行 core/query、core/kb/types、view/editor、app/handlers —— 「块语义搬进主进程」时门禁不会红，而那时块语义已经有两个实现',

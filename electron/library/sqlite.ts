@@ -84,6 +84,7 @@ create table if not exists ${DB_TABLES.block} (
 create index if not exists idx_Block_parent_left on ${DB_TABLES.block}(parent, left);
 create index if not exists idx_Block_date on ${DB_TABLES.block}(date);
 create index if not exists idx_Block_deleted on ${DB_TABLES.block}(deleted) where deleted is not null;
+create index if not exists idx_Block_kind on ${DB_TABLES.block}(kind) where kind is not null;
 
 create table if not exists ${DB_TABLES.property} (
   block text not null,
@@ -331,6 +332,17 @@ export const MIGRATIONS: Migration[] = [
       db.exec(FTS_DDL)
       writeMeta(db, META_KEYS.ftsState, 'pending')
       writeMeta(db, META_KEYS.ftsRowidSeq, '0')
+    },
+  },
+  {
+    to: 11,
+    up: (db) => {
+      /**
+       * **工作集目录的字段定义查询**：`kind is not null` 在 1M 行上是全表扫（实测约 0.1s；
+       * 首帧 catalog 的大头）。只加部分索引、不动内容——可回退的纯增益迁移，
+       * 也是 v9/v10 之后第三条「保内容」的迁移。
+       */
+      db.exec(`create index if not exists idx_Block_kind on ${DB_TABLES.block}(kind) where kind is not null`)
     },
   },
 ]
