@@ -93,7 +93,7 @@ import {
 } from './core/infra/workspace.ts'
 import type { DeviceState } from './core/storage/device.ts'
 import { WORKSPACE_VERSION } from './core/infra/workspace.ts'
-import { createLibraryClient, type LibraryClient } from './core/storage/library-client.ts'
+import { createLibraryClient, type LibraryClient, type LibraryReadBridge } from './core/storage/library-client.ts'
 import { Workset, worksetClosureIds } from './core/storage/workset.ts'
 import { UnloadedAliasError } from './core/kb/unsupported.ts'
 import type { RelationEdge, RelationKind } from './core/relations/relations.ts'
@@ -227,13 +227,18 @@ const kb = new MemoryKb(blocks)
  * `LibraryBridge` 的 `doc` 是可选格（测试可以造瘦桥），工作集装载只认**三个都在**的桥。
  * 方法经桥转调（保住 `this` 绑定），装配层不直接持有 IPC 函数。
  */
+/**
+ * **库读端口的窄面**：把桥上的读方法交给 `LibraryClient`。
+ *
+ * ⚠️ 用**整体转发**而不是逐格条件挑：新读面（identity/candidates/tree/dependents/…）
+ * 加进 `LibraryReadBridge` 时，这里漏挑一格 ＝ 该读面静默返回「bridge has no … read」，
+ * boot 会把它当装载失败退到只读演示——真机踩过（首帧只读 demo 就是它）。
+ * 整体展开不改方法引用（preload 是箭头函数，不依赖 this）；
+ * `doc`/`catalog` 在场由上面的守卫保证（cast 的是运行时事实）。
+ */
 const libraryClient: LibraryClient | null =
   LIBRARY_BRIDGE && LIBRARY_BRIDGE.doc && LIBRARY_BRIDGE.catalog
-    ? createLibraryClient({
-        doc: (roots) => LIBRARY_BRIDGE.doc!(roots),
-        ...(LIBRARY_BRIDGE.blocks ? { blocks: (ids: readonly string[]) => LIBRARY_BRIDGE.blocks!(ids) } : {}),
-        catalog: () => LIBRARY_BRIDGE.catalog!(),
-      })
+    ? createLibraryClient({ ...LIBRARY_BRIDGE } as LibraryReadBridge)
     : null
 let workset: Workset | null = null
 /** 工作集装载的结果（`null` ＝ 这次启动没走工作集路） */
