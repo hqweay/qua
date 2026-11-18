@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 /**
- * 查询与全局列表的**可复算读数**（索引缓存第一刀）。
+ * 查询与全局列表的**可复算读数**（候选集＋先序 rank 这一刀）。
  *
  * 口径：
- *   · 固定种子的合成森林：每块一段中文，固定 5,000 个标签成员；页/标签/定义/回收站各占少数；
- *   · 查询取中位数（7 次，缓存已热）；首轮（建索引＋建缓存）单独报；
- *   · `trashAfterEdit` 是「打字之后读回收站」——本轮的核心判据：纯正文写不许重建列表；
- *   · 数字是量级，不是门禁阈值。
+ *   · 固定种子的合成森林：每块一段中文；前 5,000 块打同一个标签、带一个布尔属性、
+ *     各发一枚指向同一目标的引用；页/标签/定义/回收站/日记各占少数；
+ *   · 每个形状先热一轮，再取 21 次的 p50 / p95；首轮（建索引＋建字段表＋建列表）单独报；
+ *   · 每个形状同时报 `candidate` / `fallback` 计数器增量——可枚举形状不许回退；
+ *   · `trashAfterEdit` 是「打字之后读回收站」：纯正文写不许重建列表；
+ *   · 数字是量级，不是门禁阈值；**不是真机测试**（Node core，不含 DOM/Electron）。
  *
  * 用法：
  *   node --expose-gc scripts/perf-query.mjs
@@ -20,6 +22,10 @@ import { FEED_SPEC } from '../src/core/query/feed.ts'
 
 const N = Math.max(1_000, Math.trunc(Number(process.env.QUA_QUERY_N ?? 100_000)) || 100_000)
 const HITS = Math.min(5_000, Math.floor(N / 2))
+const RUNS = 21
+const TAG = 'tag1'
+const DEF = 'flag-def'
+const TARGET = 'ref-target'
 const gc = globalThis.gc
 
 const FRAGMENTS = [
@@ -37,23 +43,21 @@ const FRAGMENTS = [
 
 function forest(n) {
   const tag = {
-    id: 'tag1',
+    id: TAG,
     content: textRuns('tag1'),
     children: [],
     created: 1,
     modified: 1,
     props: { _lists: ['tag'], _aliases: ['tag1'] },
   }
-  const roots = [tag]
+  // 一个布尔字段定义：`all:[tag, prop]` 的第二个条件要有可查的字段
+  const def = { id: DEF, content: textRuns('flag'), children: [], created: 1, modified: 1, props: { _kind: 'checkbox' } }
+  // 被引用的目标
+  const target = { id: TARGET, content: textRuns('被引用的块'), children: [], created: 1, modified: 1 }
+  const roots = [tag, def, target]
   for (let i = 0; i < n; i++) {
     const id = `b${String(i).padStart(8, '0')}`
-    const b = {
-      id,
-      content: textRuns(`${FRAGMENTS[i % FRAGMENTS.length]}。第${i}条。`),
-      children: [],
-      created: 1_700_000_000_000 + i,
-      modified: 1_700_000_000_000 + i,
-    }
+    const content = textRuns(`${FRAGMENTS[i % FRAGMENTS.length]}。第${i}条。`)
     const props = {}
     if (i % 10_000 === 0) props._deletedAt = 1
     if (i % 100 === 0) {
@@ -62,22 +66,21 @@ function forest(n) {
     }
     if (i % 1_000 === 0) props._kind = 'text'
     if (i % 997 === 0) props._date = `2026-01-${String((i % 28) + 1).padStart(2, '0')}`
-    if (i < HITS) props._tags = ['tag1']
+    if (i < HITS) {
+      props._tags = [TAG]
+      props[DEF] = i % 2 === 0
+      content.push({ id: `r${i}`, t: 'ref', to: TARGET })
+    }
+    const b = { id, content, children: [], created: 1_700_000_000_000 + i, modified: 1_700_000_000_000 + i }
     if (Object.keys(props).length > 0) b.props = props
     roots.push(b)
   }
   return roots
 }
 
-function median(fn, runs = 7) {
-  const xs = []
-  for (let i = 0; i < runs; i++) {
-    const s = performance.now()
-    fn()
-    xs.push(performance.now() - s)
-  }
-  xs.sort((a, b) => a - b)
-  return xs[Math.floor(xs.length / 2)]
+/** 一次计时的分位：p50 / p95（样本已排序） */
+function percentile(sorted, p) {
+  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(p * sorted.length) - 1))]
 }
 
 function one(fn) {
@@ -86,11 +89,44 @@ function one(fn) {
   return performance.now() - s
 }
 
+/** 热一轮 → N 次计时 → 再跑一次取计数器增量与命中数 */
+function measure(kb, store, spec) {
+  kb.query(spec)
+  const xs = []
+  let hits = 0
+  for (let i = 0; i < RUNS; i++) {
+    const s = performance.now()
+    hits = kb.query(spec).length
+    xs.push(performance.now() - s)
+  }
+  xs.sort((a, b) => a - b)
+  const before = { ...store.index.cacheProbe }
+  kb.query(spec)
+  const after = store.index.cacheProbe
+  return {
+    hits,
+    p50: +percentile(xs, 0.5).toFixed(1),
+    p95: +percentile(xs, 0.95).toFixed(1),
+    candidate: after.candidateQueries - before.candidateQueries,
+    fallback: after.fallbackQueries - before.fallbackQueries,
+  }
+}
+
 const store = new BlockStore(forest(N))
 const kb = new MemoryKb(store)
 
-// 首轮：建索引 ＋ 建字段表缓存 ＋ 建列表缓存（冷启动的一次性成本）
-const coldQuery = one(() => kb.query({ where: { tag: 'tag1' } }))
+const SHAPES = {
+  tag: { where: { tag: TAG } },
+  'all-tag-prop': { where: { all: [{ tag: TAG }, { prop: { id: DEF, eq: true } }] } },
+  ref: { where: { ref: TARGET } },
+  journal: { where: { role: 'journal' }, sort: [{ by: '_date', dir: 'desc' }] },
+  feed: FEED_SPEC,
+  'fallback-text': { where: { text: '索引' } },
+  'fallback-not': { where: { not: { tag: TAG } } },
+}
+
+// 首轮：建索引 ＋ 建字段表缓存 ＋ 建候选用的列表缓存（一次性成本）
+const coldQuery = one(() => kb.query(SHAPES.tag))
 const coldLists = one(() => {
   kb.pages()
   kb.tags()
@@ -99,12 +135,13 @@ const coldLists = one(() => {
 })
 const probeAfterCold = { ...store.index.cacheProbe }
 
-const query = median(() => kb.query({ where: { tag: 'tag1' } }))
-const feed = median(() => kb.query(FEED_SPEC))
-const pages = median(() => kb.pages())
-const tags = median(() => kb.tags())
-const propDefs = median(() => kb.propDefs())
-const trash = median(() => kb.trash())
+const shapes = {}
+for (const [name, spec] of Object.entries(SHAPES)) shapes[name] = measure(kb, store, spec)
+
+const pages = one(() => kb.pages())
+const tags = one(() => kb.tags())
+const propDefs = one(() => kb.propDefs())
+const trash = one(() => kb.trash())
 
 // 打字路径：纯正文写之后读回收站，缓存必须仍然命中
 kb.tx((tx) =>
@@ -120,14 +157,14 @@ console.log(
     {
       n: N,
       hits: HITS,
+      runs: RUNS,
       coldQueryMs: +coldQuery.toFixed(1),
       coldListsMs: +coldLists.toFixed(1),
-      queryMs: +query.toFixed(1),
-      feedMs: +feed.toFixed(1),
-      pagesMs: +pages.toFixed(1),
-      tagsMs: +tags.toFixed(1),
-      propDefsMs: +propDefs.toFixed(1),
-      trashMs: +trash.toFixed(1),
+      shapes,
+      pagesMs: +pages.toFixed(2),
+      tagsMs: +tags.toFixed(2),
+      propDefsMs: +propDefs.toFixed(2),
+      trashMs: +trash.toFixed(2),
       trashAfterEditMs: +trashAfterEdit.toFixed(2),
       cacheProbe: {
         cold: probeAfterCold,
@@ -136,6 +173,14 @@ console.log(
         fieldBuildsDelta: probeAfterEdit.fieldBuilds - probeAfterCold.fieldBuilds,
       },
       heapMB: gc ? (() => { gc(); return +(process.memoryUsage().heapUsed / 1024 / 1024).toFixed(1) })() : undefined,
+      // 先序 rank 的保留大小（清掉整张表再 GC）：它是派生索引里最大的一张新表
+      heapWithoutOrderMB: gc
+        ? (() => {
+            store.index.order.clear()
+            gc()
+            return +(process.memoryUsage().heapUsed / 1024 / 1024).toFixed(1)
+          })()
+        : undefined,
     },
     null,
     2,
