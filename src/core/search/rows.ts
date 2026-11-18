@@ -258,6 +258,17 @@ export function ftsSourceTexts(
 }
 
 /**
+ * 这一批块的 **helper 闭包**：source 文本要引用哪些块（引用目标、标签、字段定义）。
+ *
+ * 流式重建的切片森林里没有跨子树的 helper——调用方按这份清单把缺的块从库里
+ * 补进切片森林，切片算出的文本才与全量重建同解（缺一个，那个来源行就静默少词）。
+ */
+export function ftsWantedIds(ws: StoredWorkspace, ids: ReadonlySet<string>): string[] {
+  const look = probeOf(ws.blocks, ids)
+  return [...collectWanted(ids, (id) => look.get(id))]
+}
+
+/**
  * 「这一批块 ＋ 它们引用的目标／标签／定义块」需要哪些 id（一次遍历能收齐的最小集）。
  *
  * 与下面那份投影拆开，是为了让**按 id 的调用方**跳过这一趟收集：它手里已经能查表。

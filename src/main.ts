@@ -100,6 +100,8 @@ import { UnloadedAliasError } from './core/kb/unsupported.ts'
 import type { RelationEdge, RelationKind } from './core/relations/relations.ts'
 import { loadWorksetBoot, withAncestors, type WorksetBootResult } from './app/boot/workset-boot.ts'
 import { rebuildDerivedTables } from './app/boot/derived-rebuild.ts'
+import { rebuildFtsStreaming } from './app/boot/fts-rebuild.ts'
+import { FTS_TOKENIZER_VERSION } from './core/search/tokenizer.ts'
 import { candidateBuildOf } from './core/storage/query-candidates.ts'
 import type { QueryContext, QuerySpec } from './core/query/query.ts'
 import type { LoadedWorkspace } from './core/storage/index.ts'
@@ -292,20 +294,32 @@ let derivedReady = worksetBoot?.catalog.meta.derivedState === 'ready'
 /**
  * **派生表的后台重建**（启动后错峰）：表还是 `pending`（迁移来的库没跑过全量）
  * 时按顶层根逐批重建，跑完置 ready——反链/角标这些全库计数消费者等的就是它。
- * 首帧之后 3 秒才起步，逐根一个小事务，与用户输入在同一队列里交错。
+ * **FTS 回填**接在同一个错峰槽里：工作集模式的启动不读全库，新库/分词器升版的库
+ * 索引永远停在 pending（⌘K 显式空），按根逐批补建才有 ready 的那天。
+ * 两者都逐根一个小事务，与用户输入在同一队列里交错；派生重建先跑完再回填 FTS，
+ * 不让两个逐根读者并发抢同一个库。
  */
-if (worksetBoot && LIBRARY_BRIDGE && worksetBoot.catalog.meta.derivedState !== 'ready') {
-  setTimeout(() => {
-    void rebuildDerivedTables({
-      client: libraryClient!,
-      store,
-    })
-      .then((r) => {
-        if (r.ok) derivedReady = true
-        console.info(`[derived] rebuild ${r.ok ? 'done' : 'incomplete'}: ${r.done}/${r.total} roots, failed=${r.failed}`)
-      })
-      .catch((e) => console.warn('[derived] rebuild failed:', e))
-  }, 3000)
+if (worksetBoot && LIBRARY_BRIDGE) {
+  const needDerived = worksetBoot.catalog.meta.derivedState !== 'ready'
+  const needFts =
+    worksetBoot.catalog.meta.ftsState !== 'ready' ||
+    worksetBoot.catalog.meta.ftsTokenizer !== FTS_TOKENIZER_VERSION
+  if (needDerived || needFts) {
+    setTimeout(() => {
+      void (async () => {
+        if (needDerived) {
+          const r = await rebuildDerivedTables({ client: libraryClient!, store })
+          if (r.ok) derivedReady = true
+          console.info(`[derived] rebuild ${r.ok ? 'done' : 'incomplete'}: ${r.done}/${r.total} roots, failed=${r.failed}`)
+        }
+        if (needFts) {
+          // setTimeout 里才跑：那时 search 已装配完（赋值在本块之后、模块顶层之内）
+          const r = await rebuildFtsStreaming({ client: libraryClient!, store, indexer: search!.indexer })
+          console.info(`[fts] backfill ${r.ok ? 'done' : 'incomplete'}: ${r.done}/${r.total} roots, failed=${r.failed}`)
+        }
+      })().catch((e) => console.warn('[boot] backfill failed:', e))
+    }, 3000)
+  }
 }
 
 /**
