@@ -16,6 +16,7 @@ import type { Anno } from '../model/runs.ts'
 import { walkForest } from '../model/walk.ts'
 import { normalizeAlias } from '../identity/alias.ts'
 import { journalDate, isJournal } from '../identity/journal.ts'
+import { assignSubtreeRanks, compareRanks, ORDER_STEP, rankBetween, renumberLevel, type RankMap } from './order.ts'
 import {
   CARDINALITY_PROP,
   CHECK_PROP,
@@ -113,6 +114,16 @@ export interface Index {
    */
   parentOf: Map<string, string | null>
   /**
+   * 块 id → **它在本层兄弟之间的 rank**（先序位置，不含路径）。
+   *
+   * 完整先序键 = 从根到自己逐层 rank 的数组（`locateOf` 现拼）：这样移动只改被移块的
+   * 一格，子孙的 rank 仍是它们各自父块里的位置。口径与代价见 `infra/order.ts`。
+   *
+   * ⚠️ 覆盖**树上全部块（含软删）**：模型 `children` 数组里有它们，位置没变 ⇒ 删除不清、
+   *    purge 才摘、恢复免费。查询只按可见块取候选，不受影响。
+   */
+  order: RankMap
+  /**
    * 块 id → 块（**含被软删的块**）。
    *
    * 与 `blocks` 的区别只有可见性：`blocks` 是「读路径看得见谁」（软删退场），
@@ -148,6 +159,12 @@ export interface Index {
     tags: Block[] | null
     propDefs: Block[] | null
     trash: Block[] | null
+    /**
+     * **全部日记块**（可见、森林先序）。`journals` 表是「一天一个」，答不了
+     * 「所有日记块」；组合条件里的 `{role:'journal'}` 又只是普通谓词（不去重）。
+     * 与别的列表同一套失效口径：`_date` 写、含日记的子树挪动/存在性变化。
+     */
+    journals: Block[] | null
   }
   /**
    * **字段读取表**缓存（`fieldTableOf` 的两趟全林扫描）。
@@ -157,7 +174,14 @@ export interface Index {
    */
   fields: FieldTable | null
   /** 派生缓存的重建计数（只增、不清零；给「打字不许触发重建」这类断言一个读数） */
-  cacheProbe: { listsBuilds: number; fieldBuilds: number }
+  cacheProbe: {
+    listsBuilds: number
+    fieldBuilds: number
+    /** 走候选迭代的查询次数（候选路径不遍历森林） */
+    candidateQueries: number
+    /** 回退全林的查询次数（不可枚举形状／定不了位）；「不许静默全林」看它 */
+    fallbackQueries: number
+  }
 }
 
 function emptyIndex(): Index {
@@ -171,12 +195,13 @@ function emptyIndex(): Index {
     journals: new Map(),
     rootOf: new Map(),
     parentOf: new Map(),
+    order: new Map(),
     all: new Map(),
     parentOfAll: new Map(),
     annos: new Map(),
-    lists: { pages: null, tags: null, propDefs: null, trash: null },
+    lists: { pages: null, tags: null, propDefs: null, trash: null, journals: null },
     fields: null,
-    cacheProbe: { listsBuilds: 0, fieldBuilds: 0 },
+    cacheProbe: { listsBuilds: 0, fieldBuilds: 0, candidateQueries: 0, fallbackQueries: 0 },
   }
 }
 
@@ -198,18 +223,23 @@ export function rebuild(forest: readonly Block[]): Index {
   // 块表 / 标签表 / 日记表 / 根表 / 关系边（一次先序遍历；与增量修补同一口径）。
   // ⚠️ 遍历默认跳过被删的子树（原位软删：被删的块对索引不可见）。
   for (const b of forest) indexSubtree(idx, b, b.id, null)
+  // 顶层 rank：`indexSubtree` 只记子孙（根的位置取决于它父级的邻居，它没有）。
+  for (let i = 0; i < forest.length; i++) idx.order.set(forest[i]!.id, (i + 1) * ORDER_STEP)
+  // 日期表：先序第一个赢（与 `journalDays` 同一条）；不在 `indexSubtree` 里逐块打点
+  rebuildJournalMap(idx, forest)
 
   return idx
 }
 
 /* ------------------------------------------------------------ 派生缓存 */
 
-/** `ensureIndexLists` 的返回值：四张表都保证已建好（`Index.lists` 的可空是「未建」标记） */
+/** `ensureIndexLists` 的返回值：五张表都保证已建好（`Index.lists` 的可空是「未建」标记） */
 export interface IndexLists {
   pages: Block[]
   tags: Block[]
   propDefs: Block[]
   trash: Block[]
+  journals: Block[]
 }
 
 /**
@@ -227,18 +257,21 @@ export function ensureIndexLists(index: Index, forest: readonly Block[]): IndexL
   const wantTags = lists.tags === null
   const wantDefs = lists.propDefs === null
   const wantTrash = lists.trash === null
-  if (!wantPages && !wantTags && !wantDefs && !wantTrash) return lists as IndexLists
+  const wantJournals = lists.journals === null
+  if (!wantPages && !wantTags && !wantDefs && !wantTrash && !wantJournals) return lists as IndexLists
 
   index.cacheProbe.listsBuilds++
   if (wantPages) lists.pages = []
   if (wantTags) lists.tags = []
   if (wantDefs) lists.propDefs = []
+  if (wantJournals) lists.journals = []
 
-  if (wantPages || wantTags || wantDefs) {
+  if (wantPages || wantTags || wantDefs || wantJournals) {
     walkForest(forest, (b) => {
       if (wantPages && hasList(b, 'page')) lists.pages!.push(b)
       if (wantTags && hasList(b, 'tag')) lists.tags!.push(b)
       if (wantDefs && isPropDefBlock(b)) lists.propDefs!.push(b)
+      if (wantJournals && isJournal(b)) lists.journals!.push(b)
     })
   }
 
@@ -321,11 +354,12 @@ function refreshAllRelations(idx: Index): void {
  * 走 `includeDeleted`：可见子树里也可能挂着被单独软删的后代（标签/定义进了回收站），
  * 移动/插入这棵子树会改变 trash 的顺序。普通单块插入只访问一块，成本可忽略。
  */
-function invalidateForSubtree(index: Index, block: Block): void {
+function invalidateForSubtree(index: Index, block: Block): boolean {
   let pages = false
   let tags = false
   let defs = false
   let trash = false
+  let journals = false
   walkForest(
     [block],
     (b) => {
@@ -333,6 +367,7 @@ function invalidateForSubtree(index: Index, block: Block): void {
       if (hasList(b, 'tag')) tags = true
       if (isPropDefBlock(b)) defs = true
       if (isDeleted(b)) trash = true
+      if (isJournal(b)) journals = true
     },
     { includeDeleted: true },
   )
@@ -346,6 +381,8 @@ function invalidateForSubtree(index: Index, block: Block): void {
     index.fields = null
   }
   if (trash) index.lists.trash = null
+  if (journals) index.lists.journals = null
+  return journals
 }
 
 /** 属性槽 → 派生缓存失效（只标脏，读时重建）。 */
@@ -359,6 +396,10 @@ function invalidateForProp(index: Index, name: string): void {
   if (name === '_kind') {
     index.lists.propDefs = null
     index.fields = null
+    return
+  }
+  if (name === '_date') {
+    index.lists.journals = null
     return
   }
   if (
@@ -388,7 +429,9 @@ function invalidateForProp(index: Index, name: string): void {
  * 与 `rebuild` 的口径对齐点（逐条对过，改任何一边都要回头查另一边）：
  *   · 名字表：先序第一个认领者赢 ⇒ 增量加名时「表里已有人就不抢」；
  *     摘块时受影响的名字**重扫森林**找下一个认领者（被删的块无权认领）；
- *   · 日期表：rebuild 是先序**最后一个**赢 ⇒ 摘块重扫同样取最后一个；
+ *   · 日期表：先序第一个赢（与 `journalDays` 同一条）⇒ 任何可能改写归属的变化都整表重建，
+ *     不做逐条接手（「谁先序第一」只有整片森林知道）；
+ *   · 先序 rank：位置 op 之后按**最终森林**给受影响的父级放 rank；同一批多块 ⇒ 该层重编号；
  *   · 成员表：`tag` 边是集合语义，同块打两次同一标签只算一个；
  *   · 关系边：数据源是**可见源块**的内容/属性——删块把「源在这个子树里」的边一起摘
  *     （恢复时随子树重建），与 rebuild 同口径。
@@ -406,6 +449,14 @@ export function applyOps(index: Index, ops: readonly Op[], forest: readonly Bloc
    * 不跳过的话，建页/建标签在 50,000 块时要扫全库（实测 15.8ms）。
    */
   const fresh = new Set<string>()
+  /**
+   * 这一批里**位置变过的子块**：父 id（`null` = 森林顶层）→ 子块 id 集合。
+   * 批次结束后统一放 rank：只动了一个子块 ⇒ 在最终邻居之间取中点；
+   * 同一父下动了多个（撤销/批量移动）⇒ 该层重编号——中点会互相踩，重编号是唯一稳的。
+   */
+  const orderTouched = new Map<string | null, Set<string>>()
+  /** 日记归属可能变了（`_date` 写 / 含日记的子树挪动、删除、恢复）⇒ 整表重建 */
+  let journalsDirty = false
   // 边的 `to` 会按 anno 反查表归一化 ⇒ 表的**成员**一变，所有指向 anno 的边都得按最终表重算。
   // 只改 range 的打字不改变成员（hostId 不变），所以这次重算不会落到按键路径上。
   const annoKeysBefore = new Set(index.annos.keys())
@@ -414,17 +465,17 @@ export function applyOps(index: Index, ops: readonly Op[], forest: readonly Bloc
       case 'block':
         if (op.op === 'upsert') {
           if (op.value.parent !== undefined && !index.blocks.has(op.id)) fresh.add(op.id)
-          applyBlockUpsert(index, op.id, op.value, forest)
+          applyBlockUpsert(index, op.id, op.value, forest, orderTouched)
           /**
            * 结构变化才可能动派生列表：普通插块（没有 page/tag/def 后代）不失效，
            * 否则每次 Enter 都会把下一次 `pages()/tags()` 打回 O(N)。
            */
           if (op.value.parent !== undefined) {
             const b = index.blocks.get(op.id) ?? index.all.get(op.id)
-            if (b) invalidateForSubtree(index, b)
+            if (b && invalidateForSubtree(index, b)) journalsDirty = true
           }
         } else {
-          applyBlockExist(index, op.id, op.state, forest)
+          if (applyBlockExist(index, op.id, op.state, forest)) journalsDirty = true
           /**
            * 删除/恢复/清除会带走或带回整棵子树：里面可能有页/标签/定义，
            * 也可能改变回收站的成员与顺序。低频动作，保守全失效。
@@ -433,6 +484,7 @@ export function applyOps(index: Index, ops: readonly Op[], forest: readonly Bloc
           index.lists.tags = null
           index.lists.propDefs = null
           index.lists.trash = null
+          index.lists.journals = null
           index.fields = null
         }
         break
@@ -448,12 +500,12 @@ export function applyOps(index: Index, ops: readonly Op[], forest: readonly Bloc
         // 派生缓存失效必须放在 `fresh` 跳过之前：新标签/新定义的 `_lists`/`_kind`
         // 可能就在同一笔 genesis 里，而 `fresh` 会让下面的修补整段跳过。
         invalidateForProp(index, op.name)
+        if (op.name === '_date') journalsDirty = true
         if (fresh.has(op.block) && (op.name === ALIASES_PROP || op.name === LISTS_PROP || op.name === '_tags' || op.name === '_date' || op.name === '_kind')) break
         if (op.name === ALIASES_PROP || op.name === LISTS_PROP) {
           refreshTagsClaim(index, op.block, forest)
           refreshRelations(index, op.block)
         } else if (op.name === '_date') {
-          refreshJournalClaim(index, op.block)
           refreshRelations(index, op.block)
         } else if (op.name === '_kind') {
           /**
@@ -474,6 +526,8 @@ export function applyOps(index: Index, ops: readonly Op[], forest: readonly Bloc
         break
     }
   }
+  flushOrder(index, orderTouched, forest)
+  if (journalsDirty) rebuildJournalMap(index, forest)
   let annoKeysChanged = annoKeysBefore.size !== index.annos.size
   if (!annoKeysChanged) {
     for (const k of annoKeysBefore) {
@@ -498,6 +552,7 @@ function applyBlockUpsert(
   id: string,
   value: { content?: unknown; parent?: string | null },
   forest: readonly Block[],
+  orderTouched: Map<string | null, Set<string>>,
 ): void {
   const known = index.blocks.get(id)
   if (value.content !== undefined && known) {
@@ -513,11 +568,51 @@ function applyBlockUpsert(
     index.parentOf.set(id, parent)
     index.parentOfAll.set(id, parent)
     reindexSubtreeRoot(index, known, rootId)
+    // rank 只属于层：被移的块换一格，子孙的 rank 不动（它们仍是各自父块里的位置）
+    markOrderTouched(orderTouched, parent, id)
     return
   }
   const block = findInForest(forest, id)
   if (!block) return
   indexSubtree(index, block, rootId, parent)
+  // 新子树：子孙的 rank 由 `indexSubtree` 记；根的 rank 取决于父级邻居，批次末尾统一放
+  markOrderTouched(orderTouched, parent, id)
+}
+
+/** 记一笔「这个父级下这个子块的位置变了」；批次末尾统一放 rank */
+function markOrderTouched(touched: Map<string | null, Set<string>>, parent: string | null, id: string): void {
+  const set = touched.get(parent)
+  if (set) set.add(id)
+  else touched.set(parent, new Set([id]))
+}
+
+/**
+ * 批次末尾放 rank（读**最终森林**：`children` 数组是唯一真相）。
+ *
+ * 只动了一个子块 ⇒ 在最终邻居之间取中点，O(1)；同一父下动了多个（撤销/批量移动）⇒
+ * 该层重编号——中点按 op 顺序放会互相踩（前一个刚放的中点可能已经越过后一个的邻居）。
+ * 邻居缺 rank 说明索引与森林已分叉，也走重编号（宁可慢，不要静默错位）。
+ */
+function flushOrder(index: Index, touched: Map<string | null, Set<string>>, forest: readonly Block[]): void {
+  for (const [parentId, ids] of touched) {
+    const children = parentId === null ? forest : (index.all.get(parentId)?.children ?? [])
+    if (children.length === 0) continue
+    if (ids.size === 1) {
+      const id = ids.values().next().value as string
+      const i = children.findIndex((b) => b.id === id)
+      if (i >= 0) {
+        const prev = i > 0 ? index.order.get(children[i - 1]!.id) : undefined
+        const next = i < children.length - 1 ? index.order.get(children[i + 1]!.id) : undefined
+        const neighborsKnown = (i === 0 || prev !== undefined) && (i === children.length - 1 || next !== undefined)
+        const rank = neighborsKnown ? rankBetween(prev, next) : undefined
+        if (rank !== undefined) {
+          index.order.set(id, rank)
+          continue
+        }
+      }
+    }
+    renumberLevel(index.order, children)
+  }
 }
 
 /**
@@ -525,16 +620,18 @@ function applyBlockUpsert(
  *
  * 退场的是「可见集合」：根 ＋ 它**还没被删**的后代（本来就删了的已经不在表里）。
  * 入向边跟着源块退场（`edgeByAnno` 簿记摘旧边）——数据源 atoms 没动，
- * 但 rebuild 只数可见源块的原子，两条路必须同口径。名字表/日期表的接手者重扫
- * 森林时同样跳过被删子树（被删的块无权认领名字）。
+ * 但 rebuild 只数可见源块的原子，两条路必须同口径。名字表的接手者重扫森林时
+ * 同样跳过被删子树（被删的块无权认领名字）。
+ *
+ * @returns 这棵子树里有没有日记块（有 ⇒ 日记归属要整表重建；`applyOps` 用它标脏）
  */
-function applyBlockDelete(index: Index, id: string, forest: readonly Block[], purge: boolean): void {
+function applyBlockDelete(index: Index, id: string, forest: readonly Block[], purge: boolean): boolean {
   /**
    * 软删过的块不在 `blocks` 里 —— 清除它时要到 `all` 里取（否则子树摘不掉，
    * 索引会留下一个「已经不存在的 id」；而撤销会因此以为它还在）。
    */
   const block = index.blocks.get(id) ?? (purge ? index.all.get(id) : undefined)
-  if (!block) return
+  if (!block) return false
   // ⚠️ 取子树要**含被删块**：执行到这里时根已被打上标记（tx 先改内存、后修补索引），
   //    默认遍历会把整棵子树跳过去——一张都摘不掉。退场的正是「这棵子树里的全部」。
   const gone = walkSubtreeIncludingDeleted(block)
@@ -594,16 +691,7 @@ function applyBlockDelete(index: Index, id: string, forest: readonly Block[], pu
     const heir = firstAddressClaimant(forest, name)
     if (heir !== undefined) index.aliases.set(name, heir)
   }
-  // 日期表：同上（rebuild 是先序最后一个赢 ⇒ 接手也取最后一个）
-  const goneDates = [...dates].filter((d) => {
-    const owner = index.journals.get(d)
-    return owner !== undefined && goneSet.has(owner)
-  })
-  for (const d of goneDates) index.journals.delete(d)
-  for (const d of goneDates) {
-    const heir = lastJournalClaimant(forest, d)
-    if (heir) index.journals.set(d, heir)
-  }
+  // 日期表：先序第一个赢 ⇒ 「谁接手」只有整片森林知道，整表在 `applyOps` 末尾重建
   // 关系边：源在退场子树里的边一起摘（恢复时随子树重建）。
   // 字段定义退场 ⇒ 所有使用它的属性值都不再算关系，走一次全量重算（低频）。
   if (droppedPropKind) {
@@ -620,8 +708,10 @@ function applyBlockDelete(index: Index, id: string, forest: readonly Block[], pu
     for (const bid of gone) {
       index.all.delete(bid)
       index.parentOfAll.delete(bid)
+      index.order.delete(bid)
     }
   }
+  return dates.size > 0
 }
 
 /**
@@ -692,17 +782,20 @@ function firstAddressClaimant(forest: readonly Block[], name: string): string | 
   return hit
 }
 
-/** 重算一个块对**日期表**的认领（口径与 rebuild 相同：无条件覆盖＝先序最后一个赢） */
-function refreshJournalClaim(index: Index, blockId: string): void {
-  const live = index.blocks.get(blockId)
-  if (!live) return
-  for (const [d, owner] of [...index.journals]) {
-    if (owner === blockId) index.journals.delete(d)
-  }
-  if (isJournal(live)) {
-    const d = journalDate(live)
-    if (d !== '') index.journals.set(d, blockId)
-  }
+/**
+ * **日期表整表重建**（先序第一个赢，与 `journalDays` 同一条口径）。
+ *
+ * 为什么不是逐条接手：`_date` 写、日记块挪位/删除/恢复都可能改变「谁先序第一」，
+ * 而「谁是第一」只有整片森林知道。这些动作都不在打字路径上——一次 O(N) 换掉
+ * 一整类静默分叉（日期表与 `journalDays` 各说各的）。
+ */
+function rebuildJournalMap(index: Index, forest: readonly Block[]): void {
+  index.journals.clear()
+  walkForest(forest, (b) => {
+    if (!isJournal(b)) return
+    const d = journalDate(b)
+    if (d !== '' && !index.journals.has(d)) index.journals.set(d, b.id)
+  })
 }
 
 /**
@@ -715,14 +808,13 @@ function refreshJournalClaim(index: Index, blockId: string): void {
  * 为什么 `purged` 不能也走 `refreshVisibility`：它在森林里找不到这块（`includeDeleted`
  * 也找不到），而索引里的旧条目必须被摘掉 —— 那正是「同一个词两个意思」时漏掉的一支。
  */
-function applyBlockExist(index: Index, id: string, state: 'present' | 'deleted' | 'purged', forest: readonly Block[]): void {
+function applyBlockExist(index: Index, id: string, state: 'present' | 'deleted' | 'purged', forest: readonly Block[]): boolean {
   if (state === 'purged') {
-    applyBlockDelete(index, id, forest, true)
-    return
+    return applyBlockDelete(index, id, forest, true)
   }
   // 幂等：已经在索引里（可见）的块再收到一次 present ⇒ 一个字节都不该动
-  if (state === 'present' && index.blocks.has(id)) return
-  refreshVisibility(index, id, forest)
+  if (state === 'present' && index.blocks.has(id)) return false
+  return refreshVisibility(index, id, forest)
 }
 
 /**
@@ -734,7 +826,7 @@ function applyBlockExist(index: Index, id: string, state: 'present' | 'deleted' 
  * 口径与 `rebuild` 一致：走 `walkForest`，用 `includeDeleted` 让被删的块也参与遍历，
  * 再按 `isDeleted` 自己判 —— 与 `rebuild`／`applyBlockDelete` 同一份判据。
  */
-function refreshVisibility(index: Index, blockId: string, forest: readonly Block[]): void {
+function refreshVisibility(index: Index, blockId: string, forest: readonly Block[]): boolean {
   // 走 `walkForest` 含被删块找它（`findInForest` 是可见遍历，看不见软删的块）
   let block: Block | undefined
   let parentId: string | null = null
@@ -748,11 +840,10 @@ function refreshVisibility(index: Index, blockId: string, forest: readonly Block
     },
     { includeDeleted: true },
   )
-  if (!block) return
+  if (!block) return false
   if (isDeleted(block)) {
-    // 变不可见 ⇒ 与「退场」走同一条路径（摘子树、退名字/日期/成员/边）；块仍在树上，`all` 不动
-    applyBlockDelete(index, blockId, forest, false)
-    return
+    // 变不可见 ⇒ 与「退场」走同一条路径（摘子树、退名字/成员/边）；块仍在树上，`all` 不动
+    return applyBlockDelete(index, blockId, forest, false)
   }
   /**
    * 变可见 ⇒ 重新入场。
@@ -766,15 +857,18 @@ function refreshVisibility(index: Index, blockId: string, forest: readonly Block
   /**
    * 恢复的子树里如果带字段定义，别处使用该字段的属性值也要重新变成关系边
    * （它们退场时 `propKinds` 被摘掉了）。低频动作，走一次全量重算。
+   * 同一趟顺带回答「这里有没有日记」——有 ⇒ 日记归属整表重建（先序第一可能换人）。
    */
   let hasPropDef = false
+  let hasJournal = false
   walkForest([block], (b) => {
     if (isPropDefBlock(b)) hasPropDef = true
+    if (isJournal(b)) hasJournal = true
   })
   if (hasPropDef) refreshAllRelations(index)
-  // 名字/日期：入场后要重新认领（被删期间它们无权认领，见 `rebuild` 的同一口径）
+  // 名字：入场后要重新认领（被删期间它们无权认领，见 `rebuild` 的同一口径）
   refreshTagsClaim(index, blockId, forest)
-  refreshJournalClaim(index, blockId)
+  return hasJournal
 }
 
 function reindexSubtreeRoot(index: Index, root: Block, rootId: string): void {
@@ -795,15 +889,6 @@ function firstTagClaimant(forest: readonly Block[], name: string): string | unde
         return false
       }
     }
-  })
-  return heir
-}
-
-/** 日期表摘块后的接手者：先序**最后一个**（与 rebuild 的无条件覆盖同一口径） */
-function lastJournalClaimant(forest: readonly Block[], date: string): string | undefined {
-  let heir: string | undefined
-  walkForest(forest, (b) => {
-    if (isJournal(b) && journalDate(b) === date) heir = b.id
   })
   return heir
 }
@@ -835,8 +920,11 @@ function walkSubtreeIncludingDeleted(root: Block): string[] {
 /** 把一棵子树写进索引（与 `rebuild` 同一口径：先序；`rootId` ＝ 它所在的顶层块） */
 function indexSubtree(index: Index, root: Block, rootId: string, parentId: string | null): void {
   /**
-   * **两趟**：先把块/名字/日期/定义 kind 都写进去，再收关系边。
+   * **两趟**：先把块/名字/定义 kind 都写进去，再收关系边。
    * 关系边要读 `propKinds`，而字段定义块可能就在这棵子树里、甚至排在使用者后面。
+   *
+   * ⚠️ 日期表不在这里打点：它有「谁先序第一」这条全局判据，由 `applyOps` 末尾
+   *    （或 `rebuild`）整表重建；这里逐块写入反而会造出第二个答案。
    */
   const visited: Block[] = []
   walkForest([root], (b, ctx) => {
@@ -861,10 +949,6 @@ function indexSubtree(index: Index, root: Block, rootId: string, parentId: strin
       if (!index.aliases.has(name)) index.aliases.set(name, b.id)
       if (hasList(b, 'tag') && !index.tags.has(name)) index.tags.set(name, b.id)
     }
-    if (isJournal(b)) {
-      const d = journalDate(b)
-      if (d !== '') index.journals.set(d, b.id)
-    }
     for (const a of b.annos ?? []) index.annos.set(a.id, { hostId: b.id, anno: a })
     visited.push(b)
   })
@@ -887,6 +971,8 @@ function indexSubtree(index: Index, root: Block, rootId: string, parentId: strin
     },
     { includeDeleted: true },
   )
+  // 先序 rank：只记子孙（含软删兄弟）；根的位置取决于父级邻居，批次末尾由 `flushOrder` 放
+  assignSubtreeRanks(index.order, root)
 }
 
 /* ------------------------------------------------------------ 查询 */
@@ -916,11 +1002,58 @@ export function fingerprint(index: Index): string {
     parentOf: flat(index.parentOf),
     all: sortedKeys(index.all),
     parentOfAll: flat(index.parentOfAll),
+    /**
+     * **先序 id 序列**（按逐层 rank 排序）＋ 缺 rank 的 id；**原始 rank 数值不进契约**。
+     *
+     * 增量路径的中点 rank 与全量重建的等步长 rank 天然不同字节；契约是「顺序一样」，
+     * 与上面 `sortedKeys`／`flat` 把 Map 插入顺序排掉同一个理由。`missing` 单列：
+     * 只要一边有缺而另一边没有，等式就红（而不是被排序悄悄吞掉）。
+     */
+    order: orderFingerprint(index),
     // range 与引文一起进指纹：内容写入口平移了区间而增量漏维护时，等式断言必须抓得到
     annos: [...index.annos.entries()]
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([k, v]) => [k, v.hostId, v.anno.range.start, v.anno.range.end, v.anno.quote?.exact ?? '']),
   })
+}
+
+/** 先序指纹：**排好序的 id 序列** ＋ 缺 rank 的 id（原始 rank 数值不进契约） */function orderFingerprint(index: Index): { seq: string[]; missing: string[] } {
+  const rankPathOf = (id: string): number[] | undefined => {
+    const out: number[] = []
+    const seen = new Set<string>()
+    let cur: string | null = id
+    while (cur !== null) {
+      if (seen.has(cur)) return undefined
+      seen.add(cur)
+      const rank = index.order.get(cur)
+      if (rank === undefined) return undefined
+      out.push(rank)
+      const parent = index.parentOfAll.get(cur)
+      if (parent === undefined) return undefined
+      cur = parent
+    }
+    return out.reverse()
+  }
+  const ranked: { id: string; path: number[] }[] = []
+  const missing: string[] = []
+  for (const id of index.all.keys()) {
+    const path = rankPathOf(id)
+    if (path === undefined) missing.push(id)
+    else ranked.push({ id, path })
+  }
+  ranked.sort((a, b) => {
+    const d = compareRanks(a.path, b.path)
+    return d !== 0 ? d : a.id.localeCompare(b.id)
+  })
+  return { seq: ranked.map((r) => r.id), missing: missing.sort() }
+}
+
+/**
+ * **先序 id 序列**（含软删块；缺 rank 的块不在序列里）。
+ * 测试与探针用它直接比「索引给出的顺序」与「森林走查的顺序」。
+ */
+export function orderSequenceOf(index: Index): string[] {
+  return orderFingerprint(index).seq
 }
 
 /**
@@ -958,6 +1091,32 @@ export function indexPathOf(index: Index, id: string): Block[] {
     cur = parent
   }
   return out.reverse()
+}
+
+/** 候选求值的一站：块本体 ＋ 真实祖先链（root→父）＋ 逐层 rank（root→自己） */
+export interface LocatedSite {
+  block: Block
+  ancestors: readonly Block[]
+  ranks: readonly number[]
+}
+
+/**
+ * 候选 id 的**位置读面**：一次向上走查同时给出路径与先序 rank。
+ *
+ * 路径与 rank 必须来自同一条真实祖先链——候选块不能被当成 root（那会把 `path` 截断，
+ * 也会让 `_date` 排序看不到它所属的那一天）。任一环缺 rank／断链 ⇒ `undefined`
+ * （调用方回退全林，不静默丢行、也不乱序）。
+ */
+export function locateOf(index: Index, id: string): LocatedSite | undefined {
+  const path = indexPathOf(index, id)
+  if (path.length === 0) return undefined
+  const ranks: number[] = []
+  for (const b of path) {
+    const rank = index.order.get(b.id)
+    if (rank === undefined) return undefined
+    ranks.push(rank)
+  }
+  return { block: path[path.length - 1]!, ancestors: path.slice(0, -1), ranks }
 }
 
 /** 指向某个目标的所有关系边（入向；UI 按 kind 过滤） */
@@ -1133,14 +1292,27 @@ function specContextOf(
   }
   const roots: readonly Block[] = forest
   /**
-   * 成员条件的候选集：顶层就是 `{role:'journal'}` 时，日期表就是「库里有哪些天」
-   * （一天一个、O(天数)），不用全库逐块判定。它与纯函数路径的 `journalDays` 同口径，
+   * 成员条件的候选集：顶层就是 `{role:'journal'}` 时，从**全部日记块列表**按日期去重
+   * （一天一个、先序第一个），不用全库逐块判定。它与纯函数路径的 `journalDays` 同口径，
    * 等式由测试钉住；不是范围条件，判定不做特殊处理。
    */
-  const memberRoots = isExactRoleJournal(q.where)
-    ? [...index.journals.values()].map((id) => index.blocks.get(id)).filter((b): b is Block => b !== undefined)
-    : roots
+  const memberRoots = isExactRoleJournal(q.where) ? journalDaysOfIndex(index, forest) : roots
   return { q, env, memberRoots }
+}
+
+/**
+ * 顶层精确日记的成员集（一天一个、先序第一个）——与 `journalDays` 同一条。
+ *
+ * 从**全部日记块列表**去重，而不是从日期表取 values：日期表是「按日期找块」的解析表，
+ * 它的赢家口径不能反过来定义查询成员。列表是森林先序，去重结果与 `journalDays` 逐条相同。
+ */
+function journalDaysOfIndex(index: Index, forest: readonly Block[]): Block[] {
+  const byDate = new Map<string, Block>()
+  for (const b of ensureIndexLists(index, forest).journals) {
+    const d = journalDate(b)
+    if (d !== '' && !byDate.has(d)) byDate.set(d, b)
+  }
+  return [...byDate.values()]
 }
 
 /** 「没有宿主 ⇒ 恒假」的环境：调用方直接拿空结果，不走判定 */

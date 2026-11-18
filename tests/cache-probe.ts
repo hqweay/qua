@@ -11,6 +11,7 @@ import {
   fieldTableOf,
   hasList,
   indexFieldTable,
+  isJournalBlock,
   isPropDefBlock,
   trashOf,
   walkForest,
@@ -21,37 +22,42 @@ import type { Block } from '../src/core/model/model.ts'
 
 const ids = (blocks: readonly Block[]): string[] => blocks.map((b) => b.id)
 
-/** 四张全局列表的规范化指纹（顺序＝森林先序，必须保留） */
+/** 五张全局列表的规范化指纹（顺序＝森林先序，必须保留） */
 export function listsFingerprint(lists: {
   pages: readonly Block[]
   tags: readonly Block[]
   propDefs: readonly Block[]
   trash: readonly Block[]
+  journals: readonly Block[]
 }): string {
   return JSON.stringify({
     pages: ids(lists.pages),
     tags: ids(lists.tags),
     propDefs: ids(lists.propDefs),
     trash: ids(lists.trash),
+    journals: ids(lists.journals),
   })
 }
 
-/** 从森林现算的四张列表（与 `MemoryKb` 重构前的实现逐字一致） */
+/** 从森林现算的五张列表（与 `MemoryKb` 重构前的实现逐字一致） */
 export function pureLists(forest: readonly Block[]): {
   pages: Block[]
   tags: Block[]
   propDefs: Block[]
   trash: Block[]
+  journals: Block[]
 } {
   const pages: Block[] = []
   const tags: Block[] = []
   const propDefs: Block[] = []
+  const journals: Block[] = []
   walkForest(forest, (b) => {
     if (hasList(b, 'page')) pages.push(b)
     if (hasList(b, 'tag')) tags.push(b)
     if (isPropDefBlock(b)) propDefs.push(b)
+    if (isJournalBlock(b)) journals.push(b)
   })
-  return { pages, tags, propDefs, trash: trashOf(forest) }
+  return { pages, tags, propDefs, trash: trashOf(forest), journals }
 }
 
 const sortedEntries = (m: ReadonlyMap<string, unknown>): [string, unknown][] =>

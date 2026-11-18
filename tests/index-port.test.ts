@@ -8,16 +8,22 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   applyOps,
+  ensureIndexLists,
   fingerprint,
   findJournalDay,
   incomingCount,
   incomingIds,
   indexPathOf,
+  journalDays,
   journalIdByDate,
   lookupBlock,
+  orderSequenceOf,
+  queryByIndex,
   rebuild,
+  runQuery,
   tagIdByName,
   tagMemberIdsOf,
+  walkForest,
   type Index,
 } from '../src/core/index.ts'
 import type { Block } from '../src/core/model/model.ts'
@@ -376,12 +382,15 @@ test('applyOps：空 op ⇒ 原样返回（不是「重建一遍」）', () => {
   assert.equal(applyOps(idx, [], store.blocks), idx, '没有变化就别重算')
 })
 
-test('fingerprint：与插入顺序无关（否则会假报不一致）', () => {
+test('fingerprint：兄弟顺序是内容（换序必须红）；同一棵树不假红', () => {
   const a = b('x', 'X', { props: { _aliases: ['X'], _lists: ['page'] }, children: [withRefs(b('y', 'Y'), ref('e1', 'x'), ref('e2', 'z'))] })
   const c = b('z', 'Z', { props: { _aliases: ['Z'], _lists: ['page'] } })
-  const fwd = rebuild([a, c])
-  const rev = rebuild([c, a])
-  assert.equal(fingerprint(fwd), fingerprint(rev))
+  assert.equal(fingerprint(rebuild([a, c])), fingerprint(rebuild([a, c])), '同一棵树 ⇒ 同一指纹')
+  assert.notEqual(
+    fingerprint(rebuild([a, c])),
+    fingerprint(rebuild([c, a])),
+    '森林顶层顺序变了（顺序是内容）⇒ 先序指纹必须变',
+  )
 })
 
 /* ------------------------------------------------------------ 接进共享 store */
@@ -560,4 +569,117 @@ test('反链总数：没有入向边 ⇒ 0；指向不存在目标不炸', () =>
   const idx = rebuild([b('a', '甲')])
   assert.equal(inboundRefCount(idx, 'a'), 0)
   assert.equal(inboundRefCount(idx, 'ghost'), 0)
+})
+
+/* ------------------------------------------------------------ 先序 rank */
+
+/** 森林先序（含软删）——rank 序列的独立对照 */
+function preorderOf(forest: readonly Block[]): string[] {
+  const out: string[] = []
+  walkForest(forest, (x) => {
+    out.push(x.id)
+  }, { includeDeleted: true })
+  return out
+}
+
+function assertOrderMatchesForest(idx: Index, forest: readonly Block[], label: string): void {
+  assert.deepEqual(orderSequenceOf(idx), preorderOf(forest), `${label}：rank 给出的先序必须等于森林先序`)
+  for (const id of idx.all.keys()) assert.ok(idx.order.has(id), `${label}：树上的块都要有 rank（${id}）`)
+}
+
+test('先序 rank：rebuild 覆盖全树（含软删块），序列＝森林先序', () => {
+  const { forest } = fixture()
+  // 一个被软删的子块：它仍在 `children` 里，rank 也必须记
+  ;(forest[1] as Block).children.push(b('gone', '回收站里的', { props: { _deletedAt: 1 } }))
+  const idx = rebuild(forest)
+  assertOrderMatchesForest(idx, forest, 'rebuild')
+})
+
+test('先序 rank：末尾追加 / 前插 / 中间插 ⇒ 增量与全量同序', () => {
+  const { store, kb, idx } = kbFixture()
+  let cur = idx
+  assertOrderMatchesForest(cur, store.blocks, '初始')
+
+  cur = txStep(kb, store, cur, (tx) => tx.insert(b('tail', '末尾'), 'p1', 99))
+  assertOrderMatchesForest(cur, store.blocks, '末尾追加')
+
+  cur = txStep(kb, store, cur, (tx) => tx.insert(b('head', '最前'), 'p1', 0))
+  assertOrderMatchesForest(cur, store.blocks, '前插')
+
+  cur = txStep(kb, store, cur, (tx) => tx.insert(b('mid', '中间'), 'p1', 2))
+  assertOrderMatchesForest(cur, store.blocks, '中间插')
+})
+
+test('先序 rank：移动只改被移块的一格，子孙 rank 不动；换父也一样', () => {
+  const { store, kb, idx } = kbFixture()
+  const before = new Map(idx.order)
+  // b 带着子块 b1 从 p1 挪到 p2
+  const next = txStep(kb, store, idx, (tx) => tx.move('b', 'p2', 0))
+  assertOrderMatchesForest(next, store.blocks, '换父')
+  assert.equal(next.order.get('b1'), before.get('b1'), 'b1 的 rank 属于「b 这一层」，换父不该改写它')
+  assert.notEqual(next.order.get('b'), before.get('b'), '被移块要在新父级拿到新 rank')
+
+  // 同父内换序
+  const reordered = txStep(kb, store, next, (tx) => tx.move('b', 'p2', 1))
+  assertOrderMatchesForest(reordered, store.blocks, '同父换序')
+})
+
+test('先序 rank：同一批挪两个子块 ⇒ 该层重编号（中点会互相踩）', () => {
+  const { store, kb, idx } = kbFixture()
+  const next = txStep(kb, store, idx, (tx) => {
+    tx.move('a', 'p1', 1)
+    tx.move('b', 'p1', 0)
+  })
+  assertOrderMatchesForest(next, store.blocks, '同批两块换序')
+})
+
+test('先序 rank：软删保留、恢复免费、purge 才摘', () => {
+  const { store, kb, idx } = kbFixture()
+  const soft = txStep(kb, store, idx, (tx) => tx.remove('b'))
+  assertOrderMatchesForest(soft, store.blocks, '软删')
+  assert.ok(soft.order.has('b1'), '软删的子树仍在 `children` 里，rank 不该丢')
+
+  const back = txStep(kb, store, soft, (tx) => tx.restore('b'))
+  assertOrderMatchesForest(back, store.blocks, '恢复')
+
+  // purge：索引与森林一起走同一条 op（`Tx` 没有 purge；它属于回收站的清除路径）
+  const ops = [{ e: 'block', id: 'b', op: 'exist', state: 'purged', at: 1 }] as const
+  applyForestOps(store.blocks, [...ops])
+  const purged = applyOps(back, ops, store.blocks)
+  assert.equal(fingerprint(purged), fingerprint(rebuild(store.blocks)), 'purge 后增量仍与全量一致')
+  assertOrderMatchesForest(purged, store.blocks, 'purge')
+  assert.equal(purged.order.has('b1'), false, 'purge 把整棵子树的 rank 一起摘掉')
+})
+
+/* ------------------------------------------------------------ 日记归属：先序第一个赢 */
+
+test('日记表：同日多块 ⇒ 先序第一个赢，与 journalDays 同一条', () => {
+  const forest = [
+    b('j1', '', { props: { _date: '2026-10-21' } }),
+    b('j2', '', { props: { _date: '2026-10-21' } }),
+    b('j3', '', { props: { _date: '2026-10-22' } }),
+  ]
+  const idx = rebuild(forest)
+  assert.equal(journalIdByDate(idx, '2026-10-21'), 'j1', 'rebuild：先序第一个赢')
+  assert.deepEqual(journalDays(forest).map((x) => x.id), ['j1', 'j3'])
+
+  const store = new BlockStore(JSON.parse(JSON.stringify(forest)))
+  const kb = new MemoryKb(store)
+  let cur = rebuild(store.blocks)
+  // 把 j1 挪到 j2 后面 ⇒ 先序第一换人
+  cur = txStep(kb, store, cur, (tx) => tx.move('j1', null, 1))
+  assert.equal(journalIdByDate(cur, '2026-10-21'), 'j2', '移动后赢家换人')
+  assert.equal(findJournalDay(store.blocks, '2026-10-21')?.id, 'j2', '索引与扫描同口径')
+
+  // 整份日记块列表不去重（组合条件里的 `{role:'journal'}` 是普通谓词）
+  assert.deepEqual(
+    ensureIndexLists(cur, store.blocks).journals.map((x) => x.id),
+    ['j2', 'j1', 'j3'],
+    '全部日记块列表按先序、不去重',
+  )
+  // 顶层精确日记仍是「一天一个」，两条求值路径同解
+  assert.deepEqual(
+    queryByIndex(cur, store.blocks, { where: { role: 'journal' } }),
+    runQuery({ where: { role: 'journal' } }, { blocks: store.blocks }),
+  )
 })
