@@ -7,8 +7,9 @@
  *   · **内容**——永远按 `block id` 现读现渲染（D5：集合冻、内容不冻）。
  *
  * ⚠️ 这里零 DOM、零持久化：求值只吃森林（指向边住在块内容里），所以能直接单测。
- * ⚠️ 接索引后本文件的签名不变：`evaluateQuery`（判定与顺序）由两条路径共用，
- *    索引路径见 `index-port.ts` 的 `queryByIndex`；`QuerySpec` 仍是那个 canonical JSON。
+ * ⚠️ 接索引后本文件是**语义的唯一实现**：`evaluateQuery`（walk）与 `evaluateQueryIds`
+ *    （候选迭代）共用同一份 matcher／`applySort`／回退判据；索引路径见 `index-port.ts`
+ *    的 `queryByIndex`；`QuerySpec` 仍是那个 canonical JSON。
  */
 import { hasList, isJournalBlock, isPropDefBlock, type Block } from '../model/model.ts'
 import { MARK_KINDS, normMarks, plainText, type Content, type Marks } from '../model/runs.ts'
@@ -1289,7 +1290,8 @@ export function canonicalNode(n: QueryNode): QueryNode {
  * 求值一次。**纯函数**：同样的输入永远同样的输出顺序（按森林的先序），
  * 这样「冻结」只要保存输出的 `blockId[]` 就够了（D4：冻结成员与顺序）。
  *
- * ⚠️ 索引路径（`index-port.ts` 的 `queryByIndex`）与环境收集方式不同、判定与顺序共用本函数。
+ * ⚠️ 索引路径（`index-port.ts` 的 `queryByIndex`）与环境收集方式不同；可枚举形状走
+ *    `evaluateQueryIds`（候选迭代），判定与排序规则共用本文件，结果与这里逐条相等（测试钉住）。
  * ⚠️ `'$self'` 的解析只有一份（`resolveSelfSpec`），两条路径都在**求值第一行**调它。
  */
 export function runQuery(spec: QuerySpec, input: QueryRunInput): QueryHit[] {

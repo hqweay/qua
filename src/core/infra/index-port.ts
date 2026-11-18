@@ -1247,11 +1247,13 @@ export function blockIdByAlias(index: Index, name: string): string | undefined {
 /* ------------------------------------------------------------ 查询 */
 
 /**
- * **查询走索引**：`ref`／`tag`／`journal` 三类条件查表（O(1)），其余谓词仍是逐块判定。
+ * **查询走索引**：可枚举条件先抽候选，再**按候选 id 迭代**（不再遍历全林）；
+ * 顺序由 `Index.order`（按层先序 rank）给出，路径由 `parentOf` 现拼。
  *
- * 为什么不是「查询全在索引里」：索引是派生**表**，不记树的形状（`rootOf` 只到顶层、
- * 挪位后 `blocks` 的插入顺序会漂移）——候选迭代与结果顺序仍按森林先序走，
- * 判定与顺序共用 `query.ts` 的 `evaluateQuery`（两条路径只有「环境怎么来」不同）。
+ * 不可枚举的形状（方向原子／`refCount` 排序／`prop`／`text`／…）整次回退到
+ * `evaluateQuery` 的 `walk(forest)`。两条路径的判定与排序语义共用 `query.ts`
+ * （同一份 matcher／`applySort`），只有「候选与环境怎么来」不同；回退可计数
+ * （`cacheProbe.fallbackQueries`）。
  *
  * 与纯函数路径 `runQuery` 的等式（同一输入 ⇒ 同一输出）由测试钉住；
  * 换成 SQLite 之后，这张等式的另一边就是 SQL 查询要复刻的口径。
