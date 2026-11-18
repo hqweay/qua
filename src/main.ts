@@ -94,6 +94,7 @@ import {
 import type { DeviceState } from './core/storage/device.ts'
 import { WORKSPACE_VERSION } from './core/infra/workspace.ts'
 import { createLibraryClient, type LibraryClient, type LibraryReadBridge } from './core/storage/library-client.ts'
+import { createMemoryLibraryClient } from './core/storage/memory-client.ts'
 import { Workset, worksetClosureIds } from './core/storage/workset.ts'
 import { UnloadedAliasError } from './core/kb/unsupported.ts'
 import type { RelationEdge, RelationKind } from './core/relations/relations.ts'
@@ -235,8 +236,11 @@ const kb = new MemoryKb(blocks)
  * boot 会把它当装载失败退到只读演示——真机踩过（首帧只读 demo 就是它）。
  * 整体展开不改方法引用（preload 是箭头函数，不依赖 this）；
  * `doc`/`catalog` 在场由上面的守卫保证（cast 的是运行时事实）。
+ *
+ * web 单库（没有桥）这里先落 `null`：它的内存实现在字节装载完成、整份模型就位之后
+ * 才建（`memory-client.ts` 现场编码要读活森林）。
  */
-const libraryClient: LibraryClient | null =
+let libraryClient: LibraryClient | null =
   LIBRARY_BRIDGE && LIBRARY_BRIDGE.doc && LIBRARY_BRIDGE.catalog
     ? createLibraryClient({ ...LIBRARY_BRIDGE } as LibraryReadBridge)
     : null
@@ -323,6 +327,9 @@ if (!worksetBoot) {
   ws = boot.status === 'ok' ? boot.ws : seedWorkspace()
   // 整库路：这份模型就是库本身（换库语义清掉可能残留的工作集状态）
   blocks.reset(ws.blocks)
+  // web 单库的读面：内存全量实现（代价登记见 `memory-client.ts`）。
+  // 模型已就位才建——现场编码读的是活森林；消费面只认契约，web 与桌面同一批代码。
+  libraryClient = createMemoryLibraryClient({ ws: () => ws, store: blocks })
 }
 /**
  * 种子库的**设备侧**演示配置：日记面板的演示栏 ＋ 左槽的演示收纳盘（`seedDock`）。

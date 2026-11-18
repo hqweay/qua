@@ -322,6 +322,27 @@ function listRows(block: string, raw: unknown): RowWrite[] {
   }))
 }
 
+/**
+ * 一块的四张行（**内存读面的编码出口**）：列名与主进程 `select *` 逐字一致。
+ *
+ * 「块长成哪几行」只有这一份答案——桌面读面走 SQL（行在库里），
+ * web 单库的内存读面从模型现场编码；两边各写一份列编码，读回来就是两种块。
+ */
+export function rowsOfBlock(b: Block, pos: { parent: string | null; left: string | null }): {
+  block: Record<string, unknown>
+  props: Record<string, unknown>[]
+  aliases: Record<string, unknown>[]
+  lists: Record<string, unknown>[]
+} {
+  const br = blockRow(b, pos)
+  return {
+    block: { id: br.key.id, ...br.values },
+    props: propWrites(b).map((w) => ({ ...w.key, ...w.values })),
+    aliases: aliasRows(b.id, b.props?.[ALIASES_PROP]).map((w) => ({ ...w.key, ...w.values })),
+    lists: listRows(b.id, b.props?.[LISTS_PROP]).map((w) => ({ ...w.key })),
+  }
+}
+
 /** 库级两格：当前对象与落盘时刻（它们不是块，走 `meta`） */
 export function metaWrites(ws: StoredWorkspace): RowWrite[] {
   return [

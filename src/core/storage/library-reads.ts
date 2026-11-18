@@ -119,7 +119,7 @@ export const LIBRARY_READS = {
     select p.block as id, 'tag' as kind from ${P} p where p.name = '_tags' and p.value = ?2
     union all
     select p.block as id, 'prop' as kind from ${P} p
-      where p.name not like '\_%' escape '\' and p.value = ?2`,
+      where p.name not like '\\_%' escape '\\' and p.value = ?2`,
 
   /** **入向关系按目标批查**（引用角标的全库计数；派生表 ready 后才可读） */
   relationsFor: `select to_id, from_id, kind, from_root, count from BlockRelation
