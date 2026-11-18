@@ -402,7 +402,7 @@ export function relationWritesOf(store: BlockStore, complete: ReadonlySet<string
       const key = `${e.from}\u0000${e.to}\u0000${e.kind}`
       if (seen.has(key)) continue
       seen.add(key)
-      relations.push({ from_id: e.from, to_id: e.to, kind: e.kind, from_root: root })
+      relations.push({ from_id: e.from, to_id: e.to, kind: e.kind, from_root: root, count: e.count ?? null })
     }
   }
   if (relations.length > 0) {
@@ -411,7 +411,7 @@ export function relationWritesOf(store: BlockStore, complete: ReadonlySet<string
         table: 'BlockRelation',
         op: 'upsert',
         key: { from_id: r.from_id, to_id: r.to_id, kind: r.kind },
-        values: { from_root: r.from_root },
+        values: { from_root: r.from_root, count: r.count },
       })
     }
   }

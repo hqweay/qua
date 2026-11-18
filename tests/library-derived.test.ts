@@ -19,7 +19,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DB_TABLES, META_KEYS } from '../src/core/identity/library.ts'
+import { DB_SCHEMA_VERSION, DB_TABLES, META_KEYS } from '../src/core/identity/library.ts'
 import { mkBlock, type Block } from '../src/core/model/model.ts'
 import { walkForest } from '../src/core/model/walk.ts'
 import type { Run } from '../src/core/model/runs.ts'
@@ -160,8 +160,8 @@ test('v11 → v12：只加派生表/索引，内容与库级 meta 原样；状�
   first.db!.close()
 
   const r = openLibraryDb(file)
-  assert.equal(r.status, 'migrated', `v11 应当被迁移到 v12，实际 ${r.status}`)
-  assert.equal(r.version, 12)
+  assert.equal(r.status, 'migrated', `v11 应当被迁移到当前版本，实际 ${r.status}`)
+  assert.equal(r.version, DB_SCHEMA_VERSION)
   const db = r.db!
   const tables = (db.prepare("select name from sqlite_master where type='table'").all() as { name: string }[]).map((t) => t.name)
   assert.ok(tables.includes(DB_TABLES.blockIndex), `迁移后应当建出 BlockIndex：${tables.join(',')}`)
@@ -185,11 +185,11 @@ test('v11 → v12：只加派生表/索引，内容与库级 meta 原样；状�
   db.close()
 })
 
-test('新建库 v12：派生表存在且状态 pending（空表 ≠ 已建好）', () => {
+test('新建库：派生表存在且状态 pending（空表 ≠ 已建好）', () => {
   const file = tmpDb()
   const r = openLibraryDb(file)
   assert.equal(r.status, 'created')
-  assert.equal(r.version, 12)
+  assert.equal(r.version, DB_SCHEMA_VERSION)
   const db = r.db!
   assert.equal(readMeta(db, META_KEYS.derivedState), 'pending')
   const tables = (db.prepare("select name from sqlite_master where type='table'").all() as { name: string }[]).map((t) => t.name)

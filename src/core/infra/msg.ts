@@ -1628,6 +1628,8 @@ export const MSG = {
   'ui.toast.mentionStale': '那一处的正文已经变了，没有转换',
   /** 创建路径撞上一个未装载的同名块（工作集迁移）：不新建，等装载后重试 */
   'ui.toast.aliasUnloaded': '这个名字已存在但还没装载，稍后再试',
+  /** 巨大 Doc 护栏（313 D8：护栏按 Doc 不按库大小）：打开是用户的决定，代价要说清楚 */
+  'ui.boot.hugeDoc': '这一篇非常大（{count} 块），打开与编辑可能偏慢',
   'ui.toast.mentionReadonly': '这一行的正文是名字或只读内容，不能改写',
   'ui.toast.selectionToRefCreated': '新建页「{name}」并转为引用',
   'ui.toast.selectionToRefBlockCreated': '新建块「{name}」并关联',

@@ -39,6 +39,7 @@ export interface LibraryReadBridge {
   ftsMap?(ids: readonly string[]): Promise<unknown>
   dependents?(targetId: string): Promise<unknown>
   roots?(): Promise<unknown>
+  relations?(ids: readonly string[]): Promise<unknown>
 }
 
 /**
@@ -61,6 +62,13 @@ export interface LibraryClient {
   dependents(targetId: string): Promise<LibraryReadResult<{ content: string[]; tag: string[]; prop: string[] }>>
   /** 顶层根 id 清单（派生表流式重建的装载单位） */
   roots(): Promise<LibraryReadResult<string[]>>
+  /** 入向关系按目标批查（引用角标的全库计数）；`ready:false` ＝ 派生表还没重建，调用方走工作集口径 */
+  relations(ids: readonly string[]): Promise<
+    LibraryReadResult<{
+      rows: { to_id: string; from_id: string; kind: string; from_root: string; count: number | null }[]
+      ready: boolean
+    }>
+  >
   /** 查询候选 id（计划是超集；matcher 仍是判定来源）。失败分型与 doc 同一条 */
   candidates(plan: CandidatePlan): Promise<LibraryReadResult<string[]>>
   /** 候选装载：块＋全部祖先链（可选一层子级） */
@@ -165,6 +173,34 @@ function createClient(bridge: LibraryReadBridge): LibraryClient {
       if (r.status !== 'ok') return clientError('library/doc', `bad reply status: ${String(r.status)}`)
       if (!isDocRows(r.doc)) return clientError('library/doc', 'bad reply shape')
       return { status: 'ok', value: r.doc }
+    },
+
+    async relations(ids) {
+      if (!bridge.relations) return clientError('library/relations', 'bridge has no relations read')
+      const uniq = [...new Set(ids.filter((x) => typeof x === 'string' && x !== ''))]
+      if (uniq.length === 0) return { status: 'ok', value: { rows: [], ready: false } }
+      let raw: unknown
+      try {
+        raw = await bridge.relations(uniq)
+      } catch (e) {
+        return clientError('library/relations', e instanceof Error ? e.message : String(e))
+      }
+      const r = replyStatus(raw)
+      if (r.status === 'no-library') return { status: 'no-library' }
+      if (r.status === 'bad-args') return { status: 'bad-args' }
+      if (r.status === 'error') return clientError('library/relations', String(r.error ?? 'unknown'))
+      if (r.status !== 'ok') return clientError('library/relations', `bad reply status: ${String(r.status)}`)
+      const rows = (r as { rows?: unknown }).rows
+      const ready = (r as { ready?: unknown }).ready === true
+      if (!Array.isArray(rows)) return clientError('library/relations', 'bad reply shape')
+      const okRows = rows.filter(
+        (x): x is { to_id: string; from_id: string; kind: string; from_root: string; count: number | null } =>
+          isRecord(x) &&
+          typeof (x as Record<string, unknown>).to_id === 'string' &&
+          typeof (x as Record<string, unknown>).from_id === 'string' &&
+          typeof (x as Record<string, unknown>).kind === 'string',
+      )
+      return { status: 'ok', value: { rows: okRows, ready } }
     },
 
     async roots() {

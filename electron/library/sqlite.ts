@@ -171,6 +171,7 @@ create table if not exists ${DB_TABLES.blockRelation} (
   to_id text not null,
   kind text not null,
   from_root text not null,
+  count integer,
   primary key (from_id, to_id, kind)
 ) without rowid;
 create index if not exists idx_BlockRelation_to on ${DB_TABLES.blockRelation}(to_id, kind);
@@ -395,6 +396,24 @@ export const MIGRATIONS: Migration[] = [
        */
       db.exec(DERIVED_DDL)
       writeMeta(db, META_KEYS.derivedState, 'pending')
+    },
+  },
+  {
+    to: 13,
+    up: (db) => {
+      /**
+       * **关系行带上出现次数**：引用角标的全库总数要逐处计数（同一源块里的
+       * 多次提及各算一处），而这条计数本来就在边提取的产出里——落一列，
+       * 让「N 处引用」不再需要为每个目标回扫内容。派生表可整体重建，
+       * 这一列跟着重建/维护批次走，不会成为第二份真相。
+       */
+      // 跨版迁移链（v7→v13）在 v12 步建表时已带这一列 ⇒ 按 pragma 判存在再加
+      const cols = (db.prepare(`pragma table_info(${DB_TABLES.blockRelation})`).all() as { name: string }[]).map(
+        (c) => c.name,
+      )
+      if (!cols.includes('count')) {
+        db.exec(`alter table ${DB_TABLES.blockRelation} add column count integer`)
+      }
     },
   },
 ]
@@ -721,7 +740,7 @@ const COLUMNS: Record<string, ReadonlySet<string>> = {
   BlockFTS: new Set(['rowid', 'seg', 'chars', 'pinyin']),
   BlockFTSMap: new Set(['block_id', 'source', 'fts_rowid']),
   BlockIndex: new Set(['block', 'root', 'path', 'hidden']),
-  BlockRelation: new Set(['from_id', 'to_id', 'kind', 'from_root']),
+  BlockRelation: new Set(['from_id', 'to_id', 'kind', 'from_root', 'count']),
 }
 
 function sqlOf(w: RowWrite): string {

@@ -70,6 +70,8 @@ export interface BlockRelationRow {
   to_id: string
   kind: RelationKind
   from_root: string
+  /** 同一源块里出现几次（inline／tagMention 有；其余单边为 null——读侧按 1 算） */
+  count: number | null
 }
 
 export interface DerivedRows {
@@ -171,7 +173,7 @@ function derive(forest: readonly Block[], wanted: ReadonlySet<string> | null): D
       const key = `${e.from}\u0000${e.to}\u0000${e.kind}`
       if (seen.has(key)) continue
       seen.add(key)
-      relations.push({ from_id: e.from, to_id: e.to, kind: e.kind, from_root: rootOf.get(e.from)! })
+      relations.push({ from_id: e.from, to_id: e.to, kind: e.kind, from_root: rootOf.get(e.from)!, count: e.count ?? null })
     }
   })
 
@@ -198,7 +200,7 @@ export function derivedRowWrites(rows: DerivedRows, opts: { clear?: boolean } = 
       table: 'BlockRelation',
       op: 'upsert',
       key: { from_id: r.from_id, to_id: r.to_id, kind: r.kind },
-      values: { from_root: r.from_root },
+      values: { from_root: r.from_root, count: r.count },
     })
   }
   return out

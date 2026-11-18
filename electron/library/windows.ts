@@ -29,8 +29,9 @@ import {
   type LibraryEntry,
 } from '../../src/core/identity/library.ts'
 import { libraryDir, loadRegistry, markOpened, saveRegistry, type RegistryIo } from './registry.ts'
-import { loadContent, openSession, readBlocks, readCatalog, readCandidates, readDependentIds, readDoc, readFtsMap, readIdentity, readRoots, readTree, saveContent, type OpenFailure, type RepoSession } from './session.ts'
-import { hasContent, readSeq, searchFts, snapshotLibrary, type RowWrite } from './sqlite.ts'
+import { loadContent, openSession, readBlocks, readCatalog, readCandidates, readDependentIds, readDoc, readFtsMap, readIdentity, readRelations, readRoots, readTree, saveContent, type OpenFailure, type RepoSession } from './session.ts'
+import { hasContent, readMeta, readSeq, searchFts, snapshotLibrary, type RowWrite } from './sqlite.ts'
+import { META_KEYS } from '../../src/core/identity/library.ts'
 import { isCandidatePlan } from '../../src/core/storage/library-reads.ts'
 
 /** 关窗握手等 renderer 回话的上限。超时就强关——卡住比丢一句话更糟。 */
@@ -506,6 +507,23 @@ export class LibraryManager {
       if (!isRootList(ids)) return { status: 'bad-args' }
       try {
         return { status: 'ok', rows: readFtsMap(s, ids) }
+      } catch (err) {
+        return { status: 'error', error: String(err) }
+      }
+    })
+
+    /**
+     * **入向关系按目标批查**（引用角标的全库计数）。派生表没 ready 时返回**空**
+     * ——调用方（渲染层）据此退回工作集口径，不把半表当真。
+     */
+    ipcMain.handle('qua:library/relations', (e, ids: unknown) => {
+      const s = sessionOf(e)
+      if (!s) return { status: 'no-library' }
+      if (!isRootList(ids)) return { status: 'bad-args' }
+      try {
+        const state = readMeta(s.db, META_KEYS.derivedState)
+        if (state !== 'ready') return { status: 'ok', rows: [], ready: false }
+        return { status: 'ok', rows: readRelations(s, ids), ready: true }
       } catch (err) {
         return { status: 'error', error: String(err) }
       }

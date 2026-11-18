@@ -189,3 +189,18 @@ export function readRootIds(db: DatabaseSync): string[] {
   const rows = db.prepare(LIBRARY_READS.catalogRoots).all() as { id: string }[]
   return rows.map((r) => String(r.id))
 }
+
+/** 入向关系按目标批查（引用角标的全库计数；派生表 ready 后才可读） */
+export function readRelationsFor(
+  db: DatabaseSync,
+  targetIds: readonly string[],
+): { to_id: string; from_id: string; kind: string; from_root: string }[] {
+  if (targetIds.length === 0) return []
+  const idJson = JSON.stringify([...new Set(targetIds)])
+  return db.prepare(LIBRARY_READS.relationsFor).all(idJson) as {
+    to_id: string
+    from_id: string
+    kind: string
+    from_root: string
+  }[]
+}

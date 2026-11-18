@@ -121,6 +121,10 @@ export const LIBRARY_READS = {
     select p.block as id, 'prop' as kind from ${P} p
       where p.name not like '\_%' escape '\' and p.value = ?2`,
 
+  /** **入向关系按目标批查**（引用角标的全库计数；派生表 ready 后才可读） */
+  relationsFor: `select to_id, from_id, kind, from_root, count from BlockRelation
+    where to_id in (select value from json_each(?1))`,
+
   /** **顶层根清单**（派生表流式重建的装载单位；含软删根——它们的行也要 hidden=1） */
   catalogRoots: `select id from ${B} where parent is null order by rowid`,
 

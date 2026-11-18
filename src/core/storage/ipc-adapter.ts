@@ -74,6 +74,8 @@ export interface LibraryBridge {
   dependents?(targetId: string): Promise<unknown>
   /** 顶层根清单（派生表流式重建用） */
   roots?(): Promise<unknown>
+  /** 入向关系按目标批查（引用角标的全库计数；未 ready 时 ready:false） */
+  relations?(ids: readonly string[]): Promise<unknown>
 
   /**
    * 资产面（内容寻址；字节走 ArrayBuffer，主进程写进库目录的 `assets/`）。

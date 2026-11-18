@@ -49,6 +49,7 @@ import {
   walkForest,
   gutterFieldsOf,
   relationsFrom,
+  relationsTo,
   isRefKind,
   fieldTableOf,
   applyClosurePlan,
@@ -72,6 +73,7 @@ import {
   type VisibleRow,
 } from '../../core/index.ts'
 import { resolveRef } from '../../core/relations/ref.ts'
+import type { RelationEdge } from '../../core/relations/relations.ts'
 import { inputSession } from './input-session.ts'
 import {
   clearMarks as clearRunsMarks,
@@ -300,6 +302,13 @@ export interface ViewOpts {
    * （新建就是第二个同名身份）。省略 ＝ 整库模式（所有块都在内存里）。
    */
   ensureLoaded?: (ids: readonly string[], then: () => void) => void
+  /**
+   * **入向关系的全库批查**（引用角标的全库计数；装配层注入）。
+   *
+   * 返回 `null` ＝ 派生表还没重建（`derived_state !== 'ready'`）：半表不可信，
+   * 角标退回工作集口径。整库模式省略 ＝ 工作集就是全库。
+   */
+  relationsFor?: (ids: readonly string[]) => Promise<Map<string, readonly RelationEdge[]> | null>
 }
 
 export interface ViewEvents {
@@ -639,6 +648,16 @@ export class BlockEditor {
   private entryDepth = 0
   /** 工作集装载咽喉（装配层注入；省略 ＝ 整库模式）。触发链落点按名字复用未装载目标用 */
   readonly ensureLoaded: ViewOpts['ensureLoaded']
+  /** 入向关系全库批查（装配层注入；省略 ＝ 整库模式） */
+  readonly relationsFor: ViewOpts['relationsFor']
+  /**
+   * **引用角标的全库答案缓存**（targetId → 入向边）。
+   * 只在派生表 ready 时由批查填入；未命中的 id 退回工作集口径（部分装载下是子集，
+   * 这是登记过的窗口，批查完成即自愈）。
+   */
+  private relationsCache = new Map<string, readonly RelationEdge[]>()
+  private relationsPending = false
+  private relationsTimer: number | null = null
   /** store 订阅与事件绑定的卸载函数（`dispose` 用；视图被移除后不该继续收通知） */
   private readonly offStore: () => void
   private readonly unbind: () => void
@@ -652,6 +671,7 @@ export class BlockEditor {
     this.rootRemoveFill = o.rootRemoveFill !== false
     this.structuralScope = o.structuralScope ?? 'document'
     this.ensureLoaded = o.ensureLoaded
+    this.relationsFor = o.relationsFor
     // 写入口顺手作废那张派生表：标签声明／定义 kind 变了，下一次 `closureOf` 要重算
     this.write = (fn, source, opts) => {
       this.fieldTableCache = null
@@ -1099,6 +1119,55 @@ export class BlockEditor {
 
   renderAll(): void {
     this.render.renderAll()
+    this.prefetchRefBadges()
+  }
+
+  /**
+   * **引用角标的全库口径**：派生表批查的缓存优先，未命中退回工作集。
+   * 缓存只在派生表 ready 时填入（`relationsFor` 回 null 就不填）——
+   * 半表当真会让角标「看起来是 0」，比少几个更糟。
+   */
+  badgeSourcesOf(id: string): readonly RelationEdge[] {
+    const cached = this.relationsCache.get(id)
+    return cached ?? relationsTo(this.store.index, id)
+  }
+
+  /** 编辑让某目标的角标过期：缓存摘掉（退回工作集口径），错峰补一次批查 */
+  invalidateRefBadge(targets: readonly string[]): void {
+    for (const id of targets) this.relationsCache.delete(id)
+    this.scheduleRefBadgePrefetch()
+  }
+
+  private scheduleRefBadgePrefetch(): void {
+    if (!this.relationsFor || this.relationsTimer !== null) return
+    this.relationsTimer = window.setTimeout(() => {
+      this.relationsTimer = null
+      this.prefetchRefBadges()
+    }, 500)
+  }
+
+  private prefetchRefBadges(): void {
+    const fetch = this.relationsFor
+    if (!fetch || this.relationsPending) return
+    const ids = [...new Set(flatten(this.doc).map((b) => b.id))].filter((id) => !this.relationsCache.has(id))
+    if (ids.length === 0) return
+    this.relationsPending = true
+    void fetch(ids)
+      .then((map) => {
+        if (map === null) return
+        for (const [to, edges] of map) this.relationsCache.set(to, edges)
+        // 只重画「全库答案 ≠ 工作集答案」的行：整页重画会让折叠/选区白抖一次
+        for (const id of ids) {
+          if (!this.relationsCache.has(id)) continue
+          const full = this.relationsCache.get(id)!.length
+          const partial = relationsTo(this.store.index, id).length
+          if (full !== partial && this.blockEl(id)) this.renderBlock(id)
+        }
+      })
+      .catch((e) => console.warn(`[editor] ref badge prefetch failed: ${e instanceof Error ? e.message : String(e)}`))
+      .finally(() => {
+        this.relationsPending = false
+      })
   }
 
   renderBlock(id: string): void {
@@ -2083,6 +2152,8 @@ export class BlockEditor {
       if (!isRefKind(e.kind) || e.to === id) continue
       if (this.blockEl(e.to)) this.renderBlock(e.to)
     }
+    // 改过的出向边让目标的全库角标过期（缓存摘掉 ＋ 错峰批查补全库口径）
+    this.invalidateRefBadge(relationsFrom(this.store.index, id).filter((e) => isRefKind(e.kind) && e.to !== id).map((e) => e.to))
   }
 
   /* --------------------------------------------------------- 结构操作 */

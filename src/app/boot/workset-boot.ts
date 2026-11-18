@@ -40,6 +40,7 @@ export type WorksetBootResult =
       today: { exists: boolean; deleted: boolean }
       counts: {
         docReads: number
+        docBlocks: number
         docRows: number
         catalogRows: number
         identityRows: number
@@ -126,6 +127,7 @@ export async function loadWorksetBoot(deps: WorksetBootDeps): Promise<WorksetBoo
     today: { exists: todayJournal !== undefined, deleted: todayJournal?.deleted != null },
     counts: {
       docReads,
+      docBlocks: doc.rows.blocks.length,
       docRows: doc.rows.blocks.length + doc.rows.props.length + doc.rows.aliases.length + doc.rows.lists.length,
       catalogRows:
         catalog.journals.length +

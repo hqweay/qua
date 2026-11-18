@@ -96,6 +96,7 @@ import { WORKSPACE_VERSION } from './core/infra/workspace.ts'
 import { createLibraryClient, type LibraryClient } from './core/storage/library-client.ts'
 import { Workset, worksetClosureIds } from './core/storage/workset.ts'
 import { UnloadedAliasError } from './core/kb/unsupported.ts'
+import type { RelationEdge, RelationKind } from './core/relations/relations.ts'
 import { loadWorksetBoot, withAncestors, type WorksetBootResult } from './app/boot/workset-boot.ts'
 import { rebuildDerivedTables } from './app/boot/derived-rebuild.ts'
 import { candidateBuildOf } from './core/storage/query-candidates.ts'
@@ -114,6 +115,9 @@ const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) 
  *     与夹具命令，所以它们跑的那份构建要带 flag。
  */
 const DEV_SURFACE = __QUA_DEV_SURFACE__
+
+/** **巨大 Doc 护栏**（块数）：超过只提示不拦——「打开很慢」要让用户有预期 */
+const HUGE_DOC_BLOCKS = 100_000
 
 /** 页名：**只读投影**（中间没有页标题，页名就是那个块的正文） */
 const stateMenuBtn = $('state-menu-btn')
@@ -260,11 +264,21 @@ let boot: LoadedWorkspace
     boot = { status: 'empty' }
   } else if (info && info.status !== 'ok') {
     boot = { status: 'storage-error', error: new Error(`library: ${info.status}`) }
+  } else if (LIBRARY_BRIDGE) {
+    // 有库面但库信息读不到 ⇒ 只读。**不退回 `store.load()`**：那一次调用读的是
+    // 整库行——「信息读不到」兜底成一次全量装载，正是层 1 要消灭的形状。
+    boot = { status: 'storage-error', error: new Error('library info unavailable') }
   } else {
+    // 没有库面（web 单库）：旧的全量装载路（注册过的非对称，层 5 才删）
     boot = await store.load()
   }
 }
 if (worksetBoot) kb.setCatalog(worksetBoot.catalog)
+/**
+ * **派生表可不可信**（引用角标的全库计数闸）：catalog meta 的 derivedState；
+ * 后台重建跑完置 ready 时由闭包翻真。false ⇒ 角标退回工作集口径（部分装载下是子集）。
+ */
+let derivedReady = worksetBoot?.catalog.meta.derivedState === 'ready'
 
 /**
  * **派生表的后台重建**（启动后错峰）：表还是 `pending`（迁移来的库没跑过全量）
@@ -277,7 +291,10 @@ if (worksetBoot && LIBRARY_BRIDGE && worksetBoot.catalog.meta.derivedState !== '
       client: libraryClient!,
       store,
     })
-      .then((r) => console.info(`[derived] rebuild ${r.ok ? 'done' : 'incomplete'}: ${r.done}/${r.total} roots, failed=${r.failed}`))
+      .then((r) => {
+        if (r.ok) derivedReady = true
+        console.info(`[derived] rebuild ${r.ok ? 'done' : 'incomplete'}: ${r.done}/${r.total} roots, failed=${r.failed}`)
+      })
       .catch((e) => console.warn('[derived] rebuild failed:', e))
   }, 3000)
 }
@@ -401,6 +418,12 @@ if (boot.status === 'corrupt' && DEV_SURFACE) bootNotice += t('ui.boot.corruptDe
 bootState.notice = bootNotice
 // 开发者日志（英文，不走 msg 字典）：排查「为什么是只读态」时这是唯一的第一手线索
 if (bootState.readOnly) console.warn('[boot] read-only prototype state:', boot.status)
+
+// **巨大 Doc 护栏**（313 D8：护栏按 Doc 不按库大小）：子树超过护栏只提示不拦——
+// 打开是用户的决定，应用把代价说清楚；只读/分页是懒子树那一层的事
+if (worksetBoot && worksetBoot.counts.docBlocks > HUGE_DOC_BLOCKS) {
+  bootState.notice = t('ui.boot.hugeDoc', { count: String(worksetBoot.counts.docBlocks) })
+}
 
 /** 槽快捷卡指到的块 id（设备状态里那几个）：它们不在任何 Doc 里，但首帧要显示名字 */
 function dockShortcutIds(device: DeviceState): string[] {
@@ -1932,6 +1955,25 @@ ed = new BlockEditor({
   container: editorEl,
   // 工作集装载：触发链落点按名字复用未装载的目标（先装再落，不建重复身份）
   ensureLoaded: ensureDocsLoaded,
+  // 引用角标的全库计数：派生表 ready 才查（未 ready 回 null ⇒ 退回工作集口径）
+  relationsFor: async (ids) => {
+    if (!libraryClient || !derivedReady) return null
+    const r = await libraryClient.relations(ids)
+    if (r.status !== 'ok') throw new Error(r.status === 'error' ? r.error : r.status)
+    if (!r.value.ready) return null
+    const map = new Map<string, RelationEdge[]>()
+    for (const row of r.value.rows) {
+      const list = map.get(row.to_id) ?? []
+      list.push({
+        from: row.from_id,
+        to: row.to_id,
+        kind: row.kind as RelationKind,
+        ...(row.count !== null && row.count !== undefined ? { count: row.count } : {}),
+      })
+      map.set(row.to_id, list)
+    }
+    return map
+  },
   // 「点空白建块」的监听面 = #doc：只监听 editorEl 的话，点它下方气口不触发
   blankArea: chrome.blankAreaEl,
   // 共享 store：块是活引用；marks/atoms/undo 也是共享的

@@ -24,7 +24,6 @@ import {
   locate,
   noteSourceCellsOf,
   refSourcesOf,
-  relationsTo,
   walkForest,
   type Block,
   type BelowFields,
@@ -433,7 +432,7 @@ export class RenderOps {
          * 放在构造渲染参数里而不是 `ViewEvents`：编辑器**构造时就画首帧**，
          * 事件表那时还没赋上（同 `assetView` 那条实测过的坑）。
          */
-        refBadge: makeRefBadgeEl(r.block.id, refSourcesOf(relationsTo(this.ed.store.index, r.block.id))),
+        refBadge: makeRefBadgeEl(r.block.id, refSourcesOf(this.ed.badgeSourcesOf(r.block.id))),
         // 行尾标签 chips 拖拽重排：写回走同一份 reorderTags（只许换序，一笔撤销）
         onReorderTags: (blockId, orderedIds) => {
           void this.ed.reorderTags(blockId, orderedIds)

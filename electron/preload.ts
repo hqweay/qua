@@ -118,6 +118,8 @@ const qua = {
   dependents: (targetId: string): Promise<unknown> => ipcRenderer.invoke('qua:library/dependents', targetId),
   /** 顶层根清单（派生表流式重建用） */
   roots: (): Promise<unknown> => ipcRenderer.invoke('qua:library/roots'),
+  /** 入向关系按目标批查（引用角标的全库计数；派生表未 ready 时 rows 空＋ready:false） */
+  relations: (ids: readonly string[]): Promise<unknown> => ipcRenderer.invoke('qua:library/relations', ids),
 
   /** 全文检索（match 由渲染层编译；主进程只做参数绑定与 bm25 排序） */
   search: (match: string, limit: number, offset = 0): Promise<unknown> =>
