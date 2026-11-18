@@ -683,3 +683,20 @@ test('日记表：同日多块 ⇒ 先序第一个赢，与 journalDays 同一�
     runQuery({ where: { role: 'journal' } }, { blocks: store.blocks }),
   )
 })
+
+test('日记：_date 写入/清除后，日期表与全部日记块列表都跟着走', () => {
+  const forest = [b('a', '', { props: { _date: '2026-10-21' } }), b('b', '')]
+  const store = new BlockStore(JSON.parse(JSON.stringify(forest)))
+  const kb = new MemoryKb(store)
+  let cur = rebuild(store.blocks)
+  assert.deepEqual(ensureIndexLists(cur, store.blocks).journals.map((x) => x.id), ['a'])
+
+  cur = txStep(kb, store, cur, (tx) => tx.setProp('b', '_date', '2026-10-22'))
+  assert.equal(journalIdByDate(cur, '2026-10-22'), 'b')
+  assert.deepEqual(ensureIndexLists(cur, store.blocks).journals.map((x) => x.id), ['a', 'b'])
+
+  cur = txStep(kb, store, cur, (tx) => tx.clearProp('a', '_date'))
+  assert.equal(journalIdByDate(cur, '2026-10-21'), undefined)
+  assert.deepEqual(ensureIndexLists(cur, store.blocks).journals.map((x) => x.id), ['b'])
+  assert.deepEqual(journalDays(store.blocks).map((x) => x.id), ['b'], '索引与扫描同口径')
+})
