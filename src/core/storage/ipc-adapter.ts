@@ -72,6 +72,8 @@ export interface LibraryBridge {
   ftsMap?(ids: readonly string[]): Promise<unknown>
   /** 依赖方查询（正文引用/标签成员/属性值三路分类） */
   dependents?(targetId: string): Promise<unknown>
+  /** 顶层根清单（派生表流式重建用） */
+  roots?(): Promise<unknown>
 
   /**
    * 资产面（内容寻址；字节走 ArrayBuffer，主进程写进库目录的 `assets/`）。

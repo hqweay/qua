@@ -29,7 +29,7 @@ import {
   type LibraryEntry,
 } from '../../src/core/identity/library.ts'
 import { libraryDir, loadRegistry, markOpened, saveRegistry, type RegistryIo } from './registry.ts'
-import { loadContent, openSession, readBlocks, readCatalog, readCandidates, readDependentIds, readDoc, readFtsMap, readIdentity, readTree, saveContent, type OpenFailure, type RepoSession } from './session.ts'
+import { loadContent, openSession, readBlocks, readCatalog, readCandidates, readDependentIds, readDoc, readFtsMap, readIdentity, readRoots, readTree, saveContent, type OpenFailure, type RepoSession } from './session.ts'
 import { hasContent, readSeq, searchFts, snapshotLibrary, type RowWrite } from './sqlite.ts'
 import { isCandidatePlan } from '../../src/core/storage/library-reads.ts'
 
@@ -506,6 +506,17 @@ export class LibraryManager {
       if (!isRootList(ids)) return { status: 'bad-args' }
       try {
         return { status: 'ok', rows: readFtsMap(s, ids) }
+      } catch (err) {
+        return { status: 'error', error: String(err) }
+      }
+    })
+
+    /** **顶层根清单**（派生表流式重建的装载单位） */
+    ipcMain.handle('qua:library/roots', (e) => {
+      const s = sessionOf(e)
+      if (!s) return { status: 'no-library' }
+      try {
+        return { status: 'ok', ids: readRoots(s) }
       } catch (err) {
         return { status: 'error', error: String(err) }
       }

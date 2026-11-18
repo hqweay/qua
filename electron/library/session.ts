@@ -40,7 +40,7 @@ import {
   type LibraryManifest,
 } from '../../src/core/identity/library.ts'
 import { createFolderAssetStore, type AssetStore } from './assets.ts'
-import { readBlockRows, readBlockTreeRows, readCandidateIds, readCatalogRows, readDocRows, readDependents, readFtsMapRows, readIdentityRows } from './reads.ts'
+import { readBlockRows, readBlockTreeRows, readCandidateIds, readCatalogRows, readDocRows, readDependents, readFtsMapRows, readIdentityRows, readRootIds } from './reads.ts'
 import type { CandidatePlan, LibraryCatalog, LibraryDocRows, RawLibraryRows } from '../../src/core/storage/library-reads.ts'
 import {
   applyRowWrites,
@@ -400,4 +400,9 @@ export function readDependentIds(
   targetId: string,
 ): { content: string[]; tag: string[]; prop: string[] } {
   return readDependents(session.db, targetId)
+}
+
+/** 顶层根 id 清单（派生表流式重建的装载单位） */
+export function readRoots(session: RepoSession): string[] {
+  return readRootIds(session.db)
 }

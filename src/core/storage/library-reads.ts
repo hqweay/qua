@@ -121,6 +121,9 @@ export const LIBRARY_READS = {
     select p.block as id, 'prop' as kind from ${P} p
       where p.name not like '\_%' escape '\' and p.value = ?2`,
 
+  /** **顶层根清单**（派生表流式重建的装载单位；含软删根——它们的行也要 hidden=1） */
+  catalogRoots: `select id from ${B} where parent is null order by rowid`,
+
   /** **FTS 映射按块查**（增量索引不再把整张映射搬进内存）：一块最多几行（每来源一行） */
   ftsMapOf: `select block_id, source, fts_rowid from ${DB_TABLES.blockFtsMap}
     where block_id in (select value from json_each(?1))`,
@@ -194,6 +197,8 @@ export type LibraryCatalog = {
     ftsState: string
     ftsTokenizer: string
     ftsRowidSeq: number
+    /** 派生两表的重建状态：非 ready 时读路径不许信（分层闸——重建完成前它们只是半份答案） */
+    derivedState: string
   }
   journals: CatalogJournal[]
   tags: CatalogTag[]

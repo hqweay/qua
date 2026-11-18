@@ -55,6 +55,11 @@ export interface WorkspaceStore {
     ops: readonly Op[],
     opts?: { replace?: boolean },
   ) => Promise<{ ok: true } | { ok: false; error: unknown }>
+  /**
+   * **派生行的批量落盘**（流式重建用）：与常规提交共用一条串行队列，但不产 op、
+   * 不进日志（派生表可从内容重建，不是历史）。字节后端无行可写 ⇒ 恒 ok。
+   */
+  commitRaw: (writes: readonly RowWrite[]) => Promise<{ ok: true } | { ok: false; error: unknown }>
   clear: () => Promise<void>
   /**
    * 作废前抄一份原始字节（见 `StoragePort.backup`）。
@@ -181,7 +186,28 @@ export function createWorkspaceStore(port: StoragePort, fts?: FtsCommitSource, h
       return next
     },
 
-    clear: () => port.clear(),
+    /**
+   * **派生行的批量落盘**（流式重建用）：与常规提交共用同一条串行队列，
+   * 但不产 op、不进日志——派生表可从内容重建，不是历史的一部分。
+   * 整个批就是一个事务；逐根调用时每根一个小事务，与用户输入的写入交错不抢锁。
+   */
+  commitRaw: async (writes: readonly RowWrite[]) => {
+    const run = async (): Promise<{ ok: true } | { ok: false; error: unknown }> => {
+      try {
+        const batch: CommitBatch = { ops: [], changes: [], writes: [...writes], savedAt: Date.now() }
+        if (port.consumes !== 'rows') return { ok: true as const }
+        const r = await port.commit(batch)
+        return r.ok ? { ok: true as const } : { ok: false as const, error: r.error }
+      } catch (error) {
+        return { ok: false as const, error }
+      }
+    }
+    const next = tail.then(run, run)
+    tail = next
+    return next
+  },
+
+  clear: () => port.clear(),
 
     /**
      * 备份是**可选能力**：没有就是 `null`（「没有备份」与「备份失败」必须分开——

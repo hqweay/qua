@@ -97,6 +97,7 @@ import { createLibraryClient, type LibraryClient } from './core/storage/library-
 import { Workset, worksetClosureIds } from './core/storage/workset.ts'
 import { UnloadedAliasError } from './core/kb/unsupported.ts'
 import { loadWorksetBoot, withAncestors, type WorksetBootResult } from './app/boot/workset-boot.ts'
+import { rebuildDerivedTables } from './app/boot/derived-rebuild.ts'
 import { candidateBuildOf } from './core/storage/query-candidates.ts'
 import type { QueryContext, QuerySpec } from './core/query/query.ts'
 import type { LoadedWorkspace } from './core/storage/index.ts'
@@ -264,6 +265,22 @@ let boot: LoadedWorkspace
   }
 }
 if (worksetBoot) kb.setCatalog(worksetBoot.catalog)
+
+/**
+ * **派生表的后台重建**（启动后错峰）：表还是 `pending`（迁移来的库没跑过全量）
+ * 时按顶层根逐批重建，跑完置 ready——反链/角标这些全库计数消费者等的就是它。
+ * 首帧之后 3 秒才起步，逐根一个小事务，与用户输入在同一队列里交错。
+ */
+if (worksetBoot && LIBRARY_BRIDGE && worksetBoot.catalog.meta.derivedState !== 'ready') {
+  setTimeout(() => {
+    void rebuildDerivedTables({
+      client: libraryClient!,
+      store,
+    })
+      .then((r) => console.info(`[derived] rebuild ${r.ok ? 'done' : 'incomplete'}: ${r.done}/${r.total} roots, failed=${r.failed}`))
+      .catch((e) => console.warn('[derived] rebuild failed:', e))
+  }, 3000)
+}
 
 /**
  * 读盘结果分型：

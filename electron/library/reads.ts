@@ -97,6 +97,7 @@ export function readCatalogRows(db: DatabaseSync): LibraryCatalog {
       ftsState: meta.get(META_KEYS.ftsState) ?? 'pending',
       ftsTokenizer: meta.get(META_KEYS.ftsTokenizer) ?? '',
       ftsRowidSeq: Number.isFinite(ftsSeq) && ftsSeq >= 0 ? ftsSeq : 0,
+      derivedState: meta.get(META_KEYS.derivedState) ?? 'pending',
     },
     journals,
     tags,
@@ -181,4 +182,10 @@ export function readDependents(
     else if (r.kind === 'prop') out.prop.push(id)
   }
   return out
+}
+
+/** 顶层根 id 清单（含软删根）：派生表流式重建的装载单位 */
+export function readRootIds(db: DatabaseSync): string[] {
+  const rows = db.prepare(LIBRARY_READS.catalogRoots).all() as { id: string }[]
+  return rows.map((r) => String(r.id))
 }

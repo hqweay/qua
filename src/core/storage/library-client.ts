@@ -38,6 +38,7 @@ export interface LibraryReadBridge {
   /** FTS 映射按块查（增量索引用） */
   ftsMap?(ids: readonly string[]): Promise<unknown>
   dependents?(targetId: string): Promise<unknown>
+  roots?(): Promise<unknown>
 }
 
 /**
@@ -58,6 +59,8 @@ export interface LibraryClient {
   ftsMap(ids: readonly string[]): Promise<LibraryReadResult<{ block_id: string; source: string | null; fts_rowid: number }[]>>
   /** 依赖方查询（全库口径）：改名/清除的 FTS 重铺用 */
   dependents(targetId: string): Promise<LibraryReadResult<{ content: string[]; tag: string[]; prop: string[] }>>
+  /** 顶层根 id 清单（派生表流式重建的装载单位） */
+  roots(): Promise<LibraryReadResult<string[]>>
   /** 查询候选 id（计划是超集；matcher 仍是判定来源）。失败分型与 doc 同一条 */
   candidates(plan: CandidatePlan): Promise<LibraryReadResult<string[]>>
   /** 候选装载：块＋全部祖先链（可选一层子级） */
@@ -162,6 +165,25 @@ function createClient(bridge: LibraryReadBridge): LibraryClient {
       if (r.status !== 'ok') return clientError('library/doc', `bad reply status: ${String(r.status)}`)
       if (!isDocRows(r.doc)) return clientError('library/doc', 'bad reply shape')
       return { status: 'ok', value: r.doc }
+    },
+
+    async roots() {
+      if (!bridge.roots) return clientError('library/roots', 'bridge has no roots read')
+      let raw: unknown
+      try {
+        raw = await bridge.roots()
+      } catch (e) {
+        return clientError('library/roots', e instanceof Error ? e.message : String(e))
+      }
+      const r = replyStatus(raw)
+      if (r.status === 'no-library') return { status: 'no-library' }
+      if (r.status === 'error') return clientError('library/roots', String(r.error ?? 'unknown'))
+      if (r.status !== 'ok') return clientError('library/roots', `bad reply status: ${String(r.status)}`)
+      const ids = (r as { ids?: unknown }).ids
+      if (!Array.isArray(ids) || !ids.every((x) => typeof x === 'string')) {
+        return clientError('library/roots', 'bad reply shape')
+      }
+      return { status: 'ok', value: ids }
     },
 
     async dependents(targetId) {
