@@ -165,6 +165,11 @@ const ftsSource: FtsCommitSource = {
 const store = createWorkspaceStore(
   LIBRARY_BRIDGE ? createIpcAdapter(LIBRARY_BRIDGE) : createLocalStorageAdapter(STORAGE_KEY),
   ftsSource,
+  {
+    // 派生关系行（层 2 第一片）：与行写入同一批。workset 在启动段才建——闭包现取，
+    // commit 只发生在装载之后
+    relationWrites: (ops) => workset?.relationWritesFor(ops) ?? [],
+  },
 )
 /**
  * **设备状态**（偏好）走它自己的键与端口实例：库作废不连累它。
@@ -324,7 +329,7 @@ search = createSearchService({
   loadBlocks: async (ids) => {
     if (!libraryClient || !workset || ids.length === 0) return
     const r = await libraryClient.tree(ids, false)
-    if (r.status === 'ok') workset.loadBlocks(r.value)
+    if (r.status === 'ok') workset.loadBlocks(r.value, true)
     else console.warn('[search] hit load failed:', r.status === 'error' ? r.error : r.status)
   },
   // 增量索引的现有 rowid 按块查（不再把整张映射搬进内存）
@@ -426,7 +431,7 @@ async function ensureQueryLoaded(
     const missing = r.value.filter((id) => !blocks.isLoaded(id))
     if (missing.length > 0) {
       const tr = await libraryClient.tree(missing, build.children)
-      if (tr.status === 'ok') workset.loadBlocks(tr.value)
+      if (tr.status === 'ok') workset.loadBlocks(tr.value, true)
       else {
         console.warn('[workset] candidate load failed:', tr.status === 'error' ? tr.error : tr.status)
         return false

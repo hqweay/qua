@@ -25,10 +25,14 @@
  * 本文件不做淘汰决策（预算与 pin 判据在 `BlockStore.trimWorkset`），只在淘汰后
  * 把被淘汰块的行一起丢掉，防止下一次装载把它们又算进来。
  */
+import type { Op } from '../kb/types.ts'
 import type { Block } from '../model/model.ts'
+import { isDeleted } from '../model/model.ts'
 import { walkForest } from '../model/walk.ts'
 import type { BlockStore } from '../model/store.ts'
-import { rowsToWorkspace, type RawLibraryRows } from './db-rows.ts'
+import { rowsToWorkspace, type RawLibraryRows, type RowWrite } from './db-rows.ts'
+import { derivedPruneWrites, type BlockRelationRow } from './derived-rows.ts'
+import { relationEdgesOfBlock } from '../relations/relations.ts'
 
 type Row = Record<string, unknown>
 
@@ -51,9 +55,24 @@ export class Workset {
   private rows: RawLibraryRows = emptyRows()
   /** 与 `store.isLoaded` 同步的一份 id 集合（淘汰后按它裁行缓存） */
   private ids = new Set<string>()
+  /**
+   * **祖先链完整的块**（`from_root`／`hidden` 这类派生格的正确性前提）。
+   * Doc 装载（子树＋祖先链）与显式 `complete` 的装载都进这一份；普通按 id 的
+   * 预取（引用目标）不进——它的父链还在库里。派生关系行只重铺完整链上的源块。
+   */
+  private complete = new Set<string>()
 
   constructor(store: BlockStore) {
     this.store = store
+  }
+
+  isComplete(id: string): boolean {
+    return this.complete.has(id)
+  }
+
+  /** 完整链集合的快照（测试/诊断用；派生行写读它） */
+  completeIds(): ReadonlySet<string> {
+    return this.complete
   }
 
   get size(): number {
@@ -72,6 +91,8 @@ export class Workset {
   loadDoc(rows: RawLibraryRows, rootIds: readonly string[]): Block[] {
     this.mergeRows(rows)
     this.apply()
+    // Doc 行自带完整祖先链：这一批的块从此都可算 from_root
+    for (const r of rows.blocks) this.complete.add(idOf(r))
     const out: Block[] = []
     for (const id of rootIds) {
       const b = this.store.find(id)
@@ -80,11 +101,17 @@ export class Workset {
     return out
   }
 
-  /** 装一批不带子树的块（引用目标、标签、字段定义……） */
-  loadBlocks(rows: RawLibraryRows): void {
+  /**
+   * 装一批不带子树的块（引用目标、标签、字段定义……）。
+   *
+   * `complete` ＝ 这批行**自带完整祖先链**（`tree` 读、全局身份块）⇒ 装完即可算
+   * from_root/hidden。普通按 id 预取不给：父链还在库里，派生格先不算。
+   */
+  loadBlocks(rows: RawLibraryRows, complete = false): void {
     if (rows.blocks.length === 0) return
     this.mergeRows(rows)
     this.apply()
+    if (complete) for (const r of rows.blocks) this.complete.add(idOf(r))
   }
 
   /** 钉住这些块（与 `BlockStore.pin` 同一份判据） */
@@ -112,6 +139,11 @@ export class Workset {
   /** 已加载 id 的快照（诊断/探针用） */
   loadedIds(): ReadonlySet<string> {
     return new Set(this.ids)
+  }
+
+  /** 这次 op 批的派生关系行写（只重铺祖先链完整的源块，见 `relationWritesOf`） */
+  relationWritesFor(ops: readonly Op[]): RowWrite[] {
+    return relationWritesOf(this.store, this.complete, ops)
   }
 
   /* ------------------------------------------------------------ 内部 */
@@ -177,14 +209,14 @@ export class Workset {
     for (const [id, info] of freshInfo) {
       if (existingInfo.has(id)) continue
       const target = mapped.get(id)!
-      target.children.splice(0, target.children.length, ...info.block.children.map((c) => mapped.get(c.id)!))
+      target.children.splice(0, target.children.length, ...info.block.children.map((c: Block) => mapped.get(c.id)!))
     }
 
     // 4) 老父块：只补缺的孩子，按新树里的兄弟序插到最近的前兄弟之后
     for (const [id, info] of freshInfo) {
       if (!existingInfo.has(id)) continue
       const target = mapped.get(id)!
-      const kids = info.block.children.map((c) => mapped.get(c.id)!)
+      const kids = info.block.children.map((c: Block) => mapped.get(c.id)!)
       for (let i = 0; i < kids.length; i++) {
         const kid = kids[i]!
         if (target.children.includes(kid)) continue
@@ -293,4 +325,95 @@ export function worksetClosureIds(blocks: readonly Block[], extra: readonly stri
     { includeDeleted: true },
   )
   return [...out]
+}
+
+/* ------------------------------------------------------------ 派生关系行（层 2 第一片） */
+
+/**
+ * **这次 op 批让谁的「出向关系边」变了**（关系行是**按源块**的行——不需要兄弟序，
+ * 是两张派生表里唯一能从部分工作集正确算的一张；`BlockIndex.path` 要全库兄弟 rank，
+ * 留给主进程侧的 SQL 设计，`derived_state` 在那之前保持 `pending`）。
+ *
+ * 返回两份集合：
+ *   · `prune`——关系行要**清掉**的源块（删除/清除的子树整棵都清，含已不可见的块）；
+ *   · `upsert`——关系行要**重铺**的源块（只含祖先链完整的块：`from_root` 要沿父链走到顶层）。
+ * 祖先链不完整的块**不动**：宁可让它的关系行保持库里原值（消费侧有 `derived_state` 闸），
+ * 也不写一份算错 root 的行。
+ */
+export interface AffectedRelations {
+  prune: Set<string>
+  upsert: Set<string>
+}
+
+function subtreeIdsOf(root: Block | undefined, id: string): { all: string[]; visible: string[] } {
+  if (!root) return { all: [id], visible: [id] }
+  const all: string[] = []
+  const visible: string[] = []
+  walkForest(
+    [root],
+    (b) => {
+      all.push(b.id)
+      if (!isDeleted(b)) visible.push(b.id)
+    },
+    { includeDeleted: true },
+  )
+  return { all, visible }
+}
+
+export function relationWritesOf(store: BlockStore, complete: ReadonlySet<string>, ops: readonly Op[]): RowWrite[] {
+  const index = store.index
+  const prune = new Set<string>()
+  const upsert = new Set<string>()
+  const addSubtree = (id: string): void => {
+    const { all, visible } = subtreeIdsOf(index.all.get(id), id)
+    for (const x of all) prune.add(x)
+    for (const x of visible) upsert.add(x)
+  }
+  for (const op of ops) {
+    if (op.e === 'block') {
+      if (op.op === 'upsert' && op.value.parent !== undefined) addSubtree(op.id)
+      else if (op.op === 'exist') addSubtree(op.id)
+      else {
+        // content/modified：正文里的引用边可能消失 ⇒ 先 prune 再按当前内容重铺
+        prune.add(op.id)
+        upsert.add(op.id)
+      }
+    } else {
+      // prop/anno：属性值边与 anno 边同理（清掉值＝边消失）
+      prune.add(op.block)
+      upsert.add(op.block)
+    }
+  }
+  // 祖先链不完整的块不重铺（from_root 会算错）；但 prune 照做——旧行清掉是对的
+  const sources = [...upsert].filter((id) => complete.has(id) && index.blocks.has(id))
+  if (prune.size === 0 && sources.length === 0) return []
+  const out = derivedPruneWrites([], prune)
+  const seen = new Set<string>()
+  const relations: BlockRelationRow[] = []
+  for (const id of sources) {
+    const b = index.blocks.get(id)
+    if (!b) continue
+    // from_root：沿父链走到顶层（祖先链完整的块，链上每一块都在内存里）
+    let root = id
+    for (let cur: string | null | undefined = id; cur !== null && cur !== undefined; cur = index.parentOf.get(cur)) {
+      root = cur
+    }
+    for (const e of relationEdgesOfBlock(b, index.propKinds, index.annos)) {
+      const key = `${e.from}\u0000${e.to}\u0000${e.kind}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      relations.push({ from_id: e.from, to_id: e.to, kind: e.kind, from_root: root })
+    }
+  }
+  if (relations.length > 0) {
+    for (const r of relations) {
+      out.push({
+        table: 'BlockRelation',
+        op: 'upsert',
+        key: { from_id: r.from_id, to_id: r.to_id, kind: r.kind },
+        values: { from_root: r.from_root },
+      })
+    }
+  }
+  return out
 }

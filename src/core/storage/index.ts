@@ -21,7 +21,7 @@ import type { Op } from '../kb/types.ts'
 import { changesOf } from '../kb/changes.ts'
 import { META_KEYS } from '../identity/library.ts'
 import { parseWorkspace, parseWorkspaceValue, type ParseResult, type Workspace } from './shape.ts'
-import { rowWritesFor, workspaceToRowWrites } from './db-rows.ts'
+import { rowWritesFor, workspaceToRowWrites, type RowWrite } from './db-rows.ts'
 import type { FtsCommitPlan, FtsCommitSource, FtsLoadState } from './fts-port.ts'
 
 /** 「整份库都动过」的那批改动：本地适配器的最细粒度（信封实现与门面共用同一份声明） */
@@ -83,7 +83,15 @@ export function judge(r: LoadResult): LoadedWorkspace {
  */
 export { changesOf }
 
-export function createWorkspaceStore(port: StoragePort, fts?: FtsCommitSource): WorkspaceStore {
+export interface WorkspaceStoreHooks {
+  /**
+   * **派生关系行写**（层 2）：工作集侧按 op 批算出 `BlockRelation` 的 prune＋upsert，
+   * 与行写入同一批（主进程同一个事务）。省略 ＝ 不维护（派生表保持装载侧现状）。
+   */
+  relationWrites?: (ops: readonly Op[]) => RowWrite[]
+}
+
+export function createWorkspaceStore(port: StoragePort, fts?: FtsCommitSource, hooks?: WorkspaceStoreHooks): WorkspaceStore {
   /**
    * **提交从「生成行」到「映射推进」全程串行**。
    *
@@ -121,6 +129,14 @@ export function createWorkspaceStore(port: StoragePort, fts?: FtsCommitSource): 
         if (port.consumes === 'rows') {
           batch.replace = replace
           batch.writes = replace ? workspaceToRowWrites(ws) : rowWritesFor(ws, ops)
+          /**
+           * **派生关系行与内容行同一批**（层 2）： prune 在前、upsert 在后，
+           * 主进程同一个事务里执行。整份替换不追加——replace 自带清表重建语义。
+           */
+          if (!replace) {
+            const derived = hooks?.relationWrites?.(ops)
+            if (derived && derived.length > 0) batch.writes.push(...derived)
+          }
 
           /**
            * **增量索引与内容行同一批**。规划可能失败（分词器没起来／worker 崩了）：

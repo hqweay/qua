@@ -103,7 +103,8 @@ export async function loadWorksetBoot(deps: WorksetBootDeps): Promise<WorksetBoo
   if (idn.status !== 'ok') {
     return idn.status === 'no-library' ? { status: 'no-library' } : { status: 'error', error: `identity: ${describe(idn)}` }
   }
-  deps.workset.loadBlocks(idn.value)
+  // 全局身份块都是顶层（身份不占位置）⇒ 祖先链天然完整，可参与派生行计算
+  deps.workset.loadBlocks(idn.value, true)
 
   let doc = first.doc
   let roots = first.roots
