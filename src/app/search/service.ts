@@ -14,6 +14,7 @@ import { compileMatch, scanSearch } from '../../core/search/query.ts'
 import { FTS_TOKENIZER_VERSION } from '../../core/search/tokenizer.ts'
 import { FTS_SOURCES, type FtsSource } from '../../core/search/sources.ts'
 import { SearchIndexer, type SearchSnapshot, type TokenizeMany } from './indexer.ts'
+export type { SearchSnapshot }
 import { rebuildSearch } from './rebuild.ts'
 import { createTokenizerClient, type TokenizerClient } from './tokenizer-client.ts'
 
@@ -63,6 +64,16 @@ export interface SearchDeps {
   tokenizer?: TokenizeMany
   /** 重建结束后有编辑被跳过 ⇒ 再排一轮的延迟 */
   retryDelayMs?: number
+  /**
+   * **这一份读面是不是只装了工作集**（工作集装载注入）。
+   * 工作集模式下重建/扫描都是**错**的——重建拿工作集重铺整表（写坏索引），
+   * 扫描只看得见已装载块（结果必然是错的另一半）⇒ 都显式不做：查询给空＋降级标记。
+   */
+  isPartial?: () => boolean
+  /** 命中块按 id 连祖先链装进工作集（查询结果的呈现要块对象） */
+  loadBlocks?: (ids: readonly string[]) => Promise<void>
+  /** FTS 映射按块查（增量索引的现有 rowid；整库模式省略——映射已全量在内存） */
+  ftsMapOf?: (ids: readonly string[]) => Promise<Map<string, number>>
 }
 
 export function createSearchService(deps: SearchDeps): SearchService {
@@ -94,7 +105,7 @@ export function createSearchService(deps: SearchDeps): SearchService {
         return client.tokenize(items)
       }
 
-  const indexer = new SearchIndexer(snapshot, tokenize)
+  const indexer = new SearchIndexer(snapshot, tokenize, { ftsMapOf: deps.ftsMapOf })
   const canFts = Boolean(bridge?.search)
 
   function clearTimer(): void {
@@ -138,6 +149,7 @@ export function createSearchService(deps: SearchDeps): SearchService {
 
   async function rebuild(): Promise<void> {
     if (disposed || !bridge || !canFts) return
+    if (deps.isPartial?.()) return
     if (inflight) return inflight
     inflight = (async () => {
       const r = await rebuildSearch({ forest: deps.forest, indexer, save: saveWrites })
@@ -151,6 +163,8 @@ export function createSearchService(deps: SearchDeps): SearchService {
   }
 
   async function scan(text: string, limit: number): Promise<SearchResult> {
+    // 工作集模式下扫描是错的另一半（只扫已装载块）⇒ 显式空，不静默给假结果
+    if (deps.isPartial?.()) return { hits: [], mode: 'scan' }
     return { hits: scanSearch(deps.forest(), text, limit).map((blockId) => ({ blockId, score: 0 })), mode: 'scan' }
   }
 
@@ -163,6 +177,8 @@ export function createSearchService(deps: SearchDeps): SearchService {
    */
   function start(): void {
     if (disposed || !bridge || !canFts) return
+    // 工作集模式下不重建（见 SearchDeps.isPartial）；索引已就绪时也无事可做
+    if (deps.isPartial?.()) return
     if (indexer.status === 'ready') return
     const kick = (): void => schedule()
     if (typeof document === 'undefined' || document.readyState === 'complete') kick()
@@ -187,10 +203,18 @@ export function createSearchService(deps: SearchDeps): SearchService {
           | { status?: string; hits?: { blockId?: unknown; source?: unknown; score?: unknown }[] }
           | null
         if (!reply || reply.status !== 'ok' || !Array.isArray(reply.hits)) return scan(text, n)
+        const raw = reply.hits
+        // 命中块先装载（工作集模式：结果呈现要块对象；祖先链用于路径与日期投影）
+        const hitIds = [...new Set(raw.map((h) => (typeof h.blockId === 'string' ? h.blockId : '')).filter((x) => x !== ''))]
+        try {
+          await deps.loadBlocks?.(hitIds)
+        } catch (err) {
+          console.warn(`[search] hit load failed: ${err instanceof Error ? err.message : String(err)}`)
+        }
         const forest = deps.forest()
         const hits: SearchHit[] = []
         const best = new Map<string, SearchHit>()
-        for (const h of reply.hits) {
+        for (const h of raw) {
           if (typeof h.blockId !== 'string') continue
           // 索引里可能还有刚软删的块（删除那一批还没来得及落盘）⇒ 结果以模型为准
           if (!findInForest(forest, h.blockId)) continue

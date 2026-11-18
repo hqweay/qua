@@ -68,6 +68,8 @@ export interface LibraryBridge {
   catalog?(): Promise<unknown>
   /** 全局身份块（页/标签/定义/回收站根） */
   identity?(): Promise<unknown>
+  /** FTS 映射按块查（增量索引用） */
+  ftsMap?(ids: readonly string[]): Promise<unknown>
 
   /**
    * 资产面（内容寻址；字节走 ArrayBuffer，主进程写进库目录的 `assets/`）。

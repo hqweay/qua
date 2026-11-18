@@ -40,7 +40,7 @@ import {
   type LibraryManifest,
 } from '../../src/core/identity/library.ts'
 import { createFolderAssetStore, type AssetStore } from './assets.ts'
-import { readBlockRows, readBlockTreeRows, readCandidateIds, readCatalogRows, readDocRows, readIdentityRows } from './reads.ts'
+import { readBlockRows, readBlockTreeRows, readCandidateIds, readCatalogRows, readDocRows, readFtsMapRows, readIdentityRows } from './reads.ts'
 import type { CandidatePlan, LibraryCatalog, LibraryDocRows, RawLibraryRows } from '../../src/core/storage/library-reads.ts'
 import {
   applyRowWrites,
@@ -387,4 +387,9 @@ export function readIdentity(session: RepoSession): RawLibraryRows {
   session.reads.identity += 1
   session.reads.identityRows += rows.blocks.length + rows.props.length + rows.aliases.length + rows.lists.length
   return rows
+}
+
+/** FTS 映射按块查（增量索引不再依赖全量映射进内存） */
+export function readFtsMap(session: RepoSession, blockIds: readonly string[]): { block_id: string; source: string | null; fts_rowid: number }[] {
+  return readFtsMapRows(session.db, blockIds)
 }

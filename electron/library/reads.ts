@@ -84,6 +84,7 @@ export function readCatalogRows(db: DatabaseSync): LibraryCatalog {
     meta.set(row.key, row.value)
   }
   const savedAt = Number(meta.get(META_KEYS.savedAt) ?? 0)
+  const ftsSeq = Number(meta.get(META_KEYS.ftsRowidSeq) ?? 0)
   const journals = db.prepare(LIBRARY_READS.catalogJournals).all() as CatalogJournal[]
   const tags = db.prepare(LIBRARY_READS.catalogTags).all() as CatalogTag[]
   const propDefs = db.prepare(LIBRARY_READS.catalogPropDefs).all() as CatalogPropDef[]
@@ -93,6 +94,9 @@ export function readCatalogRows(db: DatabaseSync): LibraryCatalog {
     meta: {
       activeId: meta.get(META_KEYS.activeId) ?? '',
       savedAt: Number.isFinite(savedAt) ? savedAt : 0,
+      ftsState: meta.get(META_KEYS.ftsState) ?? 'pending',
+      ftsTokenizer: meta.get(META_KEYS.ftsTokenizer) ?? '',
+      ftsRowidSeq: Number.isFinite(ftsSeq) && ftsSeq >= 0 ? ftsSeq : 0,
     },
     journals,
     tags,
@@ -147,4 +151,15 @@ export function readIdentityRows(db: DatabaseSync): RawLibraryRows {
   const aliases = db.prepare(LIBRARY_READS.docAliases).all(idJson) as Row[]
   const lists = db.prepare(LIBRARY_READS.docLists).all(idJson) as Row[]
   return { blocks, props, aliases, lists, meta: {} }
+}
+
+/** FTS 映射按块查（增量索引的装配单位；块 id 过滤走索引，不搬整表） */
+export function readFtsMapRows(db: DatabaseSync, blockIds: readonly string[]): { block_id: string; source: string | null; fts_rowid: number }[] {
+  if (blockIds.length === 0) return []
+  const idJson = JSON.stringify([...new Set(blockIds)])
+  return db.prepare(LIBRARY_READS.ftsMapOf).all(idJson) as {
+    block_id: string
+    source: string | null
+    fts_rowid: number
+  }[]
 }

@@ -29,7 +29,7 @@ import {
   type LibraryEntry,
 } from '../../src/core/identity/library.ts'
 import { libraryDir, loadRegistry, markOpened, saveRegistry, type RegistryIo } from './registry.ts'
-import { loadContent, openSession, readBlocks, readCatalog, readCandidates, readDoc, readIdentity, readTree, saveContent, type OpenFailure, type RepoSession } from './session.ts'
+import { loadContent, openSession, readBlocks, readCatalog, readCandidates, readDoc, readFtsMap, readIdentity, readTree, saveContent, type OpenFailure, type RepoSession } from './session.ts'
 import { hasContent, readSeq, searchFts, snapshotLibrary, type RowWrite } from './sqlite.ts'
 import { isCandidatePlan } from '../../src/core/storage/library-reads.ts'
 
@@ -491,6 +491,21 @@ export class LibraryManager {
       if (!s) return { status: 'no-library' }
       try {
         return { status: 'ok', catalog: readCatalog(s) }
+      } catch (err) {
+        return { status: 'error', error: String(err) }
+      }
+    })
+
+    /**
+     * **FTS 映射按块查**：增量索引只取「这批块的现有 rowid」，不再把整张映射搬进内存。
+     * 来源不认识的行由渲染层丢弃（宁可重建，不猜它是什么）。
+     */
+    ipcMain.handle('qua:library/fts-map', (e, ids: unknown) => {
+      const s = sessionOf(e)
+      if (!s) return { status: 'no-library' }
+      if (!isRootList(ids)) return { status: 'bad-args' }
+      try {
+        return { status: 'ok', rows: readFtsMap(s, ids) }
       } catch (err) {
         return { status: 'error', error: String(err) }
       }

@@ -76,7 +76,8 @@ import {
 } from './core/infra/assets.ts'
 import { createIpcAdapter, type LibraryBridge } from './core/storage/ipc-adapter.ts'
 import type { FtsCommitSource } from './core/storage/fts-port.ts'
-import { createSearchService, type SearchService } from './app/search/service.ts'
+import { createSearchService, type SearchService, type SearchSnapshot } from './app/search/service.ts'
+import { FTS_SOURCES, ftsRowKey, type FtsSource } from './core/search/sources.ts'
 import { describeHit, type HitView } from './app/search/hits.ts'
 import { recentBlocks } from './app/search/recents.ts'
 import {
@@ -298,10 +299,46 @@ if (boot.status !== 'ok') {
  * 索引状态来自这次装载：状态不是 `ready`／分词器版本不匹配 ⇒ 先扫描，后台重建
  * （重建在 worker 里，不占输入路径）。
  */
+/**
+ * **索引快照的两条来路**：整库路是装载自带的（映射整表在内存）；
+ * 工作集路的映射**按块查**，这里只带状态/分词器版本/水位——
+ * 状态不是 ready ⇒ 查询面显式降级（不扫描工作集），重建被服务挡住。
+ */
+const searchSnapshot: SearchSnapshot | undefined = worksetBoot
+  ? {
+      map: new Map(),
+      state: worksetBoot.catalog.meta.ftsState === 'ready' ? 'ready' : 'pending',
+      rowidSeq: worksetBoot.catalog.meta.ftsRowidSeq,
+      tokenizer: worksetBoot.catalog.meta.ftsTokenizer,
+    }
+  : boot.status === 'ok'
+    ? boot.search
+    : undefined
+
 search = createSearchService({
   bridge: LIBRARY_BRIDGE,
   forest: () => ws.blocks,
-  snapshot: boot.status === 'ok' ? boot.search : undefined,
+  snapshot: searchSnapshot,
+  isPartial: () => blocks.partial,
+  // 命中块按 id 连祖先链装进工作集（⌘K 的结果呈现要块对象）
+  loadBlocks: async (ids) => {
+    if (!libraryClient || !workset || ids.length === 0) return
+    const r = await libraryClient.tree(ids, false)
+    if (r.status === 'ok') workset.loadBlocks(r.value)
+    else console.warn('[search] hit load failed:', r.status === 'error' ? r.error : r.status)
+  },
+  // 增量索引的现有 rowid 按块查（不再把整张映射搬进内存）
+  ftsMapOf: async (ids) => {
+    if (!libraryClient) return new Map()
+    const r = await libraryClient.ftsMap(ids)
+    if (r.status !== 'ok') throw new Error(r.status === 'error' ? r.error : r.status)
+    const out = new Map<string, number>()
+    for (const row of r.value) {
+      if (typeof row.source !== 'string' || !(FTS_SOURCES as readonly string[]).includes(row.source)) continue
+      out.set(ftsRowKey(row.block_id, row.source as FtsSource), Number(row.fts_rowid))
+    }
+    return out
+  },
 })
 
 /**
@@ -757,13 +794,9 @@ const searchFaceDeps = (): SearchFaceDeps => {
       scheduleTabs()
       scheduleBadge()
     },
-    // 引擎现取：索引状态会变（ready 才信 FTS，否则扫描降级——面自己把降级说明白）
-    // ⚠️ 工作集模式下查询给空：`scan` 会扫工作集而不是库（结果必然是错的另一半），
-    //    FTS 查询层接上之前宁可显式空（面有「降级」标记），不给一份假结果
-    query: (text, limit) =>
-      blocks.partial
-        ? Promise.resolve({ hits: [], mode: 'scan' as const })
-        : (search ?? { query: async () => ({ hits: [], mode: 'scan' as const }) }).query(text, limit),
+    // 引擎现取：索引状态会变（ready 才信 FTS，否则扫描降级——面自己把降级说明白）。
+    // 工作集模式下「扫描」由服务挡成显式空（不扫工作集给假结果）
+    query: (text, limit) => (search ?? { query: async () => ({ hits: [], mode: 'scan' as const }) }).query(text, limit),
     // 行怎么说与 ⌘K 浮层同一份
     describe: (hit, term) => describeHit(kb, hit, term),
     openBlock: (id, place) => app.openBlock(id, place ?? 'center'),
@@ -939,17 +972,11 @@ const assets = setupAssets({
 
 
 /**
- * **工作集模式下搜索不重建**：重建会拿 `forest()`（＝工作集）当输入重铺**整张** FTS 表
- * ——那不是变慢，是把全库索引写坏（写出去的行只覆盖工作集）。搜索层迁移完成之前，
- * 工作集模式既不重建也不扫描，搜索面拿到的是显式空结果。
- */
-const searchIndexable = (): boolean => search !== undefined && !blocks.partial
-
-/**
  * 打开的是盘上已有的库 ⇒ 现在就检查索引；种子／换库那条路要等第一笔 replace
  * 落盘（`onReplace`）之后才重建，否则会先给一份还没写进库的森林建索引。
+ * （工作集模式下「重建/扫描都不做」的门在服务里：`SearchDeps.isPartial`。）
  */
-if (searchIndexable()) search.start()
+if (boot.status === 'ok') search.start()
 
 /* ------------------------------------------------------------ 关闭握手（Electron 库面） */
 
@@ -1659,8 +1686,7 @@ const app: App = {
   openSearch: (place) => {
     if (!search) return
     // 第一次打开搜索时把索引排上（启动期不抢 CPU；用户按下 ⌘K 是最可靠的「现在可以建」信号）
-    // ⚠️ 工作集模式下不排：重建会拿工作集重铺整张 FTS 表（见 `searchIndexable`）
-    if (searchIndexable()) search.start()
+    search.start()
     if (place === 'dock') {
       addUtility('right', 'search')
       return

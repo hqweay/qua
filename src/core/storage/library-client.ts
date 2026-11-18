@@ -35,6 +35,8 @@ export interface LibraryReadBridge {
   catalog(): Promise<unknown>
   /** 全局身份块（页/标签/定义/回收站根） */
   identity?(): Promise<unknown>
+  /** FTS 映射按块查（增量索引用） */
+  ftsMap?(ids: readonly string[]): Promise<unknown>
 }
 
 /**
@@ -51,6 +53,8 @@ export interface LibraryClient {
   doc(roots: readonly string[]): Promise<LibraryReadResult<LibraryDocRows>>
   /** 全局身份块（页/标签/定义/回收站根）：catalog 的块对象面 */
   identity(): Promise<LibraryReadResult<RawLibraryRows>>
+  /** FTS 映射按块查（增量索引的装配单位） */
+  ftsMap(ids: readonly string[]): Promise<LibraryReadResult<{ block_id: string; source: string | null; fts_rowid: number }[]>>
   /** 查询候选 id（计划是超集；matcher 仍是判定来源）。失败分型与 doc 同一条 */
   candidates(plan: CandidatePlan): Promise<LibraryReadResult<string[]>>
   /** 候选装载：块＋全部祖先链（可选一层子级） */
@@ -155,6 +159,32 @@ function createClient(bridge: LibraryReadBridge): LibraryClient {
       if (r.status !== 'ok') return clientError('library/doc', `bad reply status: ${String(r.status)}`)
       if (!isDocRows(r.doc)) return clientError('library/doc', 'bad reply shape')
       return { status: 'ok', value: r.doc }
+    },
+
+    async ftsMap(ids) {
+      if (!bridge.ftsMap) return clientError('library/fts-map', 'bridge has no fts-map read')
+      const uniq = [...new Set(ids.filter((x) => typeof x === 'string' && x !== ''))]
+      if (uniq.length === 0) return { status: 'ok', value: [] }
+      let raw: unknown
+      try {
+        raw = await bridge.ftsMap(uniq)
+      } catch (e) {
+        return clientError('library/fts-map', e instanceof Error ? e.message : String(e))
+      }
+      const r = replyStatus(raw)
+      if (r.status === 'no-library') return { status: 'no-library' }
+      if (r.status === 'bad-args') return { status: 'bad-args' }
+      if (r.status === 'error') return clientError('library/fts-map', String(r.error ?? 'unknown'))
+      if (r.status !== 'ok') return clientError('library/fts-map', `bad reply status: ${String(r.status)}`)
+      const rows = (r as { rows?: unknown }).rows
+      if (!Array.isArray(rows)) return clientError('library/fts-map', 'bad reply shape')
+      return {
+        status: 'ok',
+        value: rows.filter(
+          (x): x is { block_id: string; source: string | null; fts_rowid: number } =>
+            isRecord(x) && typeof (x as Record<string, unknown>).block_id === 'string',
+        ),
+      }
     },
 
     async identity() {

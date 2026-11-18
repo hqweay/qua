@@ -112,6 +112,8 @@ const qua = {
   catalog: (): Promise<unknown> => ipcRenderer.invoke('qua:library/catalog'),
   /** 全局身份块（页/标签/定义/回收站根）：catalog 的块对象面 */
   identity: (): Promise<unknown> => ipcRenderer.invoke('qua:library/identity'),
+  /** FTS 映射按块查（增量索引用） */
+  ftsMap: (ids: readonly string[]): Promise<unknown> => ipcRenderer.invoke('qua:library/fts-map', ids),
 
   /** 全文检索（match 由渲染层编译；主进程只做参数绑定与 bm25 排序） */
   search: (match: string, limit: number, offset = 0): Promise<unknown> =>

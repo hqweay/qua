@@ -106,6 +106,10 @@ export const LIBRARY_READS = {
        or b.kind is not null
        or exists (select 1 from ${L} l where l.block = b.id and l.list in ('page','tag'))`,
 
+  /** **FTS 映射按块查**（增量索引不再把整张映射搬进内存）：一块最多几行（每来源一行） */
+  ftsMapOf: `select block_id, source, fts_rowid from ${DB_TABLES.blockFtsMap}
+    where block_id in (select value from json_each(?1))`,
+
   /**
    * 日记日期（槽的日历／日记流窗口）。
    *
@@ -165,8 +169,17 @@ export type CatalogAlias = { name: string; block: string }
 
 /** 槽的全局身份摘要；页列表刻意不在这里（它是查询视图，按页查） */
 export type LibraryCatalog = {
-  /** 库级 meta 里首帧真需要的两格（当前对象与保存时刻） */
-  meta: { activeId: string; savedAt: number }
+  /**
+   * 库级 meta 里首帧真需要的几格：当前对象、保存时刻，以及 FTS 索引的状态
+   * （查询面据此决定「信 FTS 还是显式降级」；映射按块查，不再整表进内存）。
+   */
+  meta: {
+    activeId: string
+    savedAt: number
+    ftsState: string
+    ftsTokenizer: string
+    ftsRowidSeq: number
+  }
   journals: CatalogJournal[]
   tags: CatalogTag[]
   propDefs: CatalogPropDef[]

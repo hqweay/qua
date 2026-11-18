@@ -62,8 +62,17 @@ export class SearchIndexer implements FtsCommitSource {
    */
   private dirtyWhileUnindexed = false
   private readonly tokenize: TokenizeMany
+  /**
+   * **映射按块查**（工作集装载注入；整库模式省略——映射已全量在内存）。
+   * 增量写只碰「这批目标块」的现有 rowid：按块查一次，不再把整张映射搬进内存。
+   */
+  private readonly ftsMapOf: ((ids: readonly string[]) => Promise<Map<string, number>>) | undefined
 
-  constructor(snapshot: SearchSnapshot | undefined, tokenize: TokenizeMany) {
+  constructor(
+    snapshot: SearchSnapshot | undefined,
+    tokenize: TokenizeMany,
+    opts: { ftsMapOf?: (ids: readonly string[]) => Promise<Map<string, number>> } = {},
+  ) {
     this.map = new Map(snapshot?.map ?? [])
     /**
      * **水位不能低于映射里的最大值**。
@@ -78,6 +87,7 @@ export class SearchIndexer implements FtsCommitSource {
     this.state = snapshot?.state ?? 'pending'
     this.tokenizer = snapshot?.tokenizer ?? ''
     this.tokenize = tokenize
+    this.ftsMapOf = opts.ftsMapOf
   }
 
   /** 现在能不能相信 FTS（查询路径读它） */
@@ -188,10 +198,27 @@ export class SearchIndexer implements FtsCommitSource {
 
     const want = new Set<string>()
     for (const ids of targets.index.values()) for (const id of ids) want.add(id)
+    // 目标块的现有映射按块查（工作集模式下内存里没有整张映射）；水位被取回的 rowid 抬高
+    let lookup = this.map
+    if (this.ftsMapOf && want.size > 0) {
+      try {
+        const fetched = await this.ftsMapOf([...want])
+        if (fetched.size > 0) {
+          lookup = new Map(this.map)
+          for (const [key, rowid] of fetched) {
+            if (!lookup.has(key)) lookup.set(key, rowid)
+            if (rowid > this.rowid) this.rowid = rowid
+          }
+        }
+      } catch (e) {
+        console.warn(`[search] fts map fetch failed; skipping this batch: ${e instanceof Error ? e.message : String(e)}`)
+        return null
+      }
+    }
     const texts = ftsSourceTexts(ws, want)
     const items = texts.map((x) => ({ id: x.key, text: x.text }))
     const tokens = items.length > 0 ? await this.tokenize(items) : new Map<string, TokenizedText>()
-    const built = buildFtsWrites(targets, tokens, this.map, this.rowid)
+    const built = buildFtsWrites(targets, tokens, lookup, this.rowid)
     if (built.writes.length === 0) return null
     return {
       /**
