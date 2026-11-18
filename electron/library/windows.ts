@@ -29,10 +29,11 @@ import {
   type LibraryEntry,
 } from '../../src/core/identity/library.ts'
 import { libraryDir, loadRegistry, markOpened, saveRegistry, type RegistryIo } from './registry.ts'
-import { openSession, readBlocks, readCatalog, readCandidates, readDependentIds, readDoc, readFtsMap, readIdentity, readRelations, readRoots, readTree, saveContent, type OpenFailure, type RepoSession } from './session.ts'
+import { openSession, readBlocks, readCatalog, readCandidates, readDependentIds, readDoc, readFtsMap, readIdentity, readIndexChildren, readIndexFollowing, readIndexRows, readRelations, readRoots, readTree, saveContent, type OpenFailure, type RepoSession } from './session.ts'
 import { hasContent, readMeta, readSeq, searchFts, snapshotLibrary, type RowWrite } from './sqlite.ts'
 import { META_KEYS } from '../../src/core/identity/library.ts'
 import { isCandidatePlan } from '../../src/core/storage/library-reads.ts'
+import { isDerivedPlan, type DerivedPlan } from '../../src/core/storage/derived-plans.ts'
 
 /** 关窗握手等 renderer 回话的上限。超时就强关——卡住比丢一句话更糟。 */
 const CLOSE_ACK_TIMEOUT_MS = 1500
@@ -51,6 +52,11 @@ function isRootList(v: unknown): v is string[] {
     v.length <= 512 &&
     v.every((x) => typeof x === 'string' && x.length > 0 && x.length <= 256)
   )
+}
+
+/** `parent`／`left` 这类「可空 id」参数：null 或非空字符串，没有第三种形状 */
+function isNullableId(v: unknown): v is string | null {
+  return v === null || (typeof v === 'string' && v !== '' && v.length <= 256)
 }
 
 export interface LibraryManagerDeps {
@@ -386,7 +392,7 @@ export class LibraryManager {
       const s = sessionOf(e)
       if (!s) return { ok: false, error: 'no-library' }
       if (!Array.isArray(writes)) return { ok: false, error: 'bad-args' }
-      const o = opts as { replace?: unknown; oplog?: unknown; derived?: unknown } | null
+      const o = opts as { replace?: unknown; oplog?: unknown; derived?: unknown; plans?: unknown } | null
       const replace = Boolean(o?.replace)
       const derived = Boolean(o?.derived)
       /**
@@ -401,8 +407,18 @@ export class LibraryManager {
             .map((x) => ({ at: Number(x.at), opJson: String(x.opJson) }))
             .filter((x) => Number.isFinite(x.at) && x.opJson.length > 0)
         : []
+      /**
+       * **派生写计划**（可选）：形状只认 core 定义的那三种，参数只有前缀/块 id/0-1 位。
+       * 一条不合法就整批拒绝——计划是 core 算出来的，形状错是 bug；放它过去只会让
+       * 派生表与内容分叉，而那种分叉在界面上看不出来。
+       */
+      const plans: DerivedPlan[] = []
+      if (o?.plans !== undefined) {
+        if (!Array.isArray(o.plans) || !o.plans.every(isDerivedPlan)) return { ok: false, error: 'bad-args' }
+        plans.push(...(o.plans as DerivedPlan[]))
+      }
       try {
-        const changed = saveContent(s, writes as RowWrite[], { replace, oplog, derived })
+        const changed = saveContent(s, writes as RowWrite[], { replace, oplog, derived, plans })
         return { ok: true, changed }
       } catch (err) {
         return { ok: false, error: String(err) }
@@ -522,6 +538,45 @@ export class LibraryManager {
       if (!s) return { status: 'no-library' }
       try {
         return { status: 'ok', ids: readRoots(s) }
+      } catch (err) {
+        return { status: 'error', error: String(err) }
+      }
+    })
+
+    /**
+     * **派生位置行的三条读面**（结构写路径上的取数口，不是首帧读面）。
+     *
+     * 参数形状与 `doc` 同一条：id 列表非空、有上限；`parent`／`left` 只校验 null 或字符串。
+     * 执行 `core/storage/library-reads.ts` 的具名 SQL，主进程不认块语义。
+     */
+    ipcMain.handle('qua:library/index-rows', (e, ids: unknown) => {
+      const s = sessionOf(e)
+      if (!s) return { status: 'no-library' }
+      if (!isRootList(ids)) return { status: 'bad-args' }
+      try {
+        return { status: 'ok', rows: readIndexRows(s, ids) }
+      } catch (err) {
+        return { status: 'error', error: String(err) }
+      }
+    })
+
+    ipcMain.handle('qua:library/index-following', (e, parent: unknown, left: unknown) => {
+      const s = sessionOf(e)
+      if (!s) return { status: 'no-library' }
+      if (!isNullableId(parent) || !isNullableId(left)) return { status: 'bad-args' }
+      try {
+        return { status: 'ok', row: readIndexFollowing(s, parent, left) }
+      } catch (err) {
+        return { status: 'error', error: String(err) }
+      }
+    })
+
+    ipcMain.handle('qua:library/index-children', (e, parent: unknown) => {
+      const s = sessionOf(e)
+      if (!s) return { status: 'no-library' }
+      if (!isNullableId(parent)) return { status: 'bad-args' }
+      try {
+        return { status: 'ok', rows: readIndexChildren(s, parent) }
       } catch (err) {
         return { status: 'error', error: String(err) }
       }

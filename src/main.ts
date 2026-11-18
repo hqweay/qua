@@ -96,6 +96,7 @@ import { WORKSPACE_VERSION } from './core/infra/workspace.ts'
 import { createLibraryClient, type LibraryClient, type LibraryReadBridge } from './core/storage/library-client.ts'
 import { createMemoryLibraryClient } from './core/storage/memory-client.ts'
 import { Workset, worksetClosureIds } from './core/storage/workset.ts'
+import { indexReadsOf, indexWritesOf, type IndexReads } from './core/storage/index-rows.ts'
 import { UnloadedAliasError } from './core/kb/unsupported.ts'
 import type { RelationEdge, RelationKind } from './core/relations/relations.ts'
 import { loadWorksetBoot, withAncestors, type WorksetBootResult } from './app/boot/workset-boot.ts'
@@ -177,6 +178,10 @@ const store = createWorkspaceStore(
     // 派生关系行（层 2 第一片）：与行写入同一批。workset 在启动段才建——闭包现取，
     // commit 只发生在装载之后
     relationWrites: (ops) => workset?.relationWritesFor(ops) ?? [],
+    // 派生位置行（root/path/hidden）：同一批、同一事务。它要读库里的存量段（中点/后继），
+    // 所以是异步的——读在 store 的串行队列里，看到的是上一批已落盘的状态。
+    // 没有读面的宿主（web 单库）整条不接。
+    indexWrites: async (ops) => (indexReads ? indexWritesOf(blocks.index, ops, indexReads) : { writes: [], plans: [] }),
   },
 )
 /**
@@ -246,6 +251,13 @@ let libraryClient: LibraryClient | null =
   LIBRARY_BRIDGE && LIBRARY_BRIDGE.doc && LIBRARY_BRIDGE.catalog
     ? createLibraryClient({ ...LIBRARY_BRIDGE } as LibraryReadBridge)
     : null
+/**
+ * **派生位置行的读面**（结构写的中点要夹在库里的存量段之间）。
+ *
+ * 只有「库里有派生表」的宿主才拿得到（web 单库没有）；缺一条就整体不接，
+ * 增量维护整条钩子随之不接线——半套读面会把位置行的哪一半变成另一种答案。
+ */
+let indexReads: IndexReads | null = libraryClient ? indexReadsOf(libraryClient) : null
 let workset: Workset | null = null
 /** 工作集装载的结果（`null` ＝ 这次启动没走工作集路） */
 let worksetBoot: Extract<WorksetBootResult, { status: 'ok' }> | null = null

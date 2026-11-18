@@ -19,7 +19,7 @@
  * `library-reads.ts` 的具名查询与主进程执行分支，再在这里加一格——三处各写一份 SQL
  * 就是「同一件事有多个答案」。
  */
-import type { CandidatePlan, LibraryCatalog, LibraryDocRows, RawLibraryRows } from './library-reads.ts'
+import type { BlockIndexRow, CandidatePlan, LibraryCatalog, LibraryDocRows, RawLibraryRows } from './library-reads.ts'
 
 /** 桥面：桌面由 preload 提供；web 宿主根本没有库面（`undefined`） */
 export interface LibraryReadBridge {
@@ -40,6 +40,12 @@ export interface LibraryReadBridge {
   dependents?(targetId: string): Promise<unknown>
   roots?(): Promise<unknown>
   relations?(ids: readonly string[]): Promise<unknown>
+  /** 派生位置行按块批查（结构写的增量维护用） */
+  indexRows?(ids: readonly string[]): Promise<unknown>
+  /** 一个落点的库后继（`parent` 下 `left = ?`；`left` 为 null ＝ 层首） */
+  indexFollowing?(parent: string | null, left: string | null): Promise<unknown>
+  /** 一层的全部子块行（按库里的先序；整层重编号用） */
+  indexChildren?(parent: string | null): Promise<unknown>
 }
 
 /**
@@ -80,6 +86,15 @@ export interface LibraryClient {
    */
   blocks(ids: readonly string[]): Promise<LibraryReadResult<RawLibraryRows>>
   catalog(): Promise<LibraryReadResult<LibraryCatalog>>
+  /**
+   * **派生位置行的三条读面**（结构写的增量维护用）。
+   *
+   * 可选：web 单库没有派生表（它的「派生答案」就是内存索引本身），
+   * 这三格只为「内容行与派生行都在库里」的桌面宿主存在。
+   */
+  indexRows?(ids: readonly string[]): Promise<LibraryReadResult<BlockIndexRow[]>>
+  indexFollowing?(parent: string | null, left: string | null): Promise<LibraryReadResult<BlockIndexRow | null>>
+  indexChildren?(parent: string | null): Promise<LibraryReadResult<BlockIndexRow[]>>
 }
 
 /** 回复外壳的形状（主进程只回这几个 status；其余一律按坏回复处理） */
@@ -156,6 +171,42 @@ function replyStatus(r: unknown): ReadReply {
 
 /** 单次 `blocks` 的分片上限：与主进程 handler 的形状校验同一条（`isRootList` 的 512） */
 const BLOCKS_CHUNK = 512
+
+/** 回复三态 → 值：新读面共用的一层外壳（通道名进错误信息，坏回复停在发生的那一层） */
+async function invoke<T>(
+  channel: string,
+  call: () => Promise<unknown>,
+  pick: (r: ReadReply) => T | undefined,
+): Promise<LibraryReadResult<T>> {
+  let raw: unknown
+  try {
+    raw = await call()
+  } catch (e) {
+    return clientError(channel, e instanceof Error ? e.message : String(e))
+  }
+  const r = replyStatus(raw)
+  if (r.status === 'no-library') return { status: 'no-library' }
+  if (r.status === 'bad-args') return { status: 'bad-args' }
+  if (r.status === 'error') return clientError(channel, String(r.error ?? 'unknown'))
+  if (r.status !== 'ok') return clientError(channel, `bad reply status: ${String(r.status)}`)
+  const value = pick(r)
+  return value === undefined ? clientError(channel, 'bad reply shape') : { status: 'ok', value }
+}
+
+/** 一行派生位置行的形状（四列；`hidden` 只有 1 与 null 两种值） */
+function isIndexRow(v: unknown): v is BlockIndexRow {
+  return (
+    isRecord(v) &&
+    typeof v.block === 'string' &&
+    typeof v.root === 'string' &&
+    typeof v.path === 'string' &&
+    (v.hidden === 1 || v.hidden === null)
+  )
+}
+
+function isIndexRowList(v: unknown): v is BlockIndexRow[] {
+  return Array.isArray(v) && v.every(isIndexRow)
+}
 
 function createClient(bridge: LibraryReadBridge): LibraryClient {
   return {
@@ -368,6 +419,31 @@ function createClient(bridge: LibraryReadBridge): LibraryClient {
       if (r.status !== 'ok') return clientError('library/catalog', `bad reply status: ${String(r.status)}`)
       if (!isCatalog(r.catalog)) return clientError('library/catalog', 'bad reply shape')
       return { status: 'ok', value: r.catalog }
+    },
+
+    async indexRows(ids) {
+      if (!bridge.indexRows) return clientError('library/index-rows', 'bridge has no index-rows read')
+      const uniq = [...new Set(ids.filter((x) => typeof x === 'string' && x !== ''))]
+      if (uniq.length === 0) return { status: 'ok', value: [] }
+      return invoke('library/index-rows', () => bridge.indexRows!(uniq), (r) =>
+        isIndexRowList(r.rows) ? r.rows : undefined,
+      )
+    },
+
+    async indexFollowing(parent, left) {
+      if (!bridge.indexFollowing) return clientError('library/index-following', 'bridge has no index-following read')
+      return invoke('library/index-following', () => bridge.indexFollowing!(parent, left), (r) => {
+        const row = (r as { row?: unknown }).row
+        if (row === null) return null
+        return isIndexRow(row) ? row : undefined
+      })
+    },
+
+    async indexChildren(parent) {
+      if (!bridge.indexChildren) return clientError('library/index-children', 'bridge has no index-children read')
+      return invoke('library/index-children', () => bridge.indexChildren!(parent), (r) =>
+        isIndexRowList(r.rows) ? r.rows : undefined,
+      )
     },
   }
 }

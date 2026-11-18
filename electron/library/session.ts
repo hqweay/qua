@@ -40,8 +40,29 @@ import {
   type LibraryManifest,
 } from '../../src/core/identity/library.ts'
 import { createFolderAssetStore, type AssetStore } from './assets.ts'
-import { readBlockRows, readBlockTreeRows, readCandidateIds, readCatalogRows, readDocRows, readDependents, readFtsMapRows, readIdentityRows, readRelationsFor, readRootIds } from './reads.ts'
-import type { CandidatePlan, LibraryCatalog, LibraryDocRows, RawLibraryRows } from '../../src/core/storage/library-reads.ts'
+import {
+  readBlockRows,
+  readBlockTreeRows,
+  readCandidateIds,
+  readCatalogRows,
+  readDocRows,
+  readDependents,
+  readFtsMapRows,
+  readIdentityRows,
+  readIndexChildren as readIndexChildrenFor,
+  readIndexFollowing as readIndexFollowingFor,
+  readIndexRows as readIndexRowsFor,
+  readRelationsFor,
+  readRootIds,
+} from './reads.ts'
+import type {
+  BlockIndexRow,
+  CandidatePlan,
+  LibraryCatalog,
+  LibraryDocRows,
+  RawLibraryRows,
+} from '../../src/core/storage/library-reads.ts'
+import type { DerivedPlan } from '../../src/core/storage/derived-plans.ts'
 import {
   applyRowWrites,
   openLibraryDb,
@@ -310,7 +331,13 @@ export function readCatalog(session: RepoSession): LibraryCatalog {
 export function saveContent(
   session: RepoSession,
   writes: readonly RowWrite[],
-  opts: { replace?: boolean; oplog?: readonly { at: number; opJson: string }[]; derived?: boolean } = {},
+  opts: {
+    replace?: boolean
+    oplog?: readonly { at: number; opJson: string }[]
+    derived?: boolean
+    /** 派生表的整片改写计划：同一个事务、行写入之后执行（见 `derived-plans.ts`） */
+    plans?: readonly DerivedPlan[]
+  } = {},
 ): number {
   /**
    * **变更流与行写入同一个事务**（`applyRowWrites` 内部把它并进同一层事务）。
@@ -319,7 +346,7 @@ export function saveContent(
    */
   const changed = opts.replace
     ? replaceContentRows(session.db, writes, { deviceId: session.deviceId, oplog: opts.oplog })
-    : applyRowWrites(session.db, writes, { deviceId: session.deviceId, oplog: opts.oplog })
+    : applyRowWrites(session.db, writes, { deviceId: session.deviceId, oplog: opts.oplog, plans: opts.plans })
   /**
    * **派生索引的构建成本单独记账**：它不是「一次用户动作写了多少行」。
    * 同一个计数器里混进 100k 重建的 20 万行，会让「打一个字写几行」永远测不出来。
@@ -388,4 +415,27 @@ export function readRelations(
   targetIds: readonly string[],
 ): { to_id: string; from_id: string; kind: string; from_root: string }[] {
   return readRelationsFor(session.db, targetIds)
+}
+
+/**
+ * **派生位置行的三条读面**（增量维护的取数口）。
+ *
+ * 不计入 `reads` 的行数账：那组数是「首帧装载读了多少」的证据，而这三条发生在
+ * 结构写的路径上（一次一两行；`indexChildren` 只在整层重编号时读一层）。
+ * 混进去会让「首帧读数」这条断言失去意义。
+ */
+export function readIndexRows(session: RepoSession, blockIds: readonly string[]): BlockIndexRow[] {
+  return readIndexRowsFor(session.db, blockIds)
+}
+
+export function readIndexFollowing(
+  session: RepoSession,
+  parent: string | null,
+  left: string | null,
+): BlockIndexRow | null {
+  return readIndexFollowingFor(session.db, parent, left)
+}
+
+export function readIndexChildren(session: RepoSession, parent: string | null): BlockIndexRow[] {
+  return readIndexChildrenFor(session.db, parent)
 }

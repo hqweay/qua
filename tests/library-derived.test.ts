@@ -198,6 +198,35 @@ test('新建库：派生表存在且状态 pending（空表 ≠ 已建好）', (
   db.close()
 })
 
+test('v13 → v14：位置行进入增量维护 ⇒ 两张派生表整表作废，内容行原样', () => {
+  const file = tmpDb()
+  const first = openLibraryDb(file, { target: 13 })
+  assert.equal(first.status, 'created', '先造一个 v13 的库')
+  applyRowWrites(first.db!, [
+    { table: 'Block', op: 'upsert', key: { id: 'keep-me' }, values: { content: '[]', created: 1, modified: 1, parent: null, left: null } },
+  ])
+  applyRowWrites(first.db!, rebuildDerivedWrites(readContentRows(first.db!)))
+  // 一行「上一次重建之后早已不该存在」的残留：清表必须把它也带走
+  applyRowWrites(first.db!, [
+    { table: 'BlockIndex', op: 'upsert', key: { block: 'ghost' }, values: { root: 'ghost', path: '/0000000001024/', hidden: null } },
+  ])
+  assert.equal(readMeta(first.db!, META_KEYS.derivedState), 'ready')
+  first.db!.close()
+
+  const r = openLibraryDb(file)
+  assert.equal(r.status, 'migrated', `v13 应当被迁移，实际 ${r.status}`)
+  assert.equal(r.version, DB_SCHEMA_VERSION)
+  const db = r.db!
+  assert.equal(readMeta(db, META_KEYS.derivedState), 'pending', '两张表都要重铺一轮')
+  const count = (table: string): number =>
+    (db.prepare(`select count(*) as n from ${table}`).all() as { n: number }[])[0]!.n
+  assert.equal(count(DB_TABLES.blockIndex), 0, '清表而不是只改状态：残留行不能留到 rebuild')
+  assert.equal(count(DB_TABLES.blockRelation), 0)
+  assert.equal(count(DB_TABLES.block), 1, '迁移不许动内容')
+  assert.deepEqual((db.prepare(`select id from ${DB_TABLES.block}`).all() as { id: string }[]).map((b) => b.id), ['keep-me'])
+  db.close()
+})
+
 /* ------------------------------------------------------------ ② 语义 */
 
 test('重建：root／hidden／先序与内存 Index 同源；关系边按 (from,to,kind) 与 Index 一致', () => {

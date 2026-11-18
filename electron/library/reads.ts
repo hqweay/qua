@@ -14,6 +14,7 @@ import {
   candidatePlanSql,
   LIBRARY_READS,
   type CandidatePlan,
+  type BlockIndexRow,
   type CatalogAlias,
   type CatalogJournal,
   type CatalogPropDef,
@@ -203,4 +204,33 @@ export function readRelationsFor(
     kind: string
     from_root: string
   }[]
+}
+
+/* ------------------------------------------------------------ 派生位置行 */
+
+/** `BlockIndex` 行的四列按派生层的形状归一（`hidden` 只可能是 1 / null） */
+function indexRows(rows: readonly unknown[]): BlockIndexRow[] {
+  return (rows as Record<string, unknown>[]).map((r) => ({
+    block: String(r.block),
+    root: String(r.root),
+    path: String(r.path),
+    hidden: r.hidden === 1 ? 1 : null,
+  }))
+}
+
+/** 一批块的派生位置行（增量维护：存量前缀／父前缀／前兄弟的存量段） */
+export function readIndexRows(db: DatabaseSync, blockIds: readonly string[]): BlockIndexRow[] {
+  if (blockIds.length === 0) return []
+  const idJson = JSON.stringify([...new Set(blockIds)])
+  return indexRows(db.prepare(LIBRARY_READS.indexByBlock).all(idJson))
+}
+
+/** 一个落点的库后继（`parent` 下 `left = ?` 的那一行；`left` 为 null ＝ 层首） */
+export function readIndexFollowing(db: DatabaseSync, parent: string | null, left: string | null): BlockIndexRow | null {
+  return indexRows(db.prepare(LIBRARY_READS.indexFollowing).all(parent, left))[0] ?? null
+}
+
+/** 一层的全部子块行（按库里的先序；整层重编号的取数口） */
+export function readIndexChildren(db: DatabaseSync, parent: string | null): BlockIndexRow[] {
+  return indexRows(db.prepare(LIBRARY_READS.indexChildren).all(parent))
 }

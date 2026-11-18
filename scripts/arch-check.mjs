@@ -687,6 +687,13 @@ function commandDecls() {
      * 仍住在 core，主进程不解释它们。
      */
     /^(\.\.\/)+src\/core\/storage\/library-reads(\.ts)?$/,
+    /**
+     * `src/core/storage/derived-plans.ts` 是**纯写计划**：三种派生表的整片改写
+     * （前缀改写／清除／hidden 重算）的 SQL 文本与形状校验。主进程执行它——因为
+     * `recomputeHidden` 里「自己或祖先被软删 ⇒ hidden」是派生格的**定义**（块语义），
+     * 只能由 core 写成 SQL、主进程照跑；参数只有前缀串／块 id／0-1 位。
+     */
+    /^(\.\.\/)+src\/core\/storage\/derived-plans(\.ts)?$/,
   ]
   const hits = []
   for (const f of electronFiles) {
@@ -705,12 +712,12 @@ function commandDecls() {
   }
   add({
     id: '2+',
-    title: '主进程准入白名单：只许 node:* / electron / core/infra/msg / core/identity/library / core/infra/assets / core/storage/library-reads（纯查询计划）（块语义、查询、渲染一律不许）',
+    title: '主进程准入白名单：只许 node:* / electron / core/infra/msg / core/identity/library / core/infra/assets / core/storage/library-reads（纯查询计划）/ core/storage/derived-plans（纯写计划）（块语义、查询、渲染一律不许）',
     method:
-      'AST 遍历 electron/**/*.ts 的 import/export-from，**白名单**逐条比：`node:*`／`electron`／`src/core/infra/msg`／`src/core/identity/library`／`src/core/infra/assets`／`src/core/storage/library-reads`（纯 SQL 计划）；其余一律命中',
+      'AST 遍历 electron/**/*.ts 的 import/export-from，**白名单**逐条比：`node:*`／`electron`／`src/core/infra/msg`／`src/core/identity/library`／`src/core/infra/assets`／`src/core/storage/library-reads`（纯 SQL 计划）／`src/core/storage/derived-plans`（纯 SQL 计划）；其余一律命中',
     scope: `electron/**/*.ts（${electronFiles.length} 个文件：${electronFiles.map(rel).join(' · ')}）`,
     whitelist:
-      '`node:*`（fs／sqlite／path）· `electron`（壳本体）· `./x.ts`（主进程自己目录内）· `src/core/infra/msg`（纯文案字典）· `src/core/identity/library`（库身份与版本判据，零依赖、两进程共读）· `src/core/infra/assets`（字节→类型/后缀/地址的纯函数，同一份判据给协议两端）· `src/core/storage/library-reads`（只读查询计划：具名 SQL＋类型，无块模型/渲染/存储实现）',
+      '`node:*`（fs／sqlite／path）· `electron`（壳本体）· `./x.ts`（主进程自己目录内）· `src/core/infra/msg`（纯文案字典）· `src/core/identity/library`（库身份与版本判据，零依赖、两进程共读）· `src/core/infra/assets`（字节→类型/后缀/地址的纯函数，同一份判据给协议两端）· `src/core/storage/library-reads`（只读查询计划：具名 SQL＋类型，无块模型/渲染/存储实现）· `src/core/storage/derived-plans`（派生表写计划：SQL 文本＋形状校验，参数只有前缀/块 id/0-1 位）',
     hits: hits.length,
     detail: hits,
     note: '为什么是白名单：黑名单版本实测放行 core/query、core/kb/types、view/editor、app/handlers —— 「块语义搬进主进程」时门禁不会红，而那时块语义已经有两个实现',

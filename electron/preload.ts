@@ -119,6 +119,14 @@ const qua = {
   roots: (): Promise<unknown> => ipcRenderer.invoke('qua:library/roots'),
   /** 入向关系按目标批查（引用角标的全库计数；派生表未 ready 时 rows 空＋ready:false） */
   relations: (ids: readonly string[]): Promise<unknown> => ipcRenderer.invoke('qua:library/relations', ids),
+  /** 派生位置行按块批查（增量维护：存量前缀／父前缀／前兄弟的存量段） */
+  indexRows: (ids: readonly string[]): Promise<unknown> => ipcRenderer.invoke('qua:library/index-rows', ids),
+  /** 一个落点的库后继（`parent` 下 `left = ?` 的那一行；`left` 为 null ＝ 层首） */
+  indexFollowing: (parent: string | null, left: string | null): Promise<unknown> =>
+    ipcRenderer.invoke('qua:library/index-following', parent, left),
+  /** 一层的全部子块行（按库里的先序；整层重编号用） */
+  indexChildren: (parent: string | null): Promise<unknown> =>
+    ipcRenderer.invoke('qua:library/index-children', parent),
 
   /** 全文检索（match 由渲染层编译；主进程只做参数绑定与 bm25 排序） */
   search: (match: string, limit: number, offset = 0): Promise<unknown> =>

@@ -25,12 +25,15 @@
  */
 import { DB_TABLES } from '../identity/library.ts'
 import type { RawLibraryRows } from './db-rows.ts'
+import type { BlockIndexRow } from './derived-rows.ts'
 
 /**
  * 行形状经这一份**再导出**给主进程：`electron/**` 的 import 白名单只认少数 core 模块，
  * 行编码的形状从具名查询这一层走（主进程不该直接摸 `db-rows` 的编码细节）。
  */
 export type { RawLibraryRows }
+/** 派生位置行的形状（`BlockIndex` 四列；增量维护的读面按它回话） */
+export type { BlockIndexRow }
 
 const B = DB_TABLES.block
 const P = DB_TABLES.property
@@ -124,6 +127,39 @@ export const LIBRARY_READS = {
   /** **入向关系按目标批查**（引用角标的全库计数；派生表 ready 后才可读） */
   relationsFor: `select to_id, from_id, kind, from_root, count from BlockRelation
     where to_id in (select value from json_each(?1))`,
+
+  /**
+   * **派生位置行按块批查**（`BlockIndex` 的按 id 取数口）。
+   *
+   * 增量维护要三样东西都从这里取：受影响子树的**库里现存前缀**（移动/清除按它整片改）、
+   * 父块的路径前缀与 root/hidden（新子树的行要拼在它下面）、前兄弟的**存量段**
+   * （中点必须夹在库里的段之间，不是渲染器现算的 rank）。
+   */
+  indexByBlock: `select block, root, path, hidden from ${DB_TABLES.blockIndex}
+    where block in (select value from json_each(?1))`,
+
+  /**
+   * **某个落点的库后继**：`parent` 下 `left = ?` 的那一行（`left` 为 null 时是层首）。
+   *
+   * 为什么不能只看内存：顶层根在工作集里只装了一部分，新块落到了「内存里前一个根」
+   * 的右边，而库里它后面可能还有未装载的根。中点必须夹在**库里的**后继之前。
+   * `(parent, left)` 有索引（`idx_Block_parent_left`），成本是一次定位。
+   */
+  indexFollowing: `select i.block, i.root, i.path, i.hidden from ${DB_TABLES.blockIndex} i
+    join ${B} b on b.id = i.block
+    where b.parent is ?1 and b.left is ?2
+    order by i.path limit 1`,
+
+  /**
+   * **一层的全部子块行**（按库里的先序）：整层重编号的取数口。
+   *
+   * 中点夹不出来（段耗尽）时唯一稳的做法是把这一层按最终顺序重铺段值——那要知道
+   * 这一层现在有哪些块、各自的旧前缀。层内块数由「这个父块有几个孩子」决定。
+   */
+  indexChildren: `select i.block, i.root, i.path, i.hidden from ${DB_TABLES.blockIndex} i
+    join ${B} b on b.id = i.block
+    where b.parent is ?1
+    order by i.path`,
 
   /** **顶层根清单**（派生表流式重建的装载单位；含软删根——它们的行也要 hidden=1） */
   catalogRoots: `select id from ${B} where parent is null order by rowid`,

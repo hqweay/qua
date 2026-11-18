@@ -42,6 +42,11 @@ import {
   judgeDbVersion,
   type DbVersionVerdict,
 } from '../../src/core/identity/library.ts'
+import {
+  DERIVED_PLAN_SQL,
+  derivedPlanParams,
+  type DerivedPlan,
+} from '../../src/core/storage/derived-plans.ts'
 
 export type Db = DatabaseSync
 
@@ -414,6 +419,26 @@ export const MIGRATIONS: Migration[] = [
       if (!cols.includes('count')) {
         db.exec(`alter table ${DB_TABLES.blockRelation} add column count integer`)
       }
+    },
+  },
+  {
+    to: 14,
+    up: (db) => {
+      /**
+       * **位置行进入增量维护**：从这一版起 `BlockIndex` 的 root/path/hidden 跟着每次
+       * 结构写更新，与 `BlockRelation` 同时进入「重建铺底＋增量跟随」。
+       *
+       * 旧库里的 `BlockIndex` 是上一次重建时刻的快照（之后的插入/移动/软删都没跟上），
+       * 而那些改动不产生任何迁移可复算的痕迹 ⇒ 只能整表作废、打回 `pending`，让流式重建
+       * 按内容重铺一轮。**清表而不是只改状态**：流式重建只 upsert，残留的旧行（例如
+       * 早已清除的块）它不会删——「作废」必须是空的起点。
+       *
+       * 两张派生表共用一个状态键：它们的可信边界本来就同源（同一趟重建、同一批维护），
+       * 拆成两个键只会让读侧多一处两表不同步的可能。
+       */
+      db.exec(`delete from ${DB_TABLES.blockIndex}`)
+      db.exec(`delete from ${DB_TABLES.blockRelation}`)
+      writeMeta(db, META_KEYS.derivedState, 'pending')
     },
   },
 ]
@@ -849,17 +874,26 @@ function runWrite(db: Db, w: RowWrite): number {
  * 为什么必须整批一个事务：一批 op 是一次用户动作；半批落盘＝模型改了、盘上只有一半，
  * 而读回来那份会是一棵缺了父块或顺序错乱的树（不报错）。
  *
+ * `plans`（派生写计划）在行**之后**、同一事务里执行：`recomputeHidden` 读的
+ * `deleted` 必须是这批已经落盘的值。
+ *
  * @returns 真正改到的行数（诊断面与成本断言用它数「打一个字写了几行」）
  */
 export function applyRowWrites(
   db: Db,
   writes: readonly RowWrite[],
-  opts: { deviceId?: string; oplog?: readonly { at: number; opJson: string }[] } = {},
+  opts: {
+    deviceId?: string
+    oplog?: readonly { at: number; opJson: string }[]
+    plans?: readonly DerivedPlan[]
+  } = {},
 ): number {
-  if (writes.length === 0) return 0
+  const plans = opts.plans ?? []
+  if (writes.length === 0 && plans.length === 0) return 0
   let changed = 0
   inTransaction(db, () => {
     for (const w of writes) changed += runWrite(db, w)
+    changed += applyDerivedPlans(db, plans)
     /**
      * **变更流与行写入同一个事务**：分开写会在崩溃时重号（幂等失效）或跳号
      * （对端水位出现空洞）。`appendLocalOps` 自己**不开**事务（它假定已在事务里），
@@ -868,6 +902,21 @@ export function applyRowWrites(
     const oplog = opts.oplog ?? []
     if (oplog.length > 0 && opts.deviceId) appendLocalOpsInner(db, opts.deviceId, oplog)
   })
+  return changed
+}
+
+/**
+ * **具名派生写计划**（`core/storage/derived-plans.ts`）的执行：一条一条按序跑。
+ *
+ * 主进程只做「取 SQL 文本、按序绑定参数」——前缀与 id 是数据，SQL 文本来自 core。
+ * 顺序就是调用方给的顺序（移动的旧前缀互不相交；清除先于重写）。
+ */
+export function applyDerivedPlans(db: Db, plans: readonly DerivedPlan[]): number {
+  let changed = 0
+  for (const plan of plans) {
+    const r = db.prepare(DERIVED_PLAN_SQL[plan.p]).run(...derivedPlanParams(plan))
+    changed += Number(r.changes)
+  }
   return changed
 }
 

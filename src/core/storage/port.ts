@@ -21,6 +21,7 @@
 
 import type { Change, ChangeKind, Op } from '../kb/types.ts'
 import type { RowWrite } from './db-rows.ts'
+import type { DerivedPlan } from './derived-plans.ts'
 
 export type { Change, ChangeKind }
 
@@ -50,6 +51,14 @@ export interface CommitBatch {
   payload?: string
   /** 这批 op 动过的块的行（只有 `consumes: 'rows'` 的适配器要；编码见 `db-rows.ts`） */
   writes?: RowWrite[]
+  /**
+   * **派生表的整片改写计划**（前缀改写／清除／hidden 重算）：与 `writes` 同一个事务、
+   * 在行之后执行（`recomputeHidden` 读的 `deleted` 必须是这批已经落盘的值）。
+   *
+   * 与 `writes` 分开的理由：行写入按主键逐行说「这一行是什么」，只对渲染器**认识**的行
+   * 成立；而重编号/软删会改到未装载子孙的行——那些只能按前缀交给 SQL（见 `derived-plans.ts`）。
+   */
+  plans?: readonly DerivedPlan[]
   /**
    * **这一批 op 本身**（变更流）。落库适配器把它追加进 `op_log`，**与行写入同一个事务**。
    *

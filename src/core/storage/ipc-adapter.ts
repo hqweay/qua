@@ -32,7 +32,15 @@ export interface LibraryBridge {
    * `oplog` 与 `writes` 必须落在**同一个事务**里：分开写会在崩溃时重号（幂等失效）
    * 或跳号（对端水位出现空洞），而 `op_log` 的两条性质都建立在这条上。
    */
-  save(writes: unknown[], opts?: { replace?: boolean; oplog?: { at: number; opJson: string }[]; derived?: boolean }): Promise<unknown>
+  save(
+    writes: unknown[],
+    opts?: {
+      replace?: boolean
+      oplog?: { at: number; opJson: string }[]
+      derived?: boolean
+      plans?: readonly unknown[]
+    },
+  ): Promise<unknown>
 
   /**
    * 全文检索查询。`match` 由渲染层编译（含列过滤与 phrase），主进程只把它当参数绑定。
@@ -108,7 +116,11 @@ export function createIpcAdapter(bridge: LibraryBridge): StoragePort {
            * （分开写会在崩溃时重号或跳号，而 `op_log` 的幂等与水位都建立在这条上）。
            */
           const oplog = batch.oplog?.map((op) => ({ at: op.at, opJson: JSON.stringify(op) })) ?? []
-          const r = (await bridge.save(writes, { replace: batch.replace === true, oplog })) as
+          const r = (await bridge.save(writes, {
+            replace: batch.replace === true,
+            oplog,
+            plans: batch.plans ?? [],
+          })) as
             | { ok?: boolean; error?: unknown }
             | null
           if (r && r.ok === true) return { ok: true, savedAt: batch.savedAt }

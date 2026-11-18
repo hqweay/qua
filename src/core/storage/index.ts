@@ -22,6 +22,7 @@ import { changesOf } from '../kb/changes.ts'
 import { META_KEYS } from '../identity/library.ts'
 import { parseWorkspace, type ParseResult, type Workspace } from './shape.ts'
 import { rowWritesFor, workspaceToRowWrites, type RowWrite } from './db-rows.ts'
+import type { IndexWriteBatch } from './index-rows.ts'
 import type { FtsCommitPlan, FtsCommitSource } from './fts-port.ts'
 
 /** 「整份库都动过」的那批改动：本地适配器的最细粒度（信封实现与门面共用同一份声明） */
@@ -91,6 +92,14 @@ export interface WorkspaceStoreHooks {
    * 与行写入同一批（主进程同一个事务）。省略 ＝ 不维护（派生表保持装载侧现状）。
    */
   relationWrites?: (ops: readonly Op[]) => RowWrite[]
+  /**
+   * **派生位置行的增量维护**：按 op 批算出 `BlockIndex` 的新行与前缀改写计划，
+   * 与内容行同一个事务。**异步**是因为中点要夹在库里的存量段之间（读一次库）。
+   *
+   * 省略 ＝ 不维护（web 单库没有派生表）。读失败时内容照常落盘、派生行这一笔跳过
+   * （与 FTS 计划同一条纪律：派生数据坏了不该连累用户输入的正文），失败会被记下来。
+   */
+  indexWrites?: (ops: readonly Op[]) => Promise<IndexWriteBatch>
 }
 
 export function createWorkspaceStore(port: StoragePort, fts?: FtsCommitSource, hooks?: WorkspaceStoreHooks): WorkspaceStore {
@@ -143,6 +152,24 @@ export function createWorkspaceStore(port: StoragePort, fts?: FtsCommitSource, h
           if (!replace) {
             const derived = hooks?.relationWrites?.(ops)
             if (derived && derived.length > 0) batch.writes.push(...derived)
+          }
+
+          /**
+           * **派生位置行与内容行同一批**（root/path/hidden）：新行进 `writes`，前缀改写／清除／
+           * hidden 重算进 `plans`（未装载的子孙只能按前缀交给 SQL）。
+           *
+           * 这里要读库（中点夹在存量段之间），所以是异步的；读在 store 的串行队列里，
+           * 看到的一定是上一批已落盘的状态。读失败 → 内容照常落盘、这一笔位置行跳过
+           * （与 FTS 计划同一条纪律），失败会留在日志里。
+           */
+          if (!replace && hooks?.indexWrites) {
+            try {
+              const indexWrites = await hooks.indexWrites(ops)
+              if (indexWrites.writes.length > 0) batch.writes.push(...indexWrites.writes)
+              if (indexWrites.plans.length > 0) batch.plans = indexWrites.plans
+            } catch (e) {
+              console.warn(`[derived] index writes skipped; saving content without index rows: ${e instanceof Error ? e.message : String(e)}`)
+            }
           }
 
           /**

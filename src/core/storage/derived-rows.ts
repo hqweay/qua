@@ -93,8 +93,20 @@ function encodeRank(rank: number): string {
 }
 
 /** 段 + 尾分隔符：父路径直接拼它得到子路径（父路径是子路径的前缀） */
-function segmentOf(rank: number): string {
+export function pathSegmentOf(rank: number): string {
   return `${encodeRank(rank)}/`
+}
+
+/**
+ * 路径末段 → rank（`pathSegmentOf` 的逆）。坏路径返回 `NaN`——调用方必须把它当
+ * 「这段不可用」（例如放弃中点、整层重编号），不要拿 `NaN` 去比较。
+ */
+export function lastSegmentRank(path: string): number {
+  const end = path.endsWith('/') ? path.length - 1 : path.length
+  const start = path.lastIndexOf('/', end - 1)
+  const text = path.slice(start + 1, end)
+  if (!/^\d+$/.test(text)) return Number.NaN
+  return Number(text) - PATH_SEGMENT_BIAS
 }
 
 /**
@@ -135,7 +147,7 @@ function derive(forest: readonly Block[], wanted: ReadonlySet<string> | null): D
   walkForest(
     forest,
     (b, ctx) => {
-      const path = ctx.parent === null ? `/${segmentOf((ctx.index + 1) * ORDER_STEP)}` : `${pathOf.get(ctx.parent.id)!}${segmentOf((ctx.index + 1) * ORDER_STEP)}`
+      const path = ctx.parent === null ? `/${pathSegmentOf((ctx.index + 1) * ORDER_STEP)}` : `${pathOf.get(ctx.parent.id)!}${pathSegmentOf((ctx.index + 1) * ORDER_STEP)}`
       const root = ctx.parent === null ? b.id : rootOf.get(ctx.parent.id)!
       const hidden = isDeleted(b) || (ctx.parent !== null && hiddenOf.get(ctx.parent.id) === true)
       pathOf.set(b.id, path)
