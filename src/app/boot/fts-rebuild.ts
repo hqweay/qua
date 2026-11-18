@@ -131,10 +131,19 @@ async function rebuildPass(deps: FtsRebuildDeps, roots: readonly string[]): Prom
       }
       helperBlocks = rowsToWorkspace(h.value).blocks
     }
-    const built = await indexer.planRebuild(
-      { blocks: [...forest, ...helperBlocks], activeId: '', savedAt: 0 },
-      ids,
-    )
+    let built: Awaited<ReturnType<typeof indexer.planRebuild>>
+    try {
+      built = await indexer.planRebuild(
+        { blocks: [...forest, ...helperBlocks], activeId: '', savedAt: 0 },
+        ids,
+      )
+    } catch (e) {
+      // 分词器（worker）抛错：这根建不了，但 rebuilding 标志必须放掉——
+      // 卡在 building 等于把整场的增量索引一起禁掉
+      console.warn('[fts] tokenize failed:', rootId, e instanceof Error ? e.message : String(e))
+      indexer.failRebuild()
+      return { ok: false, dirty: false, cancelled: false, done, failed: failed + 1, result: { ok: false, done, total: roots.length, failed: failed + 1 } }
+    }
     const saved = await deps.store.commitRaw([
       ...built.writes,
       meta(META_KEYS.ftsRowidSeq, String(indexer.currentRowid)),
