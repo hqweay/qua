@@ -13,7 +13,9 @@
 import {
   ancestorsByBlockId,
   belowFieldsFor,
+  constrainBelowFields,
   depthOf,
+  displayRowPropIds,
   flatten,
   foldStateOf,
   gutterFieldsFor,
@@ -302,10 +304,25 @@ export class RenderOps {
     return locate(this.ed.doc, id)?.parent ?? null
   }
 
+  /**
+   * 块下行的**唯一取值入口**：视图白名单在场时，行集由它覆写（空数组＝只标题）。
+   *
+   * 渲染与虚拟化估高都走这一份——两处各算一遍，滚动条会系统性地与内容不符，
+   * 而那种偏差不报错，只在滚到底部时露出来。大纲有块标，归 gutter 的属性由
+   * gutter 画，所以这里**不** `includeGutter`（并进块下行会画两遍）。
+   */
+  private belowOf(blocks: readonly Block[]): Map<string, BelowFields> {
+    const allowed = displayRowPropIds(this.ed.doc.displayProps)
+    const below = belowFieldsFor(blocks, this.ed.store.blocks, (id) => this.parentOfRow(id), this.ed.store.index.blocks, {
+      ...(allowed !== undefined ? { wanted: allowed } : {}),
+    })
+    return constrainBelowFields(below, allowed)
+  }
+
   private renderRows(rows: readonly VisibleRow[], tailComplete = true): void {
     const blocks = rows.map((r) => r.block)
     const gutters = gutterFieldsFor(blocks, this.ed.store.blocks)
-    const below = belowFieldsFor(blocks, this.ed.store.blocks, (id) => this.parentOfRow(id), this.ed.store.index.blocks)
+    const below = this.belowOf(blocks)
     let sec: HTMLElement | null = null
     /** 给上一段收尾：追加那个空槽（只给有段根的行段） */
     const closeSec = (): void => {
@@ -387,9 +404,7 @@ export class RenderOps {
       this.makeBlockEl(
         row,
         gutterFieldsOf(row.block, this.ed.store.blocks),
-        belowFieldsFor([row.block], this.ed.store.blocks, (id) => this.parentOfRow(id), this.ed.store.index.blocks).get(
-          row.block.id,
-        ),
+        this.belowOf([row.block]).get(row.block.id),
       ),
     )
     this.repaintOverlays()
@@ -621,12 +636,7 @@ export class RenderOps {
      * 与**露面块里的投影**（源的结果视图）。两者高度都来自 `VIEW_BODY_H` ——
      * 少算一处，带这种行的文档滚动条就系统性偏小。
      */
-    const below = belowFieldsFor(
-      rows.map((r) => r.block),
-      this.ed.store.blocks,
-      (id) => this.parentOfRow(id),
-      this.ed.store.index.blocks,
-    )
+    const below = this.belowOf(rows.map((r) => r.block))
     /** 这一块的属性区占几行（与装配层的渲染吃同一份判据；没有回调 ⇒ 不画） */
     const propsRowCount = (id: string, data: BelowFields | undefined): number => {
       if (!this.ed.events.propsLine || !this.ed.events.propsRows || !data) return 0

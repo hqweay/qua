@@ -22,16 +22,23 @@ import {
   cardLayoutOf,
   childrenRecords,
   cloneSubtree,
+  CREATED_COLUMN,
   displayPropsOfRaw,
+  displayRowPropId,
+  displayRowPropIds,
   defaultDisplayPropsFor,
   defaultWidthOf,
+  ENGINE_CREATED,
+  ENGINE_MODIFIED,
   fieldTextOf,
   hasChildrenViewBody,
   isMultiValueKey,
   MATCHED_COLUMN,
+  MODIFIED_COLUMN,
   PATH_COLUMN,
   REF_COUNT_COLUMN,
   SHARED_TAGS_COLUMN,
+  TAGS_COLUMN,
   sortValueOf,
   isViewRoot,
   isViewsValue,
@@ -395,6 +402,41 @@ test('sortRecords：`_date` 读**所属的那一天**（行自己不是日记时
     ['t2', 't1', 't3'],
     '没有日期坐标的行缺槽排最后',
   )
+})
+
+test('sortRecords：created／modified 按配置生效（面板写得进，渲染就要排得动）', () => {
+  const rec = (id: string, created: number, modified: number): ViewRecord => ({
+    block: { ...mk(id, id), created, modified },
+    path: [],
+    title: id,
+    tags: [],
+    values: {},
+  })
+  const a = rec('a', 300, 100)
+  const b = rec('b', 100, 300)
+  const c = rec('c', 200, 200)
+  assert.deepEqual(
+    sortRecords([a, b, c], [{ by: CREATED_COLUMN, dir: 'asc' }]).map((r) => r.block.id),
+    ['b', 'c', 'a'],
+    '创建时间升序：面板写进来的保留键不会被渲染层丢掉',
+  )
+  assert.deepEqual(
+    sortRecords([a, b, c], [{ by: MODIFIED_COLUMN, dir: 'desc' }]).map((r) => r.block.id),
+    ['b', 'c', 'a'],
+    '修改时间降序同一份取值（块字段，不是属性袋）',
+  )
+})
+
+test('displayRowPropId：时间列键桥到引擎属性行 id，其余原样（卡片/大纲的白名单读这一份）', () => {
+  assert.equal(displayRowPropId(CREATED_COLUMN), ENGINE_CREATED)
+  assert.equal(displayRowPropId(MODIFIED_COLUMN), ENGINE_MODIFIED)
+  assert.equal(displayRowPropId('def-score'), 'def-score', '普通属性键原样')
+  assert.deepEqual(
+    displayRowPropIds([TAGS_COLUMN, CREATED_COLUMN, PATH_COLUMN, 'def-score']),
+    [ENGINE_CREATED, 'def-score'],
+    '行面上没有物件的键（标签/路径）不进块下行',
+  )
+  assert.equal(displayRowPropIds(undefined), undefined, '白名单缺省 ⇒ 不覆写')
 })
 
 test('sortRecords：相等元素保持来源顺序（稳定），且不产新数组元素', () => {

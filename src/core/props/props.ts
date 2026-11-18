@@ -1518,6 +1518,7 @@ export {
   belowFieldsFor,
   belowFieldsRows,
   closureTargetField,
+  constrainBelowFields,
   fieldIdsOf,
   fieldRows,
   fieldRowsWithParent,
@@ -1526,6 +1527,7 @@ export {
 } from './rows.ts'
 export type {
   BelowFields,
+  BelowFieldsScope,
   FieldRow,
   GutterField,
   PropsLineDensity,

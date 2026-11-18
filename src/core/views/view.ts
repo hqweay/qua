@@ -365,10 +365,11 @@ export const SHARED_TAGS_COLUMN = 'sharedTags' as const
  */
 
 /**
- * 能不能按这一列排序。
+ * 这一列在**表头**上能不能点（可操作层，不是可排层）。
  *
- * `created`／`modified` 只显示、不排序：它们不是属性值，给它们排要另开一条
- * 「系统键也能排」的口径，而那是本轮之外的成本（登记，不是遗漏）。
+ * `created`／`modified` 没有表头可点：它们只出现在显示列里，表头排序是逐列手势。
+ * 排序本身**不靠它过滤**——面板写进来的保留键必须排得动（`sortRecords` 照键生效）；
+ * 把它当渲染层的过滤器会让「创建时间排序」静默失效。
  */
 export function isSortableColumn(key: string): boolean {
   return key !== CREATED_COLUMN && key !== MODIFIED_COLUMN
@@ -751,6 +752,8 @@ export {
   childrenRecords,
   defaultDisplayPropsFor,
   defaultWidthOf,
+  displayRowPropId,
+  displayRowPropIds,
   fieldTextOf,
   pathTextOf,
   resolveRows,

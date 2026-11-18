@@ -250,6 +250,24 @@ export function belowFieldsRows(
   return 1
 }
 
+/**
+ * 块下行要露出什么的**附加口径**（视图白名单与露面约束）。
+ *
+ * 缺省（不传）时行为与「rich 默认」逐字一致：只来自标签声明／自有属性／父块声明。
+ */
+export interface BelowFieldsScope {
+  /**
+   * **显式要的栏**（视图白名单，已映射成 propId）：即使没有值、没有声明也产出一行。
+   * 无值进 `pendingRows`（`+N`／一栏一行仍看得见），不静默消失。
+   */
+  wanted?: readonly string[]
+  /**
+   * gutter 行（`_uiPosition: block-left` 且有图标形）也进块下行。
+   * 卡片没有块标与 gutter，块下行是这些属性**唯一**的露面。
+   */
+  includeGutter?: boolean
+}
+
 /** 块下属性行：批级派生（整屏一次扫库，行级只查表） */
 export function belowFieldsFor(
   blocks: readonly Block[],
@@ -257,6 +275,7 @@ export function belowFieldsFor(
   /** 行的模型父块（`_childProps` 显示声明的来源）；省略 ⇒ 行为与旧签名完全一致 */
   parentOf?: (id: string) => Block | null | undefined,
   blocksById?: ReadonlyMap<string, Block>,
+  scope: BelowFieldsScope = {},
 ): Map<string, BelowFields> {
   const defs = new Map(allPropDefs(forest).map((d) => [d.id, d]))
   const tags = tagsById(forest)
@@ -290,15 +309,48 @@ export function belowFieldsFor(
       if (rows.has(propId)) continue
       rows.set(propId, fieldRowOf(block, propId, defs.get(propId), [], order++, forest, lazyLook))
     }
+    // 白名单在场＝**显式要这几栏**：没有声明、没有值的也补一行（待填也要看得见）
+    if (scope.wanted !== undefined) {
+      for (const propId of scope.wanted) {
+        if (rows.has(propId)) continue
+        rows.set(propId, fieldRowOf(block, propId, defs.get(propId), [], order++, forest, lazyLook))
+      }
+    }
 
     const visible: FieldRow[] = []
     const waiting: FieldRow[] = []
     for (const row of rows.values()) {
-      if (isGutterRow(row)) continue
+      if (scope.includeGutter !== true && isGutterRow(row)) continue
       if (row.filled) visible.push(row)
       else waiting.push(row)
     }
-    if (visible.length > 0) out.set(block.id, { rows: visible, pending: waiting.length, pendingRows: waiting })
+    // 没有任何有值属性就不出这一格；只有**显式要的栏**留下待填的痕迹
+    if (visible.length > 0 || (scope.wanted !== undefined && waiting.length > 0)) {
+      out.set(block.id, { rows: visible, pending: waiting.length, pendingRows: waiting })
+    }
+  }
+  return out
+}
+
+/**
+ * 按显示白名单收窄一批块下行（`undefined` ＝ 不覆写，原样拷贝返回）。
+ *
+ * 空数组是合法白名单（＝只标题）：整批清空。`pending`／`pendingRows` 也按白名单重算——
+ * 只筛 `rows` 会把「待填」的计数漏在外面：清空白名单之后那一块仍然露出 `+3`，
+ * 而屏幕上一条属性都没有。
+ */
+export function constrainBelowFields(
+  below: ReadonlyMap<string, BelowFields>,
+  allowed: readonly string[] | undefined,
+): Map<string, BelowFields> {
+  if (allowed === undefined) return new Map(below)
+  const ok = new Set(allowed)
+  const out = new Map<string, BelowFields>()
+  for (const [id, data] of below) {
+    const rows = data.rows.filter((r) => ok.has(r.propId))
+    const pendingRows = data.pendingRows.filter((r) => ok.has(r.propId))
+    if (rows.length === 0 && pendingRows.length === 0) continue
+    out.set(id, { rows, pending: pendingRows.length, pendingRows })
   }
   return out
 }

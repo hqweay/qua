@@ -395,17 +395,22 @@ export class ViewOptionsPanel {
     if (!editing) return
     // 勾选清单：基线＝白名单（已在自定义态）或当前生效显示（编辑态预选）；
     // 勾选即写（整份替换）；全不勾 ＝ 只标题
-    const base = whitelist ?? (this.deps.displayDefaults?.() ?? [])
+    const candidates = this.displayCandidates(view)
+    const onList = (k: string): boolean => candidates.some((c) => c.key === k)
+    // 基线只认清单里的键：`displayDefaults` 是「这批记录里真有值的键」的近似，
+    // 会把系统槽（`_lists`／`_tags`…）一起带进来；它们不在这张清单上，
+    // 首次勾选写回时就该被挡住（否则白名单里混进没人能画的键）
+    const base = (whitelist ?? this.deps.displayDefaults?.() ?? []).filter(onList)
     const list = document.createElement('div')
     list.className = 'vopt-props'
-    for (const r of this.displayCandidates()) {
+    for (const r of candidates) {
       const row = document.createElement('label')
       row.className = 'qcp-row'
       const box = document.createElement('input')
       box.type = 'checkbox'
       box.checked = base.includes(r.key)
       box.addEventListener('change', () => {
-        const current = this.deps.read().display ?? this.deps.displayDefaults?.() ?? []
+        const current = (this.deps.read().display ?? this.deps.displayDefaults?.() ?? []).filter(onList)
         const next = box.checked ? [...current, r.key] : current.filter((k) => k !== r.key)
         this.deps.invoke('core.view/set-display', { owner: this.deps.owner, viewId: this.deps.viewId(), props: next })
         this.refresh()
@@ -427,15 +432,33 @@ export class ViewOptionsPanel {
     return b
   }
 
-  /** 自定义清单的候选：属性定义 ＋ 保留投影键（它们是「这条记录的某一面」，随取随有） */
-  private displayCandidates(): readonly PropRow[] {
-    return [
-      { key: TAGS_COLUMN, label: t('ui.props.tagsTitle') },
-      { key: CHILDREN_COLUMN, label: t('ui.view.col.children') },
+  /**
+   * 自定义清单的候选：**按看法收窄**——清单里只放这一面真能画的东西。
+   *
+   * · 表格：列清单，保留投影键全都在（标签／子块数／创建／修改／路径）；
+   * · 卡片：元信息只有「标签 chips ＋ 属性行」⇒ 子块数与路径没有对应物件，不出现；
+   *   创建／修改时间有引擎属性行可画；
+   * · 大纲（默认看法）：位置由缩进／面包屑表达、子块由缩进表达，只留时间两键＋属性定义。
+   *
+   * 放进来却画不出来的键就是「勾了不出现」，和写不进配置是同一种谎。
+   */
+  private displayCandidates(view: ViewConfig | null): readonly PropRow[] {
+    const kind = view?.kind ?? 'outline'
+    const time: PropRow[] = [
       { key: CREATED_COLUMN, label: t('ui.props.createdAt') },
       { key: MODIFIED_COLUMN, label: t('ui.props.modifiedAt') },
-      { key: PATH_COLUMN, label: t('ui.view.col.path') },
-      ...this.deps.fields().map((f) => ({ key: f.id, label: f.label })),
     ]
+    const reserved: PropRow[] =
+      kind === 'table'
+        ? [
+            { key: TAGS_COLUMN, label: t('ui.props.tagsTitle') },
+            { key: CHILDREN_COLUMN, label: t('ui.view.col.children') },
+            ...time,
+            { key: PATH_COLUMN, label: t('ui.view.col.path') },
+          ]
+        : kind === 'cards'
+          ? [{ key: TAGS_COLUMN, label: t('ui.props.tagsTitle') }, ...time]
+          : time
+    return [...reserved, ...this.deps.fields().map((f) => ({ key: f.id, label: f.label }))]
   }
 }

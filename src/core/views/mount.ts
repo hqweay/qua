@@ -470,9 +470,7 @@ export function derivedRecordsOf(
   lens: DerivedLens = {},
 ): ViewRecord[] {
   const sort = (records: ViewRecord[]): ViewRecord[] =>
-    lens.sort && lens.sort.length > 0
-      ? sortRecords(records, lens.sort, undefined, { includeReserved: true })
-      : records
+    lens.sort && lens.sort.length > 0 ? sortRecords(records, lens.sort) : records
 
   // 备注栏：直读 annotates 边（谁在评论我），不走 QuerySpec
   if (source === 'notes') {

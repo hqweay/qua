@@ -624,6 +624,17 @@ export interface Doc {
    */
   paths?: false
   /**
+   * **这一屏的显示白名单**（默认看法的 `_defaultDisplayProps`；缺省＝rich 默认）。
+   *
+   * 与 `contexts`／`paths` 同族：派生、视图私有、不入库。白名单在场时，块下行的行集
+   * 由它覆写（空数组＝只标题）——`_childProps` 与标签声明不再自动出现，
+   * 这就是「视图覆写」的诚实语义。
+   *
+   * 归 gutter 的属性和显式要的列键（`created`／`modified`）由渲染层各自接：
+   * 大纲有块标，gutter 那一格照画；时间两键在行面上是引擎属性（`core/created` 那一对）。
+   */
+  displayProps?: readonly string[]
+  /**
    * **哪些根是「展开出来的上下文根」**（不是原始命中行）。
    *
    * 只影响行首那一条控制：这些根可以「收起上下文」退回上一层；普通装载根没有。

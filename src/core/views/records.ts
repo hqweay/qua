@@ -16,12 +16,11 @@ import { journalDateInChain } from '../identity/journal.ts'
 import { plainText } from '../model/runs.ts'
 import { t } from '../infra/msg.ts'
 import type { KbClient } from '../kb/types.ts'
-import { declaredFieldIds, ownFieldIds } from '../props/props.ts'
+import { declaredFieldIds, ENGINE_CREATED, ENGINE_MODIFIED, ownFieldIds } from '../props/props.ts'
 import type { QuerySpec, SortKey } from '../query/query.ts'
 import {
   CHILDREN_COLUMN,
   CREATED_COLUMN,
-  isSortableColumn,
   MATCHED_COLUMN,
   MODIFIED_COLUMN,
   PATH_COLUMN,
@@ -352,6 +351,32 @@ export function sortValueOf(r: ViewRecord, key: string): unknown {
   return r.values[key]
 }
 
+/**
+ * 显示白名单的**列键 → 块下行的 propId**。
+ *
+ * `created`／`modified` 在列面上是保留键，在行面上是引擎属性（`core/created` 那一对，
+ * 值住块字段）。两套键各说各的语言，这里是唯一一座桥：卡片与大纲都读这一份，
+ * 免得某处把 `created` 当普通属性去 `props['created']` 里找（永远找不到，
+ * 表现就是「勾了不出现」）。
+ */
+export function displayRowPropId(key: string): string {
+  if (key === CREATED_COLUMN) return ENGINE_CREATED
+  if (key === MODIFIED_COLUMN) return ENGINE_MODIFIED
+  return key
+}
+
+/**
+ * 显示白名单里**能落成块下行**的那一批（`undefined` ＝ 不覆写）。
+ *
+ * 列面上的 `tags`／`children`／`path` 在行面上没有对应物件（标签是正文原子／chips，
+ * 子块与位置由缩进与面包屑表达）——让它们进 `wanted` 只会补出一条「待填」的裸键行。
+ * 卡片与大纲共用这一份，免得两处各判一遍、漏一个键就多出一条假行。
+ */
+export function displayRowPropIds(keys: readonly string[] | undefined): string[] | undefined {
+  if (keys === undefined) return undefined
+  return keys.map(displayRowPropId).filter((id) => id !== TAGS_COLUMN && id !== CHILDREN_COLUMN && id !== PATH_COLUMN)
+}
+
 function isEmpty(v: unknown): boolean {
   return v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0)
 }
@@ -380,19 +405,17 @@ function compareAny(a: unknown, b: unknown): number {
  * `resolve` 给**排序键的取值**换一条来源（默认 `sortValueOf`）：`select` 列的值是
  * 选项块 id，按 id 字典序排没有意义 —— 调用方传「id → 选项兄弟顺序」，
  * 不在列表里的值返回 `null`（按空值排最后）。不传时行为与以前一个字不差。
+ *
+ * ⚠️ **排序键按配置原样生效**，包括 `created`／`modified` 这类保留键：视图面板写得进
+ * 它们（「按创建时间排」是画廊最常用的镜头之一），渲染层再过滤一遍就是「写了不生效」。
+ * 表头能不能点（`isSortableColumn`）是**表头那一层的可操作性**，不是这里的过滤理由。
  */
 export function sortRecords(
   records: readonly ViewRecord[],
   sort: readonly SortKey[] | undefined,
   resolve?: (r: ViewRecord, key: string) => unknown,
-  /**
-   * `includeReserved`：把 `created`／`modified` 这类**保留键**也当排序键。
-   * 表格列头排序不放开它们（表头点的是「显示序」）；派生栏的成员排序要放开
-   * （「按修改时间排」正是这一栏最常用的镜头）。
-   */
-  opts: { includeReserved?: boolean } = {},
 ): ViewRecord[] {
-  const keys = (sort ?? []).filter((k) => opts.includeReserved === true || isSortableColumn(k.by))
+  const keys = sort ?? []
   if (keys.length === 0) return [...records]
   const indexed = records.map((r, i) => ({ r, i }))
   indexed.sort((x, y) => {

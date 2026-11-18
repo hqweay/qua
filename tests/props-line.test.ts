@@ -13,6 +13,7 @@ import type { Block } from '../src/core/index.ts'
 import {
   belowFieldsFor,
   CHILD_PROPS_PROP,
+  constrainBelowFields,
   ENGINE_CREATED,
   ENGINE_MODIFIED,
   enginePropText,
@@ -72,6 +73,38 @@ test('块下属性行：一个值都没有 ⇒ 不出这一行（不靠空行表
   const t = tag('tag-book', '书', [defAuthor.id])
   const b = blk('b1', '一本书', { _tags: [t.id] })
   assert.equal(belowFieldsFor([b], [t, defAuthor, b]).get(b.id), undefined)
+})
+
+test('块下属性行：白名单要的栏即使没有值也留一条待填（勾了不能看不见）', () => {
+  const { forest, block } = fixture()
+  const got = belowFieldsFor([block], forest, undefined, undefined, { wanted: ['def-note'] }).get(block.id)!
+  assert.deepEqual(got.rows.map((r) => r.propId), ['def-author', 'def-pinned'], '没值的不进有值行')
+  assert.deepEqual(got.pendingRows.map((r) => r.propId), ['def-note'], '显式要了它 ⇒ 待填里有它（+N 仍然数得到）')
+})
+
+test('块下属性行：卡片没有 gutter ⇒ includeGutter 把归块标的 select 并进属性行', () => {
+  const { forest, block } = fixture()
+  const plain = belowFieldsFor([block], forest).get(block.id)!
+  assert.ok(!plain.rows.some((r) => r.propId === 'def-status'), '大纲面：有块标图标 ⇒ 不重复进块下行')
+  const card = belowFieldsFor([block], forest, undefined, undefined, { includeGutter: true }).get(block.id)!
+  assert.ok(card.rows.some((r) => r.propId === 'def-status'), '卡片面：没有 gutter，块下行是它唯一的露面')
+})
+
+test('块下属性行：wanted 能补引擎属性（创建时间读块字段，不进 `props` 袋）', () => {
+  const b = blk('b1', '一个块')
+  b.created = 1234
+  const got = belowFieldsFor([b], [], undefined, undefined, { wanted: [ENGINE_CREATED] }).get('b1')!
+  assert.deepEqual(got.rows.map((r) => [r.propId, r.value]), [[ENGINE_CREATED, 1234]])
+})
+
+test('constrainBelowFields：白名单收窄行与待填计数；空数组＝只标题', () => {
+  const { forest, block } = fixture()
+  const below = belowFieldsFor([block], forest)
+  const onlyAuthor = constrainBelowFields(below, ['def-author']).get(block.id)!
+  assert.deepEqual(onlyAuthor.rows.map((r) => r.propId), ['def-author'])
+  assert.equal(onlyAuthor.pending, 0, '备注不在白名单 ⇒ 待填计数也不带上（否则屏幕上一条都没有、+1 却还在）')
+  assert.equal(constrainBelowFields(below, []).get(block.id), undefined, '空数组是合法白名单（只标题）')
+  assert.equal(constrainBelowFields(below, undefined).get(block.id)?.rows.length, 2, 'undefined ＝ 不覆写')
 })
 
 test('块下属性行：批级派生与单块 fieldRows 过滤逐行一致', () => {

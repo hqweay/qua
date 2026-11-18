@@ -20,6 +20,7 @@ import {
   journalId,
   liveChildren,
   mkBlock,
+  ownerDataOfBlock,
   surfaceRefKey,
   surfaceTitleOf,
   todayISO,
@@ -554,7 +555,17 @@ export function setupPages(deps: PagesDeps) {
     const viewRootId = only && activeView(only) && !isEmbedBlock(only) ? only.id : ''
     // 折叠态是**视图**的一份：当前 tab 的那份（拿不到 tab 时退回编辑器手上的那份）
     const folded = tab ? { ...tab.doc.folded } : mainEd.doc.folded
-    mainEd.loadPage({ roots, folded, ...(viewRootId ? { viewRootId } : {}) })
+    /**
+     * **默认看法的显示白名单**（`_defaultDisplayProps`）：单根块自己的那一份。
+     * 命名视图激活时它不生效——那批 children 归视图宿主画，默认大纲不是这一屏的看法。
+     */
+    const defaultDisplay = only && !viewRootId ? ownerDataOfBlock(only).defaultDisplayProps : undefined
+    mainEd.loadPage({
+      roots,
+      folded,
+      ...(viewRootId ? { viewRootId } : {}),
+      ...(defaultDisplay !== undefined ? { displayProps: defaultDisplay } : {}),
+    })
     if (tab) tab.doc = mainEd.doc
     // 装载之后才建挂载区：它按**段根**建实例，而段是 `loadPage` 造出来的
     renderMounts()

@@ -18,11 +18,14 @@ import {
   clickModsOf,
   blockLabel,
   COLOR_PROP,
+  constrainBelowFields,
+  displayRowPropIds,
   groupsByStructure,
   isDerivedGroupKey,
   openActionOf,
   prop,
   sortRecords,
+  TAGS_COLUMN,
   type BelowFields,
   type Block,
   type FindBlock,
@@ -222,7 +225,16 @@ export class ViewCards {
     }
   }
 
-  /** 块下属性行：**一批一次**（`belowFieldsFor` 会扫森林，逐卡各算一次是量级错误） */
+  /**
+   * 块下属性行：**一批一次**（`belowFieldsFor` 会扫森林，逐卡各算一次是量级错误）。
+   *
+   * **显示白名单是卡片这一面的唯一权威**（视图白名单在场 ⇒ 它说了算）：
+   *   · 标签 chips 是单独一行，不进属性行（见 `card()`）；
+   *   · 归 gutter 的属性在卡片上**没有第二条露面**（卡片无块标／无 gutter）
+   *     ⇒ 白名单要它，就把它并进属性行；
+   *   · `created`／`modified` 是引擎属性，列键要过 `displayRowPropId` 那座桥；
+   *   · `children`／`path` 在卡片上没有对应物件（表格的列才有），候选里已不放它们。
+   */
   private refreshBelow(blocks: readonly Block[]): void {
     if (blocks.length === 0) return
     const next = new Map(this.below)
@@ -231,23 +243,20 @@ export class ViewCards {
       const pid = this.deps.store.index.parentOf.get(id) ?? null
       return pid ? (this.deps.store.find(pid) ?? null) : null
     }
-    for (const [id, data] of belowFieldsFor(blocks, this.deps.store.blocks, parentOf, this.deps.store.index.blocks))
+    const whitelist = this.deps.view?.()?.displayProps
+    const wanted = displayRowPropIds(whitelist)
+    for (const [id, data] of belowFieldsFor(blocks, this.deps.store.blocks, parentOf, this.deps.store.index.blocks, {
+      ...(wanted !== undefined ? { wanted } : {}),
+      ...(whitelist !== undefined ? { includeGutter: true } : {}),
+    }))
       next.set(id, data)
     // 掉出结果集的块不再留着（卡片重画时就不会去找它）
     for (const id of [...next.keys()]) {
       if (!this.deps.store.find(id)) next.delete(id)
     }
-    // 显示白名单在场＝覆写（空数组＝只标题）：rich 默认给出的行被白名单筛过——
+    // 白名单在场＝覆写（空数组＝只标题）：rich 默认给出的行被筛过——
     // 「视图只要这几格」优先于声明链；这是 S′6 优先级（视图 > 声明）的落地点
-    const whitelist = this.deps.view?.()?.displayProps
-    if (whitelist !== undefined) {
-      for (const [id, data] of next) {
-        const rows = data.rows.filter((row) => whitelist.includes(row.propId))
-        if (rows.length === 0) next.delete(id)
-        else next.set(id, { ...data, rows })
-      }
-    }
-    this.below = next
+    this.below = constrainBelowFields(next, wanted)
   }
 
   /**
@@ -533,7 +542,13 @@ export class ViewCards {
      */
     const meta = document.createElement('div')
     meta.className = 'vcard-meta'
-    if (r.tags.length > 0) {
+    /**
+     * 显示白名单是卡片这一面的唯一权威：标签 chips 也是「这条记录露不露它」的一格。
+     * 白名单缺省（rich 默认）时有标签就画；白名单在场则**勾了才画**（空选＝只标题）。
+     */
+    const whitelist = this.deps.view?.()?.displayProps
+    const showTags = whitelist === undefined || whitelist.includes(TAGS_COLUMN)
+    if (showTags && r.tags.length > 0) {
       const tags = document.createElement('div')
       tags.className = 'vcard-tags'
       for (const tag of r.tags) {
@@ -549,6 +564,9 @@ export class ViewCards {
         inspect: (id, propId) => this.deps.inspect(id, propId),
         refLabel: (id) => this.deps.refLabel(id),
         openUrl: (u) => this.deps.openUrl(u),
+        // 显式白名单不再按 3 条截断：勾了几条就画几条——卡片上没有「展开」的路，
+        // 被 cap 挡住的那几条等于勾了看不见
+        ...(whitelist !== undefined ? { cap: below.rows.length } : {}),
       })
       meta.appendChild(line)
     }

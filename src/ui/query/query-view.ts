@@ -1386,6 +1386,9 @@ export class ViewHost {
           const keys = new Set<string>()
           for (const r of this.records()) {
             for (const [k, val] of Object.entries(r.values)) {
+              // 系统槽（`_aliases`／`_lists`／`_tags`…）不是「这一面能露的属性」：
+              // 它们会把首次勾选的基线带脏，写进白名单就是没人能画的键
+              if (k.startsWith('_')) continue
               if (val !== undefined && val !== null && val !== '' && !(Array.isArray(val) && val.length === 0)) keys.add(k)
             }
             if (r.tags.length > 0) keys.add(TAGS_COLUMN)
@@ -2099,6 +2102,9 @@ export class ViewHost {
     this.covers = plan.covers
     this.rows = plan.roots
     const folded = unfoldForContext(this.outline?.ed?.doc.folded ?? {}, plan.covers, (id) => this.deps.kb.pathOf(id))
+    // 默认看法的显示白名单（`_defaultDisplayProps`）：大纲的块下行由它覆写。
+    // 命名视图没有大纲，这一格只属于「没有激活视图」的那一张
+    const defaultDisplay = this.view === null ? this.deps.owners.read(this.writeOwner)?.defaultDisplayProps : undefined
     this.outline?.ed?.loadPage({
       roots: plan.roots,
       folded,
@@ -2108,6 +2114,7 @@ export class ViewHost {
       ...(this.pathsHidden ? { paths: false as const } : {}),
       // 分段大纲的组头：chrome 随装载走；不分组时缺省（undefined）＝没有组头
       ...(heads !== undefined && heads.length > 0 ? { groupHeads: heads } : {}),
+      ...(defaultDisplay !== undefined ? { displayProps: defaultDisplay } : {}),
     })
     if (plan.focusId) this.outline?.ed?.reveal(plan.focusId)
     this.syncFoldAll()
