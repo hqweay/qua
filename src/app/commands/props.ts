@@ -55,6 +55,7 @@ import {
   type UiPosition,
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
+import { UnloadedAliasError } from '../../core/kb/unsupported.ts'
 import type { App, PropCreateMode, PropTarget } from '../../core/infra/ports.ts'
 import type { PropsDeps } from './types.ts'
 
@@ -529,11 +530,12 @@ export function propsCommands(
       const title = name.trim()
       if (title === '') return ''
       const made: { id: string } = { id: '' }
-      d.run((tx) => {
-        const target = ensurePageInTx(d.kb, title, tx)
-        if (!target) return
-        made.id = target.id
-        tx.patch(blockId, (b) => {
+      try {
+        d.run((tx) => {
+          const target = ensurePageInTx(d.kb, title, tx)
+          if (!target) return
+          made.id = target.id
+          tx.patch(blockId, (b) => {
           /**
            * 多值：**追加**（与多值控件写回整份数组同一条语义）。
            * 已经引用过 ⇒ 零 op —— 不重写、也不「摘出来再追加」（那会把顺序换一遍，
@@ -545,9 +547,17 @@ export function propsCommands(
             setValue(b, propId, [...list, target.id])
             return
           }
-          setValue(b, propId, target.id)
+            setValue(b, propId, target.id)
+          })
         })
-      })
+      } catch (e) {
+        // 名字被一个未装载的块占着 ⇒ 不新建；说一句实话，值格一个字节不动
+        if (e instanceof UnloadedAliasError) {
+          d.toast(t('ui.toast.aliasUnloaded'), 'warn')
+          return ''
+        }
+        throw e
+      }
       // 值变了但块不是「写入回调」那一块：这一行要当场重画（不等下一次 store 通知）
       if (made.id !== '') {
         d.repaintBlocks([blockId])

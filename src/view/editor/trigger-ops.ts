@@ -96,6 +96,21 @@ export class TriggerOps {
     const loc = id ? locate(this.ed.doc, id) : null
     if (!id || !loc) return false
     const pick = opts.pick
+    /**
+     * **按名字落点的目标先装载**：名字被一个未装载的块占着 ⇒ 先装它再重放这次落点
+     * （复用同一块，不建第二个同名身份）。触发词还在正文里 ⇒ 重放时 `triggerAt`
+     * 仍能找到落点。装载失败就落空（编辑器 catch 住，触发词留成纯文本）。
+     */
+    const named = pick.kind === 'newTag' || pick.kind === 'newPage' || pick.kind === 'tag' ? pick.name : null
+    if (named !== null && this.ed.ensureLoaded) {
+      const known = this.ed.store.aliasTargetId(named)
+      if (known !== undefined && !this.ed.store.isLoaded(known)) {
+        this.ed.ensureLoaded([known], () => {
+          this.acceptTrigger(opts)
+        })
+        return true
+      }
+    }
     this.ed.beginUndoEntry()
     /** 这次是否往树上插了新块（记录）——真插了就整片重画（索引／块数要跟上） */
     let createdBlock = false

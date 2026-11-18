@@ -31,6 +31,7 @@ import {
   type Block,
 } from '../../core/index.ts'
 import { ensureTagInTx } from '../../core/kb/ensure-tag.ts'
+import { UnloadedAliasError } from '../../core/kb/unsupported.ts'
 import { t } from '../../core/infra/msg.ts'
 import type { App } from '../../core/infra/ports.ts'
 import type { Row } from '../../ui/overlay/layers.ts'
@@ -246,13 +247,23 @@ export function pageCommands(d: PageDeps): Pick<
       const wasAddress = wasTag || d.kb.resolveAlias(tag) !== undefined
       // 找到或创建 ＋ 写归属，**同一笔事务**（与编辑器打行内标签同形）：
       // 拆开就会留下「只有标签、没有归属」或「归属指向不存在 id」的半批
-      const r = d.run((tx) => {
-        const block = ensureTagInTx(d.kb, tag, tx)
-        if (!block) return null
-        if (hasTag(host, block.id)) return { block, tagged: false }
-        tx.setTags(host.id, [...tagIdsOf(host), block.id])
-        return { block, tagged: true }
-      }).result
+      let r: { block: Block; tagged: boolean } | null
+      try {
+        r = d.run((tx) => {
+          const block = ensureTagInTx(d.kb, tag, tx)
+          if (!block) return null
+          if (hasTag(host, block.id)) return { block, tagged: false }
+          tx.setTags(host.id, [...tagIdsOf(host), block.id])
+          return { block, tagged: true }
+        }).result
+      } catch (e) {
+        // 名字被一个未装载的块占着 ⇒ 不新建；说一句实话，归属一个字节不动
+        if (e instanceof UnloadedAliasError) {
+          d.toast(t('ui.toast.aliasUnloaded'), 'warn')
+          return
+        }
+        throw e
+      }
       if (!r) {
         d.toast(t('ui.toast.tagEmpty'), 'warn')
         return

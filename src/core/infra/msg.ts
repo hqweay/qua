@@ -1626,6 +1626,8 @@ export const MSG = {
   'ui.mount.mention.convert': '转成引用',
   'ui.mount.mention.hoverHint': '转为引用',
   'ui.toast.mentionStale': '那一处的正文已经变了，没有转换',
+  /** 创建路径撞上一个未装载的同名块（工作集迁移）：不新建，等装载后重试 */
+  'ui.toast.aliasUnloaded': '这个名字已存在但还没装载，稍后再试',
   'ui.toast.mentionReadonly': '这一行的正文是名字或只读内容，不能改写',
   'ui.toast.selectionToRefCreated': '新建页「{name}」并转为引用',
   'ui.toast.selectionToRefBlockCreated': '新建块「{name}」并关联',

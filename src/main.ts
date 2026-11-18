@@ -94,6 +94,7 @@ import type { DeviceState } from './core/storage/device.ts'
 import { WORKSPACE_VERSION } from './core/infra/workspace.ts'
 import { createLibraryClient, type LibraryClient } from './core/storage/library-client.ts'
 import { Workset, worksetClosureIds } from './core/storage/workset.ts'
+import { UnloadedAliasError } from './core/kb/unsupported.ts'
 import { loadWorksetBoot, withAncestors, type WorksetBootResult } from './app/boot/workset-boot.ts'
 import type { LoadedWorkspace } from './core/storage/index.ts'
 
@@ -713,8 +714,18 @@ const searchFaceDeps = (): SearchFaceDeps => {
     promote: (term) => app.createQuery(term, { where: { text: term } }),
     // 无结果的创建入口：找到或创建页（与引用浮层同一条创建路径），建好当场打开
     createPage: (name) => {
-      const r = pageDeps.run((tx) => ensurePageInTx(kb, name, tx)?.id ?? '')
-      if (r.result !== '') app.openBlock(r.result, 'center')
+      let id = ''
+      try {
+        id = pageDeps.run((tx) => ensurePageInTx(kb, name, tx)?.id ?? '').result
+      } catch (e) {
+        // 名字被一个未装载的块占着 ⇒ 不新建；说一句实话（搜索面的「创建」入口）
+        if (e instanceof UnloadedAliasError) {
+          app.toast(t('ui.toast.aliasUnloaded'), 'warn')
+          return
+        }
+        throw e
+      }
+      if (id !== '') app.openBlock(id, 'center')
     },
     copyRef: (id) => {
       void registry.invoke('core.editor/copy-block-ref', { blockId: id }, 'surface')
@@ -1807,6 +1818,8 @@ async function backupBeforeReplace(failMsg: MsgId): Promise<string | null | fals
 // 会被当成「未知原子」渲染成 dangling（持久化后重开最明显）。
 ed = new BlockEditor({
   container: editorEl,
+  // 工作集装载：触发链落点按名字复用未装载的目标（先装再落，不建重复身份）
+  ensureLoaded: ensureDocsLoaded,
   // 「点空白建块」的监听面 = #doc：只监听 editorEl 的话，点它下方气口不触发
   blankArea: chrome.blankAreaEl,
   // 共享 store：块是活引用；marks/atoms/undo 也是共享的

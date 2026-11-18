@@ -26,6 +26,7 @@ import {
   type Block,
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
+import { UnloadedAliasError } from '../../core/kb/unsupported.ts'
 import type { App, SelectionToRefRequest } from '../../core/infra/ports.ts'
 import type { KbClient } from '../../core/kb/types.ts'
 import type { MentionDeps } from './types.ts'
@@ -98,39 +99,47 @@ export function mentionCommands(d: MentionDeps): Pick<App, 'convertMention' | 'c
       }
       /** 用对象装「建了什么」：赋值发生在事务回调里，裸 let 会被 TS 窄成初始值 */
       const made: { kind: 'page' | 'block' | null } = { kind: null }
-      const r = d.run((tx) => {
-        let target: Block | null | undefined
-        if (req.to) {
-          // 选择器挑中的已有目标：只认 id，不改它的身份、不补 page 露面
-          target = d.kb.get(req.to)
-        } else if (req.create === 'block') {
-          // ⌥↵：以选中的字造一个普通块（不进地址空间，也没有 page 露面）
-          const slot = nextSiblingSlot(d.kb, spot.blockId)
-          target = mkBlock(spot.text)
-          tx.insert(target, slot.parentId, slot.index)
-          made.kind = 'block'
-        } else {
-          /**
-           * 一键默认：同名地址已经存在 ⇒ 指向它（**不改它的身份**——一个已经存在的
-           * 标签不该因为被引用一次就变成页）；不存在 ⇒ 建页块。
-           */
-          const existing = d.kb.resolveAlias(spot.text)
-          target =
-            existing ??
-            ensurePageInTx(d.kb, spot.text, tx)
-          if (!existing && target) made.kind = 'page'
-        }
-        if (!target) return false
-        // label 是目标的名字快照（dangling 兜底）；anchor 才是这一处要显示的字
-        const label = blockLabel(target, (id) => d.kb.get(id))
-        const next = convertSpotToRef(src.content, spot, target.id, label, spot.text)
-        if (!next) return false
-        tx.patch(spot.blockId, (x) => {
-          writeBlockContent(x, next)
-          x.modified = Date.now()
+      let r: { result: unknown }
+      try {
+        r = d.run((tx) => {
+          let target: Block | null | undefined
+          if (req.to) {
+            // 选择器挑中的已有目标：只认 id，不改它的身份、不补 page 露面
+            target = d.kb.get(req.to)
+          } else if (req.create === 'block') {
+            // ⌥↵：以选中的字造一个普通块（不进地址空间，也没有 page 露面）
+            const slot = nextSiblingSlot(d.kb, spot.blockId)
+            target = mkBlock(spot.text)
+            tx.insert(target, slot.parentId, slot.index)
+            made.kind = 'block'
+          } else {
+            /**
+             * 一键默认：同名地址已经存在 ⇒ 指向它（**不改它的身份**——一个已经存在的
+             * 标签不该因为被引用一次就变成页）；不存在 ⇒ 建页块。
+             */
+            const existing = d.kb.resolveAlias(spot.text)
+            target = existing ?? ensurePageInTx(d.kb, spot.text, tx)
+            if (!existing && target) made.kind = 'page'
+          }
+          if (!target) return false
+          // label 是目标的名字快照（dangling 兜底）；anchor 才是这一处要显示的字
+          const label = blockLabel(target, (id) => d.kb.get(id))
+          const next = convertSpotToRef(src.content, spot, target.id, label, spot.text)
+          if (!next) return false
+          tx.patch(spot.blockId, (x) => {
+            writeBlockContent(x, next)
+            x.modified = Date.now()
+          })
+          return true
         })
-        return true
-      })
+      } catch (e) {
+        // 名字被一个未装载的块占着 ⇒ 不新建（否则地址空间出现第二个同名身份）；说一句实话
+        if (e instanceof UnloadedAliasError) {
+          d.toast(t('ui.toast.aliasUnloaded'), 'warn')
+          return false
+        }
+        throw e
+      }
       if (!r.result) return false
       if (made.kind === 'page') {
         // 新建的页落在森林顶层，可能不在这一屏里；左槽清单要当场跟上

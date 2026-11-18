@@ -104,6 +104,7 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
       .filter((dt) => dt <= anchorDate)
       .slice(-limit)
       .reverse()
+      .map(journalId)
 
   /**
    * 最近一次复盘的参数：空天格子里落笔要**按同一参数重开**（格子变成真实段、其余格子原样）。

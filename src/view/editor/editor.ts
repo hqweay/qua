@@ -292,6 +292,14 @@ export interface ViewOpts {
    * 只改「段怎么摆」，不改「段是什么」——DOM 形状对所有 layout 一致（见 `renderRows` 的 `.sec`）。
    */
   layout?: SecLayout
+  /**
+   * **按 id 装一批块进工作集**（工作集装载；装配层注入）。
+   *
+   * 触发链落点要「找到或创建」一个名字目标：名字被一个未装载的块占着时，
+   * 先装载它再落（复用同一块），而不是把「未加载」当「不存在」去新建
+   * （新建就是第二个同名身份）。省略 ＝ 整库模式（所有块都在内存里）。
+   */
+  ensureLoaded?: (ids: readonly string[], then: () => void) => void
 }
 
 export interface ViewEvents {
@@ -629,6 +637,8 @@ export class BlockEditor {
    * 而后者自己也会 `begin/finish`。只有最外层真正开袋／落条目；内层并入外层。
    */
   private entryDepth = 0
+  /** 工作集装载咽喉（装配层注入；省略 ＝ 整库模式）。触发链落点按名字复用未装载目标用 */
+  readonly ensureLoaded: ViewOpts['ensureLoaded']
   /** store 订阅与事件绑定的卸载函数（`dispose` 用；视图被移除后不该继续收通知） */
   private readonly offStore: () => void
   private readonly unbind: () => void
@@ -641,6 +651,7 @@ export class BlockEditor {
     this.allowRootRemove = o.allowRootRemove !== false
     this.rootRemoveFill = o.rootRemoveFill !== false
     this.structuralScope = o.structuralScope ?? 'document'
+    this.ensureLoaded = o.ensureLoaded
     // 写入口顺手作废那张派生表：标签声明／定义 kind 变了，下一次 `closureOf` 要重算
     this.write = (fn, source, opts) => {
       this.fieldTableCache = null
