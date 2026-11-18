@@ -44,9 +44,7 @@ import { readBlockRows, readBlockTreeRows, readCandidateIds, readCatalogRows, re
 import type { CandidatePlan, LibraryCatalog, LibraryDocRows, RawLibraryRows } from '../../src/core/storage/library-reads.ts'
 import {
   applyRowWrites,
-  hasContent,
   openLibraryDb,
-  readContentRows,
   readMeta,
   replaceContentRows,
   writeMeta,
@@ -89,15 +87,12 @@ export interface RepoSession {
    * 这个会话**读过多少行、按哪条读面读的**。
    *
    * 为什么要记：工作集装载的验收不是「感觉快了」，是「首帧主进程读行数 ≤ Doc＋catalog 行数」。
-   * `full` 是旧的全库装载次数（每次记 `fullRows` 行）；`doc`／`catalog` 是新的具名读，
-   * 各自记行数。两条路径并存期间，这组数就是「这次启动到底读了整库没有」的直接证据；
-   * 切换完成后 `full` 必须归零（诊断面与探针都看它）。
+   * 读面只有具名的几条（`doc`／`catalog`／`blocks`／…），各自记行数——
+   * 没有一条能一次读走整库，这组数就是「这次启动读了多少」的直接证据。
    *
    * 只计数、不改行为：读面失败不在这里记账（调用方会拿到错误，计数不代表成功）。
    */
   reads: {
-    full: number
-    fullRows: number
     doc: number
     docRows: number
     catalog: number
@@ -188,7 +183,7 @@ function makeSession(id: string, dir: string, db: Db, deviceId: string): RepoSes
     assets,
     windows: new Set<number>(),
     deviceId,
-    reads: { full: 0, fullRows: 0, doc: 0, docRows: 0, catalog: 0, catalogRows: 0, blocks: 0, blockRows: 0, candidates: 0, candidateIds: 0, identity: 0, identityRows: 0 },
+    reads: { doc: 0, docRows: 0, catalog: 0, catalogRows: 0, blocks: 0, blockRows: 0, candidates: 0, candidateIds: 0, identity: 0, identityRows: 0 },
     writes: { rows: 0, ftsRows: 0, saves: 0 },
     close: () => {
       try {
@@ -261,30 +256,10 @@ export function openSession(dir: string, opts: { expectId?: string; deviceId?: s
 /* ------------------------------------------------------------ 内容读写（行） */
 
 /**
- * 读这份库的**全部内容行**。
- *
- * 为什么返回行而不是「一份 Workspace」：编码归渲染层（`core/storage/db-rows.ts`），
- * 主进程不认识块语义。`undefined` ＝ 这个库还没有内容（新建的库／被作废的旧库），
- * **调用方**决定要不要 seed —— 这里绝不替它写种子：
- * 种子一旦写进来，「用户数据」与「演示数据」就分不开了。
- */
-export function loadContent(session: RepoSession): ReturnType<typeof readContentRows> | undefined {
-  session.reads.full += 1
-  if (!hasContent(session.db)) return undefined
-  const rows = readContentRows(session.db)
-  /**
-   * 行数＝四张内容表（＋ FTS 映射）：这是「这次装载把多少行搬进了渲染进程」的直接读数。
-   * 工作集读面只记 Doc＋catalog 的行，两者相减就是「首帧省掉的量」。
-   */
-  session.reads.fullRows += rows.blocks.length + rows.props.length + rows.aliases.length + rows.lists.length + rows.ftsMap.length
-  return rows
-}
-
-/**
  * 工作集读面：一个／多个 root 的**子树＋祖先链**（具名 SQL 在主进程执行）。
  *
- * 和 `loadContent` 分开记账：它回答的是「打开这一页要读多少行」，与库多大无关；
- * 上层据此判「首帧没有读全库」。
+ * 读面只有具名的几条（按 root／按 id／按计划），各自记账——回答的是
+ * 「打开这一页要读多少行」，与库多大无关；上层据此判「首帧没有读全库」。
  */
 export function readDoc(session: RepoSession, roots: readonly string[]): LibraryDocRows {
   const doc = readDocRows(session.db, roots)

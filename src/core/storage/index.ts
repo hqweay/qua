@@ -20,9 +20,9 @@ import type { Change, CommitBatch, LoadResult, StoragePort } from './port.ts'
 import type { Op } from '../kb/types.ts'
 import { changesOf } from '../kb/changes.ts'
 import { META_KEYS } from '../identity/library.ts'
-import { parseWorkspace, parseWorkspaceValue, type ParseResult, type Workspace } from './shape.ts'
+import { parseWorkspace, type ParseResult, type Workspace } from './shape.ts'
 import { rowWritesFor, workspaceToRowWrites, type RowWrite } from './db-rows.ts'
-import type { FtsCommitPlan, FtsCommitSource, FtsLoadState } from './fts-port.ts'
+import type { FtsCommitPlan, FtsCommitSource } from './fts-port.ts'
 
 /** 「整份库都动过」的那批改动：本地适配器的最细粒度（信封实现与门面共用同一份声明） */
 export const WHOLE_LIBRARY_CHANGES: Change[] = [
@@ -35,10 +35,9 @@ export const WHOLE_LIBRARY_CHANGES: Change[] = [
  *
  * `storage-error` 与 `corrupt` 必须分开：前者「读不到」，后者「读到了但打不开」，
  * 给用户的建议完全不同（换个浏览器 / 备份抢救）。
+ * 只有字节后端（web 单库）走这条装载路；桌面库的读面在 `LibraryClient`。
  */
-export type LoadedWorkspace =
-  | (ParseResult & { search?: FtsLoadState })
-  | { status: 'storage-error'; error: unknown; search?: FtsLoadState }
+export type LoadedWorkspace = ParseResult | { status: 'storage-error'; error: unknown }
 
 export interface WorkspaceStore {
   readonly kind: string
@@ -70,14 +69,12 @@ export interface WorkspaceStore {
   settle: () => Promise<void>
 }
 
-/** 把适配器的读盘结果判定成上层能直接分支的形状的要害就在这） */
+/** 把字节后端的读盘结果判定成上层能直接分支的形状 */
 export function judge(r: LoadResult): LoadedWorkspace {
   if (r.status === 'storage-error') return { status: 'storage-error', error: r.error }
   if (r.status === 'incompatible') return { status: 'storage-error', error: new Error(r.reason) }
   if (r.status === 'empty') return { status: 'empty' }
-  // 行后端直出对象（省掉整库 JSON 的两份拷贝）；字节后端仍走 JSON.parse 那一份
-  const parsed = 'model' in r ? parseWorkspaceValue(r.model) : parseWorkspace(r.raw)
-  return r.search === undefined ? parsed : { ...parsed, search: r.search }
+  return parseWorkspace(r.raw)
 }
 
 /**
@@ -114,7 +111,12 @@ export function createWorkspaceStore(port: StoragePort, fts?: FtsCommitSource, h
 
   return {
     kind: port.kind,
-    load: async () => judge(await port.load()),
+    load: port.load
+      ? async () => judge(await port.load!())
+      : async () => ({
+          status: 'storage-error',
+          error: new Error('this backend has no byte load; reads go through the workset'),
+        }),
 
     commit(ws, ops, opts = {}) {
       const run = async (): Promise<{ ok: true } | { ok: false; error: unknown }> => {

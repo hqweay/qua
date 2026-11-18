@@ -26,7 +26,8 @@ import {
   writeFileAtomic,
   type RegistryIo,
 } from '../electron/library/registry.ts'
-import { loadContent, openSession, saveContent } from '../electron/library/session.ts'
+import { openSession, saveContent } from '../electron/library/session.ts'
+import { readContentRows } from '../electron/library/sqlite.ts'
 
 const dirs: string[] = []
 function tmpRoot(): RegistryIo {
@@ -204,7 +205,7 @@ test('openSession：内容往返（写进去的行读回来一模一样）', () 
   const r = openSession(dir, { expectId: id })
   assert.equal(r.status, 'ok')
   const s = r.status === 'ok' ? r.session : null
-  assert.equal(loadContent(s!), undefined, '新建的库**没有内容**：seed 是调用方的事')
+  assert.equal(readContentRows(s!.db).blocks.length, 0, '新建的库**没有内容**：seed 是调用方的事')
 
   /**
    * 一条最小的行写入：一个块 ＋ 库级两格。
@@ -222,18 +223,17 @@ test('openSession：内容往返（写进去的行读回来一模一样）', () 
     { table: 'meta' as const, op: 'upsert' as const, key: { key: META_KEYS.savedAt }, values: { value: '7' } },
   ]
   saveContent(s!, writes, { replace: true })
-  const back = loadContent(s!)
-  assert.ok(back, '写进去之后必须读得出来')
-  assert.deepEqual(back!.blocks.map((b) => b.id), ['b1'])
-  assert.equal(back!.meta[META_KEYS.activeId], 'b1')
-  assert.equal(back!.meta[META_KEYS.savedAt], '7')
+  const back = readContentRows(s!.db)
+  assert.deepEqual(back.blocks.map((b) => b.id), ['b1'], '写进去之后必须读得出来')
+  assert.equal(back.meta[META_KEYS.activeId], 'b1')
+  assert.equal(back.meta[META_KEYS.savedAt], '7')
   s!.close()
 
   // 重开：内容还在（这是当前完成判据里最小的那一格）
   const again = openSession(dir, { expectId: id })
   assert.equal(again.status, 'ok')
   const s2 = again.status === 'ok' ? again.session : null
-  assert.deepEqual(loadContent(s2!)!.blocks.map((b) => b.id), ['b1'])
+  assert.deepEqual(readContentRows(s2!.db).blocks.map((b) => b.id), ['b1'])
   s2!.close()
 })
 

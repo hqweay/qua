@@ -92,8 +92,7 @@ const qua = {
   /** 整库快照到 `<库目录>/backups/`；渲染层的显式清库动作把它当回退面 */
   backupLibrary: (label?: string): Promise<unknown> => ipcRenderer.invoke('qua:library/backup', label ?? 'manual'),
 
-  /** 内容（四张内容表的全部行；编码归渲染层） */
-  load: (): Promise<unknown> => ipcRenderer.invoke('qua:storage/load'),
+  /** 落一批行写入（增量或整份替换；编码归渲染层） */
   save: (writes: unknown[], opts?: { replace?: boolean; oplog?: unknown[]; derived?: boolean }): Promise<unknown> =>
     ipcRenderer.invoke('qua:storage/save', writes, opts ?? {}),
 

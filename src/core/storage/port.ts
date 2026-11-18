@@ -21,8 +21,6 @@
 
 import type { Change, ChangeKind, Op } from '../kb/types.ts'
 import type { RowWrite } from './db-rows.ts'
-import type { FtsLoadState } from './fts-port.ts'
-import type { Workspace } from './shape.ts'
 
 export type { Change, ChangeKind }
 
@@ -85,25 +83,12 @@ export interface CommitBatch {
  *
  * 旧实现把所有失败都压成 `null`，调用方只能 `?? seedWorkspace()`，随后立刻覆盖写 ——
  * 过新/损坏的库会被**静默覆盖**（真数据丢失）。
+ *
+ * 只有字节后端（web 单库）还有「读」：桌面库的读面是 `LibraryClient` 的具名查询，
+ * 不经过这个端口——所以 `ok` 只带字节，不带模型，更不带整库行。
  */
 export type LoadResult =
-  | {
-      status: 'ok'
-      raw: string
-      /**
-       * 派生索引的状态。它不是内容：丢了／不匹配都能全量重建。
-       * 只有「行」后端（桌面库）会给；浏览器没有 FTS。
-       */
-      search?: FtsLoadState
-    }
-  /**
-   * **行后端的模型直出**：`rowsToWorkspace` 已经拼好了对象，不要再
-   * `JSON.stringify → JSON.parse` 走一遍——那是两份全量拷贝，而且整库 JSON 在
-   * 1–2M 块处会撞 V8 的字符串长度上限（不是慢，是打不开）。
-   *
-   * 两条 `ok` 的版本门禁与形状校验必须同一份（`parseWorkspaceValue`）。
-   */
-  | { status: 'ok'; model: Workspace; search?: FtsLoadState }
+  | { status: 'ok'; raw: string }
   /** 从没保存过 */
   | { status: 'empty' }
   /**
@@ -131,7 +116,12 @@ export interface StoragePort {
    * 就是把整库覆盖写的成本从存储层搬到了 CPU 上。
    */
   readonly consumes: 'bytes' | 'rows'
-  load(): Promise<LoadResult>
+  /**
+   * 读整份字节（**只有字节后端实现**——web 单库的装载路）。
+   * 接库的后端没有这个格：桌面读面是 `LibraryClient` 的具名查询（按 root／按 id／按计划），
+   * 没有「一次读走整库」的口子；这个端口在桌面只负责「写」。
+   */
+  load?(): Promise<LoadResult>
   /** 提交一批改动；**失败必须返回失败**，不许假装存上了 */
   commit(batch: CommitBatch): Promise<SaveResult>
   /** 清空（演示状态切换 / 重置用） */

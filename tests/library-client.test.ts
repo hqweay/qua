@@ -5,8 +5,8 @@
  *   ① `doc`／`catalog` 的回复必须**分型**：`no-library`／`bad-args`／`error` 不许被解包成
  *      「空 Doc」——那会让上一页看起来真的空；
  *   ② 坏回复在**发生的那一层**停下（带通道名），不把 `undefined` 漏给调用方；
- *   ③ 读计数：`doc`／`catalog` 不增 `full`，全库装载单独记 `full`／`fullRows`——
- *      这是「首帧到底读了整库没有」的直接证据。
+ *   ③ 读计数：每个读面各记各的行数——这是「首帧到底读了多少」的直接证据；
+ *      没有「整库」一格可读。
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -16,7 +16,7 @@ import { join } from 'node:path'
 import { libraryId } from '../src/core/identity/library.ts'
 import { createLibraryClient, type LibraryReadBridge } from '../src/core/storage/library-client.ts'
 import type { LibraryCatalog, LibraryDocRows } from '../src/core/storage/library-reads.ts'
-import { loadContent, openSession, readBlocks, readCatalog, readDoc, saveContent } from '../electron/library/session.ts'
+import { openSession, readBlocks, readCatalog, readDoc, saveContent } from '../electron/library/session.ts'
 import type { RowWrite } from '../electron/library/sqlite.ts'
 
 function doc(root = 'p'): LibraryDocRows {
@@ -157,7 +157,7 @@ process.on('exit', () => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true })
 })
 
-test('session 读计数：doc/catalog 不增 full；全库装载单独记行数', () => {
+test('session 读计数：每个读面各记各的行数', () => {
   const root = mkdtempSync(join(tmpdir(), 'qua-read-count-'))
   dirs.push(root)
   const id = libraryId()
@@ -185,8 +185,6 @@ test('session 读计数：doc/catalog 不增 full；全库装载单独记行数'
   assert.equal(c.tags.length, 1)
   assert.equal(b.blocks.length, 1, 'blocks 只回点名的那几块')
   assert.deepEqual(s!.reads, {
-    full: 0,
-    fullRows: 0,
     doc: 1,
     docRows: 5, // blocks 2 + props 1 + aliases 1 + lists 1（祖先链 0）
     catalog: 1,
@@ -198,12 +196,5 @@ test('session 读计数：doc/catalog 不增 full；全库装载单独记行数'
     identity: 0,
     identityRows: 0,
   })
-
-  const all = loadContent(s!)
-  assert.ok(all, '库里有内容')
-  assert.equal(s!.reads.full, 1)
-  // blocks 3 + props 1 + aliases 2 + lists 2（+ FTS 映射 0）
-  assert.equal(s!.reads.fullRows, 8)
-  assert.equal(s!.reads.doc, 1, '全库装载不重复记 doc')
   s!.close()
 })

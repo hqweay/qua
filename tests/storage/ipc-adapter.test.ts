@@ -2,28 +2,18 @@
  * 库存储适配器（渲染层，经 IPC）—— 与 localStorage 适配器同一个端口。
  *
  * 判据：
- *   ① **装载补回当前版本**：库里不存 `version`（唯一判据是 `user_version`），
- *      上层拿到的永远是一份 `version === WORKSPACE_VERSION` 的库；
- *   ② **提交送的是行写入**，不是整份字节 —— 这是「写成本不随库体量增长」的落地面；
- *   ③ 失败**如实返回**（不许假装存上）；
- *   ④ 单写者：后一次提交永远排在前一次之后。
+ *   ① **提交送的是行写入**，不是整份字节 —— 这是「写成本不随库体量增长」的落地面；
+ *   ② 失败**如实返回**（不许假装存上）；
+ *   ③ 单写者：后一次提交永远排在前一次之后。
+ *
+ * 读不走这里：桌面读面是 `LibraryClient` 的具名查询（`library-client.test.ts`），
+ * 没有一条能一次读走整库。
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { WORKSPACE_VERSION } from '../../src/core/infra/workspace.ts'
-import { createIpcAdapter, IPC_BACKEND, withVersion, type LibraryBridge } from '../../src/core/storage/ipc-adapter.ts'
+import { createIpcAdapter, IPC_BACKEND, type LibraryBridge } from '../../src/core/storage/ipc-adapter.ts'
 import { judge } from '../../src/core/storage/index.ts'
-import type { RawLibraryRows } from '../../src/core/storage/db-rows.ts'
-
-/** 一片最小的行集：一个块 ＋ 库级两格（不带 version，库本来就不存它） */
-const rows = (patch: Partial<RawLibraryRows> = {}): RawLibraryRows => ({
-  blocks: [{ id: 'b1', content: '[]', created: 1, modified: 2, parent: null, left: null }],
-  props: [],
-  aliases: [],
-  lists: [],
-  meta: { active_id: 'b1', saved_at: '3' },
-  ...patch,
-})
 
 /** 桥的资产面：本文件不测它（在 storage/asset-ipc.test.ts），但 `LibraryBridge` 的形状要求它在 */
 const assetFace = {
@@ -32,7 +22,7 @@ const assetFace = {
 }
 
 /** 一个记下「收到了什么」的假桥 */
-function fakeBridge(reply: { status: string; rows?: RawLibraryRows } = { status: 'empty' }): {
+function fakeBridge(): {
   bridge: LibraryBridge
   saves: { writes: unknown[]; opts?: { replace?: boolean } }[]
 } {
@@ -41,7 +31,6 @@ function fakeBridge(reply: { status: string; rows?: RawLibraryRows } = { status:
     saves,
     bridge: {
       libraryInfo: async () => ({ status: 'ok' }),
-      load: async () => reply,
       save: async (writes, opts) => {
         saves.push({ writes, opts })
         return { ok: true }
@@ -51,133 +40,37 @@ function fakeBridge(reply: { status: string; rows?: RawLibraryRows } = { status:
   }
 }
 
-test('withVersion：装载时补回当前版本（库里不存它）', () => {
-  const back = withVersion({ blocks: [], activeId: '', savedAt: 0 })
-  assert.equal(back.version, WORKSPACE_VERSION)
-  assert.deepEqual(back.blocks, [])
-})
-
-test('load：行 → 模型（行里有 `parent`／`left`，读出来是 `children`）', () => {
-  const { bridge } = fakeBridge({
-    status: 'ok',
-    rows: rows({
-      blocks: [
-        { id: 'root', content: '[]', created: 1, modified: 1, parent: null, left: null },
-        { id: 'a', content: '[]', created: 1, modified: 1, parent: 'root', left: null },
-        { id: 'b', content: '[]', created: 1, modified: 1, parent: 'root', left: 'a' },
-      ],
-    }),
-  })
-  return createIpcAdapter(bridge)
-    .load()
-    .then((r) => {
-      assert.equal(r.status, 'ok')
-      if (r.status !== 'ok') return
-      assert.ok('model' in r, '行后端直出模型：不再构造整库 JSON（两份全量拷贝 + 字符串长度上限）')
-      const ws = 'model' in r ? r.model : JSON.parse(r.raw)
-      assert.equal(ws.version, WORKSPACE_VERSION, '装载时补回当前版本')
-      assert.equal(ws.blocks.length, 1, '只有一个顶层根')
-      assert.deepEqual(ws.blocks[0].children.map((x: { id: string }) => x.id), ['a', 'b'], '`left` 是源，`children` 是投影')
-      assert.equal(ws.activeId, 'b1')
-      assert.equal(ws.savedAt, 3)
-    })
-})
-
-test('load：库里没有内容 ⇒ empty（不是 corrupt，也不是「库坏了」）', async () => {
-  const { bridge } = fakeBridge({ status: 'empty' })
-  assert.deepEqual(await createIpcAdapter(bridge).load(), { status: 'empty' })
-})
-
-test('judge：model 与 raw 两条载荷同解；版本门禁仍分型', async () => {
-  const { bridge } = fakeBridge({ status: 'ok', rows: rows() })
-  const r = await createIpcAdapter(bridge).load()
+test('judge：字节装载的版本门禁与形状校验', () => {
+  const ws = {
+    version: WORKSPACE_VERSION,
+    activeId: 'root',
+    savedAt: 3,
+    blocks: [
+      {
+        id: 'root',
+        content: [],
+        created: 1,
+        modified: 1,
+        children: [
+          { id: 'a', content: [], created: 1, modified: 1, children: [] },
+          { id: 'b', content: [], created: 1, modified: 1, children: [] },
+        ],
+      },
+    ],
+  }
+  const r = judge({ status: 'ok', raw: JSON.stringify(ws) })
   assert.equal(r.status, 'ok')
   if (r.status !== 'ok') return
-  const model = 'model' in r ? r.model : JSON.parse(r.raw)
-  const fromModel = judge({ status: 'ok', model })
-  const fromRaw = judge({ status: 'ok', raw: JSON.stringify(model) })
-  assert.equal(fromModel.status, 'ok')
-  assert.equal(fromRaw.status, 'ok')
-  assert.deepEqual(fromModel, fromRaw, '两条路必须过同一份版本门禁与形状校验')
-  assert.deepEqual(judge({ status: 'ok', model: { ...model, version: WORKSPACE_VERSION + 1 } }), {
+  assert.equal(r.ws.blocks.length, 1, '只有一个顶层根')
+  assert.deepEqual(r.ws.blocks[0]!.children.map((x) => x.id), ['a', 'b'])
+  assert.deepEqual(judge({ status: 'ok', raw: JSON.stringify({ ...ws, version: WORKSPACE_VERSION + 1 }) }), {
     status: 'too-new',
     version: WORKSPACE_VERSION + 1,
   })
-  assert.deepEqual(judge({ status: 'ok', model: { ...model, blocks: [] } }), { status: 'corrupt', reason: 'shape' })
-})
-
-test('load：没有库 ⇒ incompatible（不是 corrupt：这是「这个窗口没有库」）', async () => {
-  const { bridge } = fakeBridge({ status: 'no-library' })
-  const r = await createIpcAdapter(bridge).load()
-  assert.equal(r.status, 'incompatible')
-})
-
-test('load：桥抛错 ⇒ storage-error（读不到 ≠ 库坏了）', async () => {
-  const bridge: LibraryBridge = {
-    libraryInfo: async () => ({}),
-    load: async () => {
-      throw new Error('ipc broke')
-    },
-    save: async () => ({ ok: true }),
-    ...assetFace,
-  }
-  const r = await createIpcAdapter(bridge).load()
-  assert.equal(r.status, 'storage-error')
-})
-
-test('load：带上索引状态（块 id ＋ 来源 ↔ rowid、状态、分词器版本）', async () => {
-  const { bridge } = fakeBridge({
-    status: 'ok',
-    rows: rows({
-      ftsMap: [
-        { block_id: 'b1', source: 'content', fts_rowid: 7 },
-        { block_id: 'b2', source: 'alias', fts_rowid: 9 },
-      ],
-      meta: {
-        active_id: 'b1',
-        saved_at: '3',
-        fts_state: 'ready',
-        fts_rowid_seq: '9',
-        fts_tokenizer: 'tok-1',
-      },
-    }),
+  assert.deepEqual(judge({ status: 'ok', raw: JSON.stringify({ ...ws, blocks: [] }) }), {
+    status: 'corrupt',
+    reason: 'shape',
   })
-  const r = await createIpcAdapter(bridge).load()
-  assert.equal(r.status, 'ok')
-  if (r.status !== 'ok') return
-  assert.equal(r.search?.state, 'ready')
-  assert.equal(r.search?.rowidSeq, 9)
-  assert.equal(r.search?.tokenizer, 'tok-1')
-  // 映射键是「块 id ＋ 来源」；来源不认识的行整行丢（宁可重建，不猜它是什么）
-  assert.deepEqual([...r.search!.map.entries()].sort(), [
-    ['b1\u0000content', 7],
-    ['b2\u0000alias', 9],
-  ])
-})
-
-test('load：映射行来源不认识 ⇒ 整行丢掉，不猜', async () => {
-  const { bridge } = fakeBridge({
-    status: 'ok',
-    rows: rows({
-      ftsMap: [{ block_id: 'b1', fts_rowid: 7 }, { block_id: 'b2', source: 'nope', fts_rowid: 8 }],
-      meta: { active_id: 'b1', saved_at: '3', fts_state: 'ready' },
-    }),
-  })
-  const r = await createIpcAdapter(bridge).load()
-  if (r.status !== 'ok') return
-  assert.equal(r.search?.map.size, 0, '没有合法来源的映射行不成键')
-})
-
-test('load：不认识的状态按 pending（宁可重建，也不相信一个读不懂的状态）', async () => {
-  const { bridge } = fakeBridge({
-    status: 'ok',
-    rows: rows({ meta: { active_id: 'b1', saved_at: '3', fts_state: 'weird' } }),
-  })
-  const r = await createIpcAdapter(bridge).load()
-  assert.equal(r.status, 'ok')
-  if (r.status !== 'ok') return
-  assert.equal(r.search?.state, 'pending')
-  assert.equal(r.search?.map.size, 0)
 })
 
 test('commit：送的是**行写入**（不是整份字节），`replace` 一起带过去', async () => {
@@ -202,7 +95,6 @@ test('commit：送的是**行写入**（不是整份字节），`replace` 一起
 test('commit：主进程说失败 ⇒ 如实返回失败（不许假装存上）', async () => {
   const bridge: LibraryBridge = {
     libraryInfo: async () => ({}),
-    load: async () => ({ status: 'empty' }),
     save: async () => ({ ok: false, error: 'disk full' }),
     ...assetFace,
   }
@@ -219,7 +111,6 @@ test('commit：单写者 —— 后一次提交永远排在前一次之后', asy
   const order: number[] = []
   const bridge: LibraryBridge = {
     libraryInfo: async () => ({}),
-    load: async () => ({ status: 'empty' }),
     save: async (_writes, opts) => {
       // 第一次故意慢：串行的话第二次仍排在它后面
       await new Promise((r) => setTimeout(r, opts?.replace ? 30 : 0))

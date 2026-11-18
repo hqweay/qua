@@ -213,8 +213,8 @@ const device = await deviceStore.load()
 /**
  * **两条装载路，一份模型**：
  *   · 桌面库**有内容** ⇒ 工作集装载（`catalog` ＋ `doc(今日窗口|active)` ＋ 引用闭包）——
- *     启动不读全库，`reads.full` 归零是这条路的验收读数；
- *   · 其余（web 单库、还没有内容的库、库读不了）⇒ 旧的全量装载路（web 是注册过的非对称）。
+ *     启动只读 Doc＋catalog，读数在会话的 `reads` 里逐面记账；
+ *   · 其余（web 单库、还没有内容的库、库读不了）⇒ 字节装载路（web 是注册过的非对称）。
  *
  * store/kb 先于装载建好：它们只依赖一个空森林；装载路把块装进去之后，`ws` 再指到
  * **同一个数组**上（`BlockStore.blocks` 与 `ws.blocks` 共用一份，`syncSections` 靠这个）。
@@ -270,11 +270,11 @@ let boot: LoadedWorkspace
   } else if (info && info.status !== 'ok') {
     boot = { status: 'storage-error', error: new Error(`library: ${info.status}`) }
   } else if (LIBRARY_BRIDGE) {
-    // 有库面但库信息读不到 ⇒ 只读。**不退回 `store.load()`**：那一次调用读的是
-    // 整库行——「信息读不到」兜底成一次全量装载，正是层 1 要消灭的形状。
+    // 有库面但库信息读不到 ⇒ 只读。**不退回字节装载**：桌面没有「读整库」的路，
+    // 「信息读不到」兜底成一次全量装载，正是这套架构要消灭的形状。
     boot = { status: 'storage-error', error: new Error('library info unavailable') }
   } else {
-    // 没有库面（web 单库）：旧的全量装载路（注册过的非对称，层 5 才删）
+    // 没有库面（web 单库）：字节装载路（小数据全量进内存，注册过的非对称）
     boot = await store.load()
   }
 }
@@ -340,13 +340,9 @@ if (boot.status !== 'ok') {
  * **搜索运行时**：桌面库才可能走 FTS；web 没有 SQLite，构造时 `bridge.search` 缺失
  * ⇒ 查询自动走森林扫描（同一套词项，标记为降级）。
  *
- * 索引状态来自这次装载：状态不是 `ready`／分词器版本不匹配 ⇒ 先扫描，后台重建
- * （重建在 worker 里，不占输入路径）。
- */
-/**
- * **索引快照的两条来路**：整库路是装载自带的（映射整表在内存）；
- * 工作集路的映射**按块查**，这里只带状态/分词器版本/水位——
+ * **索引快照**：工作集路的映射**按块查**，这里只带状态/分词器版本/水位——
  * 状态不是 ready ⇒ 查询面显式降级（不扫描工作集），重建被服务挡住。
+ * web 没有快照（映射就是内存森林本身），走森林扫描。
  */
 const searchSnapshot: SearchSnapshot | undefined = worksetBoot
   ? {
@@ -355,9 +351,7 @@ const searchSnapshot: SearchSnapshot | undefined = worksetBoot
       rowidSeq: worksetBoot.catalog.meta.ftsRowidSeq,
       tokenizer: worksetBoot.catalog.meta.ftsTokenizer,
     }
-  : boot.status === 'ok'
-    ? boot.search
-    : undefined
+  : undefined
 
 search = createSearchService({
   bridge: LIBRARY_BRIDGE,
@@ -632,8 +626,8 @@ if (worksetBoot && libraryClient) {
 /**
  * **首帧读面探针（仅开发构建）**：工作集装载打印真机读数与主进程记的读行数。
  *
- * 验收看三个数：`full=0`（启动没读全库）、`loaded`（工作集块数＝Doc 闭包）与
- * `doc/catalog/blocks` 的行数（这次首帧到底搬了多少行进渲染层）。
+ * 验收看两个数：`loaded`（工作集块数＝Doc 闭包）与 `doc/catalog/blocks` 的行数
+ * （这次首帧到底搬了多少行进渲染层——读面只有具名几条，没有「整库」一格可读）。
  * `bootOps` 非空 ⇒ 这一轮刚物化了今日/空天首子块，那些行要等首笔落盘才在库里（照常打印）。
  */
 if (DEV_SURFACE && LIBRARY_BRIDGE && worksetBoot) {
@@ -645,8 +639,7 @@ if (DEV_SURFACE && LIBRARY_BRIDGE && worksetBoot) {
         `[perf] boot working set: mode=${worksetBoot!.mode} roots=${bootRoots.length} loaded=${blocks.loadedCount} ` +
           `doc=${bootCounts.docReads}/${bootCounts.docRows} catalog=${bootCounts.catalogRows} ` +
           `identity=${bootCounts.identityRows} ` +
-          `session full=${reads?.full ?? '?'} fullRows=${reads?.fullRows ?? '?'} ` +
-          `doc=${reads?.doc ?? '?'}/${reads?.docRows ?? '?'} catalog=${reads?.catalog ?? '?'} blocks=${reads?.blocks ?? '?'}/${reads?.blockRows ?? '?'}`,
+          `session doc=${reads?.doc ?? '?'}/${reads?.docRows ?? '?'} catalog=${reads?.catalog ?? '?'} blocks=${reads?.blocks ?? '?'}/${reads?.blockRows ?? '?'}`,
       )
     })
     .catch(() => console.warn('[perf] boot read probe: libraryInfo failed'))

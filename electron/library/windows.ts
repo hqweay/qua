@@ -29,7 +29,7 @@ import {
   type LibraryEntry,
 } from '../../src/core/identity/library.ts'
 import { libraryDir, loadRegistry, markOpened, saveRegistry, type RegistryIo } from './registry.ts'
-import { loadContent, openSession, readBlocks, readCatalog, readCandidates, readDependentIds, readDoc, readFtsMap, readIdentity, readRelations, readRoots, readTree, saveContent, type OpenFailure, type RepoSession } from './session.ts'
+import { openSession, readBlocks, readCatalog, readCandidates, readDependentIds, readDoc, readFtsMap, readIdentity, readRelations, readRoots, readTree, saveContent, type OpenFailure, type RepoSession } from './session.ts'
 import { hasContent, readMeta, readSeq, searchFts, snapshotLibrary, type RowWrite } from './sqlite.ts'
 import { META_KEYS } from '../../src/core/identity/library.ts'
 import { isCandidatePlan } from '../../src/core/storage/library-reads.ts'
@@ -373,19 +373,6 @@ export class LibraryManager {
         /** 读成本：`full` 是全库装载次数（旧路径）；`doc`／`catalog`／`blocks` 是工作集读面 */
         reads: { ...s.reads },
       }
-    })
-
-    /**
-     * 读内容（四张内容表的**全部行**）。
-     *
-     * 送行不送「一份库」：编码归渲染层，主进程不认识块语义。
-     * `status: 'empty'` ＝ 这个库还没有内容（新建／被作废的旧库），渲染层据此 seed。
-     */
-    ipcMain.handle('qua:storage/load', (e) => {
-      const s = sessionOf(e)
-      if (!s) return { status: 'no-library' }
-      const content = loadContent(s)
-      return content ? { status: 'ok', rows: content } : { status: 'empty' }
     })
 
     /**
