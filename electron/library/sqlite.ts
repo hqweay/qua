@@ -142,6 +142,44 @@ create table if not exists ${DB_TABLES.blockFtsMap} (
 `
 
 /**
+ * 派生层的 DDL —— **v12 起的两张派生表 ＋ 属性值索引**（只加表/索引，不搬内容）。
+ *
+ * 为什么单列一份、不并进 `CONTENT_DDL`：同 `FTS_DDL` 的理由——`CONTENT_DDL` 代表
+ * 内容形状，派生表只在 v12 及之后存在。旧目标版本的测试库／历史迁移因此保持各自形状。
+ *
+ * 三处形状口径：
+ *   · `BlockIndex.path` 由 `parent`/`left` 物化（定长段、段间 `/`），前缀查询＝子树、
+ *     字典序＝先序；`root` 是顶层祖先（自己也可能是根）；`hidden=1` 表示自己或祖先被软删。
+ *   · `BlockRelation` 按 `(from_id, to_id, kind)` 去重：它回答「谁指向谁」，不存计数与
+ *     属性 id（那些仍从内容行算）。`from_root` 让反链按来源根聚合，不必回查 `BlockIndex`。
+ *   · 两张表都可由内容全量重建（口径在 `core/storage/derived-rows.ts`），所以不设外键：
+ *     写入顺序由重建/维护批次决定，悬空边与悬空块在派生层是**可重建的中间态**。
+ */
+const DERIVED_DDL = `
+create table if not exists ${DB_TABLES.blockIndex} (
+  block text primary key,
+  root text not null,
+  path text not null,
+  hidden integer
+) without rowid;
+create index if not exists idx_BlockIndex_path on ${DB_TABLES.blockIndex}(path);
+create index if not exists idx_BlockIndex_root on ${DB_TABLES.blockIndex}(root);
+create index if not exists idx_BlockIndex_hidden on ${DB_TABLES.blockIndex}(hidden) where hidden is not null;
+
+create table if not exists ${DB_TABLES.blockRelation} (
+  from_id text not null,
+  to_id text not null,
+  kind text not null,
+  from_root text not null,
+  primary key (from_id, to_id, kind)
+) without rowid;
+create index if not exists idx_BlockRelation_to on ${DB_TABLES.blockRelation}(to_id, kind);
+create index if not exists idx_BlockRelation_from_root on ${DB_TABLES.blockRelation}(from_root);
+
+create index if not exists idx_BlockProperty_name_value on ${DB_TABLES.property}(name, value);
+`
+
+/**
  * 库级表（`settings`／`meta`／`op_log`）—— 与内容表分开：它们**换库不换形状**，
  * 从 v1 起就在这里（`workspace` 那张临时表才是 v1 的产物）。
  */
@@ -345,6 +383,20 @@ export const MIGRATIONS: Migration[] = [
       db.exec(`create index if not exists idx_Block_kind on ${DB_TABLES.block}(kind) where kind is not null`)
     },
   },
+  {
+    to: 12,
+    up: (db) => {
+      /**
+       * **派生层回到 SQLite**：`BlockIndex`（root／path／hidden）与 `BlockRelation`
+       * （引用／标签／归属／属性边）＋属性值索引。只加表/索引、不动内容。
+       *
+       * 表体由内容全量重建（渲染层认识块语义，主进程不认识），所以这里只落
+       * `derived_state='pending'`：重建完成前读路径不许相信这两张表。
+       */
+      db.exec(DERIVED_DDL)
+      writeMeta(db, META_KEYS.derivedState, 'pending')
+    },
+  },
 ]
 
 export type OpenResult =
@@ -482,6 +534,11 @@ export function openLibraryDb(
           // 新库也要一个明确的「索引还没建」状态：读路径据此走扫描，而不是相信空索引
           writeMeta(db, META_KEYS.ftsState, 'pending')
           writeMeta(db, META_KEYS.ftsRowidSeq, '0')
+        }
+        // 派生层同理：空表不等于「库里什么都没有」，重建完成前状态必须是 pending
+        if (target >= 12) {
+          db.exec(DERIVED_DDL)
+          writeMeta(db, META_KEYS.derivedState, 'pending')
         }
         setUserVersion(db, target)
       })
@@ -645,6 +702,8 @@ const WRITABLE = new Set<string>([
   'meta',
   'BlockFTS',
   'BlockFTSMap',
+  'BlockIndex',
+  'BlockRelation',
 ])
 
 /**
@@ -661,6 +720,8 @@ const COLUMNS: Record<string, ReadonlySet<string>> = {
   meta: new Set(['key', 'value']),
   BlockFTS: new Set(['rowid', 'seg', 'chars', 'pinyin']),
   BlockFTSMap: new Set(['block_id', 'source', 'fts_rowid']),
+  BlockIndex: new Set(['block', 'root', 'path', 'hidden']),
+  BlockRelation: new Set(['from_id', 'to_id', 'kind', 'from_root']),
 }
 
 function sqlOf(w: RowWrite): string {

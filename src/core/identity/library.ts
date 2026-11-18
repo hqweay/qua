@@ -56,12 +56,15 @@ export const LIBRARY_FORMAT = 1
  * 整个作废重建，内容一行不碰，状态落回 `pending`——派生数据丢得起，重建即可。
  * v11 给 `Block.kind` 加**部分索引**：工作集首帧要查字段定义（`kind is not null`），
  * 没有索引时是 1M 全表扫；只加索引、不动内容，是一次可回退的纯增益迁移。
+ * v12 把**派生层放回 SQLite**：`BlockIndex`（root／path／hidden）与 `BlockRelation`
+ * （引用／标签／归属／属性边）两张派生表，外加属性值索引。只加表／索引、不动内容；
+ * 两张表都可由内容全量重建，状态落 `derived_state='pending'`，重建完成前读路径不许相信它们。
  *
  * **不写数据迁移**：原型不做旧数据迁移，旧库作废重 seed（`judgeDbVersion` 判到
  * `migrate` 时跑 `MIGRATIONS` 里那一步**只丢旧形状、不搬数据**的 DDL）。
  * `user_version` 只增不减。
  */
-export const DB_SCHEMA_VERSION = 11
+export const DB_SCHEMA_VERSION = 12
 
 /** `meta` 表里被代码解释的键（其余键归将来，不在这里登记）。 */
 export const META_KEYS = {
@@ -86,6 +89,15 @@ export const META_KEYS = {
   ftsRowidSeq: 'fts_rowid_seq',
   /** 建索引时用的分词器版本；与当前版本不一致 ⇒ 旧索引作废、全量重建 */
   ftsTokenizer: 'fts_tokenizer',
+  /**
+   * 派生层（`BlockIndex`／`BlockRelation`）的构建状态：`pending`／`ready`。
+   *
+   * 与 `fts_state` 同一条纪律：它描述的是**派生表能不能信**，不是内容。
+   * 建库／整份替换／迁移都落 `pending`；全量重建与内容写在同一事务里落 `ready`。
+   * 写路径尚未在同一事务里维护这两张表：任何增量编辑都会让它们过期 ——
+   * 所以在写事务接上之前，读路径**不得**消费它们（不做半迁移发布）。
+   */
+  derivedState: 'derived_state',
 } as const
 
 /**
@@ -126,6 +138,21 @@ export const DB_TABLES = {
   blockFts: 'BlockFTS',
   /** 块 id ↔ 稳定 FTS rowid（不用 `Block.rowid`：隐式 rowid 在 VACUUM 下可能变） */
   blockFtsMap: 'BlockFTSMap',
+  /**
+   * 派生位置表（`block` 主键 → `root`／`path`／`hidden`）：派生表，不是第二真相。
+   *
+   * `root`／`path` 由 `parent`／`left` 物化（SQL 排序、子树前缀、分页都要它），
+   * `hidden` 由「自己或祖先被软删」派生。可从内容全量重建，重建口径在
+   * `core/storage/derived-rows.ts`。
+   */
+  blockIndex: 'BlockIndex',
+  /**
+   * 派生的关系边（`from_id`／`to_id`／`kind`／`from_root`）：派生表，不是第二真相。
+   *
+   * 边的语义只有一份（`core/relations/relations.ts`）；这张表只是把它放进 SQL，
+   * 供反链／标签成员／属性引用按 kind 查，不再在渲染层重建全库 `Index`。
+   */
+  blockRelation: 'BlockRelation',
 } as const
 
 /** 内容表（**装载时整份读、换库时整份清**的那四张） */

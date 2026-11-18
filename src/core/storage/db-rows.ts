@@ -83,7 +83,16 @@ export interface RawLibraryRows {
  * `upsert` 只给一部分列 ＝ 只改那几列（`on conflict do update set` 只覆盖给到的列）。
  */
 export interface RowWrite {
-  table: 'Block' | 'BlockProperty' | 'BlockAlias' | 'BlockList' | 'meta' | 'BlockFTS' | 'BlockFTSMap'
+  table:
+    | 'Block'
+    | 'BlockProperty'
+    | 'BlockAlias'
+    | 'BlockList'
+    | 'meta'
+    | 'BlockFTS'
+    | 'BlockFTSMap'
+    | 'BlockIndex'
+    | 'BlockRelation'
   /**
    * `upsert` 这一行可能还不存在（新块、新属性、新地址）；
    * `update` 这一行**必须已经存在**（改一个已存在块的正文／时刻／软删标记）；
@@ -349,18 +358,23 @@ export function workspaceToRowWrites(ws: StoredWorkspace): RowWrite[] {
     { includeDeleted: true },
   )
   /**
-   * **整份替换 ⇒ 索引作废**：清掉 FTS 与映射，状态落 `pending`。
+   * **整份替换 ⇒ 派生表全部作废**：FTS／映射与派生层清空，状态落 `pending`。
    *
-   * 为什么不在这里顺手重建：整份替换的入口是种子／换库，重建要分词（渲染层异步任务），
-   * 塞进这笔事务会让「打开一个库」变成一次同步的大计算。索引是派生表：
-   * 先标 pending（读路径据此降级扫描），后台再建。
+   * 为什么不在这里顺手重建：整份替换的入口是种子／换库，重建要分词／解析正文
+   * （渲染层异步任务），塞进这笔事务会让「打开一个库」变成一次同步的大计算。
+   * 派生表是先标 pending、后台再建；主进程只执行清表，不知道
+   * `BlockIndex`／`BlockRelation` 是什么意思。
+   * 不清的后果不是「慢」：旧内容的关系边会和新内容共存，反链/查询静默多出东西。
    */
   return [
     ...out,
     { table: 'BlockFTS', op: 'clear', key: {} },
     { table: 'BlockFTSMap', op: 'clear', key: {} },
+    { table: 'BlockIndex', op: 'clear', key: {} },
+    { table: 'BlockRelation', op: 'clear', key: {} },
     { table: 'meta', op: 'upsert', key: { key: META_KEYS.ftsState }, values: { value: 'pending' } },
     { table: 'meta', op: 'upsert', key: { key: META_KEYS.ftsRowidSeq }, values: { value: '0' } },
+    { table: 'meta', op: 'upsert', key: { key: META_KEYS.derivedState }, values: { value: 'pending' } },
     ...metaWrites(ws),
   ]
 }
