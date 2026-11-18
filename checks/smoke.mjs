@@ -31693,6 +31693,83 @@ await check('T330 条件树的「含子标签」：desc 读回、取消压回字
   return `开关读回 desc:true → chip「${chipOn}」；取消后条件回字符串形态`
 })
 
+await check('T331 记录面右键＝同一张块菜单：只放块级动作，删除落在被右键那一行且 ⌘Z 可回', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const qid = await openSeedQuery(page)
+  assert(qid !== '', '前置：种子里应有一个查询块')
+  // 切成表格＝记录面（结果行不是编辑器）
+  await page.evaluate(
+    (id) => window.__qua.invoke('core.view/add', { owner: { kind: 'block', blockId: id }, kind: 'table' }),
+    qid,
+  )
+  await page.waitForTimeout(500)
+
+  const first = await page.evaluate(() => {
+    const row = document.querySelector('.tv-row[data-block-id]')
+    return row ? { id: row.dataset.blockId ?? '' } : null
+  })
+  assert(first?.id, `前置：表格应有记录行：${JSON.stringify(first)}`)
+
+  // ① 右键记录行 ⇒ 块菜单出现（岛界不再把它挡在外面）
+  const menu = await page.evaluate(() => {
+    const row = document.querySelector('.tv-row[data-block-id]')
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 240, clientY: 160 }))
+    const layer = document.querySelector('.layer')
+    if (!layer) return null
+    return {
+      title: layer.querySelector('.layer-head')?.textContent ?? '',
+      text: layer.textContent ?? '',
+    }
+  })
+  assert(menu, '右键记录行应开块菜单')
+  assert(menu.title.includes('块'), `菜单抬头应是「块」：${JSON.stringify(menu.title)}`)
+  assert(menu.text.includes('看属性'), `块级动作应在：${JSON.stringify(menu.text)}`)
+  assert(menu.text.includes('删除块'), `删除应在：${JSON.stringify(menu.text)}`)
+  // 位置/选区类行不该出现：记录面没有装载树，缩进/折叠在这里没有语义
+  assert(!menu.text.includes('缩进'), `记录面不该出现缩进：${JSON.stringify(menu.text)}`)
+  assert(!menu.text.includes('折叠'), `记录面不该出现折叠：${JSON.stringify(menu.text)}`)
+
+  // ② 删除 ⇒ 被右键那一行当场消失（目标不是「活动编辑器的光标块」）
+  await page.locator('.layer .layer-item', { hasText: '删除块' }).first().click()
+  await page.waitForTimeout(500)
+  const gone = await page.evaluate(
+    (id) => !document.querySelector(`.tv-row[data-block-id="${id}"]`),
+    first.id,
+  )
+  assert(gone, `删除应落在被右键那一行：${first.id}`)
+
+  // ③ 一次撤销回来（撤销栈是 store 全局的；记录面的删除也进 ⌘Z）
+  await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+  await page.waitForTimeout(500)
+  const back = await page.evaluate(
+    (id) => Boolean(document.querySelector(`.tv-row[data-block-id="${id}"]`)),
+    first.id,
+  )
+  assert(back, '⌘Z 应把那一行恢复（一次撤销）')
+
+  // ④ 子菜单在记录面同样能钻：复制 → 复制块（子菜单是行数据，不靠编辑器元素定位）
+  await page.evaluate(() => {
+    const row = document.querySelector('.tv-row[data-block-id]')
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 240, clientY: 160 }))
+  })
+  await page.waitForTimeout(200)
+  await page.evaluate(() => {
+    const row = [...document.querySelectorAll('.layer-item')].find(
+      (el) => el.querySelector('.layer-label')?.textContent === '复制',
+    )
+    row?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+  })
+  await page.waitForTimeout(200)
+  const sub = await page.evaluate(() =>
+    [...document.querySelectorAll('.layer-item .layer-label')].map((r) => r.textContent),
+  )
+  assert(sub.some((t) => t === '复制块'), `记录面的「复制」子菜单应含「复制块」：${JSON.stringify(sub)}`)
+
+  await ctx.close()
+  return `右键开「${menu.title}」；删除 ${first.id.slice(0, 6)} 后撤销恢复`
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

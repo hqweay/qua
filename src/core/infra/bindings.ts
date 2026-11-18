@@ -15,12 +15,19 @@ import { evalWhen, evalWhenSafe } from './when.ts'
 // ⚠️ 三个收敛点之二：绑定表的 `label` / `keywords` 一律走 t
 import { t, type MsgId } from './msg.ts'
 import type { ColorAxis, CtxKeys } from '../index.ts'
+import type { ActsOn } from './ports.ts'
 
 export type BindingKind = 'keymap' | 'menu' | 'slash' | 'selection'
 export type Layer = 'core' | 'plugin' | 'user'
 
 export interface Binding {
-  command: string
+  /**
+   * 命令名；**子菜单行没有命令**（它开下一层，见 `submenu`）。
+   * 两者恰有一个——浮层只认行，命令与子菜单是同一层的两种行。
+   */
+  command?: string
+  /** 这一行开下一层菜单：值是下一层的分组前缀（与 `command` 互斥） */
+  submenu?: string
   kind: BindingKind
   /** 抽象修饰键：`mod` ＝ Cmd(mac) / Ctrl(其它)，渲染按平台 */
   key?: string
@@ -35,6 +42,11 @@ export interface Binding {
   label?: string
   icon?: string
   keywords?: string[]
+  /**
+   * 这一行的作用域覆盖（只有**子菜单行**需要：它没有命令可读 `actsOn`）。
+   * 命令行缺省读命令声明的 `actsOn`；两者缺省都是 `editor`。
+   */
+  actsOn?: ActsOn
   /**
    * **这一行代表哪个颜色值轴**（只用于划选气泡的呈现）。
    *
@@ -151,22 +163,22 @@ export const BINDINGS: Binding[] = [
      「视图…」同一机制）——顶层短了，语义轴不变。删除类**同住一组**：
      危险动作的位置恒定，`when` 只决定那一行写的是删块还是删页。 */
 
-  /* ---- 基本：两个子菜单锚点 ---- */
-  { command: 'core.menu/sub', kind: 'menu', when: 'blockFocused', group: 'block/1-basic', order: 10, layer: 'core', args: { prefix: 'blockCopy/' }, label: t('menu.group.copy') },
-  { command: 'core.menu/sub', kind: 'menu', when: 'blockFocused', group: 'block/1-basic', order: 20, layer: 'core', args: { prefix: 'blockInsert/' }, label: t('menu.group.insert') },
+  /* ---- 基本：两个子菜单入口（子菜单是行数据，不是命令） ---- */
+  { kind: 'menu', submenu: 'blockCopy/', actsOn: 'block', when: 'blockMenuTarget', group: 'block/1-basic', order: 10, layer: 'core', label: t('menu.group.copy') },
+  { kind: 'menu', submenu: 'blockInsert/', actsOn: 'editor', when: 'blockMenuTarget', group: 'block/1-basic', order: 20, layer: 'core', label: t('menu.group.insert') },
   /* 复制（子菜单）：前四条是「同一块的几种味」，复制块是落进文档的副本 */
-  { command: 'core.editor/copy-block', kind: 'menu', when: 'blockFocused', group: 'blockCopy/1', order: 10, layer: 'core' },
-  { command: 'core.editor/copy-block-text', kind: 'menu', when: 'blockFocused', group: 'blockCopy/1', order: 20, layer: 'core' },
-  { command: 'core.editor/copy-block-ref', kind: 'menu', when: 'blockFocused', group: 'blockCopy/1', order: 40, layer: 'core' },
-  { command: 'core.editor/duplicate-block', kind: 'menu', when: 'blockFocused', group: 'blockCopy/1', order: 50, layer: 'core' },
+  { command: 'core.editor/copy-block', kind: 'menu', when: 'blockMenuTarget', group: 'blockCopy/1', order: 10, layer: 'core' },
+  { command: 'core.editor/copy-block-text', kind: 'menu', when: 'blockMenuTarget', group: 'blockCopy/1', order: 20, layer: 'core' },
+  { command: 'core.editor/copy-block-ref', kind: 'menu', when: 'blockMenuTarget', group: 'blockCopy/1', order: 40, layer: 'core' },
+  { command: 'core.editor/duplicate-block', kind: 'menu', when: 'blockMenuTarget', group: 'blockCopy/1', order: 50, layer: 'core' },
   /* 插入（子菜单）：行内原子与归属，落点都是这一块的正文 */
-  { command: 'core.editor/pick-tag', kind: 'menu', when: 'blockFocused', group: 'blockInsert/1', order: 10, layer: 'core' },
-  { command: 'core.editor/insert-page-ref', kind: 'menu', when: 'blockFocused', group: 'blockInsert/1', order: 20, layer: 'core' },
-  { command: 'core.editor/insert-image', kind: 'menu', when: 'blockFocused', group: 'blockInsert/1', order: 30, layer: 'core' },
-  { command: 'core.editor/insert-link', kind: 'menu', when: 'blockFocused', group: 'blockInsert/1', order: 40, layer: 'core' },
+  { command: 'core.editor/pick-tag', kind: 'menu', when: 'blockMenuTarget', group: 'blockInsert/1', order: 10, layer: 'core' },
+  { command: 'core.editor/insert-page-ref', kind: 'menu', when: 'blockMenuTarget', group: 'blockInsert/1', order: 20, layer: 'core' },
+  { command: 'core.editor/insert-image', kind: 'menu', when: 'blockMenuTarget', group: 'blockInsert/1', order: 30, layer: 'core' },
+  { command: 'core.editor/insert-link', kind: 'menu', when: 'blockMenuTarget', group: 'blockInsert/1', order: 40, layer: 'core' },
 
   /* ---- 结构：把这一块摆成什么样（顺序/深度/状态） ---- */
-  { command: 'core.editor/toggle-closure', kind: 'menu', when: 'blockFocused', group: 'block/2-structure', order: 10, layer: 'core' },
+  { command: 'core.editor/toggle-closure', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 10, layer: 'core' },
   /**
    * 与上面那条**成对**出现：`toggle-closure` 在「有这一栏」时只翻值，翻不出「没有这一栏」这一态
    * （见 `editor.clearClosure`），所以「变回去」必须是独立一条。
@@ -174,30 +186,30 @@ export const BINDINGS: Binding[] = [
    * 判据用 `blockType`（`core/view/editor.ts` 的 `ctxKeys`，只取 `closure`／`paragraph` 两值）：
    * 不是任务的块上不显示 —— 一条「点了什么都不会发生」的菜单项比没有更糟。
    */
-  { command: 'core.editor/clear-closure', kind: 'menu', when: 'blockFocused && blockType == "closure"', group: 'block/2-structure', order: 15, layer: 'core' },
-  { command: 'core.editor/toggle-collapse', kind: 'menu', when: 'blockFocused && blockFoldable', group: 'block/2-structure', order: 20, layer: 'core', label: t('menu.label.toggleCollapse') },
-  { command: 'core.editor/move-block-up', kind: 'menu', when: 'blockFocused', group: 'block/2-structure', order: 30, layer: 'core' },
-  { command: 'core.editor/move-block-down', kind: 'menu', when: 'blockFocused', group: 'block/2-structure', order: 40, layer: 'core' },
-  { command: 'core.editor/indent-block', kind: 'menu', when: 'blockFocused', group: 'block/2-structure', order: 50, layer: 'core' },
-  { command: 'core.editor/outdent-block', kind: 'menu', when: 'blockFocused', group: 'block/2-structure', order: 60, layer: 'core' },
+  { command: 'core.editor/clear-closure', kind: 'menu', when: 'blockMenuTarget && blockType == "closure"', group: 'block/2-structure', order: 15, layer: 'core' },
+  { command: 'core.editor/toggle-collapse', kind: 'menu', when: 'blockMenuTarget && blockFoldable', group: 'block/2-structure', order: 20, layer: 'core', label: t('menu.label.toggleCollapse') },
+  { command: 'core.editor/move-block-up', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 30, layer: 'core' },
+  { command: 'core.editor/move-block-down', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 40, layer: 'core' },
+  { command: 'core.editor/indent-block', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 50, layer: 'core' },
+  { command: 'core.editor/outdent-block', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 60, layer: 'core' },
   /**
    * 移动到…：**显式点名**的重排。与「块上移/下移」不同——那两个只换同级顺序，
    * 这个跨容器。身份块不给入口：它们不参与组织，搬它们没有意义（位置不承载信息）。
    */
-  { command: 'core.block/move-to', kind: 'menu', when: 'blockFocused && !blockIsRoot', group: 'block/2-structure', order: 70, layer: 'core' },
+  { command: 'core.block/move-to', kind: 'menu', when: 'blockMenuTarget && !blockIsRoot', group: 'block/2-structure', order: 70, layer: 'core' },
 
   /* ---- 身份与露面：加/减一格标记（页/标签各自独立、可兼位；顺序无语义） ---- */
-  { command: 'core.block/as-page', kind: 'menu', when: 'blockFocused && !blockHasPageRole', group: 'block/3-role', order: 10, layer: 'core' },
-  { command: 'core.block/unpage', kind: 'menu', when: 'blockFocused && blockHasPageRole', group: 'block/3-role', order: 11, layer: 'core' },
+  { command: 'core.block/as-page', kind: 'menu', when: 'blockMenuTarget && !blockHasPageRole', group: 'block/3-role', order: 10, layer: 'core' },
+  { command: 'core.block/unpage', kind: 'menu', when: 'blockMenuTarget && blockHasPageRole', group: 'block/3-role', order: 11, layer: 'core' },
   // 删除页/删除标签在「删除」组（危险动作同位）；这一组只留身份的加减与配置
-  { command: 'core.block/extract-to-page', kind: 'menu', when: 'blockFocused && blockCanExtractPage', group: 'block/3-role', order: 12, layer: 'core' },
-  { command: 'core.block/as-tag', kind: 'menu', when: 'blockFocused && !blockHasTagRole', group: 'block/3-role', order: 20, layer: 'core' },
-  { command: 'core.block/untag', kind: 'menu', when: 'blockFocused && blockHasTagRole', group: 'block/3-role', order: 21, layer: 'core' },
+  { command: 'core.block/extract-to-page', kind: 'menu', when: 'blockMenuTarget && blockCanExtractPage', group: 'block/3-role', order: 12, layer: 'core' },
+  { command: 'core.block/as-tag', kind: 'menu', when: 'blockMenuTarget && !blockHasTagRole', group: 'block/3-role', order: 20, layer: 'core' },
+  { command: 'core.block/untag', kind: 'menu', when: 'blockMenuTarget && blockHasTagRole', group: 'block/3-role', order: 21, layer: 'core' },
   // 块配置（名字／露面／显示模式／脸）：一个块只有一个配置面，任何聚焦块都能打开
-  { command: 'core.block/configure', kind: 'menu', when: 'blockFocused', group: 'block/3-role', order: 30, layer: 'core' },
+  { command: 'core.block/configure', kind: 'menu', when: 'blockMenuTarget', group: 'block/3-role', order: 30, layer: 'core' },
   // 显式入口：把「看这一块的属性」做成一次点击。落点是属性抽屉——不换中心、
   // 不动槽（侧槽开关只归 core.dock/*），能力不依赖任何面板是否在场。
-  { command: 'core.block/inspect', kind: 'menu', when: 'blockFocused', group: 'block/3-role', order: 31, layer: 'core' },
+  { command: 'core.block/inspect', kind: 'menu', when: 'blockMenuTarget', group: 'block/3-role', order: 31, layer: 'core' },
 
   /* ---- 行内：光标正停在什么上，就给什么（都带 `when`，平时不占行） ---- */
   /**
@@ -207,24 +219,24 @@ export const BINDINGS: Binding[] = [
    * 具体是哪一段由命令向编辑器要，免得菜单行与手势各带一份区间。
    */
   { command: 'core.block/convert-mention', kind: 'menu', when: 'mentionHit', group: 'block/4-inline', order: 10, layer: 'core' },
-  { command: 'core.anno/clear-marks', kind: 'menu', when: 'blockFocused && !selectionEmpty', group: 'block/4-inline', order: 20, layer: 'core' },
+  { command: 'core.anno/clear-marks', kind: 'menu', when: 'blockMenuTarget && !selectionEmpty', group: 'block/4-inline', order: 20, layer: 'core' },
 
   /* ---- 视图与导航：换个看法、去别的位置看 ---- */
-  { command: 'core.query/insert', kind: 'menu', when: 'blockFocused', group: 'block/5-view', order: 5, layer: 'core', label: t('cmd.query.insert'), keywords: ['query', 'filter', 'where'], icon: 'lucide:list-filter' },
+  { command: 'core.query/insert', kind: 'menu', when: 'blockMenuTarget', group: 'block/5-view', order: 5, layer: 'core', label: t('cmd.query.insert'), keywords: ['query', 'filter', 'where'], icon: 'lucide:list-filter' },
   /**
    * **视图**（一个块换个看法）：入口只在「有东西可摊开」的块上（查询块 / 有子块 / 已有视图）。
    * 菜单里是**动态**的一份清单（大纲 ＋ 已有视图 ＋ 新建表格），所以只挂一条命令、
    * 由装配层按当前的 `_views` 现画 —— 绑定表是静态的，装不下「每个块不一样」的项。
    */
-  { command: 'core.view/menu', kind: 'menu', when: 'blockFocused && blockCanHaveView', group: 'block/5-view', order: 10, layer: 'core', label: t('menu.label.views'), keywords: ['view', 'table', 'grid', t('menu.kw.views')] },
-  { command: 'core.embed/insert', kind: 'menu', when: 'blockFocused', group: 'block/5-view', order: 20, layer: 'core', label: t('ui.embed.insert') },
+  { command: 'core.view/menu', kind: 'menu', when: 'blockMenuTarget && blockCanHaveView', group: 'block/5-view', order: 10, layer: 'core', label: t('menu.label.views'), keywords: ['view', 'table', 'grid', t('menu.kw.views')] },
+  { command: 'core.embed/insert', kind: 'menu', when: 'blockMenuTarget', group: 'block/5-view', order: 20, layer: 'core', label: t('ui.embed.insert') },
   // 视图选项：四轴（筛选/排序/分组/显示）一个面。声明层（子块行内属性）是显示节的
   // 「编辑默认」入口——不再有独立菜单行，声明与覆写在同一个面里对得上
-  { command: 'core.view/options', kind: 'menu', when: 'blockFocused && blockCanHaveView', group: 'block/5-view', order: 25, layer: 'core', label: t('ui.view.options'), keywords: ['filter', 'sort', 'group', 'display', t('menu.kw.views')] },
-  { command: 'core.embed/paste-menu', kind: 'menu', when: 'blockFocused', group: 'block/5-view', order: 30, layer: 'core', label: t('cmd.embed.paste-menu') },
+  { command: 'core.view/options', kind: 'menu', when: 'blockMenuTarget && blockCanHaveView', group: 'block/5-view', order: 25, layer: 'core', label: t('ui.view.options'), keywords: ['filter', 'sort', 'group', 'display', t('menu.kw.views')] },
+  { command: 'core.embed/paste-menu', kind: 'menu', when: 'blockMenuTarget', group: 'block/5-view', order: 30, layer: 'core', label: t('cmd.embed.paste-menu') },
   // zoom：进子树的入口挂在块菜单。**叶子块也给**（修订：
   // 块标左键＝聚焦是一贯行为：若叶子不给，点击结果会时 zoom 时不 zoom）
-  { command: 'core.block/focus-block', kind: 'menu', when: 'blockFocused', group: 'block/5-view', order: 40, layer: 'core', keywords: ['zoom', t('menu.kw.zoom')] },
+  { command: 'core.block/focus-block', kind: 'menu', when: 'blockMenuTarget', group: 'block/5-view', order: 40, layer: 'core', keywords: ['zoom', t('menu.kw.zoom')] },
   /**
    * 退回上一级：**最外层时不给入口**（`when` 挡住），不是点了没反应。
    *
@@ -233,21 +245,21 @@ export const BINDINGS: Binding[] = [
    * ⚠️ 标题也从「退回顶层」改掉了：那个词把**系统架**露给了用户
    *    （用户世界里不该有「顶层」这个概念，根是系统自己的事）。
    */
-  { command: 'core.block/zoom-out', kind: 'menu', when: 'blockFocused && !blockIsRoot', group: 'block/5-view', order: 45, layer: 'core', keywords: ['zoom', 'out', 'back'] },
+  { command: 'core.block/zoom-out', kind: 'menu', when: 'blockMenuTarget && !blockIsRoot', group: 'block/5-view', order: 45, layer: 'core', keywords: ['zoom', 'out', 'back'] },
   // 「在别处打开」的第二种落点：与 ⌘/Ctrl+点同一条路（`focus-block` 的 `newTab`）。
   // 菜单补的是**可发现性**——手势在，但没人知道它，等于没有。
-  { command: 'core.block/focus-block', kind: 'menu', when: 'blockFocused', group: 'block/5-view', order: 50, layer: 'core', args: { newTab: true }, label: t('cmd.block.open-new-tab'), keywords: ['tab', 'page', 'open'] },
-  { command: 'core.dock/open-block', kind: 'menu', when: 'blockFocused', group: 'block/5-view', order: 55, layer: 'core' },
+  { command: 'core.block/focus-block', kind: 'menu', when: 'blockMenuTarget', group: 'block/5-view', order: 50, layer: 'core', args: { newTab: true }, label: t('cmd.block.open-new-tab'), keywords: ['tab', 'page', 'open'] },
+  { command: 'core.dock/open-block', kind: 'menu', when: 'blockMenuTarget', group: 'block/5-view', order: 55, layer: 'core' },
   // 「加到快捷」与「在右槽打开」是两条独立露面：前者只留一颗 44px 入口，后者摊一张窗口卡
-  { command: 'core.dock/add-shortcut', kind: 'menu', when: 'blockFocused', group: 'block/5-view', order: 56, layer: 'core' },
+  { command: 'core.dock/add-shortcut', kind: 'menu', when: 'blockMenuTarget', group: 'block/5-view', order: 56, layer: 'core' },
 
   /* ---- 删除：危险动作**同位**——位置恒定，`when` 决定那一行删的是什么 ---- */
-  { command: 'core.editor/delete-block', kind: 'menu', when: 'blockFocused && blockCanDelete', group: 'block/6-delete', order: 10, layer: 'core', keywords: [t('menu.kw.delete')] },
+  { command: 'core.editor/delete-block', kind: 'menu', when: 'blockMenuTarget && blockCanDelete', group: 'block/6-delete', order: 10, layer: 'core', keywords: [t('menu.kw.delete')] },
   // 日记天也是装载根（编辑器里的 delete-block 删不到）⇒ 删除走命令面；今天不出现（见 ctx 键）
-  { command: 'core.journal/delete', kind: 'menu', when: 'blockFocused && blockCanDeleteJournal', group: 'block/6-delete', order: 20, layer: 'core', keywords: [t('menu.kw.delete')] },
+  { command: 'core.journal/delete', kind: 'menu', when: 'blockMenuTarget && blockCanDeleteJournal', group: 'block/6-delete', order: 20, layer: 'core', keywords: [t('menu.kw.delete')] },
   // 与「取消页」是两条轴：取消只摘露面位（块和内容都还在），删除连子树一起软删（回收站可恢复）
-  { command: 'core.page/delete', kind: 'menu', when: 'blockFocused && blockHasPageRole', group: 'block/6-delete', order: 30, layer: 'core' },
-  { command: 'core.tag/delete', kind: 'menu', when: 'blockFocused && blockHasTagRole', group: 'block/6-delete', order: 40, layer: 'core' },
+  { command: 'core.page/delete', kind: 'menu', when: 'blockMenuTarget && blockHasPageRole', group: 'block/6-delete', order: 30, layer: 'core' },
+  { command: 'core.tag/delete', kind: 'menu', when: 'blockMenuTarget && blockHasTagRole', group: 'block/6-delete', order: 40, layer: 'core' },
   /* 「粘贴为…」的两档：同一个命令，只差一个看法（菜单动态项由装配层现画，绑定点只给选项） */
   /**
    * ⚠️ 判据用 `blockFocused`（编辑器上下文里**有**这个键），不要用 `editorFocus`：
@@ -352,7 +364,7 @@ const userKeys = new Map<string, string | null>()
 
 /** 键位绑定的身份（keymap 没有 group：命令＋参数就是全部） */
 export function bindingIdOf(b: Binding): string {
-  return `${b.command}|${JSON.stringify(b.args ?? null)}`
+  return `${b.command ?? b.submenu ?? ''}|${JSON.stringify(b.args ?? null)}`
 }
 
 /** 整表替换用户覆盖（调用方给的是偏好里那份的现值；坏形状的项丢掉） */
@@ -490,7 +502,8 @@ export function resolveBindings(kind: BindingKind, ctx: CtxKeys, opts: ResolveOp
    *    同一个分组。只按 `command|group` 去重会把它们折叠成一条，用户菜单里就只剩第一个。
    *    按 `args` 展开之后，覆盖一条具体动作（而不是覆盖整条命令）才是准确语义。
    */
-  const keyOf = (b: Binding): string => `${b.command}|${b.group ?? ''}|${JSON.stringify(b.args ?? null)}`
+  const keyOf = (b: Binding): string =>
+    `${b.command ?? b.submenu ?? ''}|${b.group ?? ''}|${JSON.stringify(b.args ?? null)}`
   const byKey = new Map<string, Binding>()
   for (const b of cands) {
     const k = keyOf(b)
@@ -502,7 +515,7 @@ export function resolveBindings(kind: BindingKind, ctx: CtxKeys, opts: ResolveOp
   if (opts.query) {
     const q = opts.query.toLowerCase()
     out = out.filter((b) => {
-      const hay = [b.label ?? '', b.command, ...(b.keywords ?? [])].join(' ').toLowerCase()
+      const hay = [b.label ?? '', b.command ?? b.submenu ?? '', ...(b.keywords ?? [])].join(' ').toLowerCase()
       return hay.includes(q)
     })
   }
@@ -510,7 +523,7 @@ export function resolveBindings(kind: BindingKind, ctx: CtxKeys, opts: ResolveOp
     (a, b) =>
       (a.group ?? '').localeCompare(b.group ?? '') ||
       (a.order ?? 100) - (b.order ?? 100) ||
-      a.command.localeCompare(b.command),
+      (a.command ?? a.submenu ?? '').localeCompare(b.command ?? b.submenu ?? ''),
   )
   return opts.limit ? out.slice(0, opts.limit) : out
 }
@@ -561,7 +574,7 @@ export function keymapRows(): { key: string; command: string; when: string; laye
   const out: { key: string; command: string; when: string; layer: Layer }[] = []
   const seen = new Set<string>()
   for (const b of BINDINGS) {
-    if (b.kind !== 'keymap') continue
+    if (b.kind !== 'keymap' || !b.command) continue
     const eff = effectiveKey(b)
     if (eff === null) continue
     // 同一身份的多条表项覆盖后共用同一个键：速查表只报一行，不把同一个键念两遍
@@ -588,7 +601,7 @@ export interface KeymapSettingsRow {
 export function keymapSettingsRows(): KeymapSettingsRow[] {
   const byId = new Map<string, KeymapSettingsRow>()
   for (const b of BINDINGS) {
-    if (b.kind !== 'keymap') continue
+    if (b.kind !== 'keymap' || !b.command) continue
     const id = bindingIdOf(b)
     let row = byId.get(id)
     if (!row) {

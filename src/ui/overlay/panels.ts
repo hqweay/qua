@@ -687,11 +687,12 @@ export function openDrawerFor(deps: PanelDeps, kind: PanelKind): void {
         const table = document.createElement('table')
         table.innerHTML = t('ui.drawer.bindingsTableHead')
         for (const b of rows) {
-          const decl = deps.decl(b.command)
+          const name = b.command ?? b.submenu ?? ''
+          const decl = deps.decl(name)
           const tr = document.createElement('tr')
           tr.innerHTML =
             `<td class="mono">${escapeHtml(b.key ? keyLabel(b.key, deps.isMac()) : (b.group ?? ''))}</td>` +
-            `<td>${escapeHtml(decl?.title ?? b.command)}<br><span class="mono" style="color:var(--ui-text-tertiary)">${escapeHtml(b.command)}</span></td>` +
+            `<td>${escapeHtml(decl?.title ?? name)}<br><span class="mono" style="color:var(--ui-text-tertiary)">${escapeHtml(name)}</span></td>` +
             `<td class="mono">${escapeHtml(b.when ?? t('ui.common.always'))}</td>` +
             `<td class="mono">${b.layer}</td>`
           table.appendChild(tr)

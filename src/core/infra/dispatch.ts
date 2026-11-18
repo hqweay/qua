@@ -54,13 +54,15 @@ export function dispatchKey(e: KeyboardEvent, env: DispatchEnv): boolean {
   if (env.trace) {
     env.trace({
       key: res.id,
-      hit: res.hit ? `${res.hit.command}${res.hit.key ? ` (${res.hit.key})` : ''}` : '',
+      hit: res.hit ? `${res.hit.command ?? ''}${res.hit.key ? ` (${res.hit.key})` : ''}` : '',
       when: res.attempts.find((a) => !a.whenOk)?.binding.when ?? '',
       ok: Boolean(res.hit),
     })
   }
   if (!res.hit) return false
-  return env.invoke(res.hit.command, (res.hit.args as Record<string, unknown>) ?? {}, ctx)
+  const command = res.hit.command
+  if (!command) return false
+  return env.invoke(command, (res.hit.args as Record<string, unknown>) ?? {}, ctx)
 }
 
 /**

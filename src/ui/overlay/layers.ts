@@ -33,6 +33,8 @@ export interface Row {
   icon?: string
   group?: string
   command?: string
+  /** 这一行开下一层菜单（分组前缀）；与 `command` 恰有一个 */
+  submenu?: string
   args?: unknown
   keyHint?: string
   disabled?: boolean
@@ -90,17 +92,18 @@ export function rowsFromBindings(
   opts: { showKeywords?: boolean } = {},
 ): Row[] {
   return bs.map((b) => {
-    const decl = DECL_BY_NAME.get(b.command)
+    const decl = b.command ? DECL_BY_NAME.get(b.command) : undefined
     return {
-      id: `${b.command}|${b.group ?? ''}|${JSON.stringify(b.args ?? null)}`,
-      label: b.label ?? decl?.title ?? b.command,
+      id: `${b.command ?? b.submenu ?? ''}|${b.group ?? ''}|${JSON.stringify(b.args ?? null)}`,
+      label: b.label ?? decl?.title ?? b.command ?? b.submenu ?? '',
       // 关键词只在**斜杠菜单**里露出来（那就是它的搜索别名）；块菜单里只留键位，别吵
       hint: opts.showKeywords ? (b.keywords?.join(' · ') ?? decl?.keywords?.join(' · ')) : undefined,
       icon: b.icon,
       group: b.group,
       command: b.command,
+      submenu: b.submenu,
       args: b.args,
-      keyHint: b.key ? keyLabel(b.key) : keyHints.get(b.command),
+      keyHint: b.key ? keyLabel(b.key) : b.command ? keyHints.get(b.command) : undefined,
       ...(b.axis ? { axis: b.axis } : {}),
     }
   })

@@ -374,6 +374,21 @@ export function makeTagsEl(
 export const EDIT_ISLAND_ATTR = 'data-edit-island'
 
 /**
+ * **这一次事件发生在别人的岛里吗**：委托到容器上的处理器用它让路。
+ *
+ * 判据用派发那一刻的 `composedPath()`（不是 `target.closest()`）：处理过程中里层
+ * 可能同步重排、把目标换成一棵新子树，那时 `closest` 会得到 null，岛界就漏了。
+ * `own` 是调用方的地盘：它自己若住在某个岛里，那颗岛根才算自己的；不在岛里（主编辑器）为 null。
+ */
+export function inForeignIsland(ev: Event, own: Element | null): boolean {
+  const ownIsland = own?.closest(`[${EDIT_ISLAND_ATTR}]`) ?? null
+  for (const node of ev.composedPath()) {
+    if (node instanceof Element && node.hasAttribute(EDIT_ISLAND_ATTR)) return node !== ownIsland
+  }
+  return false
+}
+
+/**
  * **一个 `.blk` 允许有哪些直接子节点** —— 这是行的 DOM 契约清单，只有渲染层能增项。
  *
  * 为什么需要它：整片编辑区是**一个** contenteditable 容器，所以行容器 `.blk` 自己也可编辑。

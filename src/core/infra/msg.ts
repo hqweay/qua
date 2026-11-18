@@ -1045,7 +1045,6 @@ export const MSG = {
   'cmd.embed.paste-menu': '粘贴为…',
   'cmd.menu.block': '块菜单',
   'cmd.menu.slash': '斜杠菜单',
-  'cmd.menu.sub': '子菜单',
   'cmd.layer.close': '关闭浮层',
   'cmd.context-keys.inspect': '检查上下文键',
   'cmd.bindings.list': '列出绑定表',

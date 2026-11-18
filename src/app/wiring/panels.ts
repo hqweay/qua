@@ -1167,6 +1167,19 @@ export function setupPanels(deps: PanelsDeps) {
       refClick: (hit, el, mods) => deps.refClick(hit, mods, el),
       ...(deps.atomClick ? { onAtomClick: (atom, el, mods) => deps.atomClick!(atom, el, mods) } : {}),
       openBlock: (id, place) => deps.openBlock(id, place),
+      /**
+       * 记录面的块菜单：与正文右键同一个请求形状，只把 target 换成
+       * `{surface:'record'}`（块级 ctx、只放 `block` 域的行、每行带显式 blockId）。
+       */
+      blockMenu: (blockId, anchor, trigger) =>
+        app.showMenu({
+          kind: 'menu',
+          prefix: 'block/',
+          anchor,
+          ...(trigger ? { trigger } : {}),
+          title: t('menu.title.block'),
+          target: { blockId, surface: 'record' },
+        }),
       pickRef: (b, propId, current, onPick, anchor, trigger, opts) => pickRefValue(b, propId, current, onPick, anchor, trigger, opts),
       pickChoice: (b, propId, current, onPick, anchor, trigger) => pickChoiceValue(b, propId, current, onPick, anchor, trigger),
       pickAsset: (onPick) => app.pickAssetValue(onPick),

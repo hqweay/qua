@@ -24,9 +24,9 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.editor/toggle-collapse', title: t('cmd.editor.toggle-collapse'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['fold', 'collapse'] },
   // 点导轨段走这条（点线 ≠ 点三角——线折**直接子块**，三角折**自己**）
   { name: 'core.editor/toggle-children-collapse', title: t('cmd.editor.toggle-children-collapse'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { blockId: { type: 'string' } }, keywords: ['fold', 'collapse', 'children'] },
-  { name: 'core.editor/duplicate-block', title: t('cmd.editor.duplicate-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['duplicate', 'clone'] },
-  { name: 'core.editor/delete-block', title: t('cmd.editor.delete-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['delete', 'remove'] },
-  { name: 'core.editor/toggle-closure', title: t('cmd.editor.toggle-closure'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['todo', 'check', 'checkbox'] },
+  { name: 'core.editor/duplicate-block', title: t('cmd.editor.duplicate-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['duplicate', 'clone'], actsOn: 'block' },
+  { name: 'core.editor/delete-block', title: t('cmd.editor.delete-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['delete', 'remove'], actsOn: 'block' },
+  { name: 'core.editor/toggle-closure', title: t('cmd.editor.toggle-closure'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['todo', 'check', 'checkbox'], actsOn: 'block' },
   /**
    * 「切换待办」的**反向**：那个只在 `true`／`false` 之间翻，永远摘不掉这一栏。
    *
@@ -37,7 +37,7 @@ export const COMMANDS: CommandDecl[] = [
    * ⚠️ 打了「声明这一栏」的标签的块，摘完仍会显示成未完成 —— 那是标签给的，不是这一块的。
    *    调用方（handler）据此给一句解释，而不是静默。
    */
-  { name: 'core.editor/clear-closure', title: t('cmd.editor.clear-closure'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['todo', 'untodo', t('menu.kw.untodo')] },
+  { name: 'core.editor/clear-closure', title: t('cmd.editor.clear-closure'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['todo', 'untodo', t('menu.kw.untodo')], actsOn: 'block' },
   { name: 'core.editor/insert-block', title: t('cmd.editor.insert-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { type: { type: 'string', enum: ['paragraph', 'closure', 'divider'] }, text: { type: 'string' } }, keywords: ['insert', 'new block'] },
   // 只建空正文块、不接类型变体：上方插入目前只有键盘一条入口，斜杠菜单走的是下方语义；
   // 等出现第二个入口（斜杠/菜单项）再决定变体怎么共享
@@ -50,15 +50,15 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.notes/create', title: t('cmd.notes.create'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['note', 'annotate', 'comment'] },
   // 删除备注：右键标记的菜单项；软删可撤销，无确认（与块删除同口径）
   { name: 'core.notes/delete', title: t('cmd.notes.delete'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { noteId: { type: 'string' } }, hidden: true },
-  { name: 'core.editor/copy-block-ref', title: t('cmd.editor.copy-block-ref'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.editor'), args: { blockId: { type: 'string' } }, keywords: ['ref', 'copy', 'embed'] },
+  { name: 'core.editor/copy-block-ref', title: t('cmd.editor.copy-block-ref'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.editor'), args: { blockId: { type: 'string' } }, keywords: ['ref', 'copy', 'embed'], actsOn: 'block' },
   { name: 'core.editor/delete-selected-blocks', title: t('cmd.editor.delete-selected-blocks'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), hidden: true },
   { name: 'core.editor/indent-selected-blocks', title: t('cmd.editor.indent-selected-blocks'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), hidden: true },
   { name: 'core.editor/outdent-selected-blocks', title: t('cmd.editor.outdent-selected-blocks'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), hidden: true },
   { name: 'core.editor/toggle-closure-selected-blocks', title: t('cmd.editor.toggle-closure-selected-blocks'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), hidden: true },
   { name: 'core.editor/copy-selected-blocks', title: t('cmd.editor.copy-selected-blocks'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.editor'), hidden: true },
   { name: 'core.editor/copy-selected-block-refs', title: t('cmd.editor.copy-selected-block-refs'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.editor'), hidden: true },
-  { name: 'core.editor/copy-block', title: t('cmd.editor.copy-block'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.editor'), hidden: true, keywords: ['copy', 'ref'] },
-  { name: 'core.editor/copy-block-text', title: t('cmd.editor.copy-block-text'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.editor'), hidden: true, keywords: ['copy', 'text'] },
+  { name: 'core.editor/copy-block', title: t('cmd.editor.copy-block'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.editor'), hidden: true, keywords: ['copy', 'ref'], actsOn: 'block' },
+  { name: 'core.editor/copy-block-text', title: t('cmd.editor.copy-block-text'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.editor'), hidden: true, keywords: ['copy', 'text'], actsOn: 'block' },
   { name: 'core.editor/copy-ref-anchor', title: t('cmd.editor.copy-ref-anchor'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.editor'), hidden: true, keywords: ['ref', 'anchor', t('menu.kw.ref')] },
   { name: 'core.editor/cut-blocks', title: t('cmd.editor.cut-blocks'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.editor'), hidden: true, keywords: ['cut', 'move'] },
   { name: 'core.editor/paste-into-selection', title: t('cmd.editor.paste-into-selection'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), hidden: true, keywords: ['paste'] },
@@ -99,7 +99,7 @@ export const COMMANDS: CommandDecl[] = [
   // 色板的两个轴：带参且没有收集路径 ⇒ 不进命令面板，气泡直接按槽名 invoke
   { name: 'core.anno/set-ink', title: t('cmd.anno.set-ink'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.format'), args: { slot: { type: 'string' } }, keywords: ['color', 'ink', 'font'], hidden: true },
   { name: 'core.anno/set-bg', title: t('cmd.anno.set-bg'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.format'), args: { slot: { type: 'string' } }, keywords: ['background', 'highlight', t('menu.kw.background')], hidden: true },
-  { name: 'core.anno/clear-marks', title: t('cmd.anno.clear-marks'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.format'), keywords: ['clear', 'plain'] },
+  { name: 'core.anno/clear-marks', title: t('cmd.anno.clear-marks'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.format'), keywords: ['clear', 'plain'], actsOn: 'selection' },
   /**
    * 值轴入口：只切「气泡展开哪一轴」这一个 UI 状态，不写库 ⇒ `read`、不进面板。
    * 与 `showRefPicker` 同一条分工：命令报「要选值了」，浮层归装配层。
@@ -176,7 +176,7 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.page/next', title: t('cmd.page.next'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.page') },
   { name: 'core.page/prev', title: t('cmd.page.prev'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.page') },
   { name: 'core.page/rename', title: t('cmd.page.rename'), capability: 'write', undoable: false, version: '1.0', category: t('menu.cat.page') },
-  { name: 'core.page/delete', title: t('cmd.page.delete'), capability: 'admin', undoable: false, version: '1.0', category: t('menu.cat.page'), keywords: ['delete page'] },
+  { name: 'core.page/delete', title: t('cmd.page.delete'), capability: 'admin', undoable: false, version: '1.0', category: t('menu.cat.page'), keywords: ['delete page'], actsOn: 'block' },
 
   /* ---- 日记（今日是落点，不是特例；：日期只读、一天一个） ---- */
   { name: 'core.journal/today', title: t('cmd.journal.today'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), args: { date: { type: 'string' } }, keywords: ['journal', 'today', 'daily'], tile: { icon: 'lucide:calendar' } },
@@ -185,38 +185,38 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.journal/next', title: t('cmd.journal.next'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), keywords: ['journal', 'next', 'tomorrow'] },
   { name: 'core.journal/review', title: t('cmd.journal.review'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), args: { days: { type: 'number' } }, keywords: ['review', 'retro', 'days'] },
   { name: 'core.journal/feed-layout', title: t('cmd.journal.feed-layout'), capability: 'write', undoable: false, version: '1.0', category: t('menu.cat.journal'), args: { layout: { type: 'string' } }, keywords: ['layout', 'feed', 'column', 'row'] },
-  { name: 'core.journal/delete', title: t('cmd.journal.delete'), capability: 'admin', undoable: false, version: '1.0', category: t('menu.cat.journal'), args: { blockId: { type: 'string' } }, keywords: ['journal', 'delete', 'day'] },
+  { name: 'core.journal/delete', title: t('cmd.journal.delete'), capability: 'admin', undoable: false, version: '1.0', category: t('menu.cat.journal'), args: { blockId: { type: 'string' } }, keywords: ['journal', 'delete', 'day'], actsOn: 'block' },
 
   /* ---- zoom（zoom 是视图配置，不是新对象，也不引入焦点栈） ---- */
-  { name: 'core.block/focus-block', title: t('cmd.block.focus-block'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, feed: { type: 'boolean' }, restore: { type: 'boolean' }, newTab: { type: 'boolean' } }, keywords: ['zoom', 'focus', t('menu.kw.zoom')] },
-  { name: 'core.block/inspect', title: t('cmd.block.inspect'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, propId: { type: 'string' } }, keywords: ['props', 'property', 'inspect'] },
+  { name: 'core.block/focus-block', title: t('cmd.block.focus-block'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, feed: { type: 'boolean' }, restore: { type: 'boolean' }, newTab: { type: 'boolean' } }, keywords: ['zoom', 'focus', t('menu.kw.zoom')], actsOn: 'block' },
+  { name: 'core.block/inspect', title: t('cmd.block.inspect'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, propId: { type: 'string' } }, keywords: ['props', 'property', 'inspect'], actsOn: 'block' },
   { name: 'core.block/zoom-out', title: t('cmd.block.zoom-out'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['zoom', 'out', 'back'] },
-  { name: 'core.block/move-to', title: t('cmd.block.move-to'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { blockId: { type: 'string' }, targetId: { type: 'string' } }, keywords: ['move', 'move to', t('menu.kw.move')] },
+  { name: 'core.block/move-to', title: t('cmd.block.move-to'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { blockId: { type: 'string' }, targetId: { type: 'string' } }, keywords: ['move', 'move to', t('menu.kw.move')], actsOn: 'block' },
   { name: 'core.block/restore', title: t('cmd.block.restore'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { blockId: { type: 'string' } }, keywords: ['restore', 'undelete', 'trash', t('menu.kw.trash')], hidden: true },
   // 回收站的清空只有卡上那一个入口（确认框长在卡里）：命令面只提供机器形状，
   // 不进命令面板——「仅从回收站显式触发」是口径，不是建议
   { name: 'core.trash/purge', title: t('cmd.trash.purge'), capability: 'admin', undoable: false, version: '1.0', category: t('menu.cat.editor'), args: { ids: { type: 'string' } }, keywords: ['trash', 'purge', 'empty', t('menu.kw.trash')], hidden: true },
 
   /* ---- 角色（加/减一个机制位，不是破坏性转换） ---- */
-  { name: 'core.block/as-page', title: t('cmd.block.as-page'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.page'), args: { blockId: { type: 'string' } }, keywords: ['page', 'role'] },
-  { name: 'core.block/unpage', title: t('cmd.block.unpage'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.page'), args: { blockId: { type: 'string' } }, keywords: ['page', 'role', 'remove'] },
-  { name: 'core.block/extract-to-page', title: t('cmd.block.extract-to-page'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.page'), args: { blockId: { type: 'string' } }, keywords: ['extract', 'page', 'root'] },
-  { name: 'core.block/as-tag', title: t('cmd.block.as-tag'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['tag', 'role'] },
-  { name: 'core.block/untag', title: t('cmd.block.untag'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['tag', 'role', 'remove'] },
+  { name: 'core.block/as-page', title: t('cmd.block.as-page'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.page'), args: { blockId: { type: 'string' } }, keywords: ['page', 'role'], actsOn: 'block' },
+  { name: 'core.block/unpage', title: t('cmd.block.unpage'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.page'), args: { blockId: { type: 'string' } }, keywords: ['page', 'role', 'remove'], actsOn: 'block' },
+  { name: 'core.block/extract-to-page', title: t('cmd.block.extract-to-page'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.page'), args: { blockId: { type: 'string' } }, keywords: ['extract', 'page', 'root'], actsOn: 'block' },
+  { name: 'core.block/as-tag', title: t('cmd.block.as-tag'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['tag', 'role'], actsOn: 'block' },
+  { name: 'core.block/untag', title: t('cmd.block.untag'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['tag', 'role', 'remove'], actsOn: 'block' },
   { name: 'core.block/set-color', title: t('cmd.block.set-color'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, color: { type: 'string' } }, keywords: ['color', 'identity'], hidden: true },
   { name: 'core.block/set-icon', title: t('cmd.block.set-icon'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, icon: { type: 'string' } }, keywords: ['icon', 'identity'], hidden: true },
-  { name: 'core.tag/delete', title: t('cmd.tag.delete'), capability: 'admin', undoable: false, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['tag', 'delete', 'remove'] },
+  { name: 'core.tag/delete', title: t('cmd.tag.delete'), capability: 'admin', undoable: false, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['tag', 'delete', 'remove'], actsOn: 'block' },
   /**
    * 块配置弹窗（名字／露面／显示模式／脸）：一个块只有这一个配置面，
    * 脸跟名字住同一个弹窗——读路径对所有块一致，写入口也一致。
    */
-  { name: 'core.block/configure', title: t('cmd.block.configure'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['config', 'alias', 'name', 'list', 'icon', 'color', 'face'] },
+  { name: 'core.block/configure', title: t('cmd.block.configure'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['config', 'alias', 'name', 'list', 'icon', 'color', 'face'], actsOn: 'block' },
   { name: 'core.block/set-type', title: t('cmd.block.set-type'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, type: { type: 'string' } }, keywords: ['type', 'convert'], hidden: true },
   /**
    * 把一处纯文本提及换成一枚指向目标块的引用（`start`/`end` 是 plain 偏移区间）。
    * 入口只有提及栏片段行上的高亮按钮（与 `set-anchor` 同一条口径：不进命令面板）。
    */
-  { name: 'core.block/convert-mention', title: t('cmd.block.convert-mention'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.inline'), args: { blockId: { type: 'string' }, to: { type: 'string' }, start: { type: 'integer' }, end: { type: 'integer' } }, keywords: ['mention', 'ref', t('menu.kw.ref')], hidden: true },
+  { name: 'core.block/convert-mention', title: t('cmd.block.convert-mention'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.inline'), args: { blockId: { type: 'string' }, to: { type: 'string' }, start: { type: 'integer' }, end: { type: 'integer' } }, keywords: ['mention', 'ref', t('menu.kw.ref')], hidden: true, actsOn: 'selection' },
   /**
    * 划选气泡的「转为引用」：选中一段文本，原位换成一枚引用并**把原文字留作 anchor**。
    * 不带参数＝同名地址优先、没有就建页；带 `to`／`create`＝「关联到…」选择器挑过的。
@@ -240,8 +240,8 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.view/axis-up', title: t('cmd.view.axisUp'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['wide', 'fullscreen', 'focus', t('menu.kw.wide'), t('menu.kw.fullscreen')] },
   { name: 'core.view/axis-down', title: t('cmd.view.axisDown'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), hidden: true },
   { name: 'core.view/axis-to', title: t('cmd.view.axisTo'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), hidden: true, args: { mode: { type: 'string', enum: ['wide', 'full'] } } },
-  { name: 'core.dock/open-block', title: t('cmd.dock.open-block'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, side: { type: 'string' } }, keywords: ['dock', 'open', 'window', 'sidebar'] },
-  { name: 'core.dock/add-shortcut', title: t('cmd.dock.add-shortcut'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, side: { type: 'string' } }, keywords: ['shortcut', 'dock', 'quick', 'bookmark'] },
+  { name: 'core.dock/open-block', title: t('cmd.dock.open-block'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, side: { type: 'string' } }, keywords: ['dock', 'open', 'window', 'sidebar'], actsOn: 'block' },
+  { name: 'core.dock/add-shortcut', title: t('cmd.dock.add-shortcut'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, side: { type: 'string' } }, keywords: ['shortcut', 'dock', 'quick', 'bookmark'], actsOn: 'block' },
   { name: 'core.dock/top-window', title: t('cmd.dock.topWindow'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['dock', 'pin', 'top', 'window', 'sidebar'] },
   { name: 'core.view/toggle-virtualize', title: t('cmd.view.toggle-virtualize'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { on: { type: 'boolean' }, radius: { type: 'integer' } }, keywords: ['virtual', 'window', 'DOM'] },
 
@@ -262,8 +262,8 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.view/new-row', title: t('cmd.view.new-row'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { owner: {}, blockId: { type: 'string' } }, keywords: ['row', 'insert', 'new'], hidden: true },
   { name: 'core.view/new-card', title: t('cmd.view.new-card'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { owner: {}, propId: { type: 'string' }, value: {} }, keywords: ['card', 'kanban', 'new'], hidden: true },
   { name: 'core.view/delete-row', title: t('cmd.view.delete-row'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { rowId: { type: 'string' } }, keywords: ['row', 'delete', 'trash'], hidden: true },
-  { name: 'core.view/options', title: t('ui.view.options'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { owner: {} }, keywords: ['view', 'filter', 'sort', 'group', 'display'] },
-  { name: 'core.view/menu', title: t('cmd.view.menu'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { owner: {} }, keywords: ['view', 'menu', 'table'] },
+  { name: 'core.view/options', title: t('ui.view.options'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { owner: {} }, keywords: ['view', 'filter', 'sort', 'group', 'display'], actsOn: 'block' },
+  { name: 'core.view/menu', title: t('cmd.view.menu'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { owner: {} }, keywords: ['view', 'menu', 'table'], actsOn: 'block' },
   { name: 'core.view/insert', title: t('cmd.view.insert'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, kind: { type: 'string', enum: ['table', 'list-table', 'cards', 'calendar', 'mindmap', 'tabs'] } }, keywords: ['view', 'table', 'tabs', 'board', 'calendar', 'mindmap', t('menu.kw.view')] },
   { name: 'core.query/set-spec', title: t('cmd.query.set-spec'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { owner: {}, spec: {} }, keywords: ['query', t('menu.kw.query'), 'condition', 'where', 'filter'], hidden: true },
   { name: 'core.query/open-builder', title: t('cmd.query.open-builder'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { owner: {} }, keywords: ['query', t('menu.kw.query'), 'builder', 'condition', 'filter'] },
@@ -286,8 +286,6 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.settings/open', title: t('cmd.settings.open'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['settings', 'preferences', 'keys', 'theme'], tile: { icon: 'lucide:settings' } },
   { name: 'core.menu/block', title: t('cmd.menu.block'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.layer'), args: { blockId: { type: 'string' } } },
   { name: 'core.menu/slash', title: t('cmd.menu.slash'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.layer') },
-  // 子菜单锚点：绑定行带分组前缀（args），handler 把那一组渲染成二级菜单。带参 ⇒ 不进面板
-  { name: 'core.menu/sub', title: t('cmd.menu.sub'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.layer'), args: { prefix: { type: 'string' } }, hidden: true },
   { name: 'core.layer/close', title: t('cmd.layer.close'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.layer'), hidden: true },
 
   /* ---- 诊断（59  / ） ---- */

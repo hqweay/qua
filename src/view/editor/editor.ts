@@ -17,17 +17,11 @@ import {
   CommandLog,
   UndoStack,
   activeView,
+  blockMenuCtxOf,
   ensurePageInTx,
   flatten,
   hasChildrenViewBody,
-  hasIdentity,
   hasQueryBody,
-  hasList,
-  isJournal,
-  journalDate,
-  todayISO,
-  isPropDefBlock,
-  isQueryBlock,
   locate,
   runAtCell,
   blockSpanPlan,
@@ -54,24 +48,24 @@ import {
   writeBlockContent,
   walkForest,
   gutterFieldsOf,
-  closureTargetField,
   relationsFrom,
   isRefKind,
   fieldTableOf,
+  applyClosurePlan,
+  closurePlanFor,
+  closureFieldOf,
   setValue,
   clearValue,
-  declareOwnProp,
   closureOf,
   TASK_STATUS_PROP_ID,
-  TASK_STATUS_TODO_ID,
   canWriteText,
   canDirectEditText,
   isOwnEdit,
   type Block,
+  type ClosurePlan,
   type CtxKeys,
   type Doc,
   type FieldTable,
-  type GutterField,
   type BelowFields,
   type Sel,
   type UndoKind,
@@ -102,7 +96,7 @@ import {
 } from '../../core/model/runs.ts'
 import { ensureNoteInTx } from '../../core/kb/ensure-note.ts'
 import type { NotePair } from '../../core/relations/annotates.ts'
-import { CLOSURE_USE, type OpenAction, type SecLayout, type ShellCol } from '../../core/index.ts'
+import { type OpenAction, type SecLayout, type ShellCol } from '../../core/index.ts'
 export type { SecLayout }
 
 /**
@@ -506,36 +500,9 @@ export type AcceptPick =
   | { kind: 'tag'; name: string }
 
 /**
- * 一次「切换待办」要写哪一格（纯判据：单块与批量共用，避免两份翻值逻辑漂移）。
- *
- * `createCore`：这一行没有任何任务型字段 ⇒ 落核心任务状态并登记自有槽，
- * 与「第一次按 ⌘↵ ＝ 变成待办」的旧手感一致。
- * `clear`：完成型字段没有缺省值可回 ⇒ 清掉值但保留这一栏（行仍在「未填」）。
+ * 一次「切换待办」要写哪一格的判据住在 `core/props/closure.ts`：
+ * 单块、批量与记录面共用同一份，编辑器只负责事务与重画。
  */
-interface ClosurePlan {
-  propId: string
-  next?: unknown
-  clear: boolean
-  createCore: boolean
-}
-
-function applyClosurePlan(b: Block, plan: ClosurePlan): void {
-  if (plan.createCore) declareOwnProp(b, TASK_STATUS_PROP_ID)
-  if (plan.clear) clearValue(b, plan.propId, { keepField: true })
-  else setValue(b, plan.propId, plan.next)
-}
-
-/** 目标字段不存在 ⇒ 落核心任务状态（「第一次按 ⌘↵ ＝ 变成待办」） */
-function closurePlanOfField(field: GutterField | undefined): ClosurePlan {
-  if (!field) return { propId: TASK_STATUS_PROP_ID, next: TASK_STATUS_TODO_ID, clear: false, createCore: true }
-  // 任务状态：勾选 ⇄ 取消在**两个显式选项**之间翻，不再靠 default/清空
-  if (field.use === CLOSURE_USE && field.check) {
-    const next = field.value === field.check.on ? field.check.off : field.check.on
-    return { propId: field.propId, next, clear: false, createCore: false }
-  }
-  // 同一行上别的 checkbox 字段仍是布尔翻转
-  return { propId: field.propId, next: field.value !== true, clear: false, createCore: false }
-}
 
 export class BlockEditor {
   container: HTMLElement
@@ -842,6 +809,16 @@ export class BlockEditor {
   fieldTable(): FieldTable {
     this.fieldTableCache ??= fieldTableOf(this.store.blocks)
     return this.fieldTableCache
+  }
+
+  /**
+   * 这一块在哪：先在本视图装载的树里找，再退到整片森林。
+   *
+   * 记录面（查询结果／派生栏）的块不在任何编辑器的 `doc` 里；「对一块做什么」
+   * 的块级动作要能寻址它，否则只能从菜单里消失或静默失败。
+   */
+  private locateAny(id: string) {
+    return locate(this.doc, id) ?? locate({ roots: this.store.blocks }, id)
   }
 
   /**
@@ -2233,23 +2210,17 @@ export class BlockEditor {
     this.structTail(null, [id])
   }
 
-  toggleClosure(id: string, onlyPropId?: string): void {
-    const loc = locate(this.doc, id)
-    if (!loc) return
-    const fields = gutterFieldsOf(loc.block, this.store.blocks)
+  toggleClosure(id: string, onlyPropId?: string): boolean {
+    const loc = this.locateAny(id)
+    if (!loc) return false
     /**
      * 目标字段：点 gutter 上哪一枚就传哪个 propId（多个勾选框不串台）；
      * 命令／快捷键不带目标 ⇒ 库里唯一的任务状态（见 `closureTargetField`），
-     * 普通两态字段等它自己那一下点击。
+     * 普通两态字段等它自己那一下点击。判据住在 `core/props/closure.ts`
+     * （单块／批量／记录面共用）。
      */
-    let field: GutterField | undefined
-    if (onlyPropId !== undefined) {
-      field = fields.find((f) => f.propId === onlyPropId)
-      if (!field) return
-    } else {
-      field = closureTargetField(fields)
-    }
-    const plan = closurePlanOfField(field)
+    const plan = closurePlanFor(loc.block, this.store.blocks, onlyPropId)
+    if (!plan) return false
     this.beginUndoEntry()
     // 切的是一个属性值：一笔 patch 落「值 ＋（新挂时）自有槽」，与「插入待办」同一形状。
     // 落的是核心任务状态 ⇒ 定义块得先在（恢复空库／定义被清掉的库里没有它，
@@ -2259,6 +2230,7 @@ export class BlockEditor {
       tx.patch(id, (b) => applyClosurePlan(b, plan))
     })
     this.structTail(null, [id])
+    return true
   }
 
   /**
@@ -2270,9 +2242,8 @@ export class BlockEditor {
     for (const id of ids) {
       const loc = locate(this.doc, id)
       if (!loc || loc.parent === null) continue
-      const fields = gutterFieldsOf(loc.block, this.store.blocks)
-      const field = closureTargetField(fields)
-      plans.push({ id, plan: closurePlanOfField(field) })
+      const plan = closurePlanFor(loc.block, this.store.blocks)
+      if (plan) plans.push({ id, plan })
     }
     if (plans.length === 0) return false
     this.beginUndoEntry()
@@ -2300,10 +2271,10 @@ export class BlockEditor {
    *    由调用方解释「它来自标签」，而不是让用户对着一个没变化的方框猜。
    */
   clearClosure(id: string): 'cleared' | 'declared' | 'none' {
-    const loc = locate(this.doc, id)
+    const loc = this.locateAny(id)
     if (!loc) return 'none'
     // 目标与 `toggleClosure` 同一判据：库里唯一的任务状态字段
-    const field = gutterFieldsOf(loc.block, this.store.blocks).find((f) => f.use === CLOSURE_USE)
+    const field = closureFieldOf(loc.block, this.store.blocks)
     if (!field) return 'none'
     this.beginUndoEntry()
     this.write((tx) => tx.patch(id, (b) => clearValue(b, field.propId)))
@@ -2311,7 +2282,7 @@ export class BlockEditor {
     // 摘完要**再读一次**判据：这一栏可能来自标签的字段声明（`clearValue` 只动自有槽），
     // 还剩下就返回 `'declared'`，由调用方解释「它来自标签」，而不是让用户对着
     // 一个没变化的方框猜。
-    const after = locate(this.doc, id)
+    const after = this.locateAny(id)
     const still = after
       ? gutterFieldsOf(after.block, this.store.blocks).some((f) => f.propId === field.propId)
       : false
@@ -3180,7 +3151,19 @@ export class BlockEditor {
      * 但它并不是森林顶层。`store.blocks` 是森林根数组，O(根数) 就能判。
      */
     const forestRoot = Boolean(id) && this.store.blocks.some((x) => x.id === id)
+    /**
+     * 块自己的判据只有一份（`core/identity/block-ctx.ts`）：身份/角色/能不能删/
+     * 能不能提取/有没有视图/是不是任务。编辑器面与记录面读同一份。
+     */
+    const blockKeys = b
+      ? blockMenuCtxOf(b, this.store.blocks, {
+          isDocRoot: at !== null && at.parent === null,
+          isForestRoot: forestRoot,
+          fields: this.fieldTable(),
+        })
+      : {}
     return {
+      ...blockKeys,
       focus: 'editor',
       editorTextFocus: document.activeElement === this.container || this.container.contains(document.activeElement),
       selectionEmpty: s ? s.aBlock === s.hBlock && s.aOff === s.hOff : true,
@@ -3188,51 +3171,14 @@ export class BlockEditor {
       /** 选区能不能转引用（单块纯文本）：与命令执行时同一份判据 */
       selectionRef: this.selectionSpot() !== null,
       blockFocused: Boolean(id),
+      blockMenuTarget: Boolean(id),
       blockId: id ?? '',
-      /**
-       * 当前块是不是**视图的根**（`locate` 找不到父块）。
-       *
-       * 为什么需要它：根块不是一个「内容块」—— 删页／删天要走命令面
-       * （`core.page/delete`），从编辑器里 splice 掉它只会让视图看不见，
-       * 库里那块还在（刷新就回来，看起来像「删了又复活」）。
-       * ⇒ 菜单靠这个键把自己藏起来，而不是点了再静默失败。
-       */
       blockIsRoot: at !== null && at.parent === null,
       blockIsForestRoot: forestRoot,
       // 光标落在命中高亮里（块菜单「转为引用」的准入，与 ⌥ 单击同一份判据）
       mentionHit: this.mentionHitAtCaret() !== null,
-      /**
-       * 删除入口的准入：**按「有没有身份、有没有替代命令」判，不按「是不是根」**。
-       *
-       * 页／标签／日记天是身份根——它们是视图的装载单位，且各自有命令面的删除
-       * （`core.page/delete` 带「至少留一页」，`core.journal/delete` 不给今天），
-       * 从编辑器删只会让视图看不见、库里还在（「删了又复活」）⇒ 这里不给。
-       * 非身份的根块（森林顶层的普通块、zoom 进来的普通块）删掉就是删掉内容，
-       * 与普通块同构；**查询块根**同理——晋升出来的查询是内容，又没有替代命令，
-       * 藏掉它就是「完全删不掉」。编辑器侧的删除走事务（整棵软删、⌘Z 可回），
-       * 装载根的收尾（doc.roots splice／留空位）在删除命令里已处理。
-       */
-      blockCanDelete:
-        id !== null && !(at !== null && at.parent === null && b !== undefined && hasIdentity(b) && !isQueryBlock(b)),
-      /**
-       * 「提取为页」只对**内容块**有定义：身份块（journal／tag／schema／query）
-       * 不靠位置表达信息，搬它们没有意义；森林根也没有可移动的落点。
-       */
-      blockCanExtractPage:
-        b !== undefined &&
-        !forestRoot &&
-        !isJournal(b) &&
-        !(hasList(b, 'tag') && !hasList(b, 'page')) &&
-        !isPropDefBlock(b) &&
-        !isQueryBlock(b),
-      /**
-       * 这一块是**可以删的日记天**：今天不行 —— 今天在冷启动会被物化回来
-       * （它是落点，不是「恰好存在的一天」），给它一个「删了又回来」的入口只会像坏了。
-       */
-      blockCanDeleteJournal: b !== undefined && isJournal(b) && journalDate(b) !== todayISO(),
       blockSelection: this.bsel.blockSel !== null,
       blockSelectionCount: this.bsel.blockSel?.ids.length ?? 0,
-      blockType: b && closureOf(b, this.fieldTable()) ? 'closure' : 'paragraph',
       blockHasChildren: Boolean(b && hasLiveChildren(b)),
       /**
        * 这一行有没有可折的东西：子块，或**身体**（查询块的结果视图／露面投影）。
@@ -3241,14 +3187,6 @@ export class BlockEditor {
        * 不是它自己的位置，折它没有可见效果。
        */
       blockFoldable: Boolean(b && (hasLiveChildren(b) || this.bodyFoldable(b))),
-      /**
-       * 这一块值不值得给「视图…」入口：查询块（源＝命中），或**有子块**的容器，
-       * 或已经有激活视图（要能切回大纲）。叶子普通块没有可摊开的东西 ——
-       * 给一个点了什么都没有的菜单项，用户只会以为是坏的。
-       */
-      blockCanHaveView: Boolean(
-        b && (isQueryBlock(b) || isEmbedBlock(b) || hasLiveChildren(b) || activeView(b) !== null),
-      ),
       blockCollapsed: Boolean(b && isFolded(this.doc, b.id)),
       blockClosed: b ? closureOf(b, this.fieldTable()) === 'closed' : false,
       marking: b ? this.marksAtSel().join('+') : '',

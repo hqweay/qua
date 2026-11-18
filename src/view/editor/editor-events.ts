@@ -14,7 +14,7 @@
  *   2. **键位一个都不在这里处理**——全部交给绑定表，这里只碰「输入与拖拽」。
  */
 import { bindDropTarget, isRefDrag, noteDragRef, setDragBlock, zoneHint, zoneRefHint } from '../dnd.ts'
-import { EDIT_ISLAND_ATTR } from './block-dom.ts'
+import { inForeignIsland as foreignIsland } from './block-dom.ts'
 import { refsFromHtml } from './clipboard-flavor.ts'
 import type { ClipboardRefs } from './clipboard-flavor.ts'
 import type { TriggerChar } from '../../core/infra/trigger.ts'
@@ -467,18 +467,7 @@ export function bindEditorEvents(br: EditorBridge): () => void {
    * 外层再接一遍就是双投：两边各折一次、各开一次菜单，且外层的重排会把
    * 里层刚做的（视图私有的）状态冲掉。
    */
-  const ownIsland = c.closest(`[${EDIT_ISLAND_ATTR}]`)
-  /**
-   * 岛根要在**派发时**判定（`composedPath()` 是派发那一刻的快照）：
-   * 处理过程中里层编辑器可能同步重排、把事件目标换成一棵新子树——
-   * 那时 `target.closest()` 会得到 null（目标已被拆出文档），岛界就漏了。
-   */
-  const inForeignIsland = (ev: Event): boolean => {
-    for (const node of ev.composedPath()) {
-      if (node instanceof Element && node.hasAttribute(EDIT_ISLAND_ATTR)) return node !== ownIsland
-    }
-    return false
-  }
+  const inForeignIsland = (ev: Event): boolean => foreignIsland(ev, c)
   const on = <K extends keyof HTMLElementEventMap>(
     target: HTMLElement | Document,
     type: K | string,

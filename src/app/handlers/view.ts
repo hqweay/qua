@@ -157,32 +157,18 @@ export const VIEW_HANDLERS: Record<string, Handler> = {
     const id = S(a.blockId) || curBlock(app)
     if (!id) return false
     const el = app.ed.blockEl(id)
-    app.showMenu({ kind: 'menu', prefix: 'block/', anchor: el?.getBoundingClientRect() ?? null, title: t('menu.title.block') })
+    app.showMenu({
+      kind: 'menu',
+      prefix: 'block/',
+      anchor: el?.getBoundingClientRect() ?? null,
+      title: t('menu.title.block'),
+      // 这一块不在正文里（记录面/别处）⇒ 目标 ctx 走块级那一份
+      target: { blockId: id, surface: el ? 'editor' : 'record' },
+    })
     return true
   },
   'core.menu/slash': (_a, app) => {
     app.showMenu({ kind: 'slash', anchor: app.ed.caretRect(), title: t('menu.title.slash'), query: '' })
-    return true
-  },
-  /**
-   * 子菜单锚点：分组前缀由**绑定行的 args** 给（一条命令服务所有静态子菜单），
-   * 锚与标题按前缀查表——与前缀一样，都是「这组行是谁」的一格数据。
-   */
-  'core.menu/sub': (a, app) => {
-    const prefix = S(a.prefix)
-    if (!prefix) return false
-    const titles: Record<string, string> = {
-      'blockCopy/': t('menu.title.copy'),
-      'blockInsert/': t('menu.title.insert'),
-    }
-    const id = curBlock(app)
-    const el = id ? app.ed.blockEl(id) : null
-    app.showMenu({
-      kind: 'menu',
-      prefix,
-      anchor: el?.getBoundingClientRect() ?? null,
-      title: titles[prefix] ?? t('menu.title.block'),
-    })
     return true
   },
   'core.layer/close': (_a, app) => {

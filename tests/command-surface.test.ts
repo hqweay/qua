@@ -111,12 +111,17 @@ test('块菜单：删除同位、复制/插入收子菜单、组标题人人有�
   for (const need of ['core.editor/delete-block', 'core.journal/delete', 'core.page/delete', 'core.tag/delete']) {
     assert.ok(deleteGroup.includes(need), `${need} 应住在删除组：危险动作位置恒定`)
   }
-  const anchors = BINDINGS.filter((b) => b.command === 'core.menu/sub').map((b) => JSON.stringify(b.args))
+  const anchors = BINDINGS.filter((b) => b.kind === 'menu' && b.submenu !== undefined)
+    .map((b) => `${b.submenu}:${b.actsOn ?? 'editor'}`)
   assert.deepEqual(
     [...anchors].sort(),
-    [JSON.stringify({ prefix: 'blockCopy/' }), JSON.stringify({ prefix: 'blockInsert/' })],
-    '复制/插入两套行只从子菜单锚点进来',
+    ['blockCopy/:block', 'blockInsert/:editor'],
+    '复制/插入两套行只从子菜单进来（子菜单是行数据，不是命令）',
   )
+  // 「有目标块」不是「编辑器有焦点」：块菜单行只读 blockMenuTarget，记录面才借得到同一张表
+  for (const b of menu) {
+    assert.ok(!(b.when ?? '').includes('blockFocused'), `${b.submenu ?? b.command} 仍读 blockFocused`)
+  }
   // 组标题必须人人有份：裸 id 露给用户就是「打不开的引用」（视图组曾整个组没有标题）
   for (const b of menu) {
     const g = b.group ?? ''

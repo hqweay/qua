@@ -33,7 +33,7 @@ export function setupKeys(deps: KeysDeps) {
   const keyHints = (): Map<string, string> => {
     const m = new Map<string, string>()
     for (const b of BINDINGS) {
-      if (b.kind !== 'keymap' || !b.key) continue
+      if (b.kind !== 'keymap' || !b.key || !b.command) continue
       if (!m.has(b.command)) m.set(b.command, keyLabel(b.key, deps.isMac()))
     }
     return m

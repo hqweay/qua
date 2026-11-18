@@ -7,7 +7,7 @@
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
 import './styles.css'
-import { buildAdjacency, checkEdge, cyclePathLabels, danglingOf, findInForest, flatten, FEED_INITIAL, feedDays, hasLiveChildren, isJournal, journalId, mkBlock, mkJournalBlock, pruneGone, todayISO, type Block, trashOf, withBlockOwnerData, type StoredViewKind, type UndoKind } from './core/index.ts'
+import { buildAdjacency, checkEdge, cloneSubtree, cyclePathLabels, danglingOf, findInForest, flatten, FEED_INITIAL, feedDays, hasLiveChildren, isJournal, journalId, locate, mkBlock, mkJournalBlock, pruneGone, todayISO, type Block, trashOf, withBlockOwnerData, type StoredViewKind, type UndoKind } from './core/index.ts'
 import { plainText } from './core/model/runs.ts'
 import { BlockStore } from './core/model/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
@@ -1298,6 +1298,36 @@ const app: App = {
   openBlockConfig: (blockId, opts) => panels.openBlockConfig(blockId, opts),
   openPropertiesDrawer: (blockId, focusPropId) => panels.openPropertiesDrawer(blockId, focusPropId),
   setBlockType: (blockId, typeId) => applyBlockType(blockId, typeId),
+  /**
+   * 块级删除：在正文里 ⇒ 编辑器的结构删除（装载根收尾、留空位）；
+   * 不在正文里（记录面／派生栏）⇒ 库级软删。身份块不走这里，各有自己的命令。
+   */
+  deleteBlock: (blockId) => {
+    if (!findInForest(ws.blocks, blockId)) return false
+    if (locate(ed.doc, blockId)) return ed.struct.remove(blockId)
+    /**
+     * 不在正文里（记录面）：走 `pageDeps.run`（**带撤销条目**），不是
+     * `pageDeps.removeBlock`——后者是身份删除用的裸结构写（回收站兜底、不进 ⌘Z），
+     * 而「删一条记录」必须能一次撤销回来。
+     */
+    pageDeps.run((tx) => tx.remove(blockId))
+    return true
+  },
+  /** 复制一块到它自己后面；正文里沿用编辑器（落点结构判据），记录面走库级插入。 */
+  duplicateBlock: (blockId) => {
+    if (locate(ed.doc, blockId)) return ed.struct.duplicate(blockId)
+    const loc = locate({ roots: ws.blocks }, blockId)
+    if (!loc) return null
+    const { block } = cloneSubtree(loc.block)
+    pageDeps.run((tx) => tx.insert(block, loc.parent?.id ?? null, loc.index + 1))
+    return block.id
+  },
+  /**
+   * 切换待办：判据在 `core/props/closure.ts`，编辑器只负责事务与重画。
+   * 编辑器的方法已能寻址「不在本视图 doc 里」的块（`locateAny`）。
+   */
+  toggleClosure: (blockId, propId) => ed.toggleClosure(blockId, propId),
+  clearClosure: (blockId) => ed.clearClosure(blockId),
 
   // 导航历史（中心槽走到哪）；与 undo/redo 的撤销栈无关
   historyBack: () => historyGo('back'),

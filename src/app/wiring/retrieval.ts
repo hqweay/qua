@@ -10,9 +10,9 @@
 import { paletteRows, rowsFromBindings, type PickMods, type Row } from '../../ui/overlay/layers.ts'
 import { createTriggers, memberRows, type MemberTagRef, type TriggerDeps } from '../../app/retrieval/triggers.ts'
 import { selectionRefRows } from '../../app/retrieval/selection-ref-rows.ts'
-import { resolveBindings } from '../../core/infra/bindings.ts'
-import { type MenuRequest, type Registry } from '../../core/commands/index.ts'
-import { inboundRefCount, type ColorAxis, type CtxKeys, type TriggerChar } from '../../core/index.ts'
+import { resolveBindings, type Binding } from '../../core/infra/bindings.ts'
+import { type ActsOn, type MenuRequest, type MenuTarget, type Registry } from '../../core/commands/index.ts'
+import { blockMenuCtxOf, findInForest, inboundRefCount, type ColorAxis, type CtxKeys, type TriggerChar } from '../../core/index.ts'
 import { Layers } from '../../ui/overlay/layers.ts'
 import type { BlockEditor } from '../../view/editor/editor.ts'
 import type { TriggerQuery } from '../../view/editor/editor-events.ts'
@@ -420,14 +420,65 @@ function noteRecentCommand(name: string): void {
   scheduleDeviceSave()
 }
 
+/**
+ * 这一次菜单的上下文。
+ *
+ * 有 target 且来自记录面时，块级键从 target 块现算，光标／选区／提及一律置空
+ * （记录面没有这些东西）。编辑器面的 target 不重算：右键前光标已落进那块，
+ * 活动编辑器的 ctx 就是它。
+ */
+function menuCtxOf(req: MenuRequest): CtxKeys {
+  const base = req.ctx ?? uiCtx()
+  if (!req.target || req.target.surface !== 'record') return base
+  const b = findInForest(ws.blocks, req.target.blockId)
+  if (!b) return base
+  return {
+    ...base,
+    ...blockMenuCtxOf(b, ws.blocks, {
+      isDocRoot: false,
+      isForestRoot: ws.blocks.some((x) => x.id === b.id),
+    }),
+    // 记录面没有光标/选区/提及命中：这些键必须压成「没有」，不能借正文那一刻的状态
+    blockSelection: false,
+    blockSelectionCount: 0,
+    selectionEmpty: true,
+    selectionCount: 0,
+    selectionRef: false,
+    mentionHit: false,
+  }
+}
+
+/** 这一行能在这个表面执行吗：`actsOn` 分域（子菜单行读自己的 `actsOn`）。 */
+function rowAllowed(b: Binding, surface: MenuTarget['surface'] | undefined): boolean {
+  if (surface !== 'record') return true
+  const actsOn: ActsOn =
+    b.actsOn ?? (b.command ? (getRegistry().decl(b.command)?.actsOn ?? 'editor') : 'editor')
+  return actsOn === 'block'
+}
+
+/**
+ * 把菜单的目标块盖进每一行 args。
+ *
+ * **行自带的 args 优先**：露面的两行（「移除这次露面」）要指露面块，而不是被右键的源块。
+ * 命令因此永远拿到显式目标，不再从「活动编辑器的光标」猜。
+ */
+function stampTarget(row: Row, target: MenuTarget | undefined): Row {
+  if (!target) return row
+  const own =
+    row.args && typeof row.args === 'object' && !Array.isArray(row.args)
+      ? (row.args as Record<string, unknown>)
+      : {}
+  return { ...row, args: { blockId: target.blockId, ...own } }
+}
+
 function showMenu(req: MenuRequest): void {
-  const ctx = req.ctx ?? uiCtx()
   /**
    * 别的菜单取代检索浮层时把状态清掉：`openMenu` 换掉旧浮层不会回调 `onClose`，
    * 留着 `triggerCh` 会让下一次按键去改一个已经不在的浮层。
    */
   triggerCh = null
   if (req.kind === 'palette') {
+    const ctx = req.ctx ?? uiCtx()
     // 空查询带「最近执行」段、有查询词收起——收放判据在 `paletteRows`，这里只传话
     const buildRows = (q: string): Row[] =>
       paletteRows(getRegistry().list(), keyHints(), { recents: prefs().recentCommands, query: q })
@@ -449,9 +500,14 @@ function showMenu(req: MenuRequest): void {
     return
   }
   if (req.kind === 'menu') {
+    const ctx = menuCtxOf(req)
+    const surface = req.target?.surface
     const rows = [
-      ...rowsFromBindings(resolveBindings('menu', ctx, { prefix: req.prefix }), keyHints()),
-      ...(req.extraRows ?? []),
+      ...rowsFromBindings(
+        resolveBindings('menu', ctx, { prefix: req.prefix }).filter((b) => rowAllowed(b, surface)),
+        keyHints(),
+      ).map((r) => stampTarget(r, req.target)),
+      ...(req.extraRows ?? []).map((r) => stampTarget(r, req.target)),
     ]
     layers.openMenu({
       rows,
@@ -461,6 +517,22 @@ function showMenu(req: MenuRequest): void {
       searchable: false,
       focusSearch: false,
       onPick: (row) => {
+        /**
+         * **子菜单是菜单的结构，不是命令**：带着同一个 target/ctx 再开一层。
+         * 写成命令（旧 `core.menu/sub`）会让 handler 去找 DOM 锚点，而记录面没有
+         * 编辑器元素可找。锚点沿用父菜单：钻进去是「换一页」，不是另开一张浮层。
+         */
+        if (row.submenu) {
+          showMenu({
+            kind: 'menu',
+            prefix: row.submenu,
+            anchor: req.anchor,
+            ...(req.trigger ? { trigger: req.trigger } : {}),
+            title: row.label,
+            ...(req.target ? { target: req.target } : {}),
+          })
+          return
+        }
         req.before?.()
         if (req.onPick) req.onPick(row, row.command ? getRegistry().decl(row.command) : undefined)
         else if (row.command) getRegistry().invoke(row.command, (row.args as Record<string, unknown>) ?? {}, 'menu', ctx)

@@ -90,6 +90,7 @@ import {
 import type { KbClient } from '../../core/kb/types.ts'
 import { t } from '../../core/infra/msg.ts'
 import { BlockEditor, type Run } from '../../view/editor/editor.ts'
+import { inForeignIsland } from '../../view/editor/block-dom.ts'
 import { DeferredFlush } from '../../view/editor/deferred-flush.ts'
 import { renderIcon } from '../../view/icons.ts'
 import { SurfaceEditor } from '../block-ui/surface-editor.ts'
@@ -236,6 +237,13 @@ export interface ViewHostDeps {
   onAtomClick?: (atom: { runId: string; kind: string; hash?: string }, el: HTMLElement, mods: ClickMods) => void
   /** 打开一块（行首块标 / 紧凑列表） */
   openBlock: (blockId: string, place?: OpenAction) => void
+  /**
+   * **右键一块**（记录面的块菜单入口）。
+   *
+   * 记录视图的行/卡片不是编辑器，所以菜单不能借外层编辑器的事件；这一层只报
+   * 「右键了谁、在什么矩形上」，菜单本身由装配层按 target 现开。
+   */
+  blockMenu?: (blockId: string, anchor: DOMRect, trigger?: HTMLElement) => void
   /** `ref` 值的选择器（与属性区同一份；`rootBlock` 让条件树多一枚「根块」候选） */
   pickRef?: (owner: Block | undefined, propId: string, current: string, onPick: (targetId: string) => void, anchor?: DOMRect, trigger?: HTMLElement, opts?: { rootBlock?: boolean }) => void
   /** 标签值选择器：只列已有标签、可搜；查询是读操作，不给新建 */
@@ -479,6 +487,8 @@ export class ViewHost {
   private title: TitleEditor | null = null
   /** 查询视图自己的 stale 订阅（只点亮提示、不重排——冻结成员是 D4） */
   private readonly offStale: () => void
+  /** 记录面的块菜单委托（右键一行/一张卡；拆台时摘掉） */
+  private readonly offContextMenu: () => void
   /** 条件树（查询源；懒建，收起只隐藏不清空草稿） */
   private treeUi: QueryTree | null = null
   /** chips 面板开着没有（就地展开；与排序面板同一种寿命） */
@@ -514,6 +524,13 @@ export class ViewHost {
      * 渲染器、配置、冻结全是同一份。CSS 按这一格选「贴在这一行下面」。
      */
     this.els.root.dataset.surface = deps.surface
+    /**
+     * 记录面的块菜单入口：一条委托装在宿主根上，五个渲染器零改动
+     * （行/卡片本来就带 `data-block-id`）。拆台时摘掉。
+     */
+    const onContextMenu = (e: MouseEvent): void => this.openRecordMenu(e)
+    this.els.root.addEventListener('contextmenu', onContextMenu)
+    this.offContextMenu = () => this.els.root.removeEventListener('contextmenu', onContextMenu)
     /**
      * 这一台宿主画的是**哪个拥有者**的身体。
      *
@@ -675,7 +692,30 @@ export class ViewHost {
     return this.outline?.ed ?? null
   }
 
+  /**
+   * 记录面的右键：只认「这一屏里的一个记录行」，其余手势原样让路。
+   *
+   * 三道让路：
+   *   · 输入控件（表格格子的 `input` 等）→ 原生菜单；
+   *   · 行内原子／tag chip／引用／属性图标 → 它们有自己的手势，v1 不在记录面接，
+   *     但也不吞（保持「现在没有菜单」的原样，不制造错误行为）；
+   *   · 里层编辑器（卡片/标题格正在编辑）→ 岛界规则：归里层。
+   */
+  private openRecordMenu(e: MouseEvent): void {
+    if (!this.deps.blockMenu) return
+    const target = e.target
+    if (!(target instanceof HTMLElement)) return
+    if (target.closest('input, textarea, select')) return
+    if (target.closest('[data-atom-id], [data-tag-id], [data-ref-to], [data-prop-id]')) return
+    if (inForeignIsland(e, this.els.root)) return
+    const el = target.closest<HTMLElement>('[data-block-id]')
+    if (!el?.dataset.blockId || !this.els.root.contains(el)) return
+    e.preventDefault()
+    this.deps.blockMenu(el.dataset.blockId, new DOMRect(e.clientX, e.clientY, 0, 0), el)
+  }
+
   dispose(): void {
+    this.offContextMenu()
     this.offStale()
     // 这一台宿主拆了，镜头浮层不能还挂着一份旧面板（关层会回调 onClose 清引用）
     if (this.optionsHost?.isConnected) this.deps.closeLens?.()

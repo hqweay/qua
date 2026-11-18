@@ -358,6 +358,9 @@ function viewEvents(
         kind: 'menu',
         prefix: 'block/',
         anchor: rect,
+        // 目标进请求：命令拿到显式 blockId，不再靠「活动编辑器的光标」猜；
+        // 编辑器面的 ctx 仍是这一台（右键前光标已落进目标块）。
+        target: { blockId, surface: 'editor' },
         // 同一处再右键一次＝收起（toggle）；触发元素随行重渲染换掉时退回先关再开
         ...(trigger ? { trigger } : {}),
         title: t('menu.title.block'),

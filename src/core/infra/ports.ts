@@ -27,6 +27,19 @@ import type { ViewOwnerRef } from '../views/view-owner.ts'
 import type { OpenOpts, OpenAction } from '../views/open.ts'
 
 export type Capability = 'read' | 'write' | 'admin' | 'plugin'
+
+/**
+ * **这条命令作用于什么**——菜单分域的唯一判据。
+ *
+ *   · `block`     —— 目标是一块，只要有块 id 就能执行（打开/看属性/身份/删除/复制/视图配置）。
+ *   · `editor`    —— 需要一台装载树的实例（缩进/上移下移/折叠/在落点插入/zoom-out）。
+ *   · `selection` —— 需要光标选区（清除格式/提及转引用）。
+ *
+ * 缺省 `editor`：新命令不会因为漏标而出现在没有编辑器的面上。
+ * 表面声明自己能执行哪些（编辑器＝全部，记录面＝`block`），菜单按它筛行。
+ * 与 `when` 正交：`when` 回答「对**这一块**适不适用」，`actsOn` 回答「**这个面**有没有执行它的机器」。
+ */
+export type ActsOn = 'block' | 'editor' | 'selection'
 export type FixtureName = 'seed' | 'empty' | 'sparse' | 'degraded' | 'boot'
 export type PanelKind = 'context' | 'bindings' | 'shortcuts' | 'model'
 
@@ -82,6 +95,11 @@ export interface CommandDecl {
   /** 不进命令面板（编辑器内部键位） */
   hidden?: boolean
   /**
+   * 这条命令作用于什么（见 `ActsOn`）。缺省 `editor` ⇒ 只出现在有编辑器的面上。
+   * 菜单分域用它，`when` 仍管「对这块适不适用」。
+   */
+  actsOn?: ActsOn
+  /**
    * 这个命令可以作为一个「小卡」摆在槽里。
    *
    * 只有带它的命令才进「添加快捷」画廊——这是一份**策展过的**集合，
@@ -103,19 +121,41 @@ export interface MenuRow {
   icon?: string
   group?: string
   command?: string
+  /**
+   * **这一行开的是下一层菜单**（不是命令）。值是下一层的分组前缀。
+   *
+   * 子菜单是菜单的结构，不是命令：写成命令（旧 `core.menu/sub`）会让 handler
+   * 去找 DOM 锚点，而「记录面」没有编辑器元素可找。浮层自己带 target/ctx 重开一层。
+   */
+  submenu?: string
   args?: unknown
   keyHint?: string
   disabled?: boolean
 }
 
+/**
+ * 菜单的**目标**：这一次菜单在对谁做事，以及从哪种表面打开。
+ *
+ * 目标进请求之后，命令不再从「活动编辑器的光标」猜自己该改哪一块：
+ * 每一行的 args 都会带上 `blockId`（行自带的 args 优先，露面那两行靠它改指向）。
+ * `surface` 决定两件事：`record` 用块级 ctx（没有光标/选区）并只放 `block` 域的行；
+ * `editor` 沿用活动编辑器的 ctx（右键前光标已落进目标块）。
+ */
+export interface MenuTarget {
+  blockId: string
+  surface: 'editor' | 'record'
+}
+
 export interface MenuRequest {
-  /** 打开哪一种浮层——**不是绑定种类**（面板枚举命令表，不经绑定表） */
+  /** 打开哪一种浮层——**不是**绑定种类（面板枚举命令表，不绑定表） */
   kind: 'palette' | 'menu' | 'slash'
   anchor: DOMRect | null
   title?: string
   prefix?: string
   query?: string
   ctx?: CtxKeys
+  /** 这一次菜单对谁做事（见 `MenuTarget`）；不给＝沿用旧行为（光标/环境） */
+  target?: MenuTarget
   /**
    * **调用方现算的追加项**（排在绑定解析出的行之后）。菜单的主体来自绑定表
    * （静态声明 ＋ `when` 过滤）；少数入口的**参数**只有打开那一刻才知道
@@ -154,6 +194,20 @@ export interface App {
   newPage(): void
   openPage(id: string): void
   deletePage(id: string): void
+  /**
+   * **删一块（按 id，软删可撤销）**——块级动作，任何表面都能调。
+   *
+   * 与三个身份删除（页／标签／日记）分开：身份块不走这里，它们各有自己的命令与守卫。
+   * 块在当前正文里时走编辑器的结构删除（装载根收尾、留空位）；不在（记录面）时
+   * 走库级软删。返回值＝真的删了（编辑器侧的守卫会静默拒绝）。
+   */
+  deleteBlock(id: string): boolean
+  /** 复制一块（含子树，原子换新 id）到它自己后面；返回新块 id。 */
+  duplicateBlock(id: string): string | null
+  /** 切换待办（按 id）：判据在 `core/props/closure.ts`，记录面与正文同一份。 */
+  toggleClosure(id: string, propId?: string): boolean
+  /** 取消待办（摘掉任务栏）；`declared` ＝ 它还来自标签声明，调用方要解释一句。 */
+  clearClosure(id: string): 'cleared' | 'declared' | 'none'
   /**
    * 永久清除回收站条目（整棵子树级联，不可恢复、不进撤销栈）。
    *

@@ -73,18 +73,18 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     app.ed.toggleChildrenCollapse(id)
     return true
   },
-  'core.editor/duplicate-block': (_a, app) => {
-    const id = curBlock(app)
+  'core.editor/duplicate-block': (a, app) => {
+    const id = S(a.blockId) || curBlock(app)
     if (!id) return false
-    app.ed.struct.duplicate(id)
+    if (!app.duplicateBlock(id)) return false
     app.toast(t('ui.toast.blockDuplicated'))
     return true
   },
-  'core.editor/delete-block': (_a, app) => {
-    const id = curBlock(app)
+  'core.editor/delete-block': (a, app) => {
+    const id = S(a.blockId) || curBlock(app)
     if (!id) return false
-    // remove 对「有身份的装载根」等会静默拒绝——没删就不说「已删除」
-    if (!app.ed.struct.remove(id)) return false
+    // 守卫会静默拒绝（身份块／不能删的装载根）——没删就不说「已删除」
+    if (!app.deleteBlock(id)) return false
     app.toast(t('ui.toast.blockDeleted'))
     return true
   },
@@ -140,11 +140,10 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     }
     return app.convertMention(S(a.blockId), S(a.to), Number(a.start), Number(a.end))
   },
-  'core.editor/toggle-closure': (_a, app) => {
-    const id = curBlock(app)
+  'core.editor/toggle-closure': (a, app) => {
+    const id = S(a.blockId) || curBlock(app)
     if (!id) return false
-    app.ed.toggleClosure(id)
-    return true
+    return app.toggleClosure(id, S(a.propId) || undefined)
   },
   /**
    * 「取消待办」：摘掉这一块的任务状态（`toggleClosure` 的反向，见 `editor.clearClosure`）。
@@ -153,10 +152,10 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
    *    另外两种都改过模型 ＝ true。牌子只在「摘了但它还在」时打一句 ——
    *    那种情况是标签声明给的，静默就会变成「点了没反应」。
    */
-  'core.editor/clear-closure': (_a, app) => {
-    const id = curBlock(app)
+  'core.editor/clear-closure': (a, app) => {
+    const id = S(a.blockId) || curBlock(app)
     if (!id) return false
-    const r = app.ed.clearClosure(id)
+    const r = app.clearClosure(id)
     if (r === 'declared') app.toast(t('ui.closure.declaredByTag'), 'info')
     return r !== 'none'
   },
@@ -249,7 +248,17 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
    * 软内 ⌘V 贴成引用（HTML 载荷），软外 ⌘V 贴出正文（text/plain）。
    * 划选文本的 ⌘C 不归这里：选区非空时键位不命中，原生复制原样保留。
    */
-  'core.editor/copy-block': (_a, app) => {
+  'core.editor/copy-block': (a, app) => {
+    /**
+     * 显式目标（块菜单／记录面）⇒ 只复制那一块；不带目标（键位）⇒ 沿用
+     * 编辑器的选区快照（块选区多块 / 光标单块）。`plainTextOf` 对不在本视图的块
+     * 回落到 store，记录面因此不用另写一条复制路径。
+     */
+    const id = S(a.blockId)
+    if (id) {
+      copyRefs(app, [id], app.ed.clip.plainTextOf(id))
+      return true
+    }
     const snap = app.ed.clip.copySnapshot()
     if (!snap) return false
     copyRefs(app, snap.ids, snap.text)
@@ -259,7 +268,13 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
    * 复制份（块上 ⌘⇧C／划选外的情况）：只写正文味、不带引用意图——
    * 软内软外 ⌘V 行为一致，贴出来都是新块。与 ⌘C 是同一动作的两个身份档。
    */
-  'core.editor/copy-block-text': (_a, app) => {
+  'core.editor/copy-block-text': (a, app) => {
+    const id = S(a.blockId)
+    if (id) {
+      app.copyFlavors({ text: app.ed.clip.plainTextOf(id) }, null)
+      app.confirmGrab([id], t('ui.toast.blocksCopied'))
+      return true
+    }
     const snap = app.ed.clip.copySnapshot()
     if (!snap) return false
     // 与 ⌘C 同一条确认通道（行抖，reduced-motion 退回提示）——抓的是同一块，不按味分通道
