@@ -342,6 +342,26 @@ const bootActive = findInForest(ws.blocks, ws.activeId) ?? ws.blocks[0]
 const bootDays = bootActive && isJournal(bootActive) ? feedDays(ws.blocks, FEED_INITIAL) : []
 const bootRoots: Block[] = bootDays.length > 0 ? rootsForMany(bootDays) : bootActive ? rootsFor(bootActive) : []
 
+/**
+ * **首帧读面探针（仅开发构建）**：用工作集读面取一次 `doc` ＋ `catalog`，看真机读数与
+ * 主进程记的读行数（`libraryInfo.reads`）。它不改模型、不参与渲染，读回来的行直接丢掉。
+ *
+ * 跳过两种不诚实的时刻：
+ *   · 新库／重 seed（`boot.status !== 'ok'`）：内容还没落盘，查出来是空的；
+ *   · 这一轮冷启动刚物化了今日／空天首子块（`bootOps` 非空）：那些行要等首笔落盘才在库里。
+ * 动态 import：产品构建里 `DEV_SURFACE` 为假，整段与这个模块都不进产物。
+ */
+if (DEV_SURFACE && LIBRARY_BRIDGE) {
+  if (boot.status === 'ok' && bootOps.length === 0 && bootRoots.length > 0) {
+    const bridge = LIBRARY_BRIDGE
+    void import('./app/perf/boot-read-probe.ts')
+      .then(({ probeBootLibraryReads }) => probeBootLibraryReads(bridge, bootRoots.map((b) => b.id)))
+      .catch((e) => console.warn('[perf] boot read probe import failed', e))
+  } else {
+    console.info('[perf] boot read probe skipped (fresh library or pending boot writes)')
+  }
+}
+
 const layers = new Layers(() => isMac())
 let ed: BlockEditor
 /** 中心槽的主编辑器；`ed` 是「当前活动编辑器」（正文或反链 footer） */

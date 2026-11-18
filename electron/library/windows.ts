@@ -29,11 +29,27 @@ import {
   type LibraryEntry,
 } from '../../src/core/identity/library.ts'
 import { libraryDir, loadRegistry, markOpened, saveRegistry, type RegistryIo } from './registry.ts'
-import { loadContent, openSession, saveContent, type OpenFailure, type RepoSession } from './session.ts'
+import { loadContent, openSession, readCatalog, readDoc, saveContent, type OpenFailure, type RepoSession } from './session.ts'
 import { readSeq, searchFts, snapshotLibrary, type RowWrite } from './sqlite.ts'
 
 /** 关窗握手等 renderer 回话的上限。超时就强关——卡住比丢一句话更糟。 */
 const CLOSE_ACK_TIMEOUT_MS = 1500
+
+/**
+ * `doc` 的 roots 参数形状：**非空字符串数组，有数量上限**。
+ *
+ * 不校验 32-hex：root 是「要装哪一个视图根」的 id，形状由内容决定（引用目标也可以是 root）；
+ * 这里只挡两件事：空串，以及「一次问整库」——一次 Doc 是 1 个（页）或几天（日记流窗口），
+ * 512 已经给未来查询页留了余量。
+ */
+function isRootList(v: unknown): v is string[] {
+  return (
+    Array.isArray(v) &&
+    v.length > 0 &&
+    v.length <= 512 &&
+    v.every((x) => typeof x === 'string' && x.length > 0 && x.length <= 256)
+  )
+}
 
 export interface LibraryManagerDeps {
   io: RegistryIo
@@ -345,6 +361,8 @@ export class LibraryManager {
          * 「打一个字写几行」只能靠它回答，而「行数随库体量增长」正是要消灭的形状。
          */
         writes: { ...s.writes },
+        /** 读成本：`full` 是全库装载次数（旧路径）；`doc`／`catalog` 是工作集读面 */
+        reads: { ...s.reads },
       }
     })
 
@@ -392,6 +410,36 @@ export class LibraryManager {
         return { ok: true, changed }
       } catch (err) {
         return { ok: false, error: String(err) }
+      }
+    })
+
+    /**
+     * **工作集读面：一个／多个 root 的子树＋祖先链**。
+     *
+     * 参数只有 root id 列表（要装哪几个视图根是装配层的决定）；主进程只校验形状，
+     * 执行 `core/storage/library-reads.ts` 的具名查询，不做块语义判断。
+     * 上限 512 个 root：一次 Doc 是 1 个（页）或几天（日记流窗口）；给未来查询页留余量，
+     * 但不给「一次问整库」留口子。
+     */
+    ipcMain.handle('qua:library/doc', (e, roots: unknown) => {
+      const s = sessionOf(e)
+      if (!s) return { status: 'no-library' }
+      if (!isRootList(roots)) return { status: 'bad-args' }
+      try {
+        return { status: 'ok', doc: readDoc(s, roots) }
+      } catch (err) {
+        return { status: 'error', error: String(err) }
+      }
+    })
+
+    /** **工作集读面：槽的全局身份摘要**（日记／标签／字段定义／回收站根；不含页列表） */
+    ipcMain.handle('qua:library/catalog', (e) => {
+      const s = sessionOf(e)
+      if (!s) return { status: 'no-library' }
+      try {
+        return { status: 'ok', catalog: readCatalog(s) }
+      } catch (err) {
+        return { status: 'error', error: String(err) }
       }
     })
 

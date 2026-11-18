@@ -97,6 +97,13 @@ const qua = {
   save: (writes: unknown[], opts?: { replace?: boolean; oplog?: unknown[]; derived?: boolean }): Promise<unknown> =>
     ipcRenderer.invoke('qua:storage/save', writes, opts ?? {}),
 
+  /**
+   * **工作集读面**（具名查询：主进程只执行 SQL，不认块语义）。
+   * `doc` 收「要装哪几个视图根」，`catalog` 只回槽要显示的全局身份摘要。
+   */
+  doc: (roots: readonly string[]): Promise<unknown> => ipcRenderer.invoke('qua:library/doc', roots),
+  catalog: (): Promise<unknown> => ipcRenderer.invoke('qua:library/catalog'),
+
   /** 全文检索（match 由渲染层编译；主进程只做参数绑定与 bm25 排序） */
   search: (match: string, limit: number, offset = 0): Promise<unknown> =>
     ipcRenderer.invoke('qua:search/query', match, limit, offset),

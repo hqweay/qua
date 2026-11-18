@@ -52,6 +52,16 @@ export interface LibraryBridge {
   search?(match: string, limit: number, offset?: number): Promise<unknown>
 
   /**
+   * **工作集读面**（可选：web 宿主没有库面，测试也能造瘦桥）。
+   *
+   * 两个具名查询：`doc(roots)` 回子树＋祖先链，`catalog()` 回槽的全局身份摘要。
+   * 主进程只执行 `core/storage/library-reads.ts` 的 SQL，不认块语义；
+   * 参数只有 root id，没有任意 SQL 过桥的口子。
+   */
+  doc?(roots: readonly string[]): Promise<unknown>
+  catalog?(): Promise<unknown>
+
+  /**
    * 资产面（内容寻址；字节走 ArrayBuffer，主进程写进库目录的 `assets/`）。
    *
    * 只有两格：**写字节**与**一次拿全部元信息**。地址不走 IPC（`qua-asset://<hash>`
