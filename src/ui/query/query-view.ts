@@ -795,10 +795,24 @@ export class ViewHost {
     return { kind: 'children', blockId: '' }
   }
 
+  /**
+   * **刷新重洗牌的种子**（会话态，不落盘）：
+   * `displaySeed` 盖命名视图的显示序，`memberSeed` 盖查询成员序里 `random` 的种子。
+   * 刷新是「再给我一批」，不是一次配置编辑——不写盘、不进撤销、不重装页面。
+   */
+  private displaySeed: number | undefined
+  private memberSeed: number | undefined
+
   /** 当前这张视图（`null` ＝ 这一份源的默认看法） */
   private get view(): ViewConfig | null {
     if (this.deps.derived) return this.derivedView()
-    return this.bound.view
+    return this.seededView(this.bound.view)
+  }
+
+  /** 把会话态的「刷新种子」盖到 `random` 键上（其余键原样；没有种子时返回原对象） */
+  private seededView(v: ViewConfig | null): ViewConfig | null {
+    if (!v?.sort?.some((k) => k.by === 'random') || this.displaySeed === undefined) return v
+    return { ...v, sort: v.sort.map((k) => (k.by === 'random' ? { ...k, seed: this.displaySeed! } : k)) }
   }
 
   /**
@@ -1055,10 +1069,26 @@ export class ViewHost {
     if (spec) this.frozen = freezeResult(spec, this.deps.kb, this.evalContext(spec), this.viewKey)
   }
 
+  /**
+   * **刷新＝重新洗牌**：这一屏看得见的序里有 `random`，就换一个种子。
+   *
+   * 随机序的默认是「同一种子同一序」（刷新/重开不洗牌），而「刷新」正是用户要换一批的
+   * 那一下——否则「随机」永远只有那一份固定序。种子住会话态（见 `displaySeed`）：
+   * 一次点击不写盘、不产生撤销、不重装页面；重新打开这一屏回到配置里的种子。
+   */
+  private rerollRandom(): void {
+    const seed = Date.now() % 2147483647
+    const hasRandom = (keys: readonly SortKey[] | undefined): boolean => keys?.some((k) => k.by === 'random') === true
+    if (hasRandom(this.view?.sort)) this.displaySeed = seed
+    const src = this.source
+    if (src.kind === 'query' && hasRandom(src.spec.sort)) this.memberSeed = seed
+  }
+
   /** 刷新按钮：**只重算这一个实例**（别的表面各自持有自己的那份，不受影响） */
   refresh(): void {
     this.els.refresh.disabled = true
     try {
+      this.rerollRandom()
       const spec = this.effective
       if (!spec) return
       const before = this.frozen?.hits ?? []
