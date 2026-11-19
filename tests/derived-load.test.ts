@@ -16,21 +16,15 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openLibraryDb, applyRowWrites, readContentRows, type RowWrite } from '../electron/library/sqlite.ts'
-import {
-  readBlockTreeRows,
-  readCandidateIds,
-  readDocRows,
-  readIdentityRows,
-} from '../electron/library/reads.ts'
+import { readBlockTreeRows, readCandidatePage, readDocRows, readIdentityRows } from '../electron/library/reads.ts'
 import { rebuildDerivedWrites } from '../src/core/storage/derived-rows.ts'
-import { candidateBuildOf } from '../src/core/storage/query-candidates.ts'
 import { BlockStore } from '../src/core/model/store.ts'
 import { Workset } from '../src/core/storage/workset.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
 import type { LibraryClient } from '../src/core/storage/library-client.ts'
 import { ensureDerivedLoaded } from '../src/app/boot/derived-load.ts'
 import { derivedRecordsOf, type DerivedSource } from '../src/core/views/mount.ts'
-import type { Block, QueryContext, QuerySpec } from '../src/core/index.ts'
+import type { Block } from '../src/core/index.ts'
 
 const dirs: string[] = []
 process.on('exit', () => {
@@ -102,8 +96,8 @@ function readClient(db: Db): LibraryClient {
     async identity() {
       return { status: 'ok', value: readIdentityRows(db) }
     },
-    async candidates(plan) {
-      return { status: 'ok', value: readCandidateIds(db, plan) }
+    async candidates(plan, page) {
+      return { status: 'ok', value: readCandidatePage(db, plan, page) }
     },
     async relations(ids) {
       const rows = db
@@ -113,27 +107,6 @@ function readClient(db: Db): LibraryClient {
       return { status: 'ok', value: { rows, ready: state === 'ready' } }
     },
   } as unknown as LibraryClient
-}
-
-/**
- * 与本机装配层的 `ensureQueryLoaded` 同一条：候选（超集）→ 未装载的连祖先链装进来 →
- * 第二跳闭包（候选身上的引用目标）。返回值＝这次真的装进了新块。
- */
-function loadedEnsurer(db: Db, store: BlockStore, workset: Workset) {
-  return async (spec: QuerySpec, ctx: QueryContext, host: Block | undefined): Promise<boolean> => {
-    const build = candidateBuildOf(spec, host, store.blocks, ctx)
-    const before = countLoaded(store)
-    const named = build.loadIds.filter((id) => !store.isLoaded(id))
-    if (named.length > 0) workset.loadBlocks(readBlockTreeRows(db, named, false), true)
-    const candidates = readCandidateIds(db, build.plan)
-    const missing = candidates.filter((id) => !store.isLoaded(id))
-    if (missing.length > 0) workset.loadBlocks(readBlockTreeRows(db, missing, build.children), true)
-    return countLoaded(store) > before
-  }
-}
-
-function countLoaded(store: BlockStore): number {
-  return store.index.all.size
 }
 
 /** 只装 PAGE_A（＋身份块）：工作集的真实首帧形状 */
@@ -171,21 +144,13 @@ test('部分装载：引用栏装齐后与整库逐条相同（别页的来源�
   const a = hostBlock(view.kb)
   assert.deepEqual(idsOf(view.kb, 'refs'), [], '只装了 PAGE_A 时看不到别页的引用来源')
 
-  const loaded = await ensureDerivedLoaded(
-    { client: readClient(db), workset: view.workset, store: view.store, ensureQueryLoaded: loadedEnsurer(db, view.store, view.workset) },
-    a,
-    'refs',
-  )
+  const loaded = await ensureDerivedLoaded({ client: readClient(db), workset: view.workset, store: view.store }, a, 'refs')
   assert.equal(loaded, true, '应当真的装进了新块')
   assert.deepEqual(idsOf(view.kb, 'refs'), idsOf(full, 'refs'), '装齐后与整库口径逐条相同（顺序也相同）')
   assert.deepEqual(idsOf(view.kb, 'refs'), ['b1'], '来源是 PAGE_B 里的 b1')
 
   // 再问一次：什么都不缺 ⇒ 不该报「装进了新块」（否则挂载区会空转重画）
-  const again = await ensureDerivedLoaded(
-    { client: readClient(db), workset: view.workset, store: view.store, ensureQueryLoaded: loadedEnsurer(db, view.store, view.workset) },
-    a,
-    'refs',
-  )
+  const again = await ensureDerivedLoaded({ client: readClient(db), workset: view.workset, store: view.store }, a, 'refs')
   assert.equal(again, false)
   close()
 })
@@ -200,11 +165,7 @@ test('备注栏没有 QuerySpec：候选来自关系表的 annotates 边，装�
   const a = hostBlock(view.kb)
   assert.deepEqual(idsOf(view.kb, 'notes'), [], '只装了 PAGE_A 时看不到别页的备注')
 
-  const loaded = await ensureDerivedLoaded(
-    { client: readClient(db), workset: view.workset, store: view.store, ensureQueryLoaded: loadedEnsurer(db, view.store, view.workset) },
-    a,
-    'notes',
-  )
+  const loaded = await ensureDerivedLoaded({ client: readClient(db), workset: view.workset, store: view.store }, a, 'notes')
   assert.equal(loaded, true)
   assert.deepEqual(idsOf(view.kb, 'notes'), idsOf(full, 'notes'), '备注栏装齐后与整库口径相同')
   assert.deepEqual(idsOf(view.kb, 'notes'), ['n1'])
@@ -217,7 +178,7 @@ test('派生表没建好：显式不装（返回 false），退回工作集口�
   // 不重建派生表 ⇒ derived_state 仍是 pending
   const view = partialView(db)
   const a = hostBlock(view.kb)
-  const deps = { client: readClient(db), workset: view.workset, store: view.store, ensureQueryLoaded: loadedEnsurer(db, view.store, view.workset) }
+  const deps = { client: readClient(db), workset: view.workset, store: view.store }
   assert.equal(await ensureDerivedLoaded(deps, a, 'notes'), false, '关系表不可信 ⇒ 不装，不假装全库')
   assert.deepEqual(idsOf(view.kb, 'notes'), [])
   close()

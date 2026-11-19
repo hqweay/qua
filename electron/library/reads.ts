@@ -11,10 +11,11 @@
  */
 import type { DatabaseSync } from 'node:sqlite'
 import {
-  candidatePlanSql,
+  candidatePageSql,
   LIBRARY_READS,
   type CandidatePlan,
   type BlockIndexRow,
+  type CandidatePage,
   type CatalogAlias,
   type CatalogJournal,
   type CatalogPropDef,
@@ -112,19 +113,27 @@ export function readCatalogRows(db: DatabaseSync): LibraryCatalog {
 /* ------------------------------------------------------------ 查询候选 */
 
 /**
- * **候选计划的执行**：SQL 由 `core/storage` 编译（`candidatePlanSql`），这里只跑它。
+ * **候选计划的执行：一页候选**（按文档先序的 keyset 分页）。
  *
  * 计划是**超集**（⊇ 真命中）：matcher 在渲染层仍是判定的唯一来源，这里少给一行
  * 就是静默丢结果，多给只是多装几块。
  *
- * **派生两表可信吗**在**这一处**问（`derived_state`）：只决定「收窄得多准」，不决定语义。
- * 不可信就退回根上的 `deleted` 位与 `visible`——宽，但仍是超集（详见 `candidatePlanSql`）。
+ * **派生两表可信吗**在**这一处**问（`derived_state`）：它只决定「收窄得多准」与
+ * 「能不能按文档序分页」——不可信时退回根上的 `deleted` 位与**一页装完**
+ * （`next: null`），宽但真（详见 `candidatePageSql`）。
  */
-export function readCandidateIds(db: DatabaseSync, plan: CandidatePlan): string[] {
+export function readCandidatePage(
+  db: DatabaseSync,
+  plan: CandidatePlan,
+  page: { after: string | null; limit: number },
+): CandidatePage {
   const derived = readMeta(db, META_KEYS.derivedState) === 'ready'
-  const { sql, params } = candidatePlanSql(plan, { derived })
-  const rows = db.prepare(sql).all(...params) as { id: unknown }[]
-  return rows.map((r) => String(r.id)).filter((id) => id !== '' && id !== 'null')
+  const q = candidatePageSql(plan, page, { derived })
+  const rows = db.prepare(q.sql).all(...q.params) as { id: unknown; path?: unknown }[]
+  const ids = rows.map((r) => String(r.id)).filter((id) => id !== '' && id !== 'null')
+  // 只有「取满一页」才可能还有下一页；不满 ⇒ 到底（下一问会是空页，少一次猜测）
+  const next = derived && rows.length === page.limit ? String(rows[rows.length - 1]!.path) : null
+  return { ids, next }
 }
 
 /**

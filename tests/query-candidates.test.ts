@@ -18,7 +18,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openLibraryDb, applyRowWrites, readContentRows, type RowWrite } from '../electron/library/sqlite.ts'
-import { readCandidateIds, readBlockTreeRows, readIdentityRows } from '../electron/library/reads.ts'
+import { readCandidatePage, readBlockTreeRows, readIdentityRows } from '../electron/library/reads.ts'
 import { rowsToWorkspace } from '../src/core/storage/db-rows.ts'
 import { rebuildDerivedWrites } from '../src/core/storage/derived-rows.ts'
 import { candidateBuildOf } from '../src/core/storage/query-candidates.ts'
@@ -168,7 +168,7 @@ function worksetEval(
   ws.loadBlocks(readIdentityRows(db), true)
   // 条件点名的块先装（标签/定义）
   if (build.loadIds.length > 0) ws.loadBlocks(readBlockTreeRows(db, build.loadIds, false))
-  const candidates = readCandidateIds(db, build.plan)
+  const candidates = allCandidateIds(db, build.plan, 3)
   if (candidates.length > 0) ws.loadBlocks(readBlockTreeRows(db, candidates, build.children))
   // matcher 环境的第二跳：候选身上的标签/定义/引用目标
   const loaded = candidates.map((id) => store.find(id)).filter((b): b is Block => b !== undefined)
@@ -210,6 +210,23 @@ function collectIds(v: unknown, out: Set<string>): void {
   }
   if (Array.isArray(v)) for (const x of v) collectIds(x, out)
   if (v !== null && typeof v === 'object') for (const x of Object.values(v as Record<string, unknown>)) collectIds(x, out)
+}
+
+/** 一页页取到到底（页大小 3：既取全，又把分页本身跑一遍） */
+function allCandidateIds(
+  db: NonNullable<ReturnType<typeof openLibraryDb>['db']>,
+  plan: Parameters<typeof readCandidatePage>[1],
+  pageSize: number,
+): string[] {
+  const out: string[] = []
+  let after: string | null = null
+  for (let i = 0; i < 10000; i++) {
+    const page = readCandidatePage(db, plan, { after, limit: pageSize })
+    out.push(...page.ids)
+    after = page.next
+    if (after === null) break
+  }
+  return out
 }
 
 const hitSet = (kb: MemoryKb, spec: QuerySpec, opts: { selfId?: string; today?: string }): Set<string> =>
@@ -289,5 +306,20 @@ test('$self 无宿主 ⇒ 空结果（不退回全库）', () => {
     const { hits, candidates } = worksetEval(db, { where: { up: { is: '$self' } } }, forest, {})
     assert.equal(hits.length, 0)
     assert.equal(candidates.length, 0)
+  })
+})
+
+test('候选分页：页大小 1／2／3／400 取到的序列与一次取全相同（keyset 不重不漏、保序）', () => {
+  withDb((db) => {
+    applyRowWrites(db, rebuildDerivedWrites(readContentRows(db)))
+    const { forest } = baseline(db)
+    for (const c of CASES) {
+      const host = c.opts?.selfId ? forest.find((b) => b.id === c.opts!.selfId) : undefined
+      const build = candidateBuildOf(c.spec, host, forest, { ...(c.opts ?? {}) })
+      const full = allCandidateIds(db, build.plan, 4000)
+      for (const size of [1, 2, 3, 400]) {
+        assert.deepEqual(allCandidateIds(db, build.plan, size), full, `「${c.name}」页大小 ${size} 的候选序列必须与一次取全相同`)
+      }
+    }
   })
 })

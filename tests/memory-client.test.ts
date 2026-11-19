@@ -228,15 +228,16 @@ test('roots：顶层根清单（含软删根，森林序＝rowid 序）', async 
 test('candidates：宽计划给全部可见块（超集）；ids 直达；none 空', async () => {
   const ws = richWorkspace()
   const mem = memSide(ws)
-  const all = await mem.candidates({ k: 'visible' })
+  const all = await mem.candidates({ k: 'visible' }, { after: null, limit: 400 })
   assert.equal(all.status, 'ok')
   if (all.status !== 'ok') return
-  assert.ok(all.value.includes(id('x')), '可见块在候选里')
-  assert.ok(!all.value.includes(id('g')), '被软删的子块不是候选')
-  const ids = await mem.candidates({ k: 'ids', ids: [id('x'), id('missing')] })
-  assert.ok(ids.status === 'ok' && ids.value.length === 1 && ids.value[0] === id('x'))
-  const none = await mem.candidates({ k: 'none' })
-  assert.ok(none.status === 'ok' && none.value.length === 0)
+  assert.ok(all.value.ids.includes(id('x')), '可见块在候选里')
+  assert.ok(!all.value.ids.includes(id('g')), '被软删的子块不是候选')
+  assert.equal(all.value.next, null, '内存读面没有下游标：一页装完')
+  const ids = await mem.candidates({ k: 'ids', ids: [id('x'), id('missing')] }, { after: null, limit: 400 })
+  assert.ok(ids.status === 'ok' && ids.value.ids.length === 1 && ids.value.ids[0] === id('x'))
+  const none = await mem.candidates({ k: 'none' }, { after: null, limit: 400 })
+  assert.ok(none.status === 'ok' && none.value.ids.length === 0)
 })
 
 test('ftsMap：恒空（web 查询走森林扫描）', async () => {

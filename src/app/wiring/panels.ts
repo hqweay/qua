@@ -68,6 +68,7 @@ import { t } from '../../core/infra/msg.ts'
 import type { RefClickHit, RefClickMods } from '../../view/editor/editor-events.ts'
 import type { App, Registry } from '../../core/commands/index.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
+import type { CandidateLoadStep, CandidateWindowRequest } from '../../core/storage/library-client.ts'
 import type { Tx } from '../../core/kb/types.ts'
 import type { BlockStore } from '../../core/model/store.ts'
 import type { Prefs, Workspace } from '../../core/infra/workspace.ts'
@@ -142,11 +143,16 @@ export type PanelsDeps = {
   /** 点标题里的一枚非引用原子（图片/外链）：默认动作 / ⌥ 详情（与正文同一份） */
   atomClick?: (atom: { runId: string; kind: string; hash?: string }, el: HTMLElement, mods: ClickMods) => void
   /**
-   * **按条件装载查询候选**（工作集装载；装配层注入）。
-   * 候选 id 从 SQL 来、按 id 连祖先链装进工作集；视图装完重算冻结结果。
-   * 省略 ＝ 整库模式（求值天然完整）。
+   * **候选流分页装载**（工作集装载；装配层注入）：取**一页**候选装进工作集。
+   * 游标是上一页最后一条的 path；`next:null` ＝ 到底。视图每取一页就重新求值，
+   * 早停口径留在视图（有 `sort` 必须取到底）。省略 ＝ 整库模式（求值天然完整）。
    */
-  ensureQueryLoaded?: (spec: QuerySpec, ctx: QueryContext, host: Block | undefined) => Promise<boolean>
+  loadCandidateWindow?: (
+    spec: QuerySpec,
+    ctx: QueryContext,
+    host: Block | undefined,
+    req: CandidateWindowRequest,
+  ) => Promise<CandidateLoadStep>
   /**
    * **派生栏的候选先装载**（引用／备注／成员／同类／提及／谁在用）：与查询视图同一条管道。
    * 省略 ＝ 不装（整库模式求值天然完整）。
@@ -1147,7 +1153,7 @@ export function setupPanels(deps: PanelsDeps) {
       store: blocks,
       write: editorRun(run, () => opts?.source?.() ?? edOfMount(hostId)),
       kb,
-      ...(deps.ensureQueryLoaded ? { ensureQueryLoaded: deps.ensureQueryLoaded } : {}),
+      ...(deps.loadCandidateWindow ? { loadCandidateWindow: deps.loadCandidateWindow } : {}),
       owners,
       owner,
       ...(binding ? { binding } : {}),

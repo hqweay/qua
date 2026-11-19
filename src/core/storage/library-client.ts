@@ -19,7 +19,15 @@
  * `library-reads.ts` 的具名查询与主进程执行分支，再在这里加一格——三处各写一份 SQL
  * 就是「同一件事有多个答案」。
  */
-import type { BlockIndexRow, CandidatePlan, LibraryCatalog, LibraryDocRows, RawLibraryRows } from './library-reads.ts'
+import type {
+  BlockIndexRow,
+  CandidatePage,
+  CandidatePageQuery,
+  CandidatePlan,
+  LibraryCatalog,
+  LibraryDocRows,
+  RawLibraryRows,
+} from './library-reads.ts'
 
 /** 桥面：桌面由 preload 提供；web 宿主根本没有库面（`undefined`） */
 export interface LibraryReadBridge {
@@ -27,8 +35,8 @@ export interface LibraryReadBridge {
   doc(roots: readonly string[]): Promise<unknown>
   /** 一批块自己的行（**不带子树**；引用目标/标签/定义按 id 装一块） */
   blocks?(ids: readonly string[]): Promise<unknown>
-  /** 查询候选 id（计划 JSON 由 core 编译，主进程只执行 SQL） */
-  candidates?(plan: unknown): Promise<unknown>
+  /** 一页候选 id（计划 JSON 由 core 编译；`after` 是上一页最后一条的 path） */
+  candidates?(plan: unknown, after: string | null, limit: number): Promise<unknown>
   /** 候选装载：块＋全部祖先链（可选一层子级） */
   tree?(ids: readonly string[], withChildren: boolean): Promise<unknown>
   /** 槽要显示的全局身份摘要（日记／标签／字段定义／地址表／回收站根） */
@@ -75,8 +83,12 @@ export interface LibraryClient {
       ready: boolean
     }>
   >
-  /** 查询候选 id（计划是超集；matcher 仍是判定来源）。失败分型与 doc 同一条 */
-  candidates(plan: CandidatePlan): Promise<LibraryReadResult<string[]>>
+  /**
+   * **一页候选 id**（计划是超集；matcher 仍是判定来源）。游标是上一页最后一条的
+   * `BlockIndex.path`——分页的单位是「候选流」，不是结果集（判定在本地）。
+   * `next: null` ＝ 已经到底。失败分型与 doc 同一条。
+   */
+  candidates(plan: CandidatePlan, page: CandidatePageQuery): Promise<LibraryReadResult<CandidatePage>>
   /** 候选装载：块＋全部祖先链（可选一层子级） */
   tree(ids: readonly string[], withChildren: boolean): Promise<LibraryReadResult<RawLibraryRows>>
   /**
@@ -95,6 +107,29 @@ export interface LibraryClient {
   indexRows?(ids: readonly string[]): Promise<LibraryReadResult<BlockIndexRow[]>>
   indexFollowing?(parent: string | null, left: string | null): Promise<LibraryReadResult<BlockIndexRow | null>>
   indexChildren?(parent: string | null): Promise<LibraryReadResult<BlockIndexRow[]>>
+}
+
+/**
+ * **一页候选装载的结果**（`{loaded, next}`）：`loaded` ＝ 真的装进了新块（调用方据此
+ * 决定要不要重算／重画），`next` ＝ 下一页游标（`null` ＝ 到底）。
+ *
+ * 形状住这里而不是装载器里：`ui` 不许 import `app`（分层），而两边的契约只有这一个。
+ */
+export interface CandidateLoadStep {
+  loaded: boolean
+  next: string | null
+}
+
+/** 一次「补一窗候选」的请求（视图自己存游标，滚一次推进一次） */
+export interface CandidateWindowRequest {
+  /** 游标（`null` ＝ 从头） */
+  after: string | null
+  /** 够多少条命中就停；**有 `sort` 的条件传 `Number.POSITIVE_INFINITY`**（全局排序要全集） */
+  target: number
+  /** 每页装完的回调：视图在这里重算冻结结果（回调之后 `hits()` 才是新的） */
+  onPage?: (step: CandidateLoadStep) => void
+  /** 当前命中数（早停判据）。不给 ⇒ 只取一页 */
+  hits?: () => number
 }
 
 /** 回复外壳的形状（主进程只回这几个 status；其余一律按坏回复处理） */
@@ -335,11 +370,11 @@ function createClient(bridge: LibraryReadBridge): LibraryClient {
       return { status: 'ok', value: r.rows as RawLibraryRows }
     },
 
-    async candidates(plan) {
+    async candidates(plan, page) {
       if (!bridge.candidates) return clientError('library/candidates', 'bridge has no candidates read')
       let raw: unknown
       try {
-        raw = await bridge.candidates(plan)
+        raw = await bridge.candidates(plan, page.after, page.limit)
       } catch (e) {
         return clientError('library/candidates', e instanceof Error ? e.message : String(e))
       }
@@ -348,11 +383,14 @@ function createClient(bridge: LibraryReadBridge): LibraryClient {
       if (r.status === 'bad-args') return { status: 'bad-args' }
       if (r.status === 'error') return clientError('library/candidates', String(r.error ?? 'unknown'))
       if (r.status !== 'ok') return clientError('library/candidates', `bad reply status: ${String(r.status)}`)
-      const reply = r as { ids?: unknown }
+      const reply = r as { ids?: unknown; next?: unknown }
       if (!Array.isArray(reply.ids) || !reply.ids.every((x) => typeof x === 'string')) {
         return clientError('library/candidates', 'bad reply shape')
       }
-      return { status: 'ok', value: reply.ids }
+      if (reply.next !== null && reply.next !== undefined && typeof reply.next !== 'string') {
+        return clientError('library/candidates', 'bad reply shape')
+      }
+      return { status: 'ok', value: { ids: reply.ids, next: typeof reply.next === 'string' ? reply.next : null } }
     },
 
     async tree(ids, withChildren) {

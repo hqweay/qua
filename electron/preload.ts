@@ -103,8 +103,9 @@ const qua = {
    */
   doc: (roots: readonly string[]): Promise<unknown> => ipcRenderer.invoke('qua:library/doc', roots),
   blocks: (ids: readonly string[]): Promise<unknown> => ipcRenderer.invoke('qua:library/blocks', ids),
-  /** 查询候选 id（计划 JSON 由 core 编译；主进程只执行） */
-  candidates: (plan: unknown): Promise<unknown> => ipcRenderer.invoke('qua:library/candidates', plan),
+  /** 一页候选 id（按文档序的 keyset：`after` 是上一页最后一条的 path）；主进程只执行 */
+  candidates: (plan: unknown, after: string | null, limit: number): Promise<unknown> =>
+    ipcRenderer.invoke('qua:library/candidates', plan, after, limit),
   /** 候选装载：块＋祖先链（可选一层子级） */
   tree: (ids: readonly string[], withChildren: boolean): Promise<unknown> =>
     ipcRenderer.invoke('qua:library/tree', ids, withChildren),

@@ -43,7 +43,7 @@ import { createFolderAssetStore, type AssetStore } from './assets.ts'
 import {
   readBlockRows,
   readBlockTreeRows,
-  readCandidateIds,
+  readCandidatePage,
   readCatalogRows,
   readDocRows,
   readDependents,
@@ -57,6 +57,7 @@ import {
 } from './reads.ts'
 import type {
   BlockIndexRow,
+  CandidatePage,
   CandidatePlan,
   LibraryCatalog,
   LibraryDocRows,
@@ -367,12 +368,16 @@ export type { LibraryEntry }
 
 /* ------------------------------------------------------------ 查询候选 */
 
-/** 候选 id（SQL 计划在 core 编译；这里是执行与记账） */
-export function readCandidates(session: RepoSession, plan: CandidatePlan): string[] {
-  const ids = readCandidateIds(session.db, plan)
+/** 一页候选（SQL 计划在 core 编译；这里是执行与记账）。游标是上一页最后一条的 path */
+export function readCandidates(
+  session: RepoSession,
+  plan: CandidatePlan,
+  page: { after: string | null; limit: number },
+): CandidatePage {
+  const out = readCandidatePage(session.db, plan, page)
   session.reads.candidates += 1
-  session.reads.candidateIds += ids.length
-  return ids
+  session.reads.candidateIds += out.ids.length
+  return out
 }
 
 /** 候选装载（块＋祖先链，可选一层子级）：与 `readBlocks` 分开记账 */

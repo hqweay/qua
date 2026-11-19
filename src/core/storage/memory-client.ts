@@ -28,7 +28,7 @@ import { isJournal, journalDate } from '../identity/journal.ts'
 import { ensureIndexLists, relationsTo, type Index } from '../infra/index-port.ts'
 import type { BlockStore } from '../model/store.ts'
 import { positionsOf, rowsOfBlock, type RawLibraryRows, type StoredWorkspace } from './db-rows.ts'
-import type { LibraryCatalog, LibraryDocRows } from './library-reads.ts'
+import type { CandidatePage, LibraryCatalog, LibraryDocRows } from './library-reads.ts'
 import type { LibraryClient, LibraryReadResult } from './library-client.ts'
 import type { CandidatePlan } from './library-reads.ts'
 
@@ -238,13 +238,14 @@ export function createMemoryLibraryClient(deps: MemoryLibraryDeps): LibraryClien
       return ok({ rows, ready: true })
     },
 
-    async candidates(plan: CandidatePlan): Promise<LibraryReadResult<string[]>> {
+    async candidates(plan: CandidatePlan): Promise<LibraryReadResult<CandidatePage>> {
       // 内存读面的候选是**超集的最简形状**：能按 id 直达的就直达，其余给全部可见块
       // （matcher 仍是判定的唯一来源；web 体量下「全部可见」就是正确的宽候选）。
-      if (plan.k === 'none') return ok([])
+      // 没有派生表 ⇒ 没有跨会话稳定的文档序游标 ⇒ 一页装完（`next:null`）。
+      if (plan.k === 'none') return ok({ ids: [], next: null })
       if (plan.k === 'ids') {
         const found = findByIds(new Set(plan.ids))
-        return ok(plan.ids.filter((id: string) => found.has(id)))
+        return ok({ ids: plan.ids.filter((id: string) => found.has(id)), next: null })
       }
       const out: string[] = []
       walkForest(
@@ -254,7 +255,7 @@ export function createMemoryLibraryClient(deps: MemoryLibraryDeps): LibraryClien
         },
         { includeDeleted: false },
       )
-      return ok(out)
+      return ok({ ids: out, next: null })
     },
 
     async tree(ids, withChildren): Promise<LibraryReadResult<Rows>> {

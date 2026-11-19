@@ -68,6 +68,8 @@ import {
   type FoldState,
   type OpenAction,
   type BlockStore,
+  type CandidateLoadStep,
+  type CandidateWindowRequest,
   type FrozenResult,
   type QueryContext,
   type QueryNode,
@@ -180,12 +182,17 @@ export interface ViewHostDeps {
   /** 求值的上下文：`$self` 指谁、结果剔除谁 */
   context: QueryContext
   /**
-   * **按条件装载候选**（工作集装载；装配层注入）。
+   * **候选流分页装载**（工作集装载；装配层注入）：取**一页**候选装进工作集。
    *
-   * 候选 id 从 SQL 来、按 id 连祖先链装进工作集；装完返回 true ⇒ 视图重算冻结结果。
-   * 省略 ＝ 整库模式（所有块都在内存里，求值天然完整）。
+   * 分页的单位是候选（候选是超集，判定在本视图）⇒ 本视图每取一页就重算一次冻结结果，
+   * 直到「命中够一窗」或「到底」。`next: null` ＝ 到底。省略 ＝ 整库模式（求值天然完整）。
    */
-  ensureQueryLoaded?: (spec: QuerySpec, ctx: QueryContext, host: Block | undefined) => Promise<boolean>
+  loadCandidateWindow?: (
+    spec: QuerySpec,
+    ctx: QueryContext,
+    host: Block | undefined,
+    req: CandidateWindowRequest,
+  ) => Promise<CandidateLoadStep>
   surface: ViewSurface
   /**
    * **名字画到哪**（只有投影给）。
@@ -455,6 +462,20 @@ export function createViewHostEls(): ViewHostEls {
 }
 
 /** 一个「表面实例」的冻结结果（内存；不进 KB、不进撤销） */
+/** 首屏与每次滚动各补到「约一窗命中」；候选命中率低时自动多取几页 */
+const HITS_PER_WINDOW = 30
+/** 距底部多少像素算「滚近底」 */
+const PAGE_SCROLL_AHEAD = 400
+
+/** 最近的可滚动祖先（真的在滚的那个）；找不到 ⇒ null（这一屏不滚，也就没有「更多」） */
+function scrollParentOf(el: HTMLElement): HTMLElement | null {
+  for (let cur = el.parentElement; cur !== null; cur = cur.parentElement) {
+    const style = getComputedStyle(cur)
+    if (/(auto|scroll)/.test(style.overflowY) && cur.scrollHeight > cur.clientHeight) return cur
+  }
+  return null
+}
+
 export class ViewHost {
   private readonly els: ViewHostEls
   private readonly deps: ViewHostDeps
@@ -508,6 +529,16 @@ export class ViewHost {
   private warned = false
   /** **这一个表面实例**的冻结结果；条件／视图／上下文变了才重算 */
   private frozen: FrozenResult | null = null
+  /** 候选流的游标（上一页最后一条的 `BlockIndex.path`）；`null` ＝ 从头 */
+  private cursor: string | null = null
+  /** 候选流到底了（再问只会是空页） */
+  private streamDone = false
+  /** 一页一页补的串行闸：前一页没回来不发下一问 */
+  private filling = false
+  /** 补页期间条件又变了：收尾后再补一轮（否则会停在旧条件的那一页上） */
+  private fillAgain = false
+  /** 滚动容器（滚近底 ⇒ 再取一页）；只绑一次 */
+  private scroller: HTMLElement | null = null
   /**
    * 大纲里的**结构编辑**改过树：冻结结果与上下文展开栈都可能过期。
    *
@@ -824,7 +855,13 @@ export class ViewHost {
   private get effective(): QuerySpec | null {
     const src = this.source
     if (src.kind !== 'query') return null
-    return slicedSpec(src.spec, this.activeFilter)
+    return this.seededSpec(slicedSpec(src.spec, this.activeFilter))
+  }
+
+  /** 同 `seededView`：刷新种子盖到成员序的 `random` 键上 */
+  private seededSpec(spec: QuerySpec): QuerySpec {
+    if (!spec.sort?.some((k) => k.by === 'random') || this.memberSeed === undefined) return spec
+    return { ...spec, sort: spec.sort.map((k) => (k.by === 'random' ? { ...k, seed: this.memberSeed! } : k)) }
   }
 
   /**
@@ -936,6 +973,7 @@ export class ViewHost {
    * 没变就只把数据对齐（不整表重排 —— 那是「滚动一下整表重建」的来源）。
    */
   sync(force = false): void {
+    this.bindPageScroll()
     const b = this.deps.host()
     const view = this.defaultView()
     const mode = view ? `${view.kind}:${view.id}` : `outline:${this.source.kind}`
@@ -1025,29 +1063,95 @@ export class ViewHost {
     const ctx = this.evalContext(spec)
     if (!frozenStale(this.frozen, spec, ctx, this.viewKey)) return
     /**
-     * **候选先装载**：候选 id 从 SQL 来（超集），未装载的按 id 连祖先链装进来；
-     * 装完重算这一份。本帧先按已装载求值（可能少几行），装载完成重置冻结重画——
-     * 这是「候选页」的装载节奏，不是静默少结果（重算之后的成员是完整的）。
+     * **候选流从头**：条件／视图／上下文变了，游标就不再描述这一份求值。
+     * 本帧先按已装载求值（可能少几行），随后一页页补——边装边出，不是静默少结果。
      */
-    if (this.deps.ensureQueryLoaded) {
-      const host = this.deps.host()
-      void this.deps
-        .ensureQueryLoaded(spec, ctx, host)
-        .then((loaded) => {
-          // 真装进了新块才重算；整库模式/候选已齐 ⇒ 本次求值已经完整
-          if (loaded) {
-            this.frozen = null
-            this.sync(true)
-          }
-        })
-        .catch((e) => this.deps.toast?.(t('ui.query.refreshFailed', { message: e instanceof Error ? e.message : String(e) }), 'warn'))
-    }
+    this.cursor = null
+    this.streamDone = false
+    void this.fillPages()
     const before = this.frozen?.hits ?? []
     this.frozen = freezeResult(spec, this.deps.kb, ctx, this.viewKey)
     const dropped = droppedFrom(before, this.frozen.hits)
     if (dropped.length > 0 && before.length > 0) {
       this.deps.toast?.(t('ui.query.dropped', { count: dropped.length }), 'info')
     }
+  }
+
+  /**
+   * **一页一页补候选**（候选流分页）：每取一页就重算一次冻结结果。
+   *
+   * 早停只有一条判据：**没有 `sort` 时**按命中数够一窗就停（文档序下「先出现的排在前面」，
+   * 多取也不会改变已出行的位置）；有 `sort` 必须取到底（全局排序需要全集，提前停会让顺序
+   * 错，而且每一页都会把已出行重排一次）。
+   *
+   * 滚动触发的 `loadMore()` 只是再进一次这个循环——同一口径，没有第二条路。
+   */
+  private async fillPages(): Promise<void> {
+    const load = this.deps.loadCandidateWindow
+    if (!load) return
+    if (this.filling) {
+      this.fillAgain = true
+      return
+    }
+    this.filling = true
+    try {
+      do {
+        this.fillAgain = false
+        if (this.streamDone) break
+        const spec = this.effective
+        if (!spec) return
+        const ctx = this.evalContext(spec)
+        const step = await load(spec, ctx, this.deps.host(), {
+          after: this.cursor,
+          target: this.windowTarget(spec),
+          hits: () => this.frozen?.hits.length ?? 0,
+          onPage: (page) => {
+            // 边装边出：装进了新块的那一页就重算重画
+            if (!page.loaded) return
+            this.frozen = freezeResult(spec, this.deps.kb, ctx, this.viewKey)
+            this.sync(true)
+          },
+        })
+        this.cursor = step.next
+        if (step.next === null) this.streamDone = true
+      } while (this.fillAgain && !this.streamDone)
+    } catch (e) {
+      this.deps.toast?.(t('ui.query.refreshFailed', { message: e instanceof Error ? e.message : String(e) }), 'warn')
+    } finally {
+      this.filling = false
+    }
+  }
+
+  /** 这一窗要够几条命中：有 `sort` ⇒ 全集（`Infinity`）；声明了 `limit` ⇒ 就那么多 */
+  private windowTarget(spec: QuerySpec): number {
+    if ((spec.sort?.length ?? 0) > 0) return Number.POSITIVE_INFINITY
+    return spec.limit !== undefined ? Math.max(1, spec.limit) : HITS_PER_WINDOW
+  }
+
+  /** 滚近底：再补一窗（与首屏同一个循环、同一条早停口径） */
+  private loadMore(): void {
+    if (this.streamDone) return
+    void this.fillPages()
+  }
+
+  /**
+   * **滚近底 ⇒ 再取一页候选**：挂在这一屏自己的滚动容器上（最近的可滚动祖先）。
+   *
+   * 中心／右槽／浮层各是不同宿主，但没人需要知道是谁：谁的祖先在滚，就是谁在露面。
+   * 只绑一次；绑不到（还没进 DOM／这一屏不滚）就下次 `sync` 再试。
+   */
+  private bindPageScroll(): void {
+    if (this.scroller !== null) return
+    const scroller = scrollParentOf(this.els.root)
+    if (scroller === null) return
+    this.scroller = scroller
+    scroller.addEventListener(
+      'scroll',
+      () => {
+        if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - PAGE_SCROLL_AHEAD) this.loadMore()
+      },
+      { passive: true },
+    )
   }
 
   /**

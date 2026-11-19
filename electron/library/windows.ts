@@ -54,6 +54,13 @@ function isRootList(v: unknown): v is string[] {
   )
 }
 
+/** 一页候选的条数上限：分页的意义是「每次只问一页」，一次问几万条是调用方的 bug */
+const PAGE_LIMIT_MAX = 2000
+
+function isPageLimit(v: unknown): v is number {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= PAGE_LIMIT_MAX
+}
+
 /** `parent`／`left` 这类「可空 id」参数：null 或非空字符串，没有第三种形状 */
 function isNullableId(v: unknown): v is string | null {
   return v === null || (typeof v === 'string' && v !== '' && v.length <= 256)
@@ -466,12 +473,13 @@ export class LibraryManager {
      * **查询候选 id**：计划由 `core/storage` 从条件树编译（超集语义），这里只执行 SQL。
      * 参数形状校验（`isCandidatePlan`）挡的是「任意计划过桥」，值全是绑定参数。
      */
-    ipcMain.handle('qua:library/candidates', (e, plan: unknown) => {
+    ipcMain.handle('qua:library/candidates', (e, plan: unknown, after: unknown, limit: unknown) => {
       const s = sessionOf(e)
       if (!s) return { status: 'no-library' }
-      if (!isCandidatePlan(plan)) return { status: 'bad-args' }
+      if (!isCandidatePlan(plan) || !isNullableId(after) || !isPageLimit(limit)) return { status: 'bad-args' }
       try {
-        return { status: 'ok', ids: readCandidates(s, plan) }
+        const page = readCandidates(s, plan, { after, limit })
+        return { status: 'ok', ids: page.ids, next: page.next }
       } catch (err) {
         return { status: 'error', error: String(err) }
       }

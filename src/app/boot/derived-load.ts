@@ -9,8 +9,8 @@
  *
  * ## 两条形状，一条闸
  *
- * · **有 `QuerySpec` 的五个源**（引用／谁在用／成员／同类／提及）：交给查询那条管道
- *   （`ensureQueryLoaded`）——候选从 SQL 来、是超集，matcher 仍是判定源。
+ * · **有 `QuerySpec` 的五个源**（引用／谁在用／成员／同类／提及）：走**候选流分页**
+ *   （`loadCandidatePage`，与查询视图同一个原语）直到到底——候选从 SQL 来、是超集，matcher 仍是判定源。
  * · **备注栏没有 `QuerySpec`**（`annotates` 不是引用，不进条件语言）：它的候选就是
  *   **关系表里指向本宿主子树的 annotates 边**（`relations` 读面，同一张 `BlockRelation`），
  *   把来源块按 id 连祖先链装进来，内存索引随即自己长出这批记录。
@@ -19,12 +19,12 @@
  * 而不是把半张表当真。**返回「这次真的装进了新块」**——调用方据此只重画一次，
  * 不装的时候不该引起重画。
  */
-import type { QueryContext, QuerySpec } from '../../core/query/query.ts'
 import type { Block } from '../../core/model/model.ts'
 import { walkForest } from '../../core/model/walk.ts'
 import type { LibraryClient } from '../../core/storage/library-client.ts'
 import type { Workset } from '../../core/storage/workset.ts'
 import { derivedSpecOf, type DerivedSource } from '../../core/views/mount.ts'
+import { loadCandidateWindow } from './query-load.ts'
 
 /**
  * 这一层要的「存储」只有三格（判工作集、判已装载、构条件用的森林）。
@@ -36,6 +36,7 @@ export interface DerivedLoadStore {
   readonly partial: boolean
   isLoaded(id: string): boolean
   readonly blocks: readonly Block[]
+  find(id: string): Block | undefined
 }
 
 export interface DerivedLoadDeps {
@@ -45,8 +46,6 @@ export interface DerivedLoadDeps {
   workset: Workset | null
   /** 判工作集 / 判已装载 / 构条件用的森林（见 `DerivedLoadStore`） */
   store: DerivedLoadStore
-  /** 查询候选装载：与查询视图同一个函数（装配层的 `ensureQueryLoaded`） */
-  ensureQueryLoaded: (spec: QuerySpec, ctx: QueryContext, host: Block | undefined) => Promise<boolean>
 }
 
 /** 这一栏的候选装进工作集了没有（`true` ＝ 真的装进了新块，值得重画一次） */
@@ -60,7 +59,16 @@ export async function ensureDerivedLoaded(
   if (source === 'notes') return ensureNotesLoaded(deps, host)
   const spec = derivedSpecOf(host, store.blocks, source)
   if (!spec) return false
-  return deps.ensureQueryLoaded(spec, { selfId: host.id, excludeIds: [host.id] }, host)
+  /**
+   * 派生栏要的是**全部**记录（它是「谁指向我」的完整清单，没有滚动分页）：一窗取到
+   * 到底（`target: Infinity` 且不给 `hits` ⇒ 一页页直到空页）。每页 ≤ `CANDIDATE_PAGE`，
+   * 所以传输上限永远碰不到。
+   */
+  const step = await loadCandidateWindow(deps, spec, { selfId: host.id, excludeIds: [host.id] }, host, {
+    after: null,
+    target: Number.POSITIVE_INFINITY,
+  })
+  return step.loaded
 }
 
 /**

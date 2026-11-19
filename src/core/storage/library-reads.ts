@@ -519,3 +519,57 @@ export function candidatePlanSql(
     }
   }
 }
+
+/* ------------------------------------------------------------ 候选流（分页） */
+
+/** 一页候选的绑定：游标是**上一页最后一条的 path**（keyset，不用 offset） */
+export interface CandidatePageQuery {
+  /** `null` ＝ 从头（第一页）；否则只取 `path` 严格大于它的 */
+  after: string | null
+  /** 本页最多取多少条候选（调用方保证 ≥ 1） */
+  limit: number
+}
+
+/** 一页候选：`next` ＝ 下一页的游标；`null` ＝ 已经到底 */
+export interface CandidatePage {
+  ids: string[]
+  next: string | null
+}
+
+/**
+ * **计划 → 一页候选的 SQL**（按文档先序的 keyset 分页）。
+ *
+ * 为什么是 keyset 不是 `offset`：候选集是**超集**、判定在 matcher——分页的单位必须是
+ * 「候选流」而不是「结果集」，而流的顺序只有一条稳定判据：`BlockIndex.path`
+ * （同一棵有序树的先序）。`offset` 在库被编辑时会跳行或重行，`path > ?` 不会。
+ *
+ * `opts.derived === false`（派生表不可信）⇒ **一页装完**：没有可信的 path 就没有稳定
+ * 游标，返回同一形状（`next: null`）而不是另造一套语义——宽，但真。
+ */
+export function candidatePageSql(
+  plan: CandidatePlan,
+  page: CandidatePageQuery,
+  opts: { derived?: boolean } = {},
+): { sql: string; params: (string | number | null)[] } {
+  if (opts.derived !== true) {
+    const all = candidatePlanSql(plan, { derived: false })
+    return { sql: all.sql, params: all.params }
+  }
+  const inner = candidatePlanSql(plan, { derived: true })
+  /**
+   * 游标条件按有无**分别写**，不写成 `(? is null or path > ?)`：OR 会让 SQLite 放弃
+   * `idx_BlockIndex_path` 的区间扫描，退化成整表扫 + 排序 —— 那正好抵消分页的意义。
+   */
+  const after = page.after
+  return {
+    sql: `select i.block as id, i.path as path
+      from ${I} i
+     where i.hidden is null
+       ${after === null ? '' : 'and i.path > ?'}
+       and i.block in (${inner.sql})
+     order by i.path
+     limit ?`,
+    // 文本里的顺序：游标（可无）→ 计划参数 → 本页条数
+    params: [...(after === null ? [] : [after]), ...inner.params, page.limit],
+  }
+}

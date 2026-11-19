@@ -41,6 +41,8 @@ export * from './query/query-view.ts'
 export * from './query/query-draft.ts'
 export * from './query/query-fields.ts'
 export * from './query/query-tree.ts'
+/** 候选流分页的装载结果形状（`ui` 与 `app/boot` 的共用契约；`ui` 不许 import `app`） */
+export type { CandidateLoadStep, CandidateWindowRequest } from './storage/library-client.ts'
 export * from './views/view.ts'
 export * from './views/view-owner.ts'
 export * from './views/list-table.ts'
