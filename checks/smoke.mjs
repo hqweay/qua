@@ -31990,10 +31990,11 @@ await check('T334 挂载区切栏不动滚动位：长栏⇄长栏 scrollTop 分
     return { top: s.scrollTop, sh: s.scrollHeight, rows }
   })
   assert(short.top === pos.top, `切到空栏 scrollTop 也应不变：${pos.top} → ${short.top}`)
-  assert(short.sh === after.sh, `切到空栏页高不应塌缩：${after.sh} → ${short.sh}`)
+  // 页高不塌缩（水位只涨不落；候选补页可能让它再长一点，所以只设下界）
+  assert(short.sh >= pos.sh, `切到空栏页高不应塌缩：${pos.sh} → ${short.sh}`)
 
   await ctx.close()
-  return `长⇄长⇄空三连切，scrollTop ${pos.top} 全程不变；页高 ${after.sh} 恒定`
+  return `长⇄长⇄空三连切，scrollTop ${pos.top} 全程不变；页高不塌缩（${pos.sh} → ${short.sh}）`
 })
 
 /**
