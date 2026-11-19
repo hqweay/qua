@@ -34,6 +34,7 @@ import {
   hasChildrenViewBody,
   isEmbedBlock,
   isViewRoot,
+  ownerDataOfBlock,
   type Block,
   type BlockStore,
 } from '../../core/index.ts'
@@ -131,6 +132,11 @@ export class DockWindows {
      * 不设是为了让根行仍按它自己的类型画。
      */
     const viewRootId = activeView(block) !== null && !isEmbedBlock(block) ? block.id : undefined
+    /**
+     * 默认看法的显示白名单跟着这一块的默认大纲走：窗口画的就是它自己的默认看法。
+     * 有激活的非大纲视图时不给——那批 children 归视图体画，默认大纲不是这一屏的看法。
+     */
+    const displayProps = viewRootId ? undefined : ownerDataOfBlock(block).defaultDisplayProps
 
     const win = new EditableBlock({
       host,
@@ -144,6 +150,7 @@ export class DockWindows {
       structuralScope: 'roots',
       allowRootRemove: false,
       ...(viewRootId ? { viewRootId } : {}),
+      ...(displayProps !== undefined ? { displayProps } : {}),
       load: (ed, ids) => {
         if (!ed) return
         // 与己无关的变化不重画（拿得到 ids 时）；拿不到（结构操作）按全量重取
@@ -251,7 +258,17 @@ export class DockWindows {
     )
     this.expandedByCard.set(id, plan.expanded)
     const folded = unfoldForContext(ed.doc.folded, plan.covers, (bid) => this.deps.kb.pathOf(bid))
-    ed.loadPage({ roots: plan.roots, folded, contexts: plan.contexts, expandedRoots: plan.contextRoots })
+    // `loadPage` 整份换 doc ⇒ 视图让位与显示白名单要跟着重给（上一份不会自动留下）
+    const viewRootId = activeView(block) !== null && !isEmbedBlock(block) ? block.id : undefined
+    const displayProps = viewRootId ? undefined : ownerDataOfBlock(block).defaultDisplayProps
+    ed.loadPage({
+      roots: plan.roots,
+      folded,
+      contexts: plan.contexts,
+      expandedRoots: plan.contextRoots,
+      ...(viewRootId ? { viewRootId } : {}),
+      ...(displayProps !== undefined ? { displayProps } : {}),
+    })
     if (plan.focusId) ed.reveal(plan.focusId)
   }
 }

@@ -1023,6 +1023,19 @@ button.queryview-chip:hover {
   cursor: pointer;
   min-width: 0;
 }
+/*
+ * 日格条目的两层：标题 ＋（视图显式 displayProps 时）一行属性。
+ * 两层各自省略——省略是文本行为，块级子项承担；按钮本身不再挂 `ui-ellipsis`
+ * （它现在有两个子项，截在按钮上会把属性行一起吞掉）。
+ */
+.vc-item-title,
+.vc-item-props {
+  display: block;
+}
+.vc-item-props {
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-2xs);
+}
 .vc-more {
   color: var(--ui-text-tertiary);
   font-size: var(--ui-fs-2xs);

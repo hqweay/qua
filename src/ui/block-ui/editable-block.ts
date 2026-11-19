@@ -42,6 +42,13 @@ export interface EditableBlockDeps {
    */
   viewRootId?: string
   /**
+   * **这一份装载的显示白名单**（默认看法的 `_defaultDisplayProps`；见 `Doc.displayProps`）。
+   *
+   * 只有「这一屏画的就是这一块自己的默认看法」时才给：侧槽窗口、页签身体这类
+   * 单块装载。多根装载（日记流、查询命中）没有唯一拥有者，不给。
+   */
+  displayProps?: readonly string[]
+  /**
    * **装载动作**。「什么时候装」归组件，「装什么」归这里。
    * `ed` 是当前编辑器（懒建时可能是 null——空结果不该建实例）；`ids` 是这次动过的块
    * （拿得到时），窗口用它跳过与己无关的重载。
@@ -224,6 +231,7 @@ export class EditableBlock {
         roots: [...(this.deps.initialRoots ?? [])],
         folded: {},
         ...(this.deps.viewRootId ? { viewRootId: this.deps.viewRootId } : {}),
+        ...(this.deps.displayProps !== undefined ? { displayProps: [...this.deps.displayProps] } : {}),
       },
       ...(this.deps.embedBodies === false ? { embedBodies: false } : {}),
       ...(this.deps.structuralScope ? { structuralScope: this.deps.structuralScope } : {}),

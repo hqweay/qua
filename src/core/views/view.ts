@@ -403,7 +403,10 @@ function sortOf(raw: unknown): SortKey | null {
   if (!raw || typeof raw !== 'object') return null
   const k = raw as Partial<SortKey>
   if (!isStr(k.by)) return null
-  return { by: k.by, dir: k.dir === 'desc' ? 'desc' : 'asc' }
+  const out: SortKey = { by: k.by, dir: k.dir === 'desc' ? 'desc' : 'asc' }
+  // 种子只有 `by:'random'` 用；形状校验只认有限数（坏值丢掉，别让整条排序作废）
+  if (typeof k.seed === 'number' && Number.isFinite(k.seed)) out.seed = k.seed
+  return out
 }
 
 /**

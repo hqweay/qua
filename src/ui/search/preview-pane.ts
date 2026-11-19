@@ -15,7 +15,7 @@
  *   · 编辑走**同一份 `run`**：落盘、索引增量、撤销都在；**绝不重跑搜索**——
  *     重跑会重排列表并打断正在输入的那一行。
  */
-import { hasFoldable, isDeleted, type Block, type BlockStore } from '../../core/index.ts'
+import { hasFoldable, isDeleted, ownerDataOfBlock, type Block, type BlockStore } from '../../core/index.ts'
 import type { KbClient } from '../../core/kb/types.ts'
 import { textSpansOf } from '../../core/query/text-spans.ts'
 import type { BlockEditor, Run } from '../../view/editor/editor.ts'
@@ -407,7 +407,15 @@ export class PreviewPane {
      */
     const note = this.deps.noteOf(block.id)
     const rootNotes = note ? new Map([[block.id, note]]) : undefined
-    ed.loadPage({ roots: [block], ...(contexts ? { contexts } : {}), ...(rootNotes ? { rootNotes } : {}), folded })
+    // 预览画的是这一块自己的默认看法：显示白名单跟着它走（`loadPage` 整份换 doc）
+    const displayProps = ownerDataOfBlock(block).defaultDisplayProps
+    ed.loadPage({
+      roots: [block],
+      ...(contexts ? { contexts } : {}),
+      ...(rootNotes ? { rootNotes } : {}),
+      ...(displayProps !== undefined ? { displayProps } : {}),
+      folded,
+    })
     /**
      * **滚到命中处并高亮**（换选中就重新定位）。
      *

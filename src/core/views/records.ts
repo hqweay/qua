@@ -17,7 +17,7 @@ import { plainText } from '../model/runs.ts'
 import { t } from '../infra/msg.ts'
 import type { KbClient } from '../kb/types.ts'
 import { declaredFieldIds, ENGINE_CREATED, ENGINE_MODIFIED, ownFieldIds } from '../props/props.ts'
-import type { QuerySpec, SortKey } from '../query/query.ts'
+import { randomRankOf, type QuerySpec, type SortKey } from '../query/query.ts'
 import {
   CHILDREN_COLUMN,
   CREATED_COLUMN,
@@ -340,6 +340,9 @@ export function sortValueOf(r: ViewRecord, key: string): unknown {
   if (key === TAGS_COLUMN) return r.tags.map((t) => plainText(t.content)).join(' ')
   if (key === PATH_COLUMN) return pathTextOf(r)
   if (key === '_date') return journalDateInChain(r.block, r.path)
+  // 「随机」在显示排序里也是同一个确定性序值（种子 0）：成员排序与视图排序共用一份
+  // 哈希，同一个键在两个面不会给出两个顺序
+  if (key === 'random') return randomRankOf(r.block.id, undefined)
   // 派生列按**数**排（引用次数 9 < 10；按串排会得到 10 < 9），其余按显示文本
   if (key === REF_COUNT_COLUMN) {
     const v = r.derived?.[REF_COUNT_COLUMN]
@@ -417,11 +420,13 @@ export function sortRecords(
 ): ViewRecord[] {
   const keys = sort ?? []
   if (keys.length === 0) return [...records]
+  const valueOf = (r: ViewRecord, k: SortKey): unknown =>
+    k.by === 'random' ? randomRankOf(r.block.id, k.seed) : resolve ? resolve(r, k.by) : sortValueOf(r, k.by)
   const indexed = records.map((r, i) => ({ r, i }))
   indexed.sort((x, y) => {
     for (const k of keys) {
-      const va = resolve ? resolve(x.r, k.by) : sortValueOf(x.r, k.by)
-      const vb = resolve ? resolve(y.r, k.by) : sortValueOf(y.r, k.by)
+      const va = valueOf(x.r, k)
+      const vb = valueOf(y.r, k)
       const ea = isEmpty(va)
       const eb = isEmpty(vb)
       if (ea && eb) continue

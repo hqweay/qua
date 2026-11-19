@@ -33,6 +33,7 @@ import {
   fieldTextOf,
   hasChildrenViewBody,
   isMultiValueKey,
+  randomRankOf,
   MATCHED_COLUMN,
   MODIFIED_COLUMN,
   PATH_COLUMN,
@@ -68,6 +69,7 @@ import {
   withSort,
   withStructureGroup,
   type Block,
+  type SortKey,
   type ViewConfig,
   type ViewRecord,
 } from '../src/core/index.ts'
@@ -437,6 +439,33 @@ test('displayRowPropId：时间列键桥到引擎属性行 id，其余原样（�
     '行面上没有物件的键（标签/路径）不进块下行',
   )
   assert.equal(displayRowPropIds(undefined), undefined, '白名单缺省 ⇒ 不覆写')
+})
+
+test('sortRecords：random 用共用哈希（同种子同一序，刷新不洗牌）', () => {
+  const { root, defs } = pageWith5()
+  const { kb } = kbOf([root, ...defs])
+  const rows = childrenRecords('root', kb)
+  const ids = (sort: readonly SortKey[]): string[] => sortRecords(rows, sort).map((r) => r.block.id)
+  const once = ids([{ by: 'random', dir: 'asc' }])
+  assert.deepEqual(ids([{ by: 'random', dir: 'asc' }]), once, '同一份配置 ⇒ 同一序（刷新/重开不换一批）')
+  const expected = [...rows]
+    .sort((a, b) => randomRankOf(a.block.id, undefined) - randomRankOf(b.block.id, undefined))
+    .map((r) => r.block.id)
+  assert.deepEqual(once, expected, '与成员排序共用同一份哈希（不是第二套洗牌）')
+  assert.equal(sortValueOf(rows[0]!, 'random'), randomRankOf(rows[0]!.block.id, undefined), '列面取值也是同一个序值')
+  const seeded = ids([{ by: 'random', dir: 'asc', seed: 42 }])
+  const seededExpected = [...rows]
+    .sort((a, b) => randomRankOf(a.block.id, 42) - randomRankOf(b.block.id, 42))
+    .map((r) => r.block.id)
+  assert.deepEqual(seeded, seededExpected, '种子是键的一部分')
+})
+
+test('canonicalViews：排序键的 seed 原样落盘（random 的确定性序可表达）', () => {
+  const [v] = canonicalViews(
+    [{ id: 'v', kind: 'cards', sort: [{ by: 'random', dir: 'asc', seed: 42 }] }],
+    { kind: 'children', blockId: 'n' },
+  )
+  assert.deepEqual(v!.sort, [{ by: 'random', dir: 'asc', seed: 42 }])
 })
 
 test('sortRecords：相等元素保持来源顺序（稳定），且不产新数组元素', () => {

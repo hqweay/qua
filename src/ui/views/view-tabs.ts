@@ -13,6 +13,7 @@
 import {
   blockLabel,
   openActionOf,
+  ownerDataOfBlock,
   type Block,
   type FindBlock,
   type BlockStore,
@@ -212,7 +213,9 @@ export class ViewTabs {
     if (component) {
       const ed = component.ed
       if (ed) {
-        ed.loadPage({ roots: [block], folded: ed.doc.folded })
+        // 页签身体画的是这一块自己的默认看法：显示白名单跟着走（`loadPage` 整份换 doc）
+        const displayProps = ownerDataOfBlock(block).defaultDisplayProps
+        ed.loadPage({ roots: [block], folded: ed.doc.folded, ...(displayProps !== undefined ? { displayProps } : {}) })
         return
       }
     }
@@ -242,6 +245,9 @@ export class ViewTabs {
       body.replaceChildren(this.component.root)
     }
     const ed = this.component.ed
-    if (ed) ed.loadPage({ roots: [block], folded: {} })
+    if (ed) {
+      const displayProps = ownerDataOfBlock(block).defaultDisplayProps
+      ed.loadPage({ roots: [block], folded: {}, ...(displayProps !== undefined ? { displayProps } : {}) })
+    }
   }
 }

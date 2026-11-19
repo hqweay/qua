@@ -680,7 +680,7 @@ function sortValueOf(
   if (by === 'created') return b.created
   if (by === 'modified') return b.modified
   if (by === 'refCount') return refCounts?.get(b.id) ?? 0
-  if (by === 'random') return randomOf(b.id, seed)
+  if (by === 'random') return randomRankOf(b.id, seed)
   // 「不在任何一天下」＝缺槽（`undefined` ⇒ 排最后）；空串是值，会让 desc 把它排到最前
   if (by === '_date') {
     const d = journalDateInChain(b, hit.ancestors)
@@ -689,8 +689,14 @@ function sortValueOf(
   return b.props?.[by]
 }
 
-/** (块 id, 种子) → 确定性伪随机：fnv-1a 的 32 位折叠，不引第二份哈希实现 */
-function randomOf(id: string, seed: number | undefined): number {
+/**
+ * (块 id, 种子) → 确定性伪随机序值（fnv-1a 的 32 位折叠）。
+ *
+ * 成员排序与视图显示排序**共用这一份**：两处各写一遍哈希，同一个「随机」在两个面
+ * 就会给出两个顺序，而人只会以为其中一个是坏的。同一份种子 ⇒ 同一序——视图刷新、
+ * 重开都不应把用户刚认过位置的那批卡重新洗一遍。
+ */
+export function randomRankOf(id: string, seed: number | undefined): number {
   let h = 2166136261 ^ (seed ?? 0)
   for (let i = 0; i < id.length; i++) {
     h ^= id.charCodeAt(i)

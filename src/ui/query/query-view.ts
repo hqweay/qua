@@ -1799,6 +1799,7 @@ export class ViewHost {
           projectTitle: (r, into) => this.deps.project(r.block, into),
           openBlock: (id, place) => this.deps.openBlock(id, place),
           today: () => this.deps.today?.() ?? todayISO(),
+          refLabel: (id) => this.deps.refLabel(id),
         })
         this.els.table.replaceChildren(this.calendar.root)
       }

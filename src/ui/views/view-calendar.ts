@@ -9,8 +9,24 @@
  *     它们在网格下方一列（`showUndated`），而「有日期但不在这个月」的条目完全不画
  *     —— 那是「翻到那个月」的事，不是「这一格装不下」。
  */
-import { blockLabel, isJournalDate, openActionOf, sortRecords, todayISO, type BlockStore, type OpenAction, type ViewConfig, type ViewRecord } from '../../core/index.ts'
+import {
+  belowFieldsFor,
+  blockLabel,
+  constrainBelowFields,
+  displayRowPropIds,
+  isJournalDate,
+  openActionOf,
+  sortRecords,
+  todayISO,
+  type BelowFields,
+  type Block,
+  type BlockStore,
+  type OpenAction,
+  type ViewConfig,
+  type ViewRecord,
+} from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
+import { fieldRowText } from '../block-ui/props-line.ts'
 import { viewNote } from './view-note.ts'
 
 export interface ViewCalendarDeps {
@@ -21,6 +37,8 @@ export interface ViewCalendarDeps {
   openBlock: (blockId: string, place?: OpenAction) => void
   /** 今天（本地日 `YYYY-MM-DD`）；由装配层给，测试与截图才钉得住 */
   today: () => string
+  /** `ref` 值的显示名（显式 displayProps 时，日格里的属性值要翻名字） */
+  refLabel: (targetId: string) => string
 }
 
 const WEEK = 7
@@ -51,6 +69,7 @@ export class ViewCalendar {
     const today = this.deps.today()
     if (this.month === '') this.month = today.slice(0, 7)
     const records = sortRecords(this.deps.records(), view?.sort)
+    const below = this.propsOf(view, records)
 
     /** 按日期分格；没有日期的单独一列（不静默消失） */
     const byDay = new Map<string, ViewRecord[]>()
@@ -108,13 +127,7 @@ export class ViewCalendar {
 
         const dayRows = byDay.get(cell) ?? []
         dayRows.slice(0, 3).forEach((r) => {
-          const chip = document.createElement('button')
-          chip.type = 'button'
-          chip.className = 'vc-item ui-ellipsis'
-          chip.dataset.blockId = r.block.id
-          chip.textContent = blockLabel(r.block, (id) => this.deps.store.find(id))
-          chip.addEventListener('click', (e) => this.deps.openBlock(r.block.id, openActionOf(e)))
-          box.appendChild(chip)
+          box.appendChild(this.itemChip(r, below))
         })
         if (dayRows.length > 3) {
           const more = document.createElement('span')
@@ -134,17 +147,60 @@ export class ViewCalendar {
       label.className = 'vc-undated-title'
       label.textContent = t('ui.calendar.undated')
       box.appendChild(label)
-      for (const r of undated) {
-        const chip = document.createElement('button')
-        chip.type = 'button'
-        chip.className = 'vc-item ui-ellipsis'
-        chip.dataset.blockId = r.block.id
-        chip.textContent = blockLabel(r.block, (id) => this.deps.store.find(id))
-        chip.addEventListener('click', (e) => this.deps.openBlock(r.block.id, openActionOf(e)))
-        box.appendChild(chip)
-      }
+      for (const r of undated) box.appendChild(this.itemChip(r, below))
       this.root.appendChild(box)
     }
+  }
+
+  /**
+   * 日格里的**属性行**：只有显式 `displayProps` 才加——缺省是只标题（日格是紧凑面）。
+   *
+   * 与卡片同一份口径：白名单在场＝唯一权威（行集与待填计数一起收窄）；
+   * 日历没有块标与 gutter ⇒ 归 `block-left` 的属性并进这一行（否则勾了看不见）。
+   */
+  private propsOf(view: ViewConfig | null, records: readonly ViewRecord[]): ReadonlyMap<string, BelowFields> {
+    const allowed = displayRowPropIds(view?.displayProps)
+    if (allowed === undefined) return new Map()
+    const parentOf = (id: string): Block | null => {
+      const pid = this.deps.store.index.parentOf.get(id) ?? null
+      return pid ? (this.deps.store.find(pid) ?? null) : null
+    }
+    const below = belowFieldsFor(
+      records.map((r) => r.block),
+      this.deps.store.blocks,
+      parentOf,
+      this.deps.store.index.blocks,
+      { wanted: allowed, includeGutter: true },
+    )
+    return constrainBelowFields(below, allowed)
+  }
+
+  /**
+   * 一条记录在日格里的样子：标题 ＋（显式白名单时）一行属性。
+   *
+   * 属性行是**一行省略文本**而不是块下属性行的控件：日格只有一格宽，
+   * 点它仍然是打开这一块（读值，不在日历里改值）。
+   */
+  private itemChip(r: ViewRecord, below: ReadonlyMap<string, BelowFields>): HTMLButtonElement {
+    const chip = document.createElement('button')
+    chip.type = 'button'
+    chip.className = 'vc-item'
+    chip.dataset.blockId = r.block.id
+    const title = blockLabel(r.block, (id) => this.deps.store.find(id))
+    const titleEl = document.createElement('span')
+    titleEl.className = 'vc-item-title ui-ellipsis'
+    titleEl.textContent = title
+    chip.appendChild(titleEl)
+    const rows = below.get(r.block.id)?.rows ?? []
+    if (rows.length > 0) {
+      const props = document.createElement('span')
+      props.className = 'vc-item-props ui-ellipsis'
+      props.textContent = rows.map((row) => `${row.label} ${fieldRowText(row, this.deps.refLabel)}`).join(' · ')
+      chip.appendChild(props)
+      chip.dataset.tip = `${title}\n${props.textContent}`
+    }
+    chip.addEventListener('click', (e) => this.deps.openBlock(r.block.id, openActionOf(e)))
+    return chip
   }
 }
 
