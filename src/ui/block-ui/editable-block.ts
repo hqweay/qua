@@ -157,9 +157,14 @@ export class EditableBlock {
      * **唯一的重载入口**：所有外部变化都从这一条路走。自己的编辑不算外部——
      * 那一行编辑器自己已经画过，但「这一栏装谁」可能因此过期（成员判定读内容），
      * 所以仍记一笔欠的，等离开这里再补，不在打字途中重排。
+     *
+     * ⚠️ **结构变化不交 ids**（交 `undefined`，走消费方「拿不到 ids 按全量重取」那条路）：
+     *    ids 过滤读的是**移动之后**的 doc——被移走的块已经不在本视图的子树里，
+     *    过滤就把它判成「与己无关」，槽里那台就停在旧层级（真踩过：正文反缩进
+     *    一个窗口卡里的子块，窗口还画着它）。正文键入照旧按 id 便宜重画。
      */
-    this.offStore = deps.store.subscribe((source, ids) => {
-      this.reloader.touch(isOwnEdit(source, this.editor) ? undefined : ids)
+    this.offStore = deps.store.subscribe((source, ids, structural) => {
+      this.reloader.touch(isOwnEdit(source, this.editor) || structural === true ? undefined : ids)
     })
 
     /**

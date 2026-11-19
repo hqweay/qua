@@ -32002,6 +32002,105 @@ await check('T335 跨表面拖拽跟变：聚焦行拖进右槽窗口当子块�
   return `B 入 A（depth ${got.depth}、rev ${got.rev}/${got.storeRev}）：窗口与正文两处都跟上`
 })
 
+/**
+ * **反缩进把子块搬出窗口的子树，槽里那台也要当场丢掉这一行**（T335 的反方向）。
+ *
+ * 被移走的块已经不在窗口 doc 的子树里 ⇒ 按 ids 过滤「动过的块在不在我这里」会把它
+ * 判成「与己无关」——正文反缩进之后，槽里的窗口还把子块画在旧层级（真踩过）。
+ * 结构变化不交 ids、按全量重取之后，这一条必须绿。
+ */
+await check('T336 跨表面拖拽跟变·反方向：正文反缩进窗口块的子块，槽里当场丢掉那一行', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+  await page.evaluate(() => window.__qua.quiet(true))
+
+  const ids = await page.evaluate(() => {
+    const at = Date.now()
+    const mk = (ch, v) => ({ id: ch.repeat(32), content: [{ t: 'text', v }], children: [], created: at, modified: at })
+    const a = mk('c', 'T336甲')
+    const x = mk('d', 'T336乙')
+    a.children.push(x)
+    const hostId = window.__qua.pages()[0]?.id
+    let ok = false
+    window.__qua.forceForest((forest) => {
+      const walk = (list) => {
+        for (const b of list) {
+          if (b.id === hostId) return b
+          const hit = walk(b.children ?? [])
+          if (hit) return hit
+        }
+        return null
+      }
+      const host = walk(forest)
+      if (host) {
+        host.children.push(a)
+        ok = true
+      }
+    })
+    return ok ? { a: a.id, x: x.id } : null
+  })
+  assert(ids, '前置：第一页要找得到宿主块')
+  await page.waitForTimeout(400)
+  assert(
+    (await page.locator(`#editor .blk[data-block-id="${ids.x}"]`).count()) === 1,
+    '前置：正文里要画得出子块行',
+  )
+
+  // 钉 A 进右槽（合成 DnD：块标 → 槽根），窗口里应画着 A 与它的子块 X
+  const pin = await page.evaluate((id) => {
+    const src = document.querySelector(`#editor [data-drag-for="${id}"]`)
+    const dst = document.querySelector('#dock-right')
+    if (!src || !dst) return { missing: { src: !src, dst: !dst } }
+    const box = dst.getBoundingClientRect()
+    const dt = new DataTransfer()
+    const ev = (type) =>
+      new DragEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: dt,
+        clientX: box.left + box.width / 2,
+        clientY: Math.min(box.top + box.height / 2, box.top + 120),
+      })
+    src.dispatchEvent(ev('dragstart'))
+    dst.dispatchEvent(ev('dragover'))
+    dst.dispatchEvent(ev('drop'))
+    src.dispatchEvent(ev('dragend'))
+    return { ok: true }
+  }, ids.a)
+  assert(pin?.ok === true, `钉 A 进右槽：${JSON.stringify(pin)}`)
+  await page.waitForTimeout(350)
+  const winCard = page.locator(`#dock-right .dock-card[data-window="1"]`)
+  assert((await winCard.locator(`.blk[data-block-id="${ids.a}"]`).count()) === 1, '前置：窗口卡里应画着 A')
+  assert((await winCard.locator(`.blk[data-block-id="${ids.x}"]`).count()) === 1, '前置：窗口里应画着子块 X')
+
+  // 焦点进正文 X 的行（在正文里反缩进），Shift+Tab 把 X 搬到 A 的同级
+  await page.locator(`#editor .blk[data-block-id="${ids.x}"] .tx`).first().click()
+  await page.waitForTimeout(150)
+  await page.keyboard.press('Shift+Tab')
+  await page.waitForTimeout(500)
+
+  const got = await page.evaluate((ids) => {
+    const ed = window.__qua.__editor
+    const a = ed.store.find(ids.a)
+    const row = document.querySelector(`#editor .blk[data-block-id="${ids.x}"]`)
+    return {
+      childOfA: (a?.children ?? []).some((c) => c.id === ids.x),
+      depth: row?.dataset.depth ?? '',
+      inWindow: Boolean(
+        document.querySelector(`#dock-right .dock-card[data-window="1"] .blk[data-block-id="${ids.x}"]`),
+      ),
+      cardAlive: Boolean(document.querySelector(`#dock-right .dock-card[data-window="1"] .blk[data-block-id="${ids.a}"]`)),
+    }
+  }, ids)
+  assert(got.childOfA === false, `模型里 X 应已离开 A 的子树：${JSON.stringify(got)}`)
+  assert(got.depth === '1', `正文里 X 应反缩进到根层：${JSON.stringify(got)}`)
+  assert(got.inWindow === false, `槽里的窗口应丢掉 X 的行（不许停在旧层级）：${JSON.stringify(got)}`)
+  assert(got.cardAlive === true, `窗口卡本身要还在：${JSON.stringify(got)}`)
+
+  await ctx.close()
+  return `X 出 A：正文 depth ${got.depth}，窗口行已消失、卡还在`
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

@@ -166,6 +166,31 @@ try {
   log('—— 点过正文之后 ——')
   log(JSON.stringify(await readState('after-click'), null, 1))
 
+  // ---- ④ 反缩进（用户报的第二段）：焦点回到正文 B 的行，Shift+Tab 把它从窗口块下搬出来
+  const bTx2 = page.locator(`#editor .blk[data-block-id="${seed.B}"] .tx`).first()
+  const bTxBox2 = await bTx2.boundingBox()
+  if (!bTxBox2) throw new Error('正文里找不到 B 的行（反缩进前置）')
+  await page.mouse.click(bTxBox2.x + Math.min(bTxBox2.width - 4, 60), bTxBox2.y + bTxBox2.height / 2)
+  await sleep(150)
+  await page.keyboard.press('Shift+Tab')
+  await sleep(600)
+  const outdent = await page.evaluate((ids) => {
+    const ed = window.__qua.__editor
+    const a = ed.store.find(ids.A)
+    const row = document.querySelector(`#editor .blk[data-block-id="${ids.B}"]`)
+    return {
+      model: {
+        childOfA: (a?.children ?? []).some((c) => c.id === ids.B),
+        depth: row?.dataset.depth ?? '-',
+      },
+      windowStillShows: Boolean(
+        document.querySelector(`#dock-right .dock-card[data-window="1"] .blk[data-block-id="${ids.B}"]`),
+      ),
+    }
+  }, seed)
+  log('—— 反缩进之后 ——')
+  log(JSON.stringify(outdent))
+
   log('事件账：', JSON.stringify(await page.evaluate(() => window.__probe.events)))
   log('通知账：', JSON.stringify(await page.evaluate(() => window.__probe.notes)))
 } finally {
