@@ -824,7 +824,7 @@ await check('E9 虚拟化下选区投影与组合期两段式的 Electron 现状
    *    「组合期被卸载」，而是「普通滚动加载」（真踩过：断言看着在跑，其实没在测它声称的东西）。
    *    判据用 `isContentEditable`（计算后），不是 `contenteditable` 属性（子块不带那个属性）。
    */
-  const targetId = await page.evaluate(() => {
+  let targetId = await page.evaluate(() => {
     for (const b of window.__qua.blocks()) {
       if (!b.text || b.text.length < 3) continue
       const tx = document.querySelector(`.blk[data-block-id="${b.id}"] .tx`)
@@ -832,6 +832,26 @@ await check('E9 虚拟化下选区投影与组合期两段式的 Electron 现状
     }
     return null
   })
+  /**
+   * 窗口跟着滚动走之后（半径式虚拟化的正确行为），回到顶部挂载的是**顶部的行**——
+   * 造块序列把顶部全造成空行了，带字的行在底部没挂载。找不着就在挂载的可写行里
+   * 现打一段：这一步本身就是「用户真能打字」的验证，目标行有了文本节点，组合期才挂得上。
+   */
+  if (targetId === null) {
+    const seedId = await page.evaluate(() => {
+      for (const b of window.__qua.blocks()) {
+        const tx = document.querySelector(`.blk[data-block-id="${b.id}"] .tx`)
+        if (tx?.isContentEditable && tx.dataset.readonly !== '1') return b.id
+      }
+      return null
+    })
+    assert(seedId, '找不到可写的一行来种正文（虚拟化窗口里全是只读行）')
+    await page.evaluate((id) => window.__qua.focusBlock(id, 0), seedId)
+    await new Promise((r) => setTimeout(r, 150))
+    await page.keyboard.type('可写正文行，用来测组合期')
+    await new Promise((r) => setTimeout(r, 300))
+    targetId = seedId
+  }
   assert(targetId, '找不到可写的一行来测组合期卸载')
   /**
    * 落光标：**先真点一下把焦点给到窗口**，再用 `focusBlock` 精确落到目标块。
