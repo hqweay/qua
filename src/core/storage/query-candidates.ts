@@ -45,7 +45,7 @@ export interface CandidateBuild {
 /** 收集条件树里点名的块（标签 id、属性定义 id）与形状标记 */
 function collect(
   node: QueryNode,
-  out: { tags: Set<string>; fields: Set<string>; children: boolean; tagDesc: boolean },
+  out: { tags: Set<string>; fields: Set<string>; children: boolean; tagDesc: boolean; tagAllDesc: boolean },
 ): void {
   if ('all' in node) {
     for (const n of node.all) collect(n, out)
@@ -62,8 +62,10 @@ function collect(
   if ('tag' in node) {
     const id = typeof node.tag === 'string' ? node.tag : node.tag.id
     if (id !== '') out.tags.add(id)
-    // 只要**有**一个分支要子标签，候选就得展开（并集是超集）；全是直接成员时才能不展开
+    // 只要**有**一个分支要子标签，候选就得展开（并集是超集）；全是直接成员时才能不展开。
+    // `tagAllDesc` 单独记「每个分支都要子标签」——只有它才让展开支成为精确集。
     if (typeof node.tag !== 'string' && node.tag.desc === true) out.tagDesc = true
+    else out.tagAllDesc = false
     return
   }
   if ('prop' in node) {
@@ -93,7 +95,7 @@ function propPlan(id: string): CandidatePlan {
 function planOf(
   node: QueryNode,
   env: { selfId?: string; today?: string },
-  seen: { tags: Set<string>; fields: Set<string>; children: boolean; tagDesc: boolean },
+  seen: { tags: Set<string>; fields: Set<string>; children: boolean; tagDesc: boolean; tagAllDesc: boolean },
 ): CandidatePlan {
   if ('all' in node) {
     if (node.all.length === 0) return { k: 'visible' } // 恒真
@@ -137,7 +139,7 @@ function planOf(
   if ('tag' in node) {
     // matcher 的 `{tag}` 读**整份 where 的标签并集**（文档化的已知语义）；
     // 候选也按并集给，否则交集条件会悄悄丢行。ids 由调用方用 seen.tags 填。
-    return { k: 'tags', ids: [...seen.tags], expand: seen.tagDesc }
+    return { k: 'tags', ids: [...seen.tags], expand: seen.tagDesc, allDesc: seen.tagAllDesc }
   }
   if ('text' in node) {
     if (typeof node.text === 'string') {
@@ -166,7 +168,7 @@ export function candidateBuildOf(
   forest: readonly Block[],
   ctx: QueryContext,
 ): CandidateBuild {
-  const seen = { tags: new Set<string>(), fields: new Set<string>(), children: false, tagDesc: false }
+  const seen = { tags: new Set<string>(), fields: new Set<string>(), children: false, tagDesc: false, tagAllDesc: true }
   const empty: CandidateBuild = { plan: NONE, loadIds: [], children: false }
   let where = spec.where
   if (usesSelf(where)) {

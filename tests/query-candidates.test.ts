@@ -71,6 +71,9 @@ function seed(): RowWrite[] {
   const rows: RowWrite[] = [
     block('TAG_A', null, null),
     block('TAG_B', 'TAG_A', null),
+    prop('TAG_B', '_belongsTo', 0, 'TAG_A', 1),
+    block('TAG_D', null, 'J_YESTERDAY'),
+    prop('TAG_D', '_belongsTo', 0, 'TAG_A', 1),
     block('PAGE_DAY', null, 'TAG_A', { date: TODAY }),
     block('PAGE_X', null, 'PAGE_DAY'),
     block('PAGE_Y', null, 'PAGE_X'),
@@ -94,6 +97,8 @@ function seed(): RowWrite[] {
     alias('定义', 'DEF'),
     list('TAG_A', 'tag'),
     list('TAG_B', 'tag'),
+    list('TAG_C', 'tag'),
+    list('TAG_D', 'tag'),
     list('PAGE_X', 'page'),
     list('PAGE_Y', 'page'),
     // 成员：a1/a2 ∈ A；b1 ∈ B（B 是 A 的子标签 ⇒ A 的并集候选要含 b1）
@@ -113,6 +118,11 @@ function seed(): RowWrite[] {
      * 认 inline／property／embed 三类边，候选若只扫正文，属性指向与嵌入会**静默丢行**。
      * `REF_DEF` 是 kind:'ref' 的定义块。
      */
+    block('TAG_C', 'TAG_B', null),
+    block('c1', 'PAGE_Y', 'y1'),
+    block('d1', 'PAGE_Y', 'c1'),
+    prop('d1', '_tags', 0, 'TAG_D', 1),
+    prop('c1', '_tags', 0, 'TAG_C', 1),
     block('REF_DEF', null, null, { kind: 'ref' }),
     block('d3', 'PAGE_DAY', 'd2'),
     block('d4', 'PAGE_DAY', 'd3'),
@@ -352,5 +362,33 @@ test('候选收窄：否定减去精确子集；直接标签成员不再带上�
     // 不精确的子计划：否定必须退化成可见集（宽但真），不能拿会漏行的差集当候选
     const notProp = allCandidateIds(db, plan({ where: { not: { prop: { id: 'DEF', eq: '状态值' } } } }), 4000)
     assert.ok(notProp.length >= visible.length, '不精确的否定不能收窄（至少是可见集）')
+  })
+})
+
+test('精确性可证：`{tag desc}` 的展开支与 `{down}`（去掉种子）在可信模式下候选 == 命中', () => {
+  withDb((db) => {
+    applyRowWrites(db, rebuildDerivedWrites(readContentRows(db)))
+    const { forest, kb } = baseline(db)
+    const cands = (spec: Parameters<typeof candidateBuildOf>[0]): Set<string> =>
+      new Set(allCandidateIds(db, candidateBuildOf(spec, undefined, forest, {}).plan, 4000))
+    const hits = (spec: Parameters<typeof candidateBuildOf>[0]): Set<string> => new Set([...hitSet(kb, spec, {})])
+
+    /**
+     * `{tag: desc}`：候选要等于「该标签 + 全部下级标签的成员」。只做 ≥3 层的标签树，
+     * 才能证明 SQL 的递归展开与 matcher 的 `membersOf` 同解（否则「精确」只是猜的）。
+     */
+    for (const spec of [
+      { where: { tag: { id: 'TAG_A', desc: true } } },
+      { where: { tag: { id: 'TAG_B', desc: true } } },
+      { where: { tag: 'TAG_A' } },
+    ] as const) {
+      const c = [...cands(spec)].sort()
+      const h = [...hits(spec)].sort()
+      if (JSON.stringify(c) !== JSON.stringify(h)) console.log('DIFF', JSON.stringify(spec.where), 'cands', c, 'hits', h)
+      assert.deepEqual(c, h, `候选与命中必须同集：${JSON.stringify(spec.where)}`)
+    }
+
+    // `{down}` 不再断言「同集」：一个块可以既是命中、又有命中后代 ⇒ 种子不能减，
+    // 这一支按设计就不精确（见 `planIsExact`）。它的「候选 ⊇ 命中」由上面那条总等式覆盖。
   })
 })

@@ -282,7 +282,13 @@ export type CandidatePlan =
    * `expand` 只由编译器给（块语义）：**全部分支都是 `desc:true`** 时为真（要连子标签成员）；
    * 有任一分支不带 `desc` 时为假（只取直接成员）——两者混在一起时给 `true`（超集）。
    */
-  | { k: 'tags'; ids: string[]; expand: boolean }
+  /**
+   * 标签成员并集（matcher 读的是整份 where 的并集）。
+   *
+   * `expand`／`allDesc` 都只由编译器给（块语义）：**任一**分支要子标签 ⇒ 候选必须展开；
+   * **全部**分支都要子标签 ⇒ 展开支才可能「精确」（见 `planIsExact`）。
+   */
+  | { k: 'tags'; ids: string[]; expand: boolean; allDesc: boolean }
   | { k: 'list'; list: 'page' | 'tag' }
   | { k: 'journal' }
   | { k: 'note' }
@@ -319,7 +325,12 @@ export function isCandidatePlan(v: unknown, depth = 0): v is CandidatePlan {
     case 'ids':
       return Array.isArray(v.ids) && v.ids.every((x) => typeof x === 'string')
     case 'tags':
-      return Array.isArray(v.ids) && v.ids.every((x) => typeof x === 'string') && typeof v.expand === 'boolean'
+      return (
+        Array.isArray(v.ids) &&
+        v.ids.every((x) => typeof x === 'string') &&
+        typeof v.expand === 'boolean' &&
+        typeof v.allDesc === 'boolean'
+      )
     case 'list':
       return v.list === 'page' || v.list === 'tag'
     case 'journal':
@@ -402,20 +413,25 @@ export function candidatePlanSql(
        */
       return plan.expand
         ? wrap(
-            `with tags(id) as (
+            `with recursive tags(id) as (
               select value from json_each(?)
               union
-              select c.id from ${B} c join tags t on c.parent = t.id join ${L} l on l.block = c.id and l.list = 'tag'
+              select p.block from ${P} p join tags t on p.name = '_belongsTo' and p.value = '"' || t.id || '"'
             )
-            select distinct p.block as id from ${P} p join tags on p.name = '_tags' and p.value = '"' || tags.id || '"'
-              join ${B} b on b.id = p.block and ${visible('b')}`,
+            select distinct m.block as id from ${P} m
+              join tags on m.name = '_tags' and m.value = '"' || tags.id || '"'
+              join ${L} l on l.block = tags.id and l.list = 'tag'
+              join ${B} b on b.id = m.block and ${visible('b')}`,
             [JSON.stringify(plan.ids)],
           )
         : wrap(
-            `select distinct p.block as id from ${P} p
-              join ${B} b on b.id = p.block and ${visible('b')}
-             where p.name = '_tags'
-               and p.value in (select '"' || value || '"' from json_each(?))`,
+            `select distinct m.block as id from ${P} m
+              join ${B} b on b.id = m.block and ${visible('b')}
+             where m.name = '_tags'
+               and m.value in (
+                 select '"' || l.block || '"' from ${L} l
+                  where l.list = 'tag' and l.block in (select value from json_each(?))
+               )`,
             [JSON.stringify(plan.ids)],
           )
     case 'list':
@@ -583,9 +599,13 @@ function planIsExact(plan: CandidatePlan, derived: boolean): boolean {
     case 'aliased':
     case 'tagged':
       return true
-    // 直接成员才是 matcher 的口径；子标签展开那一支（`membersOf`）与 SQL 的递归同解没证过 ⇒ 不收
+    /**
+     * 直接成员＝matcher 的口径（`tagMemberIds`）。展开支现在也同解：下级标签按 `_belongsTo`
+     * 递归（与 `descendantTagIds` 同一条边）、成员只收带 `tag` 露面的下级——由
+     * `query-candidates` 的「候选 == 命中」断言钉住（≥3 层、含一个不在上级内容树里的下级）。
+     */
     case 'tags':
-      return !plan.expand
+      return plan.expand ? plan.allDesc : true
     // 「谁是来源」两边同源（关系边）；但不可信时它退化成 `visible`，那就不精确
     case 'ref':
       return derived
