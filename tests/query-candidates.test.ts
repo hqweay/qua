@@ -258,6 +258,12 @@ const CASES: { name: string; spec: QuerySpec; opts?: { selfId?: string; today?: 
   { name: 'text 有正文', spec: { where: { text: { nonempty: true } } } },
   { name: 'children', spec: { where: { children: true } } },
   { name: 'not', spec: { where: { not: { role: 'journal' } } } },
+  { name: 'not 精确子集：tag', spec: { where: { not: { tag: 'TAG_A' } } } },
+  { name: 'not 精确子集：is', spec: { where: { not: { is: 'PAGE_X' } } } },
+  { name: 'not 精确子集：role page', spec: { where: { not: { role: 'page' } } } },
+  { name: 'not 不精确子集：prop 值（该退化成可见集）', spec: { where: { not: { prop: { id: 'DEF', eq: '状态值' } } } } },
+  { name: 'all: tag ∩ not(is)', spec: { where: { all: [{ tag: 'TAG_A' }, { not: { is: 'a1' } }] } } },
+  { name: 'not 包 up', spec: { where: { not: { up: { is: 'PAGE_DAY' } } } } },
   { name: 'all: tag ∩ prop', spec: { where: { all: [{ tag: 'TAG_A' }, { prop: { id: 'DEF', exists: true } }] } } },
   { name: 'any: journal ∨ page', spec: { where: { any: [{ role: 'journal' }, { role: 'page' }] } } },
   {
@@ -321,5 +327,30 @@ test('候选分页：页大小 1／2／3／400 取到的序列与一次取全相
         assert.deepEqual(allCandidateIds(db, build.plan, size), full, `「${c.name}」页大小 ${size} 的候选序列必须与一次取全相同`)
       }
     }
+  })
+})
+
+test('候选收窄：否定减去精确子集；直接标签成员不再带上子标签成员', () => {
+  withDb((db) => {
+    applyRowWrites(db, rebuildDerivedWrites(readContentRows(db)))
+    const { forest } = baseline(db)
+    const plan = (spec: Parameters<typeof candidateBuildOf>[0]) => candidateBuildOf(spec, undefined, forest, {}).plan
+
+    const visible = allCandidateIds(db, plan({ where: { not: { is: 'NOPE' } } }), 4000)
+    // `not {tag}` 的候选 = 可见块 − 该标签的直接成员（a1／a2 在场、其余照旧）
+    const notTag = allCandidateIds(db, plan({ where: { not: { tag: 'TAG_A' } } }), 4000)
+    assert.ok(notTag.length < visible.length, '否定必须真的减掉东西')
+    for (const id of ['a1', 'a2']) assert.ok(!notTag.includes(id), `${id} 是 TAG_A 的直接成员，必须被减掉`)
+    assert.ok(notTag.includes('b1'), 'b1 只是子标签成员，不该被减掉（否定保留它）')
+
+    // 直接成员：不再带子标签成员（旧计划无条件展开 ⇒ 会多给 b1）
+    const direct = allCandidateIds(db, plan({ where: { tag: 'TAG_A' } }), 4000)
+    assert.ok(!direct.includes('b1'), '不带 desc 的标签条件只认直接成员')
+    const desc = allCandidateIds(db, plan({ where: { tag: { id: 'TAG_A', desc: true } } }), 4000)
+    assert.ok(desc.includes('b1'), 'desc:true 才连子标签成员')
+
+    // 不精确的子计划：否定必须退化成可见集（宽但真），不能拿会漏行的差集当候选
+    const notProp = allCandidateIds(db, plan({ where: { not: { prop: { id: 'DEF', eq: '状态值' } } } }), 4000)
+    assert.ok(notProp.length >= visible.length, '不精确的否定不能收窄（至少是可见集）')
   })
 })

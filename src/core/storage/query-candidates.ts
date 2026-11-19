@@ -45,7 +45,7 @@ export interface CandidateBuild {
 /** 收集条件树里点名的块（标签 id、属性定义 id）与形状标记 */
 function collect(
   node: QueryNode,
-  out: { tags: Set<string>; fields: Set<string>; children: boolean },
+  out: { tags: Set<string>; fields: Set<string>; children: boolean; tagDesc: boolean },
 ): void {
   if ('all' in node) {
     for (const n of node.all) collect(n, out)
@@ -62,6 +62,8 @@ function collect(
   if ('tag' in node) {
     const id = typeof node.tag === 'string' ? node.tag : node.tag.id
     if (id !== '') out.tags.add(id)
+    // 只要**有**一个分支要子标签，候选就得展开（并集是超集）；全是直接成员时才能不展开
+    if (typeof node.tag !== 'string' && node.tag.desc === true) out.tagDesc = true
     return
   }
   if ('prop' in node) {
@@ -91,7 +93,7 @@ function propPlan(id: string): CandidatePlan {
 function planOf(
   node: QueryNode,
   env: { selfId?: string; today?: string },
-  seen: { tags: Set<string>; fields: Set<string>; children: boolean },
+  seen: { tags: Set<string>; fields: Set<string>; children: boolean; tagDesc: boolean },
 ): CandidatePlan {
   if ('all' in node) {
     if (node.all.length === 0) return { k: 'visible' } // 恒真
@@ -104,7 +106,13 @@ function planOf(
     const plans = node.any.map((n) => planOf(n, env, seen))
     return plans.every((p) => p.k === 'none') ? NONE : { k: 'any', plans }
   }
-  if ('not' in node) return { k: 'visible' } // 否定的补集不是候选
+  if ('not' in node) {
+    /**
+     * 否定：候选＝可见块减去子计划的**精确**集合（`notIn`）。
+     * 子计划不精确时 SQL 那边会自己退化成 `visible`——这里的计划形状不必知道。
+     */
+    return { k: 'notIn', plan: planOf(node.not, env, seen) }
+  }
   if ('is' in node) return node.is === '' ? NONE : { k: 'ids', ids: [node.is] }
   if ('up' in node) return { k: 'descendantsOf', plan: planOf(node.up, env, seen) }
   if ('down' in node) return { k: 'ancestorsOf', plan: planOf(node.down, env, seen) }
@@ -129,7 +137,7 @@ function planOf(
   if ('tag' in node) {
     // matcher 的 `{tag}` 读**整份 where 的标签并集**（文档化的已知语义）；
     // 候选也按并集给，否则交集条件会悄悄丢行。ids 由调用方用 seen.tags 填。
-    return { k: 'tags', ids: [...seen.tags] }
+    return { k: 'tags', ids: [...seen.tags], expand: seen.tagDesc }
   }
   if ('text' in node) {
     if (typeof node.text === 'string') {
@@ -158,7 +166,7 @@ export function candidateBuildOf(
   forest: readonly Block[],
   ctx: QueryContext,
 ): CandidateBuild {
-  const seen = { tags: new Set<string>(), fields: new Set<string>(), children: false }
+  const seen = { tags: new Set<string>(), fields: new Set<string>(), children: false, tagDesc: false }
   const empty: CandidateBuild = { plan: NONE, loadIds: [], children: false }
   let where = spec.where
   if (usesSelf(where)) {

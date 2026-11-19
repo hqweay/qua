@@ -276,7 +276,13 @@ export type CandidatePlan =
   | { k: 'none' }
   | { k: 'visible' }
   | { k: 'ids'; ids: string[] }
-  | { k: 'tags'; ids: string[] }
+  /**
+   * 标签成员（matcher 的 `{tag}` 是**整份 where 的并集**）。
+   *
+   * `expand` 只由编译器给（块语义）：**全部分支都是 `desc:true`** 时为真（要连子标签成员）；
+   * 有任一分支不带 `desc` 时为假（只取直接成员）——两者混在一起时给 `true`（超集）。
+   */
+  | { k: 'tags'; ids: string[]; expand: boolean }
   | { k: 'list'; list: 'page' | 'tag' }
   | { k: 'journal' }
   | { k: 'note' }
@@ -293,6 +299,11 @@ export type CandidatePlan =
   | { k: 'near'; plan: CandidatePlan }
   | { k: 'all'; plans: CandidatePlan[] }
   | { k: 'any'; plans: CandidatePlan[] }
+  /**
+   * **否定**：可见块减去子计划。只有当子计划**精确**时才真的减（`planIsExact`）——
+   * 否则退化成 `visible`（超集契约不允许拿一个会漏行的差集当候选）。
+   */
+  | { k: 'notIn'; plan: CandidatePlan }
 
 /** IPC 参数的形状校验（只验容器；值是绑定参数，不进 SQL 文本） */
 export function isCandidatePlan(v: unknown, depth = 0): v is CandidatePlan {
@@ -306,8 +317,9 @@ export function isCandidatePlan(v: unknown, depth = 0): v is CandidatePlan {
     case 'parents':
       return true
     case 'ids':
-    case 'tags':
       return Array.isArray(v.ids) && v.ids.every((x) => typeof x === 'string')
+    case 'tags':
+      return Array.isArray(v.ids) && v.ids.every((x) => typeof x === 'string') && typeof v.expand === 'boolean'
     case 'list':
       return v.list === 'page' || v.list === 'tag'
     case 'journal':
@@ -331,6 +343,7 @@ export function isCandidatePlan(v: unknown, depth = 0): v is CandidatePlan {
     case 'descendantsOf':
     case 'ancestorsOf':
     case 'near':
+    case 'notIn':
       return isCandidatePlan(v.plan, depth + 1)
     case 'all':
     case 'any':
@@ -379,17 +392,32 @@ export function candidatePlanSql(
       // json_each 吃 JSON 文本（与 docSubtree 同一条绑定口径）
       return wrap('select value as id from json_each(?)', [JSON.stringify(plan.ids)])
     case 'tags':
-      // 标签成员并集（matcher 的 `{tag}` 语义就是并集）；子标签沿树展开（`desc:true` 也被覆盖）
-      return wrap(
-        `with tags(id) as (
-          select value from json_each(?)
-          union
-          select c.id from ${B} c join tags t on c.parent = t.id join ${L} l on l.block = c.id and l.list = 'tag'
-        )
-        select distinct p.block as id from ${P} p join tags on p.name = '_tags' and p.value = '"' || tags.id || '"'
-          join ${B} b on b.id = p.block and ${visible('b')}`,
-        [JSON.stringify(plan.ids)],
-      )
+      /**
+       * 标签成员并集（matcher 的 `{tag}` 读的就是**整份 where 的并集**）。
+       *
+       * `expand` 决定子标签是否展开：matcher 不带 `desc` 时**只认直接成员**
+       * （`tagMemberIds` / `hasTag`），带上 `desc` 才沿标签树取闭包（`membersOf`）。
+       * 旧版无条件展开 ⇒ 直接成员的查询会多装一批子标签成员（超集、不丢行，但白装），
+       * 而且那份多出来的集合让「否定」没法安全地减（`planIsExact`）。
+       */
+      return plan.expand
+        ? wrap(
+            `with tags(id) as (
+              select value from json_each(?)
+              union
+              select c.id from ${B} c join tags t on c.parent = t.id join ${L} l on l.block = c.id and l.list = 'tag'
+            )
+            select distinct p.block as id from ${P} p join tags on p.name = '_tags' and p.value = '"' || tags.id || '"'
+              join ${B} b on b.id = p.block and ${visible('b')}`,
+            [JSON.stringify(plan.ids)],
+          )
+        : wrap(
+            `select distinct p.block as id from ${P} p
+              join ${B} b on b.id = p.block and ${visible('b')}
+             where p.name = '_tags'
+               and p.value in (select '"' || value || '"' from json_each(?))`,
+            [JSON.stringify(plan.ids)],
+          )
     case 'list':
       return wrap(
         `select l.block as id from ${L} l join ${B} b on b.id = l.block where l.list = ? and ${visible('b')}`,
@@ -517,6 +545,68 @@ export function candidatePlanSql(
         parts.flatMap((p) => p.params),
       )
     }
+    case 'notIn': {
+      /**
+       * **只有子计划精确时才真的减**：差集必须保证「被减掉的都是真命中」，
+       * 否则会从一个合法超集里挖掉命中行（那正是候选契约禁区）。
+       * 不精确 ⇒ 退化成 `visible`（宽但真）。
+       */
+      if (!planIsExact(plan.plan, derived)) return candidatePlanSql({ k: 'visible' }, opts)
+      const inner = candidatePlanSql(plan.plan, opts)
+      const all = candidatePlanSql({ k: 'visible' }, opts)
+      return wrap(`select id from (${all.sql}) except select id from (${inner.sql})`, [
+        ...all.params,
+        ...inner.params,
+      ])
+    }
+  }
+}
+
+/**
+ * **这份计划是否精确**（不多给**可见**块）：判定集 ≡ matcher 的命中集。
+ *
+ * 只用于「否定的差集」——差集拿一份会漏行的集合去减，就会从合法超集里挖掉命中。
+ * 所以这张表**只收能证明的**：能给出「多出来的只可能是不可见块」的才收；
+ * 凡是「额外给出的块可能是可见的」一律不收（保守 ⇒ 只影响收窄幅度，不影响正确性）。
+ */
+function planIsExact(plan: CandidatePlan, derived: boolean): boolean {
+  switch (plan.k) {
+    // 「是什么」在列/露面/地址上就是判定本身，matcher 与 SQL 问的是同一格
+    case 'none':
+    case 'visible':
+    case 'ids':
+    case 'list':
+    case 'journal':
+    case 'journalDay':
+    case 'note':
+    case 'kind':
+    case 'aliased':
+    case 'tagged':
+      return true
+    // 直接成员才是 matcher 的口径；子标签展开那一支（`membersOf`）与 SQL 的递归同解没证过 ⇒ 不收
+    case 'tags':
+      return !plan.expand
+    // 「谁是来源」两边同源（关系边）；但不可信时它退化成 `visible`，那就不精确
+    case 'ref':
+      return derived
+    // 「有子级」判可见子块；不可信时（软删页的后代）会多给可见块
+    case 'parents':
+      return derived
+    // 方向原子都**含自己/含兄弟子树**那一半（`up` 含被点名的块、`near` 含兄弟子树）⇒ 多给可见块
+    case 'descendantsOf':
+    case 'ancestorsOf':
+    case 'near':
+      return false
+    // 值比较（`prop`）与正文（`text`/`mark`/`link`）的 SQL 都是超集，不是判定
+    case 'prop':
+    case 'text':
+      return false
+    // 组合：交集/并集在「成员都精确」时精确；差集按构造精确（只在精确时才生效）
+    case 'all':
+    case 'any':
+      return plan.plans.every((p) => planIsExact(p, derived))
+    case 'notIn':
+      return planIsExact(plan.plan, derived)
   }
 }
 
