@@ -42,6 +42,9 @@ const L = DB_TABLES.list
 /** 派生两表（候选面换源用：关系边与物化的位置/可见性） */
 const R = DB_TABLES.blockRelation
 const I = DB_TABLES.blockIndex
+/** 子串索引与正文索引行（rowid 同址；见 `BlockGram` 的表注释） */
+const G = DB_TABLES.blockGram
+const M = DB_TABLES.blockFtsMap
 
 /** 子树查询的块列：与 `db-rows.ts` 的装载列逐字一致（编码口径只有一份） */
 const BLOCK_COLUMNS = 'b.id, b.content, b.annos, b.parent, b.left, b.created, b.modified, b.deleted, b.display, b.kind, b.date, b.query, b.type'
@@ -170,6 +173,31 @@ export const LIBRARY_READS = {
   /** **FTS 映射按块查**（增量索引不再把整张映射搬进内存）：一块最多几行（每来源一行） */
   ftsMapOf: `select block_id, source, fts_rowid from ${DB_TABLES.blockFtsMap}
     where block_id in (select value from json_each(?1))`,
+
+  /**
+   * **子串命中按块查**（`{text}` 的无命中／稀疏一档）。
+   *
+   * 参数是已经包成短语的 `MATCH` 表达式（`core/search/grams.ts` 产），条数上限由
+   * 调用方给：读它的人要的从来不是「一共多少」，而是「有没有、有没有超过一页」。
+   * 只认 `content` 来源——子串索引只给正文建行（地址／标签那几行不是「正文」，
+   * `{text}` 的判据也只看正文投影）。
+   */
+  gramMatch: `select m.block_id as block from ${M} m
+    join ${G} on ${G}.rowid = m.fts_rowid
+    where m.source = 'content' and ${G} match ?1
+    limit ?2`,
+
+  /**
+   * 子串命中的候选页（按文档序）：命中集不超过一页时，一页就是全部候选。
+   * `?1` 是 id JSON 数组；游标条件单独一条 SQL（`OR` 会让 SQLite 放弃 path 索引）。
+   */
+  gramPage: `select i.block as id, i.path as path from ${I} i
+    where i.hidden is null and i.block in (select value from json_each(?1))
+    order by i.path`,
+  gramPageAfter: `select i.block as id, i.path as path from ${I} i
+    where i.hidden is null and i.block in (select value from json_each(?1))
+      and i.path > ?2
+    order by i.path`,
 
   /**
    * 日记日期（槽的日历／日记流窗口）。
@@ -456,6 +484,45 @@ function textPredicateOf(
       ) where instr(txt, ?) > 0)`,
     params: [plan.needle],
   }
+}
+
+/**
+ * 正文串 → 子串索引的 `MATCH` 表达式；`null` ＝ 这张索引答不了，调用方退回整库扫。
+ *
+ * 三条边界，缺一条就会**静默丢结果**（索引是候选：漏给就是漏行）：
+ *
+ *   · **至少三个码点**：trigram 把正文拆成三字滑窗，两个字的串进不了索引。按码点
+ *     数而不是 `String.length`：一个表情符号是两个 UTF-16 单元、一个码点，按 length
+ *     判会把两码点当三码点，`MATCH` 恒不命中。
+ *   · **至少一个非空白字符**：正文投影为空白的块不产索引行（与词级索引同一条
+ *     「空文本不产行」）。而「全是空白」的块只可能命中「全是空白」的串——那一档
+ *     退回整库扫，索引不替它担保。
+ *   · **整串当短语**：`"…"` 里的一切都是字面量（引号自己加倍），于是它恰好是
+ *     「连续子串」而不是「这些词都出现」。
+ *
+ * 大小写／变音符：trigram 默认做 ASCII 大小写折叠，比 matcher 的逐字符比较**宽**
+ * ——候选宁可多给。正因如此它只能当候选，不能拿去当否定的减数。
+ */
+export function gramQueryOf(needle: string): string | null {
+  if ([...needle].length < 3) return null
+  if (needle.trim() === '') return null
+  return `"${needle.replaceAll('"', '""')}"`
+}
+
+/**
+ * 计划里**必须成立**的正文串（`all` 链上的 `text` 节点）。
+ *
+ * 只有落在合取链上的条件才是「每条命中都得满足」：析取项的判定是「任一成立」，
+ * 差集的减数根本不描述命中。拿这两种当筛选条件会**漏行**——而子串索引的快路
+ * 正是以「命中 ⊆ 这份命中的超集」为前提的。
+ *
+ * 与 `pushdownOf` 同一条遍历口径（只下潜 `all`）：两处判据必须认同一批节点，
+ * 否则「能下推的谓词」与「能短路的条件」会给出两套答案。
+ */
+export function necessaryTextNeedles(plan: CandidatePlan): string[] {
+  if (plan.k === 'text') return plan.nonempty === true ? [] : [plan.needle]
+  if (plan.k === 'all') return plan.plans.flatMap(necessaryTextNeedles)
+  return []
 }
 
 /**

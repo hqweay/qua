@@ -508,12 +508,17 @@ export interface FtsBuilt {
  * 每次重写都**先删旧 rowid 再插新**：contentless 不存旧 token，但按 rowid 删除是
  * `contentless_delete=1` 的明确能力（不用回读旧文本）。目标里有、分词结果里没有
  * （文本空了／目标块不可见了）⇒ 那一行被摘掉——「删除→不可搜」走的正是这条路。
+ *
+ * **正文行同时产一条子串索引行**（`BlockGram`），rowid 与正文行相同：两张表由这一批
+ * 写入共同维护，块 → rowid 的映射只有 `BlockFTSMap` 这一份。`bodies` 就是那批来源文本
+ * （与 `tokens` 同键同源）：正文行有 token 时它必须有同一串，缺一格就等于子串索引少一行。
  */
 export function buildFtsWrites(
   targets: FtsTargets,
   tokens: ReadonlyMap<string, TokenizedText>,
   prevMap: ReadonlyMap<string, number>,
   prevRowid: number,
+  bodies: ReadonlyMap<string, string>,
 ): FtsBuilt {
   const map = new Map(prevMap)
   let nextRowid = prevRowid
@@ -524,6 +529,8 @@ export function buildFtsWrites(
     const rowid = map.get(key)
     if (rowid === undefined) return
     writes.push({ table: 'BlockFTS', op: 'delete', key: { rowid } })
+    // 子串行与正文行同址：正文行没了，它也必须没——留着就是「查得到、装不到」的幽灵
+    if (source === 'content') writes.push({ table: 'BlockGram', op: 'delete', key: { rowid } })
     writes.push({ table: 'BlockFTSMap', op: 'delete', key: { block_id: id, source } })
     map.delete(key)
   }
@@ -541,6 +548,7 @@ export function buildFtsWrites(
       const old = map.get(key)
       if (old !== undefined) {
         writes.push({ table: 'BlockFTS', op: 'delete', key: { rowid: old } })
+        if (source === 'content') writes.push({ table: 'BlockGram', op: 'delete', key: { rowid: old } })
         map.delete(key)
       }
       const rowid = ++nextRowid
@@ -550,6 +558,13 @@ export function buildFtsWrites(
         key: { rowid },
         values: { seg: token.seg, chars: token.chars, pinyin: token.pinyin },
       })
+      if (source === 'content') {
+        const body = bodies.get(key)
+        // 有 token 就一定有同一串正文（两者都由同一次文本计划产出）：缺了说明调用方漏传，
+        // 此时插空串会在子串索引里留下一个「这一块什么都没有」的假事实——宁可当场炸
+        if (body === undefined) throw new Error(`fts: content row without body (${key})`)
+        writes.push({ table: 'BlockGram', op: 'insert', key: { rowid }, values: { body } })
+      }
       writes.push({
         table: 'BlockFTSMap',
         op: 'upsert',
@@ -588,5 +603,11 @@ export function buildAllFtsWrites(
   walkForest(ws.blocks, (b) => {
     ids.add(b.id)
   })
-  return buildFtsWrites(targetsFromTexts(ftsSourceTexts(ws, ids)), tokens, new Map(), 0)
+  const texts = ftsSourceTexts(ws, ids)
+  return buildFtsWrites(targetsFromTexts(texts), tokens, new Map(), 0, bodiesOf(texts))
+}
+
+/** 来源文本 → 「行键 → 正文串」（子串索引与正文索引同源，不另算一遍投影） */
+export function bodiesOf(texts: readonly { key: string; text: string }[]): Map<string, string> {
+  return new Map(texts.map((x) => [x.key, x.text] as const))
 }

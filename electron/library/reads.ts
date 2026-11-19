@@ -12,7 +12,9 @@
 import type { DatabaseSync } from 'node:sqlite'
 import {
   candidatePageSql,
+  gramQueryOf,
   LIBRARY_READS,
+  necessaryTextNeedles,
   type CandidatePlan,
   type BlockIndexRow,
   type CandidatePage,
@@ -128,12 +130,62 @@ export function readCandidatePage(
   page: { after: string | null; limit: number },
 ): CandidatePage {
   const derived = readMeta(db, META_KEYS.derivedState) === 'ready'
+  const ftsReady = readMeta(db, META_KEYS.ftsState) === 'ready'
+  if (derived && ftsReady) {
+    const short = gramCandidates(db, plan, page)
+    if (short) return short
+  }
   const q = candidatePageSql(plan, page, { derived })
   const rows = db.prepare(q.sql).all(...q.params) as { id: unknown; path?: unknown }[]
   const ids = rows.map((r) => String(r.id)).filter((id) => id !== '' && id !== 'null')
   // 只有「取满一页」才可能还有下一页；不满 ⇒ 到底（下一问会是空页，少一次猜测）
   const next = derived && rows.length === page.limit ? String(rows[rows.length - 1]!.path) : null
   return { ids, next }
+}
+
+/**
+ * **子串索引的短路**：正文条件命中不超过一页时，答案就是那一页的全部候选。
+ *
+ * 为什么值得单开一条路：`{text}` 的谓词是**行本地**的，按路径序扫、凑够一页才停
+ * ——常见串因此是亚毫秒，但**稀疏与无命中**都要扫完整库（1M 约 1.3s/页）。
+ * 子串索引（trigram）回答的正是「有没有、有几个」：无命中 0.02ms、稀疏一次查完。
+ *
+ * 只做**必要条件**（`all` 链上的 `text`，见 `necessaryTextNeedles`）：差集与析取
+ * 的成员不是「每条命中都得满足」。命中集 ⊆ `MATCH` 结果 ⊆ 必要条件，所以：
+ *   · `MATCH` 空 ⇒ 整条查询无命中，直接给空页；
+ *   · `MATCH` 不超过一页 ⇒ 候选**已齐全**，按文档序交出去、`next = null`
+ *     （候选可以是超集：matcher 仍会筛掉 `all` 里其余条件不成立的块）。
+ *   · 超过一页 ⇒ 交回扫描路（常见串本来就是它快：按「凑够一页」计价）。
+ *
+ * 降级：索引没就绪（`fts_state !== 'ready'`）、或串太短／全空白答不了 ⇒ 返回 `null`，
+ * 调用方走今天的分页 SQL，语义不变。
+ */
+function gramCandidates(
+  db: DatabaseSync,
+  plan: CandidatePlan,
+  page: { after: string | null; limit: number },
+): CandidatePage | null {
+  const needles = necessaryTextNeedles(plan)
+  if (needles.length === 0) return null
+  let best: string[] | null = null
+  for (const needle of needles) {
+    const query = gramQueryOf(needle)
+    if (query === null) continue
+    const rows = db.prepare(LIBRARY_READS.gramMatch).all(query, page.limit + 1) as { block: unknown }[]
+    if (rows.length === 0) return { ids: [], next: null }
+    if (rows.length > page.limit) continue
+    const ids = rows.map((r) => String(r.block))
+    if (best === null || ids.length < best.length) best = ids
+  }
+  if (best === null) return null
+  // 候选已齐全：按文档序交出去（`next = null` —— 不会再有了）
+  const idJson = JSON.stringify(best)
+  const rows = (
+    page.after === null
+      ? db.prepare(LIBRARY_READS.gramPage).all(idJson)
+      : db.prepare(LIBRARY_READS.gramPageAfter).all(idJson, page.after)
+  ) as { id: unknown }[]
+  return { ids: rows.map((r) => String(r.id)), next: null }
 }
 
 /**

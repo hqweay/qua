@@ -59,12 +59,15 @@ export const LIBRARY_FORMAT = 1
  * v12 把**派生层放回 SQLite**：`BlockIndex`（root／path／hidden）与 `BlockRelation`
  * （引用／标签／归属／属性边）两张派生表，外加属性值索引。只加表／索引、不动内容；
  * 两张表都可由内容全量重建，状态落 `derived_state='pending'`，重建完成前读路径不许相信它们。
+ * v13 给关系行加 `count`；v14 让位置行进入增量维护（派生两表整表作废回 `pending`）。
+ * v15 加**子串索引** `BlockGram`（trigram FTS，rowid 与正文索引行相同）：只加表、
+ * 不动内容；它的行由索引重建铺底，所以同样把 `fts_state` 打回 `pending`。
  *
  * **不写数据迁移**：原型不做旧数据迁移，旧库作废重 seed（`judgeDbVersion` 判到
  * `migrate` 时跑 `MIGRATIONS` 里那一步**只丢旧形状、不搬数据**的 DDL）。
  * `user_version` 只增不减。
  */
-export const DB_SCHEMA_VERSION = 14
+export const DB_SCHEMA_VERSION = 15
 
 /** `meta` 表里被代码解释的键（其余键归将来，不在这里登记）。 */
 export const META_KEYS = {
@@ -138,6 +141,15 @@ export const DB_TABLES = {
   blockFts: 'BlockFTS',
   /** 块 id ↔ 稳定 FTS rowid（不用 `Block.rowid`：隐式 rowid 在 VACUUM 下可能变） */
   blockFtsMap: 'BlockFTSMap',
+  /**
+   * **子串索引**（FTS5 trigram，contentless）：正文投影的三字滑窗，回答
+   * 「库里有没有这个串」。派生表，不是第二真相。
+   *
+   * rowid **与 `BlockFTS` 的正文行相同**：两块索引由同一批写入、同一批清除，于是
+   * 「块 → 正文行 rowid」这一格映射（`BlockFTSMap` 的 content 行）同时也就是子串索引
+   * 的地址，不必再存第二张映射表。
+   */
+  blockGram: 'BlockGram',
   /**
    * 派生位置表（`block` 主键 → `root`／`path`／`hidden`）：派生表，不是第二真相。
    *

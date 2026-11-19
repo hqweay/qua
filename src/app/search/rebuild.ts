@@ -55,6 +55,8 @@ async function rebuildOnce(deps: RebuildDeps): Promise<RebuildResult> {
   const reset: RowWrite[] = [
     { table: 'BlockFTS', op: 'clear', key: {} },
     { table: 'BlockFTSMap', op: 'clear', key: {} },
+    // 子串索引与正文行同址：正文行从空重铺，它也必须同批清空（否则旧 rowid 会撞 UNIQUE）
+    { table: 'BlockGram', op: 'clear', key: {} },
     meta(META_KEYS.ftsState, 'building'),
     meta(META_KEYS.ftsRowidSeq, '0'),
   ]

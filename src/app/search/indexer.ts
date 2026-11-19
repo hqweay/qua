@@ -10,7 +10,7 @@ import type { FtsCommitPlan, FtsCommitSource } from '../../core/storage/fts-port
 import type { FtsSource } from '../../core/search/sources.ts'
 import { META_KEYS } from '../../core/identity/library.ts'
 import type { TokenizedText } from '../../core/search/tokenizer.ts'
-import { addDependentIndex, buildFtsWrites, choiceIdsOf, ftsSourceTexts, ftsTargets } from '../../core/search/rows.ts'
+import { addDependentIndex, bodiesOf, buildFtsWrites, choiceIdsOf, ftsSourceTexts, ftsTargets } from '../../core/search/rows.ts'
 import { ALIASES_PROP } from '../../core/model/model.ts'
 import { CHOICES_PROP } from '../../core/props/choices.ts'
 import { ftsRowKey, parseFtsRowKey } from '../../core/search/sources.ts'
@@ -184,7 +184,7 @@ export class SearchIndexer implements FtsCommitSource {
       }
       set.add(parsed.blockId)
     }
-    const built = buildFtsWrites({ index, remove: new Map() }, tokens, this.map, this.rowid)
+    const built = buildFtsWrites({ index, remove: new Map() }, tokens, this.map, this.rowid, bodiesOf(texts))
     this.map = built.map
     this.rowid = built.nextRowid
     return { writes: built.writes, nextRowid: built.nextRowid }
@@ -262,7 +262,7 @@ export class SearchIndexer implements FtsCommitSource {
     const texts = ftsSourceTexts(ws, want)
     const items = texts.map((x) => ({ id: x.key, text: x.text }))
     const tokens = items.length > 0 ? await this.tokenize(items) : new Map<string, TokenizedText>()
-    const built = buildFtsWrites(targets, tokens, lookup, this.rowid)
+    const built = buildFtsWrites(targets, tokens, lookup, this.rowid, bodiesOf(texts))
     if (built.writes.length === 0) return null
     return {
       /**

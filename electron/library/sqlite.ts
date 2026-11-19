@@ -147,6 +147,27 @@ create table if not exists ${DB_TABLES.blockFtsMap} (
 `
 
 /**
+ * 子串索引的 DDL —— **v15 起的一张派生表**（只加表、不搬内容）。
+ *
+ * `tokenize='trigram'` 是 SQLite 内置的分词器：它把正文拆成三字滑窗，于是
+ * `MATCH '"某个串"'` 就是**子串命中**（`LIKE '%…%'` 的语义，可以走索引）。
+ * 词的召回（jieba／拼音）在 `BlockGram` 里不参与——那是 `BlockFTS` 的事，
+ * 这张表只回答「库里有没有这一串」。
+ *
+ * **rowid 与 `BlockFTS` 的正文行相同**：同一批写入、同一批清除，块 → 正文行 rowid
+ * 的映射（`BlockFTSMap.source='content'`）就是这张表的地址，不再存第二张映射。
+ * 两字以下不能查（trigram 的固有形状），那一档读路径退回整库扫描。
+ */
+const GRAM_DDL = `
+create virtual table if not exists ${DB_TABLES.blockGram} using fts5(
+  body,
+  content='',
+  contentless_delete=1,
+  tokenize='trigram'
+);
+`
+
+/**
  * 派生层的 DDL —— **v12 起的两张派生表 ＋ 属性值索引**（只加表/索引，不搬内容）。
  *
  * 为什么单列一份、不并进 `CONTENT_DDL`：同 `FTS_DDL` 的理由——`CONTENT_DDL` 代表
@@ -441,6 +462,25 @@ export const MIGRATIONS: Migration[] = [
       writeMeta(db, META_KEYS.derivedState, 'pending')
     },
   },
+  {
+    to: 15,
+    up: (db) => {
+      /**
+       * **子串索引**（trigram）加入索引面。只加表、不动内容。
+       *
+       * 为什么连 `fts_state` 一起打回 `pending`：这张表的 rowid 与正文索引行**共享**，
+       * 而老库里的正文行已经在盘上、却没有对应的子串行——两份索引不再同步，
+       * 读路径不能相信它。索引是派生数据：清空重铺一轮（流式重建现在会把两张表
+       * 一起写），内容一个字节不动。**清表而不是只改状态**：残留的旧行/旧 rowid
+       * 会让新分配的 rowid 撞 `fts_rowid` 的 UNIQUE。
+       */
+      db.exec(GRAM_DDL)
+      db.exec(`delete from ${DB_TABLES.blockFts}`)
+      db.exec(`delete from ${DB_TABLES.blockFtsMap}`)
+      writeMeta(db, META_KEYS.ftsState, 'pending')
+      writeMeta(db, META_KEYS.ftsRowidSeq, '0')
+    },
+  },
 ]
 
 export type OpenResult =
@@ -584,6 +624,8 @@ export function openLibraryDb(
           db.exec(DERIVED_DDL)
           writeMeta(db, META_KEYS.derivedState, 'pending')
         }
+        // 子串索引（trigram）：与全文索引同一批重建，状态共用 `fts_state`
+        if (target >= 15) db.exec(GRAM_DDL)
         setUserVersion(db, target)
       })
     } catch (e) {
@@ -722,7 +764,7 @@ export function searchFts(db: Db, match: string, limit: number, offset = 0, sour
  *   · `delete` —— 只给一部分主键 ＝ 删这一组的全部行。
  */
 export interface RowWrite {
-  table: 'Block' | 'BlockProperty' | 'BlockAlias' | 'BlockList' | 'meta' | 'BlockFTS' | 'BlockFTSMap'
+  table: 'Block' | 'BlockProperty' | 'BlockAlias' | 'BlockList' | 'meta' | 'BlockFTS' | 'BlockFTSMap' | 'BlockGram'
   /**
    * `relink` ＝ **兄弟链维护**：`Block.left` 是「前一个兄弟」的 id，所以一个块换位置时
    * 有两个邻居要跟着改（旧位置的后继、新位置的后继），光写自己那一格会让链断掉 ——
@@ -746,6 +788,7 @@ const WRITABLE = new Set<string>([
   'meta',
   'BlockFTS',
   'BlockFTSMap',
+  'BlockGram',
   'BlockIndex',
   'BlockRelation',
 ])
@@ -764,6 +807,7 @@ const COLUMNS: Record<string, ReadonlySet<string>> = {
   meta: new Set(['key', 'value']),
   BlockFTS: new Set(['rowid', 'seg', 'chars', 'pinyin']),
   BlockFTSMap: new Set(['block_id', 'source', 'fts_rowid']),
+  BlockGram: new Set(['rowid', 'body']),
   BlockIndex: new Set(['block', 'root', 'path', 'hidden']),
   BlockRelation: new Set(['from_id', 'to_id', 'kind', 'from_root', 'count']),
 }

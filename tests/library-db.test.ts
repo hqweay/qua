@@ -400,11 +400,11 @@ test('负向断言：`created` 只建空表，不写任何块行（seed 是调�
 
 /* ------------------------------------------------------------ 形状：内容四张表 ＋ 库级三张 */
 
-test('当前 schema 的表形状：四张内容表 ＋ settings／meta／op_log／assets ＋ FTS 两表 ＋ 派生两表（没有 blob 表）', () => {
+test('当前 schema 的表形状：四张内容表 ＋ settings／meta／op_log／assets ＋ FTS 两表 ＋ 子串索引 ＋ 派生两表（没有 blob 表）', () => {
   const file = tmpDb()
   const r = openLibraryDb(file)
   const db = r.db!
-  const tables = (db.prepare("select name from sqlite_master where type='table' and name not like 'sqlite_%' and name not like 'BlockFTS\\_%' escape '\\'").all() as {
+  const tables = (db.prepare("select name from sqlite_master where type='table' and name not like 'sqlite_%' and name not like 'BlockFTS\\_%' escape '\\' and name not like 'BlockGram\\_%' escape '\\'").all() as {
     name: string
   }[]).map((t) => t.name).sort()
   db.close()
@@ -416,6 +416,7 @@ test('当前 schema 的表形状：四张内容表 ＋ settings／meta／op_log�
       DB_TABLES.block,
       DB_TABLES.blockFts,
       DB_TABLES.blockFtsMap,
+      DB_TABLES.blockGram,
       DB_TABLES.blockIndex,
       DB_TABLES.blockRelation,
       DB_TABLES.list,

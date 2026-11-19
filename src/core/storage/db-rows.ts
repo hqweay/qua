@@ -91,6 +91,7 @@ export interface RowWrite {
     | 'meta'
     | 'BlockFTS'
     | 'BlockFTSMap'
+    | 'BlockGram'
     | 'BlockIndex'
     | 'BlockRelation'
   /**
