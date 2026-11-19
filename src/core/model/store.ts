@@ -105,6 +105,15 @@ export class BlockStore {
    * （那会把「只是换了个落点」也当成整库重写）。
    */
   private replaced = 0
+  /**
+   * **模型修订号**：每次真改动（`apply` 带着非空 ops／`reset`）单调加一。
+   *
+   * 为什么渲染层需要它：行的派生物（块标图标、关闭态标记、chips、块下属性行……）
+   * 都是**构造期**写进行元素上的，「同构重装」这类保留旧元素的快路必须先回答
+   * 「这行画下之后模型动过没有」——按块逐个对账等于把渲染重做一遍，一个全局
+   * 修订号是唯一便宜的答案。渲染在 stamp 时读它，保留时对它。
+   */
+  revision = 0
   private subs = new Set<StoreSubscriber>()
   /**
    * **派生索引**（懒重建）：`null` ＝ 已失效，下次访问时从当前 `blocks` 重算一遍。
@@ -167,6 +176,7 @@ export class BlockStore {
    * （`tests/index-port.test.ts` 的等式断言钉住）。
    */
   apply(ops: readonly Op[], source?: unknown): void {
+    if (ops.length > 0) this.revision++
     patchIndex(this.index, ops, this.blocks)
     const ids = [...new Set(changesOf(ops).map((c) => c.id))]
     this.notify(source, ids, structuralOf(ops))
@@ -545,6 +555,7 @@ export class BlockStore {
    */
   reset(blocks: Block[]): void {
     this.replaced++
+    this.revision++
     this.blocks = blocks
     /**
      * **换库回到整库模式**：`reset` 的输入是一份完整模型（种子／演示状态），

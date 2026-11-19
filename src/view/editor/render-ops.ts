@@ -85,9 +85,28 @@ export class RenderOps {
   annoSpans: ReadonlyMap<string, readonly AnnoHitSpan[]> = new Map()
 
   /**
+   * 折叠态的签名。折叠标志（行的 `data-collapsed`、身体的 `data-folded`）是**构造期**
+   * 写进行元素的——保留行原样换回时带的是旧标志，所以只在「折叠态与上次渲染一致」时
+   * 才允许保留；变了的这次（折一下／展开一组）整体退回全量重建。
+   */
+  private renderedFoldSig = ''
+  private foldSig(): string {
+    const fs = foldStateOf(this.ed.doc)
+    return Object.keys(fs)
+      .filter((k) => fs[k] === true)
+      .sort()
+      .join(',')
+  }
+
+  /** 折叠标志被**就地**重画过（`paintFold`，不重建 DOM）⇒ DOM 与折叠态重新一致 */
+  noteFoldPainted(): void {
+    this.renderedFoldSig = this.foldSig()
+  }
+
+  /**
    * **把旧 DOM 里能对上 id 的行摘下来留用**；`null` ＝ 这一次不值得保留（退回全量重建）。
    *
-   * 判据四条，任何一条不满足都整体放弃（不做「部分保留」——那要回答「哪几行深拷才对」，
+   * 判据五条，任何一条不满足都整体放弃（不做「部分保留」——那要回答「哪几行深拷才对」，
    * 退化成逐行 diff，正是这条快路要躲开的复杂度）：
    *   · **新装载的行 id 全是旧 DOM 里有的**（刷新查询／对齐数据的典型形状：成员同、
    *     顺序同或近似）。新行一出现就说明成员变了，重建只多不少地覆盖它；
@@ -95,13 +114,16 @@ export class RenderOps {
    *   · 没有虚拟化窗口（窗口切片行的 `data-depth` 属于窗口形状，不是全集形状）；
    *   · **id 无重复**（同一块在同一视图里出现两行——露面／镜像——时，保留表按 id 只
    *     认领得到一份元素，两个占位会抢同一个节点，重建把它们塌成一份；多实例只有
-   *     全量重建的「逐行各建各的」天然支持）。
+   *     全量重建的「逐行各建各的」天然支持）；
+   *   · **折叠态与上次渲染一致**（签名见 `renderedFoldSig`）。
    *
    * 保留的行**连子树一起**（embed 身体、里层编辑岛、选中漆层都在行上）——这正是
    * 「不闪」的全部来源：那些行根本没被重建过。
    */
   private holdRows(): Map<string, { el: HTMLElement; depth: number }> | null {
     if (this.ed.virtualize && this.ed.layout === 'column') return null
+    if (this.foldSig() !== this.renderedFoldSig) return null
+    const rev = String(this.ed.store.revision)
     const rows = this.ed.rows()
     if (rows.length === 0) return null
     const kept = new Map<string, { el: HTMLElement; depth: number }>()
@@ -109,6 +131,9 @@ export class RenderOps {
       const el = this.ed.blockEl(r.block.id)
       if (!el) return null
       if (el.dataset.depth !== String(r.depth)) return null
+      // 这行画下之后模型动过（内容／属性／结构——连打字也算）⇒ 行上的派生物
+      // （块标、关闭态标记、chips、属性行）都可能是旧的。一票否决，整体重建。
+      if (el.dataset.rev !== rev) return null
       kept.set(r.block.id, { el, depth: r.depth })
     }
     if (kept.size !== rows.length) return null
@@ -160,10 +185,29 @@ export class RenderOps {
       if (!el || !fresh) continue
       fresh.replaceWith(el)
     }
+    /**
+     * **把保留行的身体接回去**。`renderAll` 开头的 `disposeAll` 对身体是「延后一拍拆」：
+     * 全量重建靠 `makeBlockEl` 的 `embedBody`／`viewBody` 回调**在同一任务里重新 open**
+     * 取消拆卸；保留行走占位捷径、没人 open ⇒ 下一拍真拆——查询体／嵌入体整片消失，
+     * 只剩空壳（折叠后查询面板不见、刷新后条件树空白都是它）。照同一套回调接回：
+     * 缓存型的身体原样搬回（冻结结果与滚动位置还在），非缓存型的重挂一份新的。
+     * 只碰归位成功的保留行（新画的行已经由 `renderRows` 挂过，再挂就是双份）。
+     */
+    for (const [id, { el }] of kept) {
+      if (this.ed.blockEl(id) !== el) continue
+      if (this.ed.embeds.isPinned(id)) continue
+      const block = this.ed.store.find(id)
+      if (!block) continue
+      const viewShell = el.querySelector<HTMLElement>(':scope > .blk-view-body[data-view-body-for]')
+      if (viewShell && this.ed.events.viewBody) this.ed.embeds.attachViewBody(block, viewShell)
+      const embedShell = el.querySelector<HTMLElement>('.blk-embed-body[data-embed-body-for]')
+      if (embedShell && this.ed.events.embedBody) this.ed.embeds.attach(block, embedShell)
+    }
     this.mounted = new Set([...kept.keys()].filter((id) => Boolean(this.ed.blockEl(id))))
     this.markCaret()
     this.ed.bsel.paintBlockSel()
     this.ed.events.mounted?.()
+    this.renderedFoldSig = this.foldSig()
   }
 
   /** `rebuildWith` 给 `renderRows` 的占位钩子：返回 `null` ＝ 按普通行画 */
@@ -261,6 +305,7 @@ export class RenderOps {
     this.ed.bsel.paintBlockSel()
     this.ed.events.mounted?.()
     this.paintAnnoMarks()
+    this.renderedFoldSig = this.foldSig()
   }
 
   /**
@@ -586,6 +631,9 @@ export class RenderOps {
       },
     )
     this.mounted.add(r.block.id)
+    // 行的派生物都是构造期写死的：盖章记下「画这行时的模型修订号」，保留行快路
+    // （`holdRows`）据此判断「这行画下之后模型动过没有」——动过就整体退回全量重建。
+    el.dataset.rev = String(this.ed.store.revision)
     return el
   }
 

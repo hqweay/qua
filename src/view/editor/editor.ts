@@ -2282,6 +2282,7 @@ export class BlockEditor {
       if (folded) body.dataset.folded = '1'
       else delete body.dataset.folded
     }
+    this.render.noteFoldPainted()
   }
 
   /**
