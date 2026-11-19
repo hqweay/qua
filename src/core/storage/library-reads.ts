@@ -39,6 +39,9 @@ const B = DB_TABLES.block
 const P = DB_TABLES.property
 const A = DB_TABLES.alias
 const L = DB_TABLES.list
+/** 派生两表（候选面换源用：关系边与物化的位置/可见性） */
+const R = DB_TABLES.blockRelation
+const I = DB_TABLES.blockIndex
 
 /** 子树查询的块列：与 `db-rows.ts` 的装载列逐字一致（编码口径只有一份） */
 const BLOCK_COLUMNS = 'b.id, b.content, b.annos, b.parent, b.left, b.created, b.modified, b.deleted, b.display, b.kind, b.date, b.query, b.type'
@@ -277,7 +280,7 @@ export type CandidatePlan =
   | { k: 'list'; list: 'page' | 'tag' }
   | { k: 'journal' }
   | { k: 'note' }
-  | { k: 'ref'; to?: string }
+  | { k: 'ref'; to?: string; kinds: string[] }
   | { k: 'prop'; name: string }
   | { k: 'kind' }
   | { k: 'aliased' }
@@ -311,7 +314,14 @@ export function isCandidatePlan(v: unknown, depth = 0): v is CandidatePlan {
     case 'note':
       return true
     case 'ref':
-      return v.to === undefined || typeof v.to === 'string'
+      // kinds 进计划而不是留一个默认：`{ref:{kind:'embed'}}` 与 `{ref: X}` 的候选面不同，
+      // 而「哪些 kind 算引用」是块语义，只能由编译器给（SQL 只绑定参数）
+      return (
+        (v.to === undefined || typeof v.to === 'string') &&
+        Array.isArray(v.kinds) &&
+        v.kinds.length > 0 &&
+        v.kinds.every((x) => typeof x === 'string' && x !== '')
+      )
     case 'prop':
       return typeof v.name === 'string' && v.name !== ''
     case 'journalDay':
@@ -339,14 +349,32 @@ function isRecord(v: unknown): v is Record<string, unknown> {
  *
  * 计划是超集 ⇒ 这里的 SQL **宁可多给**：`instr`／值比较这类窄化都不做
  * （值在行里是 JSON 编码，按编码值窄会漏掉跨行拼接的命中），交给 matcher 判。
+ *
+ * `opts.derived` ＝ **派生两表可信**（`derived_state === 'ready'`）。它只决定「收窄得多准」，
+ * 不决定语义——两种模式都必须 ⊇ 真命中：
+ *
+ *   · 可信：`ref` 读 `BlockRelation`（行内／属性／嵌入三类边都在这张表里；旧的 content
+ *     扫描只认行内 run，**不是超集**——属性指向与嵌入的源块会被静默丢掉），可见性读
+ *     物化的 `BlockIndex.hidden`（逐行的「自己或祖先被删」）。
+ *   · 不可信：`ref` 退回 `visible`（宽，但真）；可见性退回根上的 `deleted` 位
+ *     （软删页的后代仍算候选，多给不少给）。
  */
-export function candidatePlanSql(plan: CandidatePlan): { sql: string; params: (string | number)[] } {
+export function candidatePlanSql(
+  plan: CandidatePlan,
+  opts: { derived?: boolean } = {},
+): { sql: string; params: (string | number)[] } {
+  const derived = opts.derived === true
   const wrap = (inner: string, params: (string | number)[]): { sql: string; params: (string | number)[] } => ({ sql: inner, params })
+  /** 「这一块可见」：可信时问物化的 hidden，否则问根上的 deleted 位（超集：软删页的后代也算） */
+  const visible = (alias: string): string =>
+    derived ? `exists (select 1 from ${I} v where v.block = ${alias}.id and v.hidden is null)` : `${alias}.deleted is null`
   switch (plan.k) {
     case 'none':
       return wrap('select null as id where 0', [])
     case 'visible':
-      return wrap(`select id from ${B} where deleted is null`, [])
+      return derived
+        ? wrap(`select block as id from ${I} where hidden is null`, [])
+        : wrap(`select id from ${B} where deleted is null`, [])
     case 'ids':
       // json_each 吃 JSON 文本（与 docSubtree 同一条绑定口径）
       return wrap('select value as id from json_each(?)', [JSON.stringify(plan.ids)])
@@ -358,81 +386,82 @@ export function candidatePlanSql(plan: CandidatePlan): { sql: string; params: (s
           union
           select c.id from ${B} c join tags t on c.parent = t.id join ${L} l on l.block = c.id and l.list = 'tag'
         )
-        select distinct p.block as id from ${P} p join tags on p.name = '_tags' and p.value = '"' || tags.id || '"'`,
+        select distinct p.block as id from ${P} p join tags on p.name = '_tags' and p.value = '"' || tags.id || '"'
+          join ${B} b on b.id = p.block and ${visible('b')}`,
         [JSON.stringify(plan.ids)],
       )
     case 'list':
       return wrap(
-        `select l.block as id from ${L} l join ${B} b on b.id = l.block where l.list = ? and b.deleted is null`,
+        `select l.block as id from ${L} l join ${B} b on b.id = l.block where l.list = ? and ${visible('b')}`,
         [plan.list],
       )
     case 'journal':
-      return wrap(`select id from ${B} where date is not null and deleted is null`, [])
+      return wrap(`select b.id as id from ${B} b where b.date is not null and ${visible('b')}`, [])
     case 'note':
       return wrap(
-        `select p.block as id from ${P} p join ${B} b on b.id = p.block and b.deleted is null where p.name = '_annotates'`,
+        `select p.block as id from ${P} p join ${B} b on b.id = p.block and ${visible('b')} where p.name = '_annotates'`,
         [],
       )
-    case 'ref':
+    case 'ref': {
+      if (!derived) return candidatePlanSql({ k: 'visible' }, opts)
+      const kinds = JSON.stringify(plan.kinds)
       return plan.to === undefined
         ? wrap(
-            `select b.id as id from ${B} b where b.deleted is null and exists (
-              select 1 from json_each(b.content) j where json_extract(j.value,'$.t') = 'ref'
-            )`,
-            [],
+            `select distinct r.from_id as id from ${R} r
+              where r.kind in (select value from json_each(?))`,
+            [kinds],
           )
         : wrap(
-            `select b.id as id from ${B} b where b.deleted is null and exists (
-              select 1 from json_each(b.content) j
-              where json_extract(j.value,'$.t') = 'ref' and json_extract(j.value,'$.to') = ?
-            )`,
-            [plan.to],
+            `select distinct r.from_id as id from ${R} r
+              where r.to_id = ? and r.kind in (select value from json_each(?))`,
+            [plan.to, kinds],
           )
+    }
     case 'prop':
       // 「有这一栏」＝ 值 ∪ 自有槽 ∪ 标签声明（matcher 的 readField 三来源）——
       // 只给「有值行」的块会漏掉标签声明进场的成员，候选就不再是超集
       return wrap(
-        `select p.block as id from ${P} p join ${B} b on b.id = p.block and b.deleted is null where p.name = ?
+        `select p.block as id from ${P} p join ${B} b on b.id = p.block and ${visible('b')} where p.name = ?
         union
-        select p.block as id from ${P} p join ${B} b on b.id = p.block and b.deleted is null
+        select p.block as id from ${P} p join ${B} b on b.id = p.block and ${visible('b')}
           where p.name = '_ownProps' and p.value = ?
         union
-        select m.block as id from ${P} m join ${B} b on b.id = m.block and b.deleted is null
+        select m.block as id from ${P} m join ${B} b on b.id = m.block and ${visible('b')}
           where m.name = '_tags' and m.value in (
             select '"' || d.block || '"' from ${P} d where d.name = '_fieldDefs' and d.value = ?
           )`,
         [plan.name, `"${plan.name}"`, `"${plan.name}"`],
       )
     case 'kind':
-      return wrap(`select id from ${B} where kind is not null and deleted is null`, [])
+      return wrap(`select b.id as id from ${B} b where b.kind is not null and ${visible('b')}`, [])
     case 'aliased':
       return wrap(
-        `select distinct a.block as id from ${A} a join ${B} b on b.id = a.block and b.deleted is null`,
+        `select distinct a.block as id from ${A} a join ${B} b on b.id = a.block and ${visible('b')}`,
         [],
       )
     case 'tagged':
       return wrap(
-        `select distinct p.block as id from ${P} p join ${B} b on b.id = p.block and b.deleted is null where p.name = '_tags'`,
+        `select distinct p.block as id from ${P} p join ${B} b on b.id = p.block and ${visible('b')} where p.name = '_tags'`,
         [],
       )
     case 'journalDay':
-      return wrap(`select id from ${B} where date = ? and deleted is null`, [plan.date])
+      return wrap(`select b.id as id from ${B} b where b.date = ? and ${visible('b')}`, [plan.date])
     case 'parents':
       return wrap(
-        `select distinct b.parent as id from ${B} b where b.parent is not null and b.deleted is null`,
+        `select distinct b.parent as id from ${B} b where b.parent is not null and ${visible('b')}`,
         [],
       )
     case 'text':
       return plan.nonempty === true
         ? wrap(
-            `select b.id as id from ${B} b where b.deleted is null and exists (
+            `select b.id as id from ${B} b where ${visible('b')} and exists (
               select 1 from json_each(b.content) j
               where json_extract(j.value,'$.t') = 'text' and trim(json_extract(j.value,'$.v')) <> ''
             )`,
             [],
           )
         : wrap(
-            `select b.id as id from ${B} b where b.deleted is null and exists (
+            `select b.id as id from ${B} b where ${visible('b')} and exists (
               select 1 from (
                 select group_concat(json_extract(j.value,'$.v'), '') as txt
                 from json_each(b.content) j where json_extract(j.value,'$.t') = 'text'
@@ -441,7 +470,7 @@ export function candidatePlanSql(plan: CandidatePlan): { sql: string; params: (s
             [plan.needle],
           )
     case 'descendantsOf': {
-      const inner = candidatePlanSql(plan.plan)
+      const inner = candidatePlanSql(plan.plan, opts)
       return wrap(
         `with m(id) as (${inner.sql}), sub(id) as (
           select id from m union select c.id from ${B} c join sub s on c.parent = s.id
@@ -451,7 +480,7 @@ export function candidatePlanSql(plan: CandidatePlan): { sql: string; params: (s
       )
     }
     case 'ancestorsOf': {
-      const inner = candidatePlanSql(plan.plan)
+      const inner = candidatePlanSql(plan.plan, opts)
       return wrap(
         `with m(id) as (${inner.sql}), anc(id) as (
           select id from m union select b.parent from ${B} b join anc a on b.id = a.id where b.parent is not null
@@ -461,7 +490,7 @@ export function candidatePlanSql(plan: CandidatePlan): { sql: string; params: (s
       )
     }
     case 'near': {
-      const inner = candidatePlanSql(plan.plan)
+      const inner = candidatePlanSql(plan.plan, opts)
       return wrap(
         `with m(id) as (${inner.sql}), all_(id) as (
           select id from m
@@ -473,16 +502,16 @@ export function candidatePlanSql(plan: CandidatePlan): { sql: string; params: (s
       )
     }
     case 'all': {
-      if (plan.plans.length === 0) return candidatePlanSql({ k: 'visible' })
-      const parts = plan.plans.map(candidatePlanSql)
+      if (plan.plans.length === 0) return candidatePlanSql({ k: 'visible' }, opts)
+      const parts = plan.plans.map((p) => candidatePlanSql(p, opts))
       return wrap(
         parts.map((p) => `select id from (${p.sql})`).join(' intersect '),
         parts.flatMap((p) => p.params),
       )
     }
     case 'any': {
-      if (plan.plans.length === 0) return candidatePlanSql({ k: 'none' })
-      const parts = plan.plans.map(candidatePlanSql)
+      if (plan.plans.length === 0) return candidatePlanSql({ k: 'none' }, opts)
+      const parts = plan.plans.map((p) => candidatePlanSql(p, opts))
       return wrap(
         parts.map((p) => `select id from (${p.sql})`).join(' union '),
         parts.flatMap((p) => p.params),

@@ -25,6 +25,7 @@ import {
   type RawLibraryRows,
 } from '../../src/core/storage/library-reads.ts'
 import { META_KEYS } from '../../src/core/identity/library.ts'
+import { readMeta } from './sqlite.ts'
 
 type Row = Record<string, unknown>
 
@@ -115,9 +116,13 @@ export function readCatalogRows(db: DatabaseSync): LibraryCatalog {
  *
  * 计划是**超集**（⊇ 真命中）：matcher 在渲染层仍是判定的唯一来源，这里少给一行
  * 就是静默丢结果，多给只是多装几块。
+ *
+ * **派生两表可信吗**在**这一处**问（`derived_state`）：只决定「收窄得多准」，不决定语义。
+ * 不可信就退回根上的 `deleted` 位与 `visible`——宽，但仍是超集（详见 `candidatePlanSql`）。
  */
 export function readCandidateIds(db: DatabaseSync, plan: CandidatePlan): string[] {
-  const { sql, params } = candidatePlanSql(plan)
+  const derived = readMeta(db, META_KEYS.derivedState) === 'ready'
+  const { sql, params } = candidatePlanSql(plan, { derived })
   const rows = db.prepare(sql).all(...params) as { id: unknown }[]
   return rows.map((r) => String(r.id)).filter((id) => id !== '' && id !== 'null')
 }

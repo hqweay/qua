@@ -8,6 +8,9 @@
  * 覆盖的形状：role／tag（含并集语义）／is／ref（指名与不限目标）／prop（系统槽与
  * 定义槽）／up／down／near／today／text（含跨 run 拼接）／children／not／all／any／
  * `$self`（有宿主与无宿主）。
+ *
+ * 每条形状在**两种数据源**上各跑一遍（派生不可信 / 可信）：可见性与 `{ref}` 的取数在这两种
+ * 模式下不同源，只测一种会漏掉另一半——旧夹具只有行内引用，就漏掉了「属性指向／嵌入」的候选。
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -15,8 +18,9 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openLibraryDb, applyRowWrites, readContentRows, type RowWrite } from '../electron/library/sqlite.ts'
-import { readCandidateIds, readBlockTreeRows } from '../electron/library/reads.ts'
+import { readCandidateIds, readBlockTreeRows, readIdentityRows } from '../electron/library/reads.ts'
 import { rowsToWorkspace } from '../src/core/storage/db-rows.ts'
+import { rebuildDerivedWrites } from '../src/core/storage/derived-rows.ts'
 import { candidateBuildOf } from '../src/core/storage/query-candidates.ts'
 import { BlockStore } from '../src/core/model/store.ts'
 import { Workset } from '../src/core/storage/workset.ts'
@@ -104,6 +108,16 @@ function seed(): RowWrite[] {
     { table: 'Block', op: 'update', key: { id: 'j1' }, values: { content: runs('黑', '体') } },
     { table: 'Block', op: 'update', key: { id: 'y1' }, values: { content: runs('有子级的一行') } },
     prop('d1', 'DEF', 0, '状态值'),
+    /**
+     * 引用的**另外两种来源**（夹具原先只有行内 run，抓不到这一条）：`{ref: X}` 的 matcher
+     * 认 inline／property／embed 三类边，候选若只扫正文，属性指向与嵌入会**静默丢行**。
+     * `REF_DEF` 是 kind:'ref' 的定义块。
+     */
+    block('REF_DEF', null, null, { kind: 'ref' }),
+    block('d3', 'PAGE_DAY', 'd2'),
+    block('d4', 'PAGE_DAY', 'd3'),
+    prop('d3', 'REF_DEF', 0, 'PAGE_X'),
+    prop('d4', '_embed', 0, { block: 'PAGE_X' }),
     prop('TAG_A', '_fieldDefs', 0, 'DEF', 1),
     prop('x1', '_color', 0, 'red'),
   ]
@@ -146,6 +160,12 @@ function worksetEval(
   const build = candidateBuildOf(spec, host, forest, ctx)
   const store = new BlockStore([])
   const ws = new Workset(store)
+  /**
+   * **全局身份块先装**（产品里这一步在启动的 identity 读面）：matcher 判 `{ref}` 要看
+   * 属性定义块的 kind（`propKinds` 决定属性值是算一条引用边还是不）。少了定义块，
+   * 「属性指向」的命中在**求值**这一侧就丢了——那不是候选的错，但会让等式红在与候选无关的地方。
+   */
+  ws.loadBlocks(readIdentityRows(db), true)
   // 条件点名的块先装（标签/定义）
   if (build.loadIds.length > 0) ws.loadBlocks(readBlockTreeRows(db, build.loadIds, false))
   const candidates = readCandidateIds(db, build.plan)
@@ -230,20 +250,34 @@ const CASES: { name: string; spec: QuerySpec; opts?: { selfId?: string; today?: 
   },
 ]
 
-test('候选计划 ⊇ 真命中，且候选装载后求值 == 整库求值', () => {
+test('候选计划 ⊇ 真命中，且候选装载后求值 == 整库求值（派生不可信 / 可信 两种源）', () => {
   withDb((db) => {
     const { forest, kb } = baseline(db)
-    for (const c of CASES) {
-      const expected = hitSet(kb, c.spec, c.opts ?? {})
-      const { hits, candidates } = worksetEval(db, c.spec, forest, c.opts ?? {})
-      const got = new Set(hits)
-      assert.deepEqual(
-        [...got].sort(),
-        [...expected].sort(),
-        `「${c.name}」的候选装载求值与整库求值不一致`,
-      )
-      for (const id of expected) {
-        assert.ok(candidates.includes(id), `「${c.name}」的候选漏了真命中 ${id}`)
+    /**
+     * 两种源都要过同一条等式：
+     *   · 不可信（`derived_state` 不是 ready）：可见性用根上的 `deleted` 位、`{ref}` 退回
+     *     `visible` —— 宽，但必须仍是**超集**；
+     *   · 可信（重建过派生两表）：可见性用物化的 `hidden`、`{ref}` 读 `BlockRelation`。
+     * 只测一种就会漏掉另一半（旧夹具正是这样漏掉了 property／embed 引用）。
+     */
+    for (const derived of [false, true]) {
+      if (derived) applyRowWrites(db, rebuildDerivedWrites(readContentRows(db)))
+      for (const c of CASES) {
+        const expected = hitSet(kb, c.spec, c.opts ?? {})
+        const { hits, candidates } = worksetEval(db, c.spec, forest, c.opts ?? {})
+        const got = new Set(hits)
+        assert.deepEqual(
+          [...got].sort(),
+          [...expected].sort(),
+          `「${c.name}」（派生${derived ? '可信' : '不可信'}）的候选装载求值与整库求值不一致`,
+        )
+        for (const id of expected) {
+          assert.ok(candidates.includes(id), `「${c.name}」（派生${derived ? '可信' : '不可信'}）的候选漏了真命中 ${id}`)
+        }
+        // 可信时软删页的后代不该耗尽候选面（`g1` 在 `gone` 之下）
+        if (derived && c.spec.where && 'role' in c.spec.where && c.spec.where.role === 'page') {
+          assert.ok(!candidates.includes('g1'), '可信时软删子树的后代不该进候选')
+        }
       }
     }
   })

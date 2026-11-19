@@ -20,7 +20,14 @@
  * 解析只有一份判据（`resolveSelfSpec`）：有宿主先解析，解析成 `NEVER` 的分支
  * 编译成空计划（`{k:'none'}`）——**不退回全库**：看不懂的指代不该变成大范围命中。
  */
-import { resolveSelfSpec, usesSelf, type QueryNode, type QuerySpec, type QueryContext } from '../query/query.ts'
+import {
+  refKindsOf,
+  resolveSelfSpec,
+  usesSelf,
+  type QueryNode,
+  type QuerySpec,
+  type QueryContext,
+} from '../query/query.ts'
 import { shiftISO } from '../identity/journal.ts'
 import type { Block } from '../model/model.ts'
 import type { CandidatePlan } from './library-reads.ts'
@@ -115,7 +122,9 @@ function planOf(
   }
   if ('ref' in node) {
     const to = typeof node.ref === 'string' ? node.ref : node.ref.to
-    return { k: 'ref', ...(to !== undefined && to !== '' ? { to } : {}) }
+    // kinds 进计划：「哪些 kind 算引用」是块语义，只能在这里给（SQL 只绑定参数）；
+    // `{ref:{kind:'embed'}}` 与 `{ref: X}` 的候选面本来就不同
+    return { k: 'ref', kinds: [...refKindsOf(node.ref)], ...(to !== undefined && to !== '' ? { to } : {}) }
   }
   if ('tag' in node) {
     // matcher 的 `{tag}` 读**整份 where 的标签并集**（文档化的已知语义）；
