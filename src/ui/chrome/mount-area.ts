@@ -85,6 +85,7 @@ import { bindDropTarget, setDragTab } from '../../view/dnd.ts'
 import { renderIcon } from '../../view/icons.ts'
 import { placeNear } from '../../view/place.ts'
 import { keepScrollWhile, scrollParentOf } from '../scroll.ts'
+import type { MenuOpts } from '../overlay/layers.ts'
 import { renderQuickFilter } from './quick-filter.ts'
 
 /** 一处浮层锚点（只读的矩形形状；`DOMRect` 与普通对象都能喂） */
@@ -209,6 +210,11 @@ export interface MountAreaDeps {
   ) => void
   /** 关掉当前浮层（宿主拆栏时收自己的尾） */
   closePopover?: () => void
+  /**
+   * 看法下拉的菜单外壳：与查询栏「视图…」**同一张菜单渲染器**（`layers.openMenu`）。
+   * 缺省不给时看法下拉整颗不画（退回镜头弹层里的旧路径），不会出现点了没反应的按钮。
+   */
+  openMenu?: (o: MenuOpts) => void
   /**
    * 这一台挂载区所在的表面（`dock` 是右槽窄列：镜头面板要向主内容一侧开）。
    * 只影响浮层落位，不影响数据与写路径。
@@ -1512,10 +1518,17 @@ export class MountArea {
   }
 
   /**
-   * 派生栏抬头：`引用 · 12 条  [大纲▾]  ⋯`。
+   * 派生栏抬头：与查询栏的抬头（`queryview-head`）**同一套**——分隔线、字号、
+   * 条数、右侧「看法下拉 ＋ 镜头」。`0 条  与这一块有共同标签   [大纲▾] ☰`。
    *
-   * 主数字＝**记录条数**（与列表/表格同一个数）：大纲折叠只影响画几行，不改成员。
-   * 条件是一句**只读说明**（「指向这一块」）——它没有可编辑的条件，也没有构建器落点。
+   * 与查询栏的三处不同，各有各的原因：
+   *   · **没有名字**：tab 条上已经写着「同类」，再写一遍是同一句话同屏两遍
+   *     （查询栏在挂载面也不写名字，同一条判据）；
+   *   · **没有刷新**：派生栏是现算的只读关系视图，成员跟着库走，没有「重算」动作；
+   *   · **条件是一句说明不是 chips**：它没有可编辑的条件，也没有构建器落点。
+   *
+   * 看法下拉与查询栏的「当前看法」是**同一颗形状**（`qv-view-btn` 配对样式），
+   * 点开同一张菜单渲染器（`openMenu`），只是行只有内置四种、写的是设备状态。
    */
   private renderDerivedHead(
     host: Block,
@@ -1528,9 +1541,6 @@ export class MountArea {
     head.hidden = false
     head.replaceChildren()
 
-    const title = document.createElement('span')
-    title.className = 'mount-derived-title'
-    title.textContent = t(BUILTIN_LABEL[entry.source])
     const num = document.createElement('span')
     num.className = 'mount-derived-count'
     num.textContent = t('ui.mount.count', { count })
@@ -1543,7 +1553,7 @@ export class MountArea {
     why.className = 'mount-derived-why ui-ellipsis'
     why.textContent = t(DERIVED_WHY[entry.source])
     why.dataset.tip = why.textContent
-    head.append(title, num, why)
+    head.append(num, why)
 
     const actions = document.createElement('div')
     actions.className = 'mount-derived-actions'
@@ -1577,9 +1587,30 @@ export class MountArea {
     }
 
     /**
-     * **镜头一个入口**：筛选/排序/分组/看法/类型都从这一颗进。抬头不再排一排
-     * 文字控件——320px 的右槽里那一排会挤成工具栏，且「点了会怎样」全靠读字。
-     * 有镜头生效时带状态点；点开的是锚定弹层（右槽向主内容一侧开）。
+     * **看法下拉与查询栏的「当前看法」同一颗**：显式下拉把已有动作从镜头弹层里
+     * 提到抬头（可见性对齐），行只有内置四种、写设备状态（`setDerivedKind`）。
+     * 拿不到菜单外壳时退回镜头——看法仍可切，只是多一层。
+     */
+    if (this.deps.openMenu) {
+      const kindBtn = document.createElement('button')
+      kindBtn.type = 'button'
+      kindBtn.className = 'qv-view-btn mount-derived-view-btn'
+      kindBtn.dataset.tip = t('ui.view.switchHint')
+      const label = document.createElement('span')
+      label.className = 'qv-view-current-label'
+      label.textContent = this.derivedKindLabel(kind)
+      const caret = document.createElement('span')
+      caret.className = 'qv-view-caret'
+      renderIcon(caret, 'lucide:chevron-down', 'chevron-down')
+      kindBtn.append(label, caret)
+      kindBtn.addEventListener('click', () => this.openDerivedKindMenu(host, entry, kind, kindBtn))
+      actions.appendChild(kindBtn)
+    }
+
+    /**
+     * **镜头一个入口**：筛选/排序/分组/类型都从这一颗进（看法已提到抬头，
+     * 弹层里不再重复一段）。有镜头生效时带状态点；点开的是锚定弹层
+     * （右槽向主内容一侧开）。
      */
     const lens = document.createElement('button')
     lens.type = 'button'
@@ -1592,6 +1623,50 @@ export class MountArea {
     lens.addEventListener('click', () => this.openDerivedLens(host, entry, lens))
     actions.appendChild(lens)
     head.appendChild(actions)
+  }
+
+  /** 派生看法的人话名（与镜头弹层、视图菜单同一份字典） */
+  private derivedKindLabel(kind: DerivedViewKind): string {
+    const labels: Record<DerivedViewKind, MsgId> = {
+      outline: 'ui.view.outline',
+      table: 'ui.view.kind.table',
+      cards: 'ui.view.kind.cards',
+      calendar: 'ui.view.kind.calendar',
+    }
+    return t(labels[kind])
+  }
+
+  /** 看法下拉的菜单：与查询栏「视图…」同一张菜单渲染器，行只有内置四种 */
+  private openDerivedKindMenu(
+    host: Block,
+    entry: Extract<MountEntry, { kind: 'derived' }>,
+    kind: DerivedViewKind,
+    trigger: HTMLElement,
+  ): void {
+    const icons: Record<DerivedViewKind, string> = {
+      outline: 'lucide:list',
+      table: 'lucide:table',
+      cards: 'lucide:layout-grid',
+      calendar: 'lucide:calendar',
+    }
+    this.deps.openMenu?.({
+      rows: DERIVED_VIEW_KINDS.map((k) => ({
+        id: k,
+        label: this.derivedKindLabel(k),
+        icon: icons[k],
+        ...(k === kind ? { keyHint: t('ui.view.current') } : {}),
+      })),
+      anchor: trigger.getBoundingClientRect(),
+      trigger,
+      width: 260,
+      title: t('menu.label.views'),
+      searchable: false,
+      onPick: (row) => {
+        const next = String(row.id) as DerivedViewKind
+        if (next === kind) return
+        this.deps.setDerivedKind?.(host, entry.source, next)
+      },
+    })
   }
 
   /** 镜头有没有「生效中的设置」：状态点只回答这一件事 */
@@ -1842,33 +1917,7 @@ export class MountArea {
       body.appendChild(group)
     }
 
-    /* 看法：一组需要比较的选项 ⇒ 弹层里用文字，不排一排图标 */
-    const viewBody = this.lensSection(root, 'ui.view.switchHint')
-    const labels: Record<DerivedViewKind, MsgId> = {
-      outline: 'ui.view.outline',
-      table: 'ui.view.kind.table',
-      cards: 'ui.view.kind.cards',
-      calendar: 'ui.view.kind.calendar',
-    }
-    const views = document.createElement('div')
-    views.className = 'vopt-seg'
-    for (const k of DERIVED_VIEW_KINDS) {
-      const b = document.createElement('button')
-      b.type = 'button'
-      b.className = 'ui-btn vopt-seg-btn'
-      b.dataset.derivedView = k
-      if (k === kind) b.dataset.active = '1'
-      b.textContent = t(labels[k])
-      b.addEventListener('click', () => {
-        if (k === kind) return
-        // 与面板里其它选项同一节奏：看法换了身体也不收层——弹层自己重画跟上，
-        // 锚点每次现查（抬头重画、触发按钮被换掉都不碍），换着看不用反复开层
-        this.deps.setDerivedKind?.(host, entry.source, k)
-        repaint()
-      })
-      views.appendChild(b)
-    }
-    viewBody.appendChild(views)
+    /* 看法已提到抬头的下拉（与查询栏同一颗）——弹层里不再重复一段 */
 
     /* 条件：只读说明 ＋ 唯一的物化动作（改变拥有者，必须显式） */
     const condBody = this.lensSection(root, 'ui.query.filter')

@@ -1356,6 +1356,8 @@ export function setupPanels(deps: PanelsDeps) {
       openPopover: (render, anchor, trigger, placement, onClose) =>
         layers.openPopover(render, anchor, onClose, trigger, placement),
       closePopover: () => layers.closePopover(),
+      // 派生栏的看法下拉：与视图宿主那条「视图…」同一张菜单渲染器（行由挂载区现画）
+      openMenu: (o) => layers.openMenu(o),
       // 大纲分支的切换下拉：与视图宿主那条同一个菜单（装配层现画行，这里只给锚点）
       derivedKind: (hostBlock, source) => {
         const mountHost = mountHostOf(hostBlock)

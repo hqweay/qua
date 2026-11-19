@@ -1714,7 +1714,8 @@
 .title-editor .tx[data-ph]::before {
   font-weight: 400;
 }
-.queryview-count {
+.queryview-count,
+.mount-derived-count {
   color: var(--ui-text-tertiary);
 }
 /* 「结果可能已过期」（待定-日记流 #1）：只是提示，不拦编辑、不改变排版 */
@@ -1749,7 +1750,8 @@
 .queryview-hidden[hidden] {
   display: none;
 }
-.queryview-options {
+.queryview-options,
+.mount-derived-lens {
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -1760,7 +1762,8 @@
   color: var(--ui-text-secondary);
   cursor: pointer;
 }
-.queryview-options:hover {
+.queryview-options:hover,
+.mount-derived-lens:hover {
   color: var(--ui-text);
 }
 /* 派生栏的镜头生效（筛选/分组/看法/类型）：一点状态色——它没有条件 pill 可承接 */
@@ -2207,17 +2210,18 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: var(--ui-gap-2);
-  margin-bottom: var(--ui-gap-1);
-  font-size: var(--ui-fs-xs);
-  color: var(--ui-text-tertiary);
+  gap: var(--ui-gap-3);
+  /* 与查询栏的抬头同一套骨架（.queryview 的分隔线 ＋ .queryview-head 的排版）：
+     24px 让位、一条结构线、12px 喘息、sm 字号——两种栏激活时抬头不跳变 */
+  margin-top: var(--ui-gap-6);
+  padding-top: var(--ui-gap-3);
+  border-top: 1px solid var(--ui-border-subtle);
+  margin-bottom: var(--ui-gap-2);
+  font-size: var(--ui-fs-sm);
+  color: var(--ui-text-secondary);
 }
 .mount-derived-head[hidden] {
   display: none;
-}
-.mount-derived-title {
-  color: var(--ui-text-secondary);
-  font-weight: 600;
 }
 .mount-derived-count,
 .mount-derived-why {
@@ -2237,23 +2241,6 @@
   align-items: center;
   gap: var(--ui-gap-2);
   margin-left: auto;
-}
-.mount-derived-lens {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  background: none;
-  border: 0;
-  padding: 0 var(--ui-gap-1);
-  font: inherit;
-  color: var(--ui-text-tertiary);
-  cursor: pointer;
-  border-radius: var(--ui-radius-sm);
-  line-height: 1.6;
-}
-.mount-derived-lens:hover {
-  color: var(--ui-text);
-  background: var(--ui-bg-hover);
 }
 .mount-derived-lens[data-active='1'] {
   color: var(--ui-accent);

@@ -248,14 +248,13 @@ const mountTab = async (page, kind) => {
   await page.waitForTimeout(180)
 }
 
-/** 派生栏的看法在镜头弹层里（与筛选/分组同一个入口）：点镜头 → 点看法段 */
+/** 派生栏的看法在抬头下拉里（与查询栏「当前看法」同一颗形状、同一张菜单渲染器） */
+const DERIVED_VIEW_LABEL = { outline: '大纲', table: '表格', cards: '卡片', calendar: '日历' }
 const pickDerivedView = async (page, kind) => {
   // 派生抬头现在有两个表面都有（中心段尾＋右槽卡）：切看法指名**中心**那一台
-  if ((await page.locator('.popover.lenspop').count()) === 0) {
-    await page.locator('#editor .mount-derived-lens').first().click()
-    await page.waitForTimeout(150)
-  }
-  await page.locator(`.popover.lenspop [data-derived-view="${kind}"]`).click()
+  await page.locator('#editor .mount-derived-view-btn').first().click()
+  await page.waitForTimeout(150)
+  await page.locator('.layer .layer-item', { hasText: DERIVED_VIEW_LABEL[kind] }).click()
   await page.waitForTimeout(250)
 }
 
@@ -2675,22 +2674,22 @@ await check('T194b 引用含属性引用：kind 过滤可切；标签页默认�
     extract: Boolean(document.querySelector('.popover.lenspop [data-materialize]')),
   }))
   assert(lens.group, '派生表格的镜头面板应有分组节')
-  assert(lens.views.includes('table') && lens.views.includes('outline'), `镜头面板应能切回大纲：${JSON.stringify(lens.views)}`)
+  assert(lens.views.length === 0, `看法已提到抬头下拉，镜头弹层里不应再有看法段：${JSON.stringify(lens.views)}`)
   assert(lens.extract, '派生栏的镜头面板应有「提取为查询」动作')
 
-  // 看法切换不收层（与面板里其它选项同一节奏）：弹层还在、选中态跟上、身体切回大纲
-  await page.locator('.popover.lenspop [data-derived-view="outline"]').click()
-  await page.waitForTimeout(300)
+  // 看法切换走抬头的下拉（与查询栏「当前看法」同一颗形状、同一张菜单）：选完菜单收、身体切回大纲
+  await pickDerivedView(page, 'outline')
   const back = await page.evaluate(() => ({
-    open: Boolean(document.querySelector('.popover.lenspop')),
-    active: document.querySelector('.popover.lenspop [data-derived-view][data-active="1"]')?.dataset.derivedView ?? '',
+    open: Boolean(document.querySelector('.layer')),
     rows: document.querySelectorAll('#editor .mount .blk[data-depth="0"]').length,
     tableRows: document.querySelectorAll('#editor .mount-view .tv-row').length,
   }))
-  assert(back.open, '看法切换后镜头面板应保持打开（换着看不用反复开层）')
-  assert(back.active === 'outline', `选中态应跟到新看法：${JSON.stringify(back)}`)
+  assert(!back.open, `选完看法菜单应收起：${JSON.stringify(back)}`)
   assert(back.rows > 0 && back.tableRows === 0, `身体应切回大纲：${JSON.stringify(back)}`)
 
+  // 「编辑条件…」住镜头弹层的筛选节里：看法下拉选完收层，先开镜头再点
+  await page.locator('#editor .mount-derived-lens').first().click()
+  await page.waitForTimeout(200)
   await page.locator('.popover.lenspop [data-derived-slice]').click()
   await page.waitForTimeout(200)
   const sliceTree = await page.evaluate(() => ({
