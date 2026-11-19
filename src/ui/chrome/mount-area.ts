@@ -454,10 +454,15 @@ export class MountArea {
       debounceMs: 200,
       // 冻结范围＝整片挂载区：焦点落在 tab 按钮上时，重排 tab 条同样会把正被按的那颗换掉
       area: this.root,
-      // 与当前栏无关的变化不重画：别处敲字不该重排 tab 条与这一栏（判据见 `loadForIds`）。
-      // 拿不到 ids（结构欠账/整库通知）才整片重画——栏的出现条件读维度存在性，欠账可能动它
+      // 与当前栏无关的变化不重画：别处敲字不该重排 tab 条与这一栏（判据见 `loadsFor`）。
+      // 拿不到 ids（结构欠账/整库通知）才整片重画——栏的出现条件读维度存在性，欠账可能动它。
+      // ⚠️ 跳过整片重排 ≠ 抬头也可以不刷：计数读的是全库现算，成员的变化不必来自宿主
+      // （任何块的一枚新引用都算）——只刷计数那一格，不动表格实例（滚动/列宽都在）。
       load: (_ed, ids) => {
-        if (ids && ids.length > 0 && !this.loadsFor(ids)) return
+        if (ids && ids.length > 0 && !this.loadsFor(ids)) {
+          this.refreshDerivedHead()
+          return
+        }
         this.render()
       },
       // 挂载区的一行是查询/派生结果：根是派生的，只能往下编辑，不能当兄弟序搬
@@ -518,14 +523,26 @@ export class MountArea {
       return ids.includes(host.id)
     }
     if (this.emptyEl.hidden === false) {
-      // 空态的出口只有宿主自己的维度变化（第一次被引用/打标签走 kickDerived 的
-      // 成员对比重画，不靠这里）；这里保守放行宿主，其余交给那条路径
-      return ids.includes(host.id)
+      // 空态不跳：成员的出现常常是**别的块**的内容/属性变化（第一个反链＝源块写了一枚
+      // 引用 run，ids 里是源块不是宿主），这里没有任何便宜的判据能排除它——而空态
+      // 本身只有一句话，整片重画是所有分支里最便宜的一条。
+      return true
     }
     const ed = this.block.ed
     if (!ed) return true
     const onScreen = new Set(flatten(ed.doc).map((b) => b.id))
     return ids.some((id) => onScreen.has(id))
+  }
+
+  /** 跳过整片重排时刷新派生抬头：计数与类型分布读全库现算，与表格实例分开保鲜 */
+  private refreshDerivedHead(): void {
+    const host = this.deps.host()
+    if (!host) return
+    const entry = this.entries.find((e) => e.id === this.active)
+    if (!entry || entry.kind !== 'derived') return
+    const kind = this.deps.derivedKind?.(host, entry.source) ?? 'outline'
+    const { filtered, records } = this.displayedDerivedRecords(host, entry.source)
+    this.renderDerivedHead(host, entry, kind, records.length, filtered)
   }
 
   /** 摘掉实例（装配层在段根换人时调）：退订 store、卸事件，别让游离容器继续被重画 */

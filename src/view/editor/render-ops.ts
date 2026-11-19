@@ -104,6 +104,25 @@ export class RenderOps {
   }
 
   /**
+   * 上次渲染时**事件表接上了没有**。编辑器构造时就渲染首帧，而事件表是装配层
+   * 之后才赋上的——「接上后再重画一次」是身体能画出来的唯一路径。那次重画
+   * 模型没变，修订号看不见它；保留行把它变成空操作，身体就永远是破态壳。
+   * 所以事件表的有无也参与保留判据：与上次渲染不一致 ⇒ 整体重建。
+   */
+  private renderedWithEvents = false
+  private eventsPresent(): boolean {
+    const ev = this.ed.events
+    return Boolean(ev && (ev.viewBody || ev.embedBody || ev.propsLine || ev.assetView))
+  }
+
+  /**
+   * 上次渲染用的**那份 doc**。装载形状（roots／paths／contexts／rootNotes／expandedRoots）
+   * 都是行渲染的输入，却不是 store 变更——修订号看不见它们；`loadPage`／派生栏重配
+   * 换的是新 doc 对象，同一性对账最便宜也最不会漏。
+   */
+  private renderedDoc: object | null = null
+
+  /**
    * **把旧 DOM 里能对上 id 的行摘下来留用**；`null` ＝ 这一次不值得保留（退回全量重建）。
    *
    * 判据五条，任何一条不满足都整体放弃（不做「部分保留」——那要回答「哪几行深拷才对」，
@@ -123,6 +142,8 @@ export class RenderOps {
   private holdRows(): Map<string, { el: HTMLElement; depth: number }> | null {
     if (this.ed.virtualize && this.ed.layout === 'column') return null
     if (this.foldSig() !== this.renderedFoldSig) return null
+    if (this.eventsPresent() !== this.renderedWithEvents) return null
+    if (this.ed.doc !== this.renderedDoc) return null
     const rev = String(this.ed.store.revision)
     const rows = this.ed.rows()
     if (rows.length === 0) return null
@@ -208,6 +229,8 @@ export class RenderOps {
     this.ed.bsel.paintBlockSel()
     this.ed.events.mounted?.()
     this.renderedFoldSig = this.foldSig()
+    this.renderedWithEvents = this.eventsPresent()
+    this.renderedDoc = this.ed.doc
   }
 
   /** `rebuildWith` 给 `renderRows` 的占位钩子：返回 `null` ＝ 按普通行画 */
@@ -306,6 +329,8 @@ export class RenderOps {
     this.ed.events.mounted?.()
     this.paintAnnoMarks()
     this.renderedFoldSig = this.foldSig()
+    this.renderedWithEvents = this.eventsPresent()
+    this.renderedDoc = this.ed.doc
   }
 
   /**

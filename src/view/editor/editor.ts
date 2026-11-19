@@ -902,6 +902,15 @@ export class BlockEditor {
       .map((id) => this.store.find(id))
       .filter((b): b is Block => Boolean(b))
     /**
+     * **根没变就复用同一份 doc**：后台装载／查询刷新这类重取，roots 与视图字段都
+     * 没变——换一份新 doc 会让「保留行」的重画快路（`holdRows` 按 doc 同一性对账）
+     * 把整屏当「装载形状变了」全量重建，读作一次无意义的闪。共享对象是同一份
+     * （`store.find` 直达），序列相同就是同一棵树。
+     */
+    const same =
+      roots.length === this.doc.roots.length && roots.every((b, i) => b.id === this.doc.roots[i]?.id)
+    if (same) return
+    /**
      * 折叠表／面包屑属于**这一份文档**（视图各带各的），换 roots 时原样保留。
      *
      * `viewRootId` 不同：它是**从模型派生的**（`activeView(根)`），所以每次重取 roots 都重算一遍。
