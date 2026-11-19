@@ -31986,15 +31986,25 @@ await check('T334 挂载区切栏不动滚动位：长栏⇄长栏 scrollTop 分
   await page.waitForTimeout(450)
   const short = await page.evaluate(() => {
     const s = document.getElementById('scroll')
+    const body = document.querySelector('#editor .mount-body')
     const rows = document.querySelectorAll('#editor .mount .queryview-editor .blk, #editor .mount .mount-editor .blk').length
-    return { top: s.scrollTop, sh: s.scrollHeight, rows }
+    return {
+      top: s.scrollTop,
+      sh: s.scrollHeight,
+      bodyH: Math.round(body.getBoundingClientRect().height),
+      bodyMin: body.style.minHeight || '',
+      rows,
+    }
   })
   assert(short.top === pos.top, `切到空栏 scrollTop 也应不变：${pos.top} → ${short.top}`)
-  // 页高允许塌到「刚好够」（钉盒封顶于视口），但必须 still 装得下当前滚动位——不塌出抖动
+  // 页高允许塌到「刚好够」（段尾走尾巴补偿，卡片贴内容），但必须仍装得下当前滚动位——不塌出抖动
   assert(short.sh >= short.top + pos.ch, `切到空栏页高应仍装得下滚动位：${short.top}+${pos.ch} → ${short.sh}`)
+  // 面板是段尾最后一块内容 ⇒ 补偿钉在**文档尾**（--doc-tail-h），身体不钉：卡片贴着空栏内容收起
+  assert(short.bodyMin === '', `段尾空栏不应把补偿钉在身体上：${JSON.stringify(short.bodyMin)}`)
+  assert(short.bodyH < 150, `空栏卡片应贴内容收起（身体 ${short.bodyH}px），不留一段沉底空白`)
 
   await ctx.close()
-  return `长⇄长⇄空三连切，scrollTop ${pos.top} 全程不变；页高收到刚好够（${pos.sh} → ${short.sh}）`
+  return `长⇄长⇄空三连切，scrollTop ${pos.top} 全程不变；卡片贴内容（身体 ${short.bodyH}px），页高收到刚好够（${pos.sh} → ${short.sh}）`
 })
 
 /**

@@ -240,6 +240,12 @@ interface MountRoots {
   contexts: Map<string, readonly Block[]>
 }
 
+/**
+ * 文档尾缓冲的**设计档**（`center.css` 里 `#editor::after` 的 min-height 兜底值）：
+ * 尾巴模式钉出的加高低于它时，不写变量、退回 CSS 兜底——改 CSS 侧的兜底值要同步这里。
+ */
+const DOC_TAIL_IDLE = 200
+
 export const BUILTIN_LABEL: Record<DerivedSource, MsgId> = {
   usedBy: 'ui.mount.usedBy',
   refs: 'ui.mount.refs',
@@ -551,6 +557,8 @@ export class MountArea {
     // 这一台拆了，镜头浮层不能还挂着一份旧面板
     if (this.lensHost?.isConnected) this.deps.closePopover?.()
     this.lensHost = null
+    // 钉过的文档尾加高也是这一台的：退回设计档，别让游离的加高留在页尾
+    this.clearTailHold()
     this.hitObserver.disconnect()
     this.editorEl.removeEventListener('click', this.onHitClick)
     this.editorEl.removeEventListener('mousemove', this.onHitHover)
@@ -1163,35 +1171,68 @@ export class MountArea {
   }
 
   /**
-   * **按当前滚动位钉住身体的最小高度**——高度只服务「这一下换体不抖」，不多留。
+   * **按当前滚动位钉住「刚好够」的高度**——高度只服务「这一下换体不抖」，不多留。
    *
-   * 换到更矮的栏时整页塌缩，滚进面板里的视窗会被浏览器按新上限收走。需要多高的
-   * 盒子才够？答数由换体那一刻的几何直接给出：身体在滚动视口里的可视位置往下、
-   * 到「视口底 − 文档尾缓冲 − 面板下内距」为止。滚动位在顶上（`scrollTop ≤ 0`）
-   * 时不钉——塌缩收不走任何东西，留白一分都不该有；身体在视口外时算出负数，
-   * 同样不钉。内容比钉的盒子矮时下方留白（封顶于视口，不随最长栏走）；
-   * 内容更高时盒子照常长高（整页滚动，不设上限）。
+   * 换到更矮的栏时整页塌缩，滚进面板里的视窗会被浏览器按新上限收走。需要补多高
+   * 才够？答数由换体那一刻的几何直接给出；**钉在哪一格**按面板的位置分两档：
+   *
+   * · **面板是最后一块内容**（段尾挂载区，下面只剩文档尾缓冲）：钉**缓冲**
+   *   （`--doc-tail-h`，`center.css` 的 `#editor::after`）。卡片贴着内容收起，
+   *   空白落在页面尾的页底色上——不是卡片内部的一段沉底色。缓冲两个方向都管：
+   *   变高时面板先长进缓冲，变矮时缓冲补住页高。
+   * · **下面还有内容**（日记流里展开的过去几天）：尾巴补页高会把下方的块滑进
+   *   视野——同一种抖，换了个落点。钉回**身体**：盒子不塌，视野里的东西都不动。
+   *
+   * 滚动位在顶上（`scrollTop ≤ 0`）或身体在视口外时不钉——塌缩收不走任何东西，
+   * 留白一分都不该有。内容比钉的盒子矮时下方留白（封顶于视口）；内容更高时
+   * 盒子照常长高（整页滚动，不设上限）。
    */
   private holdBodyAgainstCollapse(): void {
     const scroller = scrollParentOf(this.root)
     if (!scroller || scroller.scrollTop <= 0) {
       this.bodyEl.style.minHeight = ''
+      this.clearTailHold()
       return
     }
     const sRect = scroller.getBoundingClientRect()
+    const sTop = scroller.scrollTop
+    const bodyH = this.bodyEl.getBoundingClientRect().height
+    const tailCur = this.tailBuffer()
+    const editor = this.root.closest<HTMLElement>('#editor')
+    // 我是最后一块内容吗：我的底边与滚动内容末尾之间只剩文档尾缓冲
+    const mountBottomDoc = this.root.getBoundingClientRect().bottom + sTop
+    const isLast = editor !== null && scroller.scrollHeight - tailCur - mountBottomDoc <= 4
+    if (isLast) {
+      // 尾巴模式：最坏按「身体塌到 0」的中间态兜——缓冲单独把页高顶到滚动位够用。
+      // 答数与现值无关（scrollHeight 里的旧缓冲在式子里抵掉），每次现量现写，
+      // 几何允许时自动回落到设计档。
+      const needed = Math.ceil(sTop + sRect.height - (scroller.scrollHeight - bodyH - tailCur)) + 2
+      this.bodyEl.style.minHeight = ''
+      if (needed > DOC_TAIL_IDLE) editor!.style.setProperty('--doc-tail-h', `${needed}px`)
+      else editor!.style.removeProperty('--doc-tail-h')
+      return
+    }
+    this.clearTailHold()
     const bRect = this.bodyEl.getBoundingClientRect()
     const padBottom = parseFloat(getComputedStyle(this.root).paddingBottom) || 0
-    const tail = this.tailBuffer()
     // +2：scrollHeight/矩形都过取整，贴着下界钉会被整型收敛吃掉一像素
-    const needed = Math.ceil(sRect.height - tail - padBottom - (bRect.top - sRect.top)) + 2
+    const needed = Math.ceil(sRect.height - tailCur - padBottom - (bRect.top - sRect.top)) + 2
     this.bodyEl.style.minHeight = `${Math.max(0, needed)}px`
   }
 
-  /** 文档尾的生长缓冲（center.css 的 `#editor::after`）：它在面板下面托着一段页高，钉盒时扣掉 */
+  /**
+   * 文档尾的生长缓冲**现高**（center.css 的 `#editor::after`，走 `--doc-tail-h`
+   * 变量）：它在面板下面托着一段页高——尾巴模式钉它、身体模式扣掉它。
+   */
   private tailBuffer(): number {
-    const editor = this.root.closest('#editor')
+    const editor = this.root.closest<HTMLElement>('#editor')
     if (!editor) return 0
     return parseFloat(getComputedStyle(editor, '::after').minHeight) || 0
+  }
+
+  /** 尾巴的钉盒退回设计档（200px）：身体模式不占尾巴，换人/回顶不留陈旧加高 */
+  private clearTailHold(): void {
+    this.root.closest<HTMLElement>('#editor')?.style.removeProperty('--doc-tail-h')
   }
 
   private loadDerived(host: Block, entry: Extract<MountEntry, { kind: 'derived' }>, focusHint?: string): void {

@@ -611,13 +611,16 @@
   content: '';
   display: block;
   /*
-    这一格有两个用途，共用同一段空白：
+    这一格有三个用途，共用同一段空白：
     · 「还能往下写」的气口 ＋ 点空白建块的可发现性（悬停浮现一条极弱的线）；
-    · 段底挂载区的**生长缓冲**：面板是最后一块内容，视口滚到底沿时切栏，
-      面板变高先向下长进这段空白里——scrollTop 与面板顶边都不动，
+    · 段底挂载区的**生长缓冲**（变高侧）：面板是最后一块内容，视口滚到底沿时
+      切栏，面板变高先向下长进这段空白里——scrollTop 与面板顶边都不动，
       缓冲吃满才真正撑长页面。太薄了缓冲就白设，取一屏里一整块面板的高度档。
+    · 段底挂载区的**塌缩补偿**（变矮侧）：换到更矮的栏时，挂载区把「刚好够」的
+      加高写进 `--doc-tail-h`（`MountArea.holdBodyAgainstCollapse`）——卡片贴着
+      内容收起，这段空白替它托住页高，滚动位原地不动。设计档即下面的兜底 200px。
   */
-  min-height: 200px;
+  min-height: var(--doc-tail-h, 200px);
   border-bottom: 1px solid transparent;
   transition: border-color var(--ui-dur-1) ease;
 }
