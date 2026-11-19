@@ -24,6 +24,7 @@ import { MemoryKb } from '../src/core/kb/memory.ts'
 import type { LibraryClient } from '../src/core/storage/library-client.ts'
 import { CANDIDATE_PAGE, loadCandidateWindow, type QueryLoadDeps } from '../src/app/boot/query-load.ts'
 import { candidateBuildOf } from '../src/core/storage/query-candidates.ts'
+import { freezeResult } from '../src/core/query/query-view.ts'
 import type { QuerySpec } from '../src/core/index.ts'
 
 const dirs: string[] = []
@@ -212,5 +213,32 @@ test('禁用场景：派生表没建好 ⇒ 一页装完（next:null），不按
   })
   assert.equal(step.next, null, '没有可信的 path ⇒ 一页装完（同一 API 的退化，不是另一条语义）')
   assert.ok(CANDIDATE_PAGE >= 400)
+  close()
+})
+
+test('闭包块不进结果：页边界处不会先出现再回位（求值域＝已取候选）', async () => {
+  const { db, close } = tmp()
+  applyRowWrites(db, seed())
+  applyRowWrites(db, rebuildDerivedWrites(readContentRows(db)))
+  const spec: QuerySpec = { where: { not: { is: 'NOPE' } } }
+
+  const all = blank(db)
+  all.deps.workset!.loadBlocks(readContentRows(db), true)
+  const expected = ids(all.kb, spec)
+
+  const view = blank(db)
+  const step = await loadCandidateWindow(view.deps, spec, {}, undefined, {
+    after: null,
+    target: 30,
+    hits: () => view.kb.query(spec, {}).length,
+  })
+  const domain = new Set(step.ids)
+  const windowHits = freezeResult(spec, view.kb, {}, '', domain).hits.map((h) => h.blockId)
+  assert.deepEqual(
+    windowHits,
+    expected.filter((id) => domain.has(id)),
+    '求值域内谁是命中、什么顺序，必须与整库一致（闭包块不参与）',
+  )
+  assert.ok(windowHits.length > 0)
   close()
 })

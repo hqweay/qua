@@ -68,7 +68,7 @@ export async function loadCandidatePage(
   after: string | null,
 ): Promise<LoadStep> {
   const { client, workset, store } = deps
-  if (!client || !workset || !store.partial) return { loaded: false, next: null }
+  if (!client || !workset || !store.partial) return { loaded: false, next: null, ids: [] }
   const build = candidateBuildOf(spec, host, store.blocks, ctx)
   let loaded = false
 
@@ -105,7 +105,7 @@ export async function loadCandidatePage(
     }
   }
 
-  return { loaded, next: page.value.next }
+  return { loaded, next: page.value.next, ids: page.value.ids }
 }
 
 /** 一窗的硬上限（库坏了／游标不动时的刹车；正常一两页就够） */
@@ -130,14 +130,16 @@ export async function loadCandidateWindow(
 ): Promise<LoadStep> {
   let after = opts.after
   let loaded = false
+  const ids = new Set<string>()
   for (let i = 0; i < WINDOW_MAX_PAGES; i++) {
     const step = await loadCandidatePage(deps, spec, ctx, host, after)
     loaded = loaded || step.loaded
+    for (const id of step.ids) ids.add(id)
     after = step.next
     opts.onPage?.(step)
     if (after === null) break
     if (!opts.hits) break
     if (opts.hits() >= opts.target) break
   }
-  return { loaded, next: after }
+  return { loaded, next: after, ids: [...ids] }
 }

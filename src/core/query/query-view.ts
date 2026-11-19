@@ -87,12 +87,19 @@ export function freezeResult(
   kb: Pick<KbClient, 'query'>,
   ctx: QueryContext,
   viewKey = '',
+  /**
+   * **求值域**（可选）：只认这些 id 是命中。分页装载时＝「已经取过页的候选」——
+   * 闭包块（标签／定义／引用目标）只为显示装进来，不是候选，不能进结果
+   * （否则会在页边界处先出现、等下一页装齐又回位）。
+   */
+  domain?: ReadonlySet<string>,
 ): FrozenResult {
+  const hits = kb.query(spec, { selfId: ctx.selfId, excludeIds: ctx.excludeIds, ...(ctx.today ? { today: ctx.today } : {}) })
   return {
     specKey: specKeyOf(spec),
     viewKey,
     contextKey: contextKey(ctx),
-    hits: kb.query(spec, { selfId: ctx.selfId, excludeIds: ctx.excludeIds, ...(ctx.today ? { today: ctx.today } : {}) }),
+    hits: domain === undefined ? hits : hits.filter((h) => domain.has(h.blockId)),
   }
 }
 

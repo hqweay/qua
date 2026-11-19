@@ -118,6 +118,13 @@ export interface LibraryClient {
 export interface CandidateLoadStep {
   loaded: boolean
   next: string | null
+  /**
+   * 这次取到／取过的**候选 id**（窗口是各页的并集）。
+   *
+   * 视图拿它当「求值域」：闭包块（标签／定义／引用目标）只为显示装进来，
+   * **不是候选**——让它们进结果就会在页边界处提前出现、等下一页装齐又回位。
+   */
+  ids: readonly string[]
 }
 
 /** 一次「补一窗候选」的请求（视图自己存游标，滚一次推进一次） */

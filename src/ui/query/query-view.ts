@@ -540,6 +540,14 @@ export class ViewHost {
   /** 滚动容器（滚近底 ⇒ 再取一页）；只绑一次 */
   private scroller: HTMLElement | null = null
   /**
+   * **这一份条件的已取候选**（求值域）。
+   *
+   * 闭包块（标签／定义／引用目标）是为显示装进来的，不是候选——它们进结果就会在页边界
+   * 处提前出现、等下一页装齐再回位（那就是「顺序跳」）。条件一变就清空（旧条件的候选
+   * 不再描述这一份求值）。
+   */
+  private candidatesLoaded = new Set<string>()
+  /**
    * 大纲里的**结构编辑**改过树：冻结结果与上下文展开栈都可能过期。
    *
    * 为什么不在每次按键上重算：查询结果是**冻结**的（不自动重算，否则打一个字
@@ -1057,6 +1065,11 @@ export class ViewHost {
    * 于是不会出现「旧条件 ＋ 新结果」。⚠️ 这里**不写块**：结果与 `modified` 无关，
    * 也不进撤销栈。
    */
+  /** 求值域：有分页装载时＝已取的候选；整库模式下不传（求值天然完整） */
+  private domain(): ReadonlySet<string> | undefined {
+    return this.deps.loadCandidateWindow ? this.candidatesLoaded : undefined
+  }
+
   private ensureFrozen(): void {
     const spec = this.effective
     if (!spec) return
@@ -1068,9 +1081,10 @@ export class ViewHost {
      */
     this.cursor = null
     this.streamDone = false
+    this.candidatesLoaded = new Set()
     void this.fillPages()
     const before = this.frozen?.hits ?? []
-    this.frozen = freezeResult(spec, this.deps.kb, ctx, this.viewKey)
+    this.frozen = freezeResult(spec, this.deps.kb, ctx, this.viewKey, this.domain())
     const dropped = droppedFrom(before, this.frozen.hits)
     if (dropped.length > 0 && before.length > 0) {
       this.deps.toast?.(t('ui.query.dropped', { count: dropped.length }), 'info')
@@ -1112,8 +1126,9 @@ export class ViewHost {
           target: this.windowTarget(spec),
           hits: () => this.frozen?.hits.length ?? 0,
           onPage: (page) => {
+            for (const id of page.ids) this.candidatesLoaded.add(id)
             if (!page.loaded || sorted) return
-            this.frozen = freezeResult(spec, this.deps.kb, ctx, this.viewKey)
+            this.frozen = freezeResult(spec, this.deps.kb, ctx, this.viewKey, this.domain())
             this.sync(true)
           },
         })
@@ -1121,7 +1136,7 @@ export class ViewHost {
         if (step.next === null) this.streamDone = true
         // 带排序：取完之后一次性画（这才是「全集的排序」的那一次）
         if (sorted && step.loaded) {
-          this.frozen = freezeResult(spec, this.deps.kb, ctx, this.viewKey)
+          this.frozen = freezeResult(spec, this.deps.kb, ctx, this.viewKey, this.domain())
           this.sync(true)
         }
       } while (this.fillAgain && !this.streamDone)
@@ -1190,7 +1205,7 @@ export class ViewHost {
     // 与刷新同一条「按当前树重算」，但不报 toast：这是编辑边界的自动收口，
     // 不是用户按了刷新。被覆盖的命中仍会由祖先子树渲染出来，不该说「不再满足」。
     const spec = this.effective
-    if (spec) this.frozen = freezeResult(spec, this.deps.kb, this.evalContext(spec), this.viewKey)
+    if (spec) this.frozen = freezeResult(spec, this.deps.kb, this.evalContext(spec), this.viewKey, this.domain())
   }
 
   /**
@@ -1216,7 +1231,7 @@ export class ViewHost {
       const spec = this.effective
       if (!spec) return
       const before = this.frozen?.hits ?? []
-      this.frozen = freezeResult(spec, this.deps.kb, this.evalContext(spec), this.viewKey)
+      this.frozen = freezeResult(spec, this.deps.kb, this.evalContext(spec), this.viewKey, this.domain())
       const dropped = droppedFrom(before, this.frozen.hits)
       // 刷新＝成员与顺序都换了：上一轮的上下文展开没有依据，从头来
       this.expanded = new Set()
@@ -1903,7 +1918,7 @@ export class ViewHost {
             this.deps.invoke('core.view/new-card', args)
             const spec = this.effective
             if (spec) {
-              const fresh = freezeResult(spec, this.deps.kb, this.evalContext(spec), this.viewKey)
+              const fresh = freezeResult(spec, this.deps.kb, this.evalContext(spec), this.viewKey, this.domain())
               this.frozen = fresh
               if (!fresh.hits.some((h) => !before.has(h.blockId))) {
                 this.deps.toast?.(t('ui.cards.createdOutsideQuery'), 'info')
