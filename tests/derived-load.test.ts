@@ -155,6 +155,32 @@ test('部分装载：引用栏装齐后与整库逐条相同（别页的来源�
   close()
 })
 
+test('引用栏候选连一层子级：透传块的 children 装进来（reload 后的补装靠这一层摊开）', async () => {
+  const { db, close } = tmpDb()
+  const seed2 = [
+    ...seed(),
+    // b1 变成透传块（正文只有一枚引用）＋一个子块：引用栏上它默认摊开
+    { table: 'Block', op: 'update', key: { id: 'b1' }, values: { content: runs({ to: 'PAGE_A' }) } },
+    block('b1-child', 'b1', null),
+    { table: 'Block', op: 'update', key: { id: 'b1-child' }, values: { content: runs('引用真正指到的内容') } },
+  ]
+  applyRowWrites(db, seed2)
+  applyRowWrites(db, rebuildDerivedWrites(readContentRows(db)))
+
+  const view = partialView(db)
+  const a = hostBlock(view.kb)
+  await ensureDerivedLoaded({ client: readClient(db), workset: view.workset, store: view.store }, a, 'refs')
+
+  const b1 = view.store.find('b1')
+  assert.ok(b1, '候选来源 b1 已装载')
+  assert.equal(
+    b1.children.some((c) => c.id === 'b1-child'),
+    true,
+    '透传块的直接子级随候选一起装载——否则 reload 后引用栏只剩一枚孤引用',
+  )
+  close()
+})
+
 test('备注栏没有 QuerySpec：候选来自关系表的 annotates 边，装齐后与整库相同', async () => {
   const { db, close } = tmpDb()
   applyRowWrites(db, seed())

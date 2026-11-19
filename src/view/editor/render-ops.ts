@@ -85,6 +85,91 @@ export class RenderOps {
   annoSpans: ReadonlyMap<string, readonly AnnoHitSpan[]> = new Map()
 
   /**
+   * **把旧 DOM 里能对上 id 的行摘下来留用**；`null` ＝ 这一次不值得保留（退回全量重建）。
+   *
+   * 判据四条，任何一条不满足都整体放弃（不做「部分保留」——那要回答「哪几行深拷才对」，
+   * 退化成逐行 diff，正是这条快路要躲开的复杂度）：
+   *   · **新装载的行 id 全是旧 DOM 里有的**（刷新查询／对齐数据的典型形状：成员同、
+   *     顺序同或近似）。新行一出现就说明成员变了，重建只多不少地覆盖它；
+   *   · 行数对得上（防「同 id 不同位置」的树重构被误保留——depth/gutter 会全错）；
+   *   · 没有虚拟化窗口（窗口切片行的 `data-depth` 属于窗口形状，不是全集形状）；
+   *   · **id 无重复**（同一块在同一视图里出现两行——露面／镜像——时，保留表按 id 只
+   *     认领得到一份元素，两个占位会抢同一个节点，重建把它们塌成一份；多实例只有
+   *     全量重建的「逐行各建各的」天然支持）。
+   *
+   * 保留的行**连子树一起**（embed 身体、里层编辑岛、选中漆层都在行上）——这正是
+   * 「不闪」的全部来源：那些行根本没被重建过。
+   */
+  private holdRows(): Map<string, { el: HTMLElement; depth: number }> | null {
+    if (this.ed.virtualize && this.ed.layout === 'column') return null
+    const rows = this.ed.rows()
+    if (rows.length === 0) return null
+    const kept = new Map<string, { el: HTMLElement; depth: number }>()
+    for (const r of rows) {
+      const el = this.ed.blockEl(r.block.id)
+      if (!el) return null
+      if (el.dataset.depth !== String(r.depth)) return null
+      kept.set(r.block.id, { el, depth: r.depth })
+    }
+    if (kept.size !== rows.length) return null
+    return kept
+  }
+
+  /**
+   * **带着保留行重建**：搭新的段结构（占位行先挂），再把旧行 `replaceWith` 归位。
+   *
+   * 归位是「整棵子树换入」：保留行从不需要重新渲染，`makeBlockEl` 只服务新出现的行。
+   * 焦点与选区跟着 DOM 走（节点没换就不用抢）；`mounted`/祖先表/光标标记按重装后的
+   * 形状重建（与全量重建同口径）。
+   */
+  private rebuildWith(kept: Map<string, { el: HTMLElement; depth: number }>): void {
+    const detached = new Map<string, HTMLElement>()
+    for (const [id, { el }] of kept) {
+      el.remove()
+      detached.set(id, el)
+    }
+    // 占位重建：保留行先以空节点占位（占位决定它在段里的位置），随后原样换入
+    const rows = this.ed.rows()
+    const placeholders = new Map<string, HTMLElement>()
+    this.ed.container.textContent = ''
+    this.mounted.clear()
+    this.rebuildAncestors()
+    this.caretMarks = ''
+    const all = rows
+    this.winFrom = 0
+    this.winTo = all.length
+    const savedMake = this.makePlaceholderFor
+    this.makePlaceholderFor = (r) => {
+      const old = detached.get(r.block.id)
+      if (old) {
+        placeholders.set(r.block.id, old)
+        const ph = document.createElement('div')
+        ph.dataset.keepId = r.block.id
+        return ph
+      }
+      return null
+    }
+    try {
+      this.renderRows(all)
+    } finally {
+      this.makePlaceholderFor = savedMake
+    }
+    for (const id of placeholders.keys()) {
+      const el = detached.get(id)
+      const fresh = this.ed.container.querySelector<HTMLElement>(`[data-keep-id="${CSS.escape(id)}"]`)
+      if (!el || !fresh) continue
+      fresh.replaceWith(el)
+    }
+    this.mounted = new Set([...kept.keys()].filter((id) => Boolean(this.ed.blockEl(id))))
+    this.markCaret()
+    this.ed.bsel.paintBlockSel()
+    this.ed.events.mounted?.()
+  }
+
+  /** `rebuildWith` 给 `renderRows` 的占位钩子：返回 `null` ＝ 按普通行画 */
+  private makePlaceholderFor: ((r: VisibleRow) => HTMLElement | null) | null = null
+
+  /**
    * **整页重画，但把输入锚点的那一行原样换回去。**
    *
    * 为什么不增量挂新行：结构变化是低频的，整页重画 + 换回一行足够便宜；增量挂载
@@ -146,6 +231,18 @@ export class RenderOps {
     // 别的视图写进来（本实例的写入口已作废过）；重排之后重算一张表
     this.ed.fieldTableCache = null
     this.ed.embeds.disposeAll()
+    /**
+     * **同构重装**：旧 DOM 里能对上 id 的行**原样保留**，只搭新容器再把它们归位——
+     * 清空重建会让「刷新一次查询」读作「整屏白一帧再长出来」。焦点行不在保留集
+     * （成员真的换了、虚拟化窗口外）⇒ 退回全量重建。
+     */
+    const kept = this.holdRows()
+    if (kept !== null) {
+      // rebuildWith 已经管完两头的行：没进新集合的在开头就摘下了，进了新集合的刚归位成活行。
+      // 这里不能再拆一遍——会把它刚归位的整屏行连根拔掉（正文消失、只剩挂载区）。
+      this.rebuildWith(kept)
+      return
+    }
     this.ed.container.textContent = ''
     this.mounted.clear()
     this.rebuildAncestors()
@@ -422,6 +519,9 @@ export class RenderOps {
     gutter: readonly GutterField[] | undefined,
     below: BelowFields | undefined,
   ): HTMLElement {
+    // 同构重装：这一行有保留的旧行 ⇒ 直接用占位（rebuildWith 随后整棵换回）
+    const placeholder = this.makePlaceholderFor?.(r)
+    if (placeholder) return placeholder
     // 引用解析走**共享 store** 的森林：引用目标可能在当前视图之外（另一页／另一天），
     // 只有整片森林能回答「它还在不在、现在叫什么」。
     const find = (id: string) => this.ed.store.find(id)

@@ -63,11 +63,22 @@ export async function ensureDerivedLoaded(
    * 派生栏要的是**全部**记录（它是「谁指向我」的完整清单，没有滚动分页）：一窗取到
    * 到底（`target: Infinity` 且不给 `hits` ⇒ 一页页直到空页）。每页 ≤ `CANDIDATE_PAGE`，
    * 所以传输上限永远碰不到。
+   *
+   * 引用栏候选**连一层子级**一起装：透传块（正文只有一枚引用）的子块才是这条引用
+   * 真正指到的内容，栏上默认摊开——reload 之后工作集是重建的，只装「候选＋祖先链」
+   * 会让透传行的 `children` 是空的，摊开只剩一枚孤引用。
    */
-  const step = await loadCandidateWindow(deps, spec, { selfId: host.id, excludeIds: [host.id] }, host, {
-    after: null,
-    target: Number.POSITIVE_INFINITY,
-  })
+  const step = await loadCandidateWindow(
+    deps,
+    spec,
+    { selfId: host.id, excludeIds: [host.id] },
+    host,
+    {
+      after: null,
+      target: Number.POSITIVE_INFINITY,
+    },
+    source === 'refs',
+  )
   return step.loaded
 }
 

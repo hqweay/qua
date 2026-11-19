@@ -1080,9 +1080,19 @@ export class ViewHost {
    * 于是不会出现「旧条件 ＋ 新结果」。⚠️ 这里**不写块**：结果与 `modified` 无关，
    * 也不进撤销栈。
    */
-  /** 求值域：有分页装载时＝已取的候选；整库模式下不传（求值天然完整） */
+  /**
+   * 求值域：有分页装载时＝已取的候选；整库模式下不传（求值天然完整）。
+   *
+   * ⚠️ **候选流一页都没装上时不能当过滤器**（空集会把全部命中滤掉）：
+   * 整库模式（`store.partial` 为假）下 `loadCandidatePage` 每页早退、`next` 恒 null
+   * ⇒ 流立刻「到底」而 `candidatesLoaded` 是空的。求值本身在整库上天然完整，
+   * 这个空域只会把结果清零——「点刷新 0 条、再刷新还是 0 条」。判据是
+   * **到底且没装过东西** ⇒ 域不存在（不过滤），而不是拿空集硬滤。
+   */
   private domain(): ReadonlySet<string> | undefined {
-    return this.deps.loadCandidateWindow ? this.candidatesLoaded : undefined
+    if (!this.deps.loadCandidateWindow) return undefined
+    if (this.streamDone && this.candidatesLoaded.size === 0) return undefined
+    return this.candidatesLoaded
   }
 
   private ensureFrozen(): void {
@@ -1245,6 +1255,14 @@ export class ViewHost {
       this.rerollRandom()
       const spec = this.effective
       if (!spec) return
+      /**
+       * **候选流也从头**：新块可能还没被任何一页装载过，只按旧求值域过滤会把
+       * 新命中原样滤掉——「点刷新没反应」。与 `ensureFrozen` 同一开场：本帧先按
+       * 已装载求值，随后一页页补齐（补页路径自己会重算重画）。
+       */
+      this.cursor = null
+      this.streamDone = false
+      this.candidatesLoaded = new Set()
       const before = this.frozen?.hits ?? []
       this.frozen = freezeResult(spec, this.deps.kb, this.evalContext(spec), this.viewKey, this.domain())
       const dropped = droppedFrom(before, this.frozen.hits)
@@ -1257,6 +1275,7 @@ export class ViewHost {
       this.deps.toast?.(t('ui.query.refreshed', { count: this.rowCount() }), 'ok')
       this.deps.onChange()
       this.sync(true)
+      void this.fillPages()
     } catch (e) {
       // 保留旧结果 + 明确告知（不静默清空）
       this.deps.toast?.(t('ui.query.refreshFailed', { message: e instanceof Error ? e.message : String(e) }), 'warn')
@@ -1793,7 +1812,21 @@ export class ViewHost {
         area: this.els.root,
         // 查询结果的行是命中，不是「这一栏能长出块」：根只能往下长，不能并/搬出结果集
         structuralScope: 'roots',
-        load: () => this.render(),
+        // 与结果无关的变化不重装：别处敲字不该重排这一列（本视图对无关 ids 的
+        // 可见回应只有「可能已过期」提示，由外层订阅点亮）。动到屏幕上的行时只换那几行，
+        // 成员增减等刷新/条件变化路径负责。拿不到 ids（结构欠账补做）照旧整片装。
+        load: (_ed, ids) => {
+          if (ids && ids.length > 0) {
+            const onScreen = new Set(this.rows.map((b) => b.id))
+            const touched = ids.filter((id) => onScreen.has(id))
+            if (touched.length === 0) return
+            const ed = this.outline?.ed
+            if (!ed) return
+            for (const id of touched) ed.renderBlock(id)
+            return
+          }
+          this.render()
+        },
         wire: (editor, change) => this.deps.wire(editor, change),
         onChange: (kind) => {
           if (kind === 'struct') this.structureDirty = true

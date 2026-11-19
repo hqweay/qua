@@ -33,6 +33,7 @@ import {
   derivedLensOf,
   derivedRecordsOf,
   derivedSpecOf,
+  flatten,
   groupChoicesOf,
   displayTextOf,
   expandContexts,
@@ -453,8 +454,12 @@ export class MountArea {
       debounceMs: 200,
       // 冻结范围＝整片挂载区：焦点落在 tab 按钮上时，重排 tab 条同样会把正被按的那颗换掉
       area: this.root,
-      // 装载动作＝重画整片（栏出现条件读维度存在性，内容变了栏可能增减）
-      load: () => this.render(),
+      // 与当前栏无关的变化不重画：别处敲字不该重排 tab 条与这一栏（判据见 `loadForIds`）。
+      // 拿不到 ids（结构欠账/整库通知）才整片重画——栏的出现条件读维度存在性，欠账可能动它
+      load: (_ed, ids) => {
+        if (ids && ids.length > 0 && !this.loadsFor(ids)) return
+        this.render()
+      },
       // 挂载区的一行是查询/派生结果：根是派生的，只能往下编辑，不能当兄弟序搬
       structuralScope: 'roots',
       wire: (editor, change) => deps.wire(editor, change),
@@ -491,6 +496,36 @@ export class MountArea {
   /** 编辑器实例（折叠／空栏时可能还没有）。装配层用它判「活动编辑器」 */
   get blockEditor(): BlockEditor | null {
     return this.block.ed
+  }
+
+  /**
+   * 这批变化**碰得到当前激活栏吗**。三条分界面：
+   *
+   * · **视图形态**（local 栏 / 派生栏的列表表格）：条目配置读宿主的 `_mounts`/维度，
+   *   宿主块变了才整片重排；否则交给视图宿主自己的 store 订阅按 id 修补。
+   * · **大纲形态**：变更块不在屏幕的行树里就不动；在 ⇒ 只换那几行（`renderBlock`）。
+   *   成员增减（引用/标签边）不在这批 ids 里能表达——那条走 `kickDerived` 的
+   *   `derivedIdsOf` 对比重画，不靠这里。
+   * · **空态 / 折叠摘要**：与正文行同一条判据，无关不重画。
+   */
+  private loadsFor(ids: readonly string[]): boolean {
+    const host = this.deps.host()
+    if (!host) return false
+    const entry = this.entries.find((e) => e.id === this.active)
+    if (!entry) return true
+    if (this.viewEl.hidden === false) {
+      // 视图形态：宿主块自己的属性/正文变化影响条目与配置 ⇒ 重排；行内容交给视图宿主
+      return ids.includes(host.id)
+    }
+    if (this.emptyEl.hidden === false) {
+      // 空态的出口只有宿主自己的维度变化（第一次被引用/打标签走 kickDerived 的
+      // 成员对比重画，不靠这里）；这里保守放行宿主，其余交给那条路径
+      return ids.includes(host.id)
+    }
+    const ed = this.block.ed
+    if (!ed) return true
+    const onScreen = new Set(flatten(ed.doc).map((b) => b.id))
+    return ids.some((id) => onScreen.has(id))
   }
 
   /** 摘掉实例（装配层在段根换人时调）：退订 store、卸事件，别让游离容器继续被重画 */

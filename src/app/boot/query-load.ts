@@ -66,10 +66,13 @@ export async function loadCandidatePage(
   ctx: QueryContext,
   host: Block | undefined,
   after: string | null,
+  /** 覆盖 `candidateBuildOf` 的判定：候选**连一层子级**一起装（引用栏的透传行要摊子树） */
+  withChildren?: boolean,
 ): Promise<LoadStep> {
   const { client, workset, store } = deps
   if (!client || !workset || !store.partial) return { loaded: false, next: null, ids: [] }
   const build = candidateBuildOf(spec, host, store.blocks, ctx)
+  const children = withChildren ?? build.children
   let loaded = false
 
   const named = build.loadIds.filter((id) => !store.isLoaded(id))
@@ -87,7 +90,7 @@ export async function loadCandidatePage(
   }
   const missing = page.value.ids.filter((id) => !store.isLoaded(id))
   if (missing.length > 0) {
-    const rows = await client.tree(missing, build.children)
+    const rows = await client.tree(missing, children)
     if (rows.status !== 'ok') throw new Error(`library/tree: ${rows.status === 'error' ? rows.error : rows.status}`)
     workset.loadBlocks(rows.value, true)
     loaded = true
@@ -127,12 +130,14 @@ export async function loadCandidateWindow(
   ctx: QueryContext,
   host: Block | undefined,
   opts: WindowOpts,
+  /** 覆盖候选装载的子级档（见 `loadCandidatePage`；一窗取到底的每一页都吃同一个覆盖） */
+  withChildren?: boolean,
 ): Promise<LoadStep> {
   let after = opts.after
   let loaded = false
   const ids = new Set<string>()
   for (let i = 0; i < WINDOW_MAX_PAGES; i++) {
-    const step = await loadCandidatePage(deps, spec, ctx, host, after)
+    const step = await loadCandidatePage(deps, spec, ctx, host, after, withChildren)
     loaded = loaded || step.loaded
     for (const id of step.ids) ids.add(id)
     after = step.next

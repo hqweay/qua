@@ -565,14 +565,20 @@ function repaintAfterGrow(): void {
  *
  * 一次只问一页 ⇒ 传输上限（一次 id 列表 ≤ 512）永远碰不到；旧的一次性装载在宽候选上
  * 会整批 `bad-args`，查询于是对用户静默少行。
+ *
+ * ⚠️ **整库模式（没有工作集）不装这条**：视图宿主拿到它就把「已取候选」当求值域，
+ * 而整库上每页装载早退 ⇒ 域永远是空集 ⇒ 全部命中被滤掉（「刷新后 0 条」实测）。
+ * 整库的求值天然完整，视图宿主没有这条反而走对（`domain()` 回 undefined）。
  */
-const loadCandidateWindow = (
-  spec: QuerySpec,
-  ctx: QueryContext,
-  host: Block | undefined,
-  req: CandidateWindowRequest,
-): Promise<CandidateLoadStep> =>
-  loadCandidateWindowOf({ client: libraryClient, workset, store: blocks }, spec, ctx, host, req)
+const loadCandidateWindow = workset
+  ? (
+      spec: QuerySpec,
+      ctx: QueryContext,
+      host: Block | undefined,
+      req: CandidateWindowRequest,
+    ): Promise<CandidateLoadStep> =>
+      loadCandidateWindowOf({ client: libraryClient, workset, store: blocks }, spec, ctx, host, req)
+  : undefined
 
 /**
  * 冷启动的**落点**与**物化**。两条装载路的判据来源不同：

@@ -233,8 +233,12 @@ export class ViewTabs {
         // 落点由视图回落激活页给
         structuralScope: 'roots',
         rootRemoveFill: false,
-        load: (ed) => {
+        load: (ed, ids) => {
           if (!ed) return
+          // 与己无关的变化不重装：这一格只装激活页那一块，别处敲字不该换掉身体
+          // 的 DOM（title-editor/note-popover 同一条判据）。拿不到 ids（结构欠账）照旧装。
+          const active = this.active
+          if (active !== '' && ids && ids.length > 0 && !ids.includes(active)) return
           ed.reloadFromStore()
         },
         wire: (editor, change) => this.deps.wire(editor, change),

@@ -15,7 +15,7 @@
  *   · 编辑走**同一份 `run`**：落盘、索引增量、撤销都在；**绝不重跑搜索**——
  *     重跑会重排列表并打断正在输入的那一行。
  */
-import { hasFoldable, isDeleted, ownerDataOfBlock, type Block, type BlockStore } from '../../core/index.ts'
+import { flatten, hasFoldable, isDeleted, ownerDataOfBlock, type Block, type BlockStore } from '../../core/index.ts'
 import type { KbClient } from '../../core/kb/types.ts'
 import { textSpansOf } from '../../core/query/text-spans.ts'
 import type { BlockEditor, Run } from '../../view/editor/editor.ts'
@@ -231,8 +231,12 @@ export class PreviewPane {
         host: this.host,
         store: this.deps.store,
         write: this.deps.write,
-        load: (ed) => {
-          if (ed) this.load(ed)
+        load: (ed, ids) => {
+          if (!ed) return
+          // 与预览子树无关的变化不重装：别处敲字不该换掉预览的 DOM。拿不到 ids
+          //（结构欠账）照旧装（dock-windows 同一条判据）。
+          if (ids && ids.length > 0 && !ids.some((i) => flatten(ed.doc).some((b) => b.id === i))) return
+          this.load(ed)
         },
         // 预览的根是派生的结果行：不能并进上一行/搬出结果集；根内部照常编辑
         structuralScope: 'roots',
