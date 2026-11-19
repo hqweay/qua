@@ -84,7 +84,7 @@ import { paintSortRows } from '../views/sort-rows.ts'
 import { bindDropTarget, setDragTab } from '../../view/dnd.ts'
 import { renderIcon } from '../../view/icons.ts'
 import { placeNear } from '../../view/place.ts'
-import { keepScrollWhile } from '../scroll.ts'
+import { keepScrollWhile, scrollParentOf } from '../scroll.ts'
 import { renderQuickFilter } from './quick-filter.ts'
 
 /** 一处浮层锚点（只读的矩形形状；`DOMRect` 与普通对象都能喂） */
@@ -337,25 +337,6 @@ export class MountArea {
   private hostId = ''
   /** 现挂在视图槽里的那一个（local 栏按栏缓存；派生栏现造现弃） */
   private view: ViewBodyHost | null = null
-  /**
-   * **身体高度的水位**（px，只涨不落）。
-   *
-   * 换栏时若身体跟着栏内容变矮，整页高度塌缩，滚进面板里的视窗会被浏览器按
-   * 新上限收走——「切一下栏，整页抖一下」。水位记这台面板**见过的最高内容高度**，
-   * 换体前钉成 minHeight：盒子在中间态就已经是高的，页面的滚动位跨栏不动。
-   * 内容本身不封顶（长清单在整页滚动里读完），内容比水位矮时卡片下方留白（已接受）。
-   * 变高那一侧不在这里管（文档尾缓冲吃掉）。
-   *
-   * ⚠️ 水位不能只在装载时量：候选补页是**异步**长高的（补页重画不经过 load），
-   *    长高若不涨水位，下一次换体按旧水位钉盒，整页还是会塌那一段。所以挂一只
-   *    ResizeObserver 盯身体盒子——任何路径长高都涨水位，只涨不落。
-   *
-   * 代价明写：看过一根长栏之后，删掉它或切走，留白保留到段落换人／重开——
-   * 水位是会话态，不落盘。段落换人时清零（那是另一份内容）。
-   */
-  private bodyLevel = 0
-  /** 盯身体盒子长高的那只眼（回调只涨水位；折叠变矮不动它，盒子由 minHeight 托住） */
-  private readonly bodyGrow: ResizeObserver
   /** 现造现弃的那一个（派生栏）：detach 时要 dispose；local 的在缓存里，只摘不弃 */
   private ownedView: ViewBodyHost | null = null
   /**
@@ -505,9 +486,6 @@ export class MountArea {
 
     this.bodyEl.append(this.derivedHeadEl, this.emptyEl, this.block.root, this.viewEl)
 
-    this.bodyGrow = new ResizeObserver(() => this.ratchetBodyLevel())
-    this.bodyGrow.observe(this.bodyEl)
-
     this.hitObserver = new MutationObserver(() => this.scheduleHitPaint())
     this.hitObserver.observe(this.editorEl, { subtree: true, childList: true, characterData: true })
     this.editorEl.addEventListener('click', this.onHitClick)
@@ -573,7 +551,6 @@ export class MountArea {
     // 这一台拆了，镜头浮层不能还挂着一份旧面板
     if (this.lensHost?.isConnected) this.deps.closePopover?.()
     this.lensHost = null
-    this.bodyGrow.disconnect()
     this.hitObserver.disconnect()
     this.editorEl.removeEventListener('click', this.onHitClick)
     this.editorEl.removeEventListener('mousemove', this.onHitHover)
@@ -659,9 +636,6 @@ export class MountArea {
       this.refKind = 'all'
       this.sessionLenses.clear()
       this.kickedDerived.clear()
-      // 水位也是上一段的事实：换了宿主从零量起
-      this.bodyLevel = 0
-      this.bodyEl.style.minHeight = ''
       // 折叠播种也跟着宿主走：中心段尾一台实例只服务一个宿主，感知不到这条；
       // 右槽卡一台实例跟着导航换宿主，播种标记不清就会让第二位宿主永远摊开
       this.foldSeeded.clear()
@@ -1176,28 +1150,48 @@ export class MountArea {
     }
     /**
      * 换体期间保住滚动位，两手各管一侧：
-     * · **变矮**：换体前把水位钉回盒子——旧身体摘出、新身体（首次还空着）挂上的
-     *   瞬间，盒子已经是高的，整页不塌缩，页面的滚动位因此原地不动。
+     * · **变矮**：换体前按**当前滚动位**钉住身体的最小高度（精确到「刚好够」，
+     *   见 `holdBodyAgainstCollapse`）——旧身体摘出、新身体（首次还空着）挂上的
+     *   瞬间，整页不塌到滚动位以下，滚动位原地不动。
      * · **中间态的强制布局**：途中任何几何读取都会让浏览器按中间态收走 scrollTop；
      *   keepScrollWhile 换体前记下、换完写回（上一手之后这是保险，不是主闸）。
      * 带落点的装载例外：落点行的 reveal 要滚到位，不能被写回盖掉。
      */
-    if (this.bodyLevel > 0) this.bodyEl.style.minHeight = `${this.bodyLevel}px`
+    this.holdBodyAgainstCollapse()
     if (focusHint === undefined) keepScrollWhile(this.root, swap)
     else swap()
-    // 装载刚画完就量一次（不等观测器那一帧，避免「先塌再撑」的一瞬）；异步长高归
-    // bodyGrow 那只眼，两条路都只涨不落
-    this.ratchetBodyLevel()
   }
 
-  /** 水位棘轮：盒子比水位高（内容长高了）就涨上去并钉回 minHeight；矮了不动它 */
-  private ratchetBodyLevel(): void {
-    if (this.bodyEl.hidden) return
-    const h = this.bodyEl.getBoundingClientRect().height
-    if (h > this.bodyLevel) {
-      this.bodyLevel = h
-      this.bodyEl.style.minHeight = `${h}px`
+  /**
+   * **按当前滚动位钉住身体的最小高度**——高度只服务「这一下换体不抖」，不多留。
+   *
+   * 换到更矮的栏时整页塌缩，滚进面板里的视窗会被浏览器按新上限收走。需要多高的
+   * 盒子才够？答数由换体那一刻的几何直接给出：身体在滚动视口里的可视位置往下、
+   * 到「视口底 − 文档尾缓冲 − 面板下内距」为止。滚动位在顶上（`scrollTop ≤ 0`）
+   * 时不钉——塌缩收不走任何东西，留白一分都不该有；身体在视口外时算出负数，
+   * 同样不钉。内容比钉的盒子矮时下方留白（封顶于视口，不随最长栏走）；
+   * 内容更高时盒子照常长高（整页滚动，不设上限）。
+   */
+  private holdBodyAgainstCollapse(): void {
+    const scroller = scrollParentOf(this.root)
+    if (!scroller || scroller.scrollTop <= 0) {
+      this.bodyEl.style.minHeight = ''
+      return
     }
+    const sRect = scroller.getBoundingClientRect()
+    const bRect = this.bodyEl.getBoundingClientRect()
+    const padBottom = parseFloat(getComputedStyle(this.root).paddingBottom) || 0
+    const tail = this.tailBuffer()
+    // +2：scrollHeight/矩形都过取整，贴着下界钉会被整型收敛吃掉一像素
+    const needed = Math.ceil(sRect.height - tail - padBottom - (bRect.top - sRect.top)) + 2
+    this.bodyEl.style.minHeight = `${Math.max(0, needed)}px`
+  }
+
+  /** 文档尾的生长缓冲（center.css 的 `#editor::after`）：它在面板下面托着一段页高，钉盒时扣掉 */
+  private tailBuffer(): number {
+    const editor = this.root.closest('#editor')
+    if (!editor) return 0
+    return parseFloat(getComputedStyle(editor, '::after').minHeight) || 0
   }
 
   private loadDerived(host: Block, entry: Extract<MountEntry, { kind: 'derived' }>, focusHint?: string): void {
