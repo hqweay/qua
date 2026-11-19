@@ -544,6 +544,11 @@ export class ViewHost {
   private filling = false
   /** 补页期间条件又变了：收尾后再补一轮（否则会停在旧条件的那一页上） */
   private fillAgain = false
+  /**
+   * 抑制中的刷新：存**刷新前的冻结结果**，流停后 `finishRefresh` 收口（唯一一次画）。
+   * `null` ＝ 没有刷新在等；非空 ＝ 逐页画被抑制（`onPage` 照旧重算喂早停判据，只是不画）。
+   */
+  private pendingRefresh: FrozenResult | null = null
   /** 滚动容器（滚近底 ⇒ 再取一页）；只绑一次 */
   private scroller: HTMLElement | null = null
   /**
@@ -1154,6 +1159,8 @@ export class ViewHost {
              */
             if (!page.loaded && this.candidatesLoaded.size === before) return
             this.frozen = freezeResult(spec, this.deps.kb, ctx, this.viewKey, this.domain())
+            // 抑制中的刷新照旧重算（早停判据 `hits` 读的是它），只是不逐页画
+            if (this.pendingRefresh !== null) return
             this.sync(true)
           },
         })
@@ -1166,12 +1173,19 @@ export class ViewHost {
         // 时带排序的域也可能长大了，同样要画。
         if (step.next === null || (sorted && (step.loaded || this.candidatesLoaded.size > domainBefore))) {
           this.frozen = freezeResult(spec, this.deps.kb, ctx, this.viewKey, this.domain())
-          this.sync(true)
+          if (this.pendingRefresh === null) this.sync(true)
         }
       } while (this.fillAgain && !this.streamDone)
     } catch (e) {
+      // 流中途出错：回滚到刷新前的答案（屏幕本来就停在它上，不用画），说一句实话
+      if (this.pendingRefresh !== null) {
+        this.frozen = this.pendingRefresh
+        this.pendingRefresh = null
+      }
       this.deps.toast?.(t('ui.query.refreshFailed', { message: e instanceof Error ? e.message : String(e) }), 'warn')
     } finally {
+      // 正常到底（含早停）在这里收口：抑制中的刷新补唯一的一次求值＋画
+      if (this.pendingRefresh !== null) this.finishRefresh()
       this.filling = false
     }
   }
@@ -1252,7 +1266,14 @@ export class ViewHost {
     if (src.kind === 'query' && hasRandom(src.spec.sort)) this.memberSeed = seed
   }
 
-  /** 刷新按钮：**只重算这一个实例**（别的表面各自持有自己的那份，不受影响） */
+  /**
+   * 刷新按钮：**只重算这一个实例**（别的表面各自持有自己的那份，不受影响）。
+   *
+   * **流到底一次画**：刷新是问一次新答案，而旧答案还停在屏上——逐页补候选的中间态
+   * 不是答案，画出来就是闪烁（每页一次整片拆建，页与页之间隔着 IPC＝独立帧）。
+   * 候选流照旧逐页重算（喂早停判据），只是不逐页画；流停后 `finishRefresh`
+   * 求值一次、报一次、画一次。「不在中途画」的判据与带排序的补页同一条，推广到显式刷新。
+   */
   refresh(): void {
     this.els.refresh.disabled = true
     try {
@@ -1261,31 +1282,47 @@ export class ViewHost {
       if (!spec) return
       /**
        * **候选流也从头**：新块可能还没被任何一页装载过，只按旧求值域过滤会把
-       * 新命中原样滤掉——「点刷新没反应」。与 `ensureFrozen` 同一开场：本帧先按
-       * 已装载求值，随后一页页补齐（补页路径自己会重算重画）。
+       * 新命中原样滤掉——「点刷新没反应」。求值挪到收口（`finishRefresh`）：
+       * 重置瞬间求值域是空集，此刻算出的「0 条」是流水线的起点，不是答案。
        */
       this.cursor = null
       this.streamDone = false
       this.candidatesLoaded = new Set()
-      const before = this.frozen?.hits ?? []
-      this.frozen = freezeResult(spec, this.deps.kb, this.evalContext(spec), this.viewKey, this.domain())
-      const dropped = droppedFrom(before, this.frozen.hits)
       // 刷新＝成员与顺序都换了：上一轮的上下文展开没有依据，从头来
       this.expanded = new Set()
       this.covers = new Map()
       this.staleIds.clear()
       this.structureDirty = false
-      if (dropped.length > 0) this.deps.toast?.(t('ui.query.dropped', { count: dropped.length }), 'info')
-      this.deps.toast?.(t('ui.query.refreshed', { count: this.rowCount() }), 'ok')
-      this.deps.onChange()
-      this.sync(true)
-      void this.fillPages()
+      // 旧答案存住：收口时算「移除了几条」；流中途出错时回滚到它
+      this.pendingRefresh = this.frozen
+      if (this.deps.loadCandidateWindow) void this.fillPages()
+      else this.finishRefresh()
     } catch (e) {
+      this.pendingRefresh = null
       // 保留旧结果 + 明确告知（不静默清空）
       this.deps.toast?.(t('ui.query.refreshFailed', { message: e instanceof Error ? e.message : String(e) }), 'warn')
     } finally {
       this.els.refresh.disabled = false
     }
+  }
+
+  /**
+   * 刷新的唯一次收口：按**最终求值域**算一遍、报实话（移除了几条／刷新后几条）、画一次。
+   * 抑制期间 `frozen` 可能停在中间域上（`onPage` 只为早停判据重算它），这里盖成最终答案。
+   */
+  private finishRefresh(): void {
+    const old = this.pendingRefresh
+    this.pendingRefresh = null
+    const spec = this.effective
+    if (!spec) return
+    this.frozen = freezeResult(spec, this.deps.kb, this.evalContext(spec), this.viewKey, this.domain())
+    if (old) {
+      const dropped = droppedFrom(old.hits, this.frozen.hits)
+      if (dropped.length > 0) this.deps.toast?.(t('ui.query.dropped', { count: dropped.length }), 'info')
+    }
+    this.deps.toast?.(t('ui.query.refreshed', { count: this.rowCount() }), 'ok')
+    this.deps.onChange()
+    this.sync(true)
   }
 
   private rowCount(): number {
