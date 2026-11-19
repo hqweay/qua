@@ -1146,21 +1146,33 @@ export class ViewHost {
          * 后续页只会追加在已出行之后，边装边出是安全的。
          */
         const sorted = (spec.sort?.length ?? 0) > 0
+        const domainBefore = this.candidatesLoaded.size
         const step = await load(spec, ctx, this.deps.host(), {
           after: this.cursor,
           target: this.windowTarget(spec),
           hits: () => this.frozen?.hits.length ?? 0,
           onPage: (page) => {
+            const before = this.candidatesLoaded.size
             for (const id of page.ids) this.candidatesLoaded.add(id)
-            if (!page.loaded || sorted) return
+            if (sorted) return
+            /**
+             * **域变大就重算**，与「这一页装没装新块」无关：候选可能**本来就在内存里**
+             * （种子／刚编辑过）——那一页 `loaded` 是假的，但 ids 是新的，不重算就把
+             * 首帧的空域冻结永远留在屏上（查询恒 0 行）。
+             */
+            if (!page.loaded && this.candidatesLoaded.size === before) return
             this.frozen = freezeResult(spec, this.deps.kb, ctx, this.viewKey, this.domain())
             this.sync(true)
           },
         })
         this.cursor = step.next
         if (step.next === null) this.streamDone = true
-        // 带排序：取完之后一次性画（这才是「全集的排序」的那一次）
-        if (sorted && step.loaded) {
+        // 到底了就重算一次：整库／web 的流是「立即到底」的空流——首帧按空域冻结会把
+        // 结果清零，而空流不触发任何 onPage 重算；现在 streamDone 已真，`domain()` 自己
+        // 会退成不过滤（见它的判据）。带排序的「取完一次性画」也走这一条，不再看
+        // `step.loaded`（候选全在内存时它是假的，域照样在长大）。没到底（50 页刹车）
+        // 时带排序的域也可能长大了，同样要画。
+        if (step.next === null || (sorted && (step.loaded || this.candidatesLoaded.size > domainBefore))) {
           this.frozen = freezeResult(spec, this.deps.kb, ctx, this.viewKey, this.domain())
           this.sync(true)
         }
