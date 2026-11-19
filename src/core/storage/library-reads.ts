@@ -191,10 +191,10 @@ export const LIBRARY_READS = {
    * 子串命中的候选页（按文档序）：命中集不超过一页时，一页就是全部候选。
    * `?1` 是 id JSON 数组；游标条件单独一条 SQL（`OR` 会让 SQLite 放弃 path 索引）。
    */
-  gramPage: `select i.block as id, i.path as path from ${I} i
+  idsByPath: `select i.block as id, i.path as path from ${I} i
     where i.hidden is null and i.block in (select value from json_each(?1))
     order by i.path`,
-  gramPageAfter: `select i.block as id, i.path as path from ${I} i
+  idsByPathAfter: `select i.block as id, i.path as path from ${I} i
     where i.hidden is null and i.block in (select value from json_each(?1))
       and i.path > ?2
     order by i.path`,
@@ -462,6 +462,32 @@ function linkPredicate(alias: string): string {
 }
 
 /**
+ * `{prop … exists}` 的**行本地谓词**：三条来源各问一次（与 `candidatePlanSql` 的三支同集）。
+ *
+ * 只在计划「稠密」时才用它（见 `PageSqlOpts.dense`）：稀疏集合上沿路径序扫到凑够一页
+ * 比物化一份小计划贵两个数量级（1M 实测 0.1% 密度：5.7ms → 183ms/页）。
+ */
+function propExistsPredicate(name: string): { sql: string; params: (string | number)[] } {
+  return {
+    sql: `(exists (select 1 from ${P} p where p.block = b.id and p.name = ?)
+        or exists (select 1 from ${P} p where p.block = b.id and p.name = '_ownProps' and p.value = ?)
+        or exists (select 1 from ${P} m where m.block = b.id and m.name = '_tags' and m.value in (
+             select '"' || d.block || '"' from ${P} d where d.name = '_fieldDefs' and d.value = ?)))`,
+    params: [name, `"${name}"`, `"${name}"`],
+  }
+}
+
+/** `{tagged}` 的行本地谓词：一条露面行（`BlockList` 的 PK 是 `(block, list)`，逐块是索引探针） */
+function taggedPredicate(): string {
+  return `exists (select 1 from ${L} l where l.block = b.id)`
+}
+
+/** `{aliased}` 的行本地谓词：一条地址行（`block` 有索引） */
+function aliasedPredicate(): string {
+  return `exists (select 1 from ${A} a where a.block = b.id)`
+}
+
+/**
  * `{text}` 的**行本地谓词**：text run 的投影里包含这一串（与 matcher 的
  * `plainText(content).includes(needle)` 同解：只取 `t:'text'` 的 run，按序拼）。
  * 两条形态（含某串／有正文）共用这一份，避免「候选 SQL」与「分页 SQL」各写一遍。
@@ -526,6 +552,18 @@ export function necessaryTextNeedles(plan: CandidatePlan): string[] {
 }
 
 /**
+ * 一页候选的 SQL 选项。
+ *
+ * `dense` 是**执行侧**才有的知识（取计划前 N 行要多久／有多少行）：索引驱动的子计划
+ * 只有在结果集超过一页时才值得下推。缺省（不传）＝不猜，一律走 `in (plan)`——
+ * 与这一档出现之前的行为逐条相同。
+ */
+export interface PageSqlOpts {
+  derived?: boolean
+  dense?: (plan: CandidatePlan) => boolean
+}
+
+/**
  * **能下推进页查询的部分**：返回「必要条件谓词」＋「剩下的计划」＋「谓词要不要 Block 表」。
  *
  * 判据是单调的：`all` 的每个子条件都是整体成立的必要条件 ⇒ 把子条件里能写成
@@ -540,17 +578,28 @@ export function necessaryTextNeedles(plan: CandidatePlan): string[] {
  * `any` 的析取项不是必要条件；方向原子／`near` 的集合是递归闭包，写不成行本地谓词。
  *
  * **下推只收「内容谓词」**（`text`／`mark`／`link`）：它们的计划形态本来就要扫一遍正文，
- * 下推只可能赢。`prop`／`tagged`／`aliased` 这类**索引驱动**的计划不收——计划形态的成本
- * 跟结果集大小走，下推按「扫到凑够一页」计价，集约小下推越亏（1M 实测：带标签的块只占
- * 0.1% 时 5ms → 280ms/页）。这一档要能按基数选路才有意义，不是把谓词写进去就行。
+ * 下推只可能赢。`prop`／`tagged`／`aliased` 这类**索引驱动**的计划要看**基数**：
+ * 计划形态的成本跟结果集大小走，下推按「扫到凑够一页」计价 —— 稠密时下推碾压
+ * （1M、20% 密度：278ms → 1.2ms/页），稀疏时反过来（0.1%：5.7ms → 183ms/页）。
+ * 所以这三支只在 `opts.dense(plan)` 说「超过一页」时才下推；判据由执行侧给
+ * （它才拿得到「取前 N 行要多久」），这一层只做选择。
  */
-function pushdownOf(plan: CandidatePlan): {
+function pushdownOf(plan: CandidatePlan, opts: PageSqlOpts): {
   preds: { sql: string; params: (string | number)[] }[]
   rest: CandidatePlan | null
   needsBlock: boolean
 } {
   if (plan.k === 'mark') return { preds: [markPredicate('b', plan.marks)], rest: null, needsBlock: true }
   if (plan.k === 'link') return { preds: [{ sql: linkPredicate('b'), params: [] }], rest: null, needsBlock: true }
+  if (plan.k === 'prop' && opts.dense?.(plan) === true) {
+    return { preds: [propExistsPredicate(plan.name)], rest: null, needsBlock: true }
+  }
+  if (plan.k === 'tagged' && opts.dense?.(plan) === true) {
+    return { preds: [{ sql: taggedPredicate(), params: [] }], rest: null, needsBlock: true }
+  }
+  if (plan.k === 'aliased' && opts.dense?.(plan) === true) {
+    return { preds: [{ sql: aliasedPredicate(), params: [] }], rest: null, needsBlock: true }
+  }
   /**
    * `text` 也下推：它的谓词本来就是**单块内部**的投影比较。计划形态要为「所有命中」
    * 扫一遍全库才出第一页；下推后沿 path 序扫、凑够一页就停——常见串从 1.7s/页降到
@@ -574,7 +623,7 @@ function pushdownOf(plan: CandidatePlan): {
     const rest: CandidatePlan[] = []
     let needsBlock = false
     for (const p of plan.plans) {
-      const part = pushdownOf(p)
+      const part = pushdownOf(p, opts)
       preds.push(...part.preds)
       needsBlock = needsBlock || part.needsBlock
       if (part.rest !== null) rest.push(part.rest)
@@ -679,13 +728,15 @@ export function candidatePlanSql(
     }
     case 'prop':
       // 「有这一栏」＝ 值 ∪ 自有槽 ∪ 标签声明（matcher 的 readField 三来源）——
-      // 只给「有值行」的块会漏掉标签声明进场的成员，候选就不再是超集
+      // 只给「有值行」的块会漏掉标签声明进场的成员，候选就不再是超集。
+      // 三支用 `union all`：消费方是 `in`／`not in`（天然去重）与「取前 N 行」的
+      // 基数探针；去重版会让探针把整份计划排一遍（1M 实测 154ms → 0.04ms）。
       return wrap(
         `select p.block as id from ${P} p join ${B} b on b.id = p.block and ${visible('b')} where p.name = ?
-        union
+        union all
         select p.block as id from ${P} p join ${B} b on b.id = p.block and ${visible('b')}
           where p.name = '_ownProps' and p.value = ?
-        union
+        union all
         select m.block as id from ${P} m join ${B} b on b.id = m.block and ${visible('b')}
           where m.name = '_tags' and m.value in (
             select '"' || d.block || '"' from ${P} d where d.name = '_fieldDefs' and d.value = ?
@@ -885,7 +936,7 @@ export interface CandidatePage {
 export function candidatePageSql(
   plan: CandidatePlan,
   page: CandidatePageQuery,
-  opts: { derived?: boolean } = {},
+  opts: PageSqlOpts = {},
 ): { sql: string; params: (string | number | null)[] } {
   if (opts.derived !== true) {
     const all = candidatePlanSql(plan, { derived: false })
@@ -920,7 +971,7 @@ export function candidatePageSql(
       params: [...(page.after === null ? [] : [page.after]), page.limit],
     }
   }
-  const push = pushdownOf(effective)
+  const push = pushdownOf(effective, opts)
   if (push.preds.length > 0) {
     const rest = push.rest === null ? null : candidatePlanSql(push.rest, { derived: true })
     return {

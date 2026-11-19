@@ -52,6 +52,7 @@ import {
   readIndexChildren as readIndexChildrenFor,
   readIndexFollowing as readIndexFollowingFor,
   readIndexRows as readIndexRowsFor,
+  planIsDense,
   readRelationsFor,
   readRootIds,
 } from './reads.ts'
@@ -134,6 +135,14 @@ export interface RepoSession {
    * 诊断面（`libraryInfo`）会把它报出去，自检脚本据此判「这一笔是不是整库重写」。
    */
   writes: { rows: number; ftsRows: number; saves: number }
+  /**
+   * 候选分页的**选路缓存**（计划 → 结果集是否超过「小计划」上限）。
+   *
+   * 为什么要它：判断一条计划的基数要把它数一遍（1M 上稠密计划约 5ms），而一次查询
+   * 会按页来问十几次。这个答案只影响**走哪条路**（慢或快），不影响答案对不对；
+   * 所以每次写入直接清空——用不出正确的状态比省下几毫秒重要得多。
+   */
+  candidateRoute: Map<string, boolean>
   /** 关连接（最后一个窗口关掉时调）。关之前 checkpoint，让主库文件自包含。 */
   close(): void
 }
@@ -207,6 +216,7 @@ function makeSession(id: string, dir: string, db: Db, deviceId: string): RepoSes
     deviceId,
     reads: { doc: 0, docRows: 0, catalog: 0, catalogRows: 0, blocks: 0, blockRows: 0, candidates: 0, candidateIds: 0, identity: 0, identityRows: 0 },
     writes: { rows: 0, ftsRows: 0, saves: 0 },
+    candidateRoute: new Map<string, boolean>(),
     close: () => {
       try {
         // 关之前 checkpoint：WAL 里的内容回主库 ⇒「只拷 qua.db」也能读出完整数据。
@@ -355,6 +365,8 @@ export function saveContent(
   if (opts.derived) session.writes.ftsRows += changed
   else session.writes.rows += changed
   session.writes.saves += 1
+  // 基数变了 ⇒ 上一批「走哪条路」的判断可能不再成立（只影响快慢，不影响答案）
+  session.candidateRoute.clear()
   return changed
 }
 
@@ -374,7 +386,16 @@ export function readCandidates(
   plan: CandidatePlan,
   page: { after: string | null; limit: number },
 ): CandidatePage {
-  const out = readCandidatePage(session.db, plan, page)
+  const out = readCandidatePage(session.db, plan, page, {
+    denseOf: (p) => {
+      const key = JSON.stringify(p)
+      const hit = session.candidateRoute.get(key)
+      if (hit !== undefined) return hit
+      const v = planIsDense(session.db, p)
+      session.candidateRoute.set(key, v)
+      return v
+    },
+  })
   session.reads.candidates += 1
   session.reads.candidateIds += out.ids.length
   return out

@@ -12,6 +12,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import {
   candidatePageSql,
+  candidatePlanSql,
   gramQueryOf,
   LIBRARY_READS,
   necessaryTextNeedles,
@@ -124,10 +125,57 @@ export function readCatalogRows(db: DatabaseSync): LibraryCatalog {
  * 「能不能按文档序分页」——不可信时退回根上的 `deleted` 位与**一页装完**
  * （`next: null`），宽但真（详见 `candidatePageSql`）。
  */
+/**
+ * **小计划的上限**：计划的前 N 行一次取回来不超过这个数，就按「计划本身装得下」处理。
+ *
+ * 为什么是绝对行数而不是密度：密度的分母（库有多大）要一次全表 count（1M ≈ 数十 ms），
+ * 而「取前 N 行」的成本只跟 N 同阶。N 的取舍按两条路的成本曲线相交处量：
+ * 物化一份计划约 1.2µs/行，下推按「扫到凑够一页」≈ 1.2µs × 一页 × 库/命中数
+ * ⇒ 相交在 命中数 ≈ √(一页 × 库)。1M、400/页 时约 2 万；取 5000 更保守：
+ * 此时物化 ≤ 6ms，而下推要扫 8 万行（≈ 100ms）。
+ */
+const SMALL_PLAN_CAP = 5000
+
+/** 这些计划的成本跟**结果集大小**走（不是「扫一遍正文」），所以要不要下推看基数 */
+function isIndexDriven(plan: CandidatePlan): boolean {
+  return plan.k === 'prop' || plan.k === 'tagged' || plan.k === 'aliased'
+}
+
+/**
+ * 这条计划的**结果集超过「小计划」上限吗**（一次 `count(*)`，不搬行）。
+ *
+ * 主进程的会话把它按「计划 + 写入代数」缓存：一次查询按页来问十几次，而基数在一次
+ * 查询期间基本不变。缓存放 `RepoSession.candidateRoute`，每次写入清空——判断错了
+ * 只是走慢那条路，但状态讲错话的代价比几毫秒大。
+ */
+export function planIsDense(db: DatabaseSync, plan: CandidatePlan): boolean {
+  const q = candidatePlanSql(plan, { derived: true })
+  const n = (
+    db.prepare(`select count(*) as n from (${q.sql} limit ?)`).get(...q.params, SMALL_PLAN_CAP + 1) as { n: number }
+  ).n
+  return n > SMALL_PLAN_CAP
+}
+
+/** 这条计划的**全部 id**（只在 `planIsDense` 说「装得下」之后调） */
+function planIds(db: DatabaseSync, plan: CandidatePlan): string[] {
+  const q = candidatePlanSql(plan, { derived: true })
+  const rows = db.prepare(`select id from (${q.sql})`).all(...q.params) as { id: unknown }[]
+  return rows.map((r) => String(r.id))
+}
+
+/**
+ * 选路的**决策来源**：调用方（会话）带缓存时用它，否则 `readCandidatePage` 自己按
+ * 每次调用算一遍（单测与探针不需要跨请求缓存）。
+ */
+export interface CandidateRoute {
+  denseOf(plan: CandidatePlan): boolean
+}
+
 export function readCandidatePage(
   db: DatabaseSync,
   plan: CandidatePlan,
   page: { after: string | null; limit: number },
+  route?: CandidateRoute,
 ): CandidatePage {
   const derived = readMeta(db, META_KEYS.derivedState) === 'ready'
   const ftsReady = readMeta(db, META_KEYS.ftsState) === 'ready'
@@ -135,12 +183,49 @@ export function readCandidatePage(
     const short = gramCandidates(db, plan, page)
     if (short) return short
   }
-  const q = candidatePageSql(plan, page, { derived })
+  /**
+   * 索引驱动的计划先量一次基数：**装得下**（≤ CAP，且 CAP 远小于「下推要扫的行数」）
+   * ⇒ 整个计划一次交齐、按文档序切页；装不下 ⇒ 下推成行本地谓词，沿 path 序凑够
+   * 一页就停。两条路的候选序列相同（`in (plan)` 与行本地谓词同集）。
+   *
+   * 同一页里同一个节点只问一次：`dense` 回调与这里共用一份判断。
+   */
+  const local = new Map<CandidatePlan, boolean>()
+  const dense = (p: CandidatePlan): boolean => {
+    if (route) return route.denseOf(p)
+    const hit = local.get(p)
+    if (hit !== undefined) return hit
+    const v = planIsDense(db, p)
+    local.set(p, v)
+    return v
+  }
+  if (derived && isIndexDriven(plan) && !dense(plan)) return planPage(db, planIds(db, plan), page)
+  const q = candidatePageSql(plan, page, { derived, ...(derived ? { dense } : {}) })
   const rows = db.prepare(q.sql).all(...q.params) as { id: unknown; path?: unknown }[]
   const ids = rows.map((r) => String(r.id)).filter((id) => id !== '' && id !== 'null')
   // 只有「取满一页」才可能还有下一页；不满 ⇒ 到底（下一问会是空页，少一次猜测）
   const next = derived && rows.length === page.limit ? String(rows[rows.length - 1]!.path) : null
   return { ids, next }
+}
+
+/**
+ * 「计划本身装得下」的一页：把已知的 id 集合按文档序排好切一页。
+ *
+ * 集合是**齐全**的（调用方按 CAP 证明过）⇒ 切不完时 `next` 是这一页最后一条的 path，
+ * 切完就是 `null`——与普通分页同一条游标语义，只是不必再碰计划 SQL。
+ */
+function planPage(db: DatabaseSync, ids: readonly string[], page: { after: string | null; limit: number }): CandidatePage {
+  const idJson = JSON.stringify([...new Set(ids)])
+  const rows = (
+    page.after === null
+      ? db.prepare(LIBRARY_READS.idsByPath).all(idJson)
+      : db.prepare(LIBRARY_READS.idsByPathAfter).all(idJson, page.after)
+  ) as { id: unknown; path?: unknown }[]
+  const slice = rows.slice(0, page.limit)
+  return {
+    ids: slice.map((r) => String(r.id)),
+    next: rows.length > page.limit ? String(slice[slice.length - 1]!.path) : null,
+  }
 }
 
 /**
@@ -178,14 +263,8 @@ function gramCandidates(
     if (best === null || ids.length < best.length) best = ids
   }
   if (best === null) return null
-  // 候选已齐全：按文档序交出去（`next = null` —— 不会再有了）
-  const idJson = JSON.stringify(best)
-  const rows = (
-    page.after === null
-      ? db.prepare(LIBRARY_READS.gramPage).all(idJson)
-      : db.prepare(LIBRARY_READS.gramPageAfter).all(idJson, page.after)
-  ) as { id: unknown }[]
-  return { ids: rows.map((r) => String(r.id)), next: null }
+  // 候选已齐全且不超过一页：按文档序交出去（`planPage` 的 next 自然是 null）
+  return planPage(db, best, page)
 }
 
 /**
