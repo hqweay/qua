@@ -156,7 +156,10 @@ export class RenderOps {
       this.applyWindow()
       return
     }
-    this.renderRows(this.ed.rows())
+    const all = this.ed.rows()
+    this.winFrom = 0
+    this.winTo = all.length
+    this.renderRows(all)
     this.markCaret()
     this.ed.bsel.paintBlockSel()
     this.ed.events.mounted?.()
@@ -606,6 +609,72 @@ export class RenderOps {
     })
   }
 
+  /** 当前窗口盖住的行区间（`renderAll` 的非虚拟路径是整段） */
+  private winFrom = 0
+  private winTo = 0
+
+  /**
+   * **一行占多高**（窗口占位与视口定位共用这一份）。
+   *
+   * 两处必须同源：占位高度用哪套估法，按滚动位置反查行号就得用同一套——否则
+   * 「拖滚动条跨过一整窗」之后换窗会跳几行。所以把原先在 `applyWindow` 里的局部
+   * 闭包提出来，两边都调它。
+   */
+  private rowHeight(r: VisibleRow, below: Map<string, BelowFields> | undefined): number {
+    const propsRows = (id: string, data: BelowFields | undefined): number => {
+      if (!this.ed.events.propsLine || !this.ed.events.propsRows || !data) return 0
+      return this.ed.events.propsRows(id, data)
+    }
+    return visibleRowHeight(
+      r.block,
+      this.extraHeads(r),
+      (Boolean(this.ed.events.viewBody) && rowHasInlineViewBody(r) && !isFolded(this.ed.doc, r.block.id)) ||
+        (Boolean(this.ed.events.embedBody) &&
+          rowHasEmbedViewBody(r.block, (id) => this.ed.store.find(id)) &&
+          !isFolded(this.ed.doc, r.block.id)),
+      // 行数由装配层给（密度档 ＋ 单块展开）；没有这一格 ⇒ 不画属性区
+      propsRows(r.block.id, below?.get(r.block.id)),
+    )
+  }
+
+  /** 这一行是不是已经贴着窗口边（虚拟化的滚动联动据此决定换不换窗） */
+  needsRecenter(blockId: string, slack: number): boolean {
+    const i = this.ed.rows().findIndex((r) => r.block.id === blockId)
+    if (i < 0) return false
+    return i < this.winFrom + slack || i >= this.winTo - slack
+  }
+
+  /**
+   * **视口顶部那一行**（换窗的锚）。
+   *
+   * 已挂载的行按**真实几何**找；视口落进占位区（拖滚动条一气跨过一整窗）时，按与占位
+   * 高度**同一份** `rowHeight` 从上往下累加——两边同源，所以定位与占位不会打架。
+   */
+  topRowId(): string | null {
+    const rows = this.ed.rows()
+    if (rows.length === 0) return null
+    const area = this.ed.blankArea
+    const box = area.getBoundingClientRect()
+    for (const r of rows) {
+      const el = this.ed.blockEl(r.block.id)
+      if (!el) continue
+      const rect = el.getBoundingClientRect()
+      /**
+       * 只认**与视口相交**的行：只判「底边在视口顶之下」会把一整段挂在视口外的行
+       * 也算成顶部那一行（滚动一步跨过整窗时正中这一枪）。
+       */
+      if (rect.bottom > box.top && rect.top < box.bottom) return r.block.id
+    }
+    const y = box.top - this.ed.container.getBoundingClientRect().top
+    const below = this.belowOf(rows.map((r) => r.block))
+    let acc = 0
+    for (const r of rows) {
+      acc += this.rowHeight(r, below)
+      if (acc > y) return r.block.id
+    }
+    return rows[rows.length - 1]?.block.id ?? null
+  }
+
   /** 窗口化挂载：只挂「光标所在行 ± radius」（**以可见行计**，折叠的子树本来就不在窗口里） */
   applyWindow(centerId?: string): void {
     /**
@@ -637,22 +706,10 @@ export class RenderOps {
      * 少算一处，带这种行的文档滚动条就系统性偏小。
      */
     const below = this.belowOf(rows.map((r) => r.block))
-    /** 这一块的属性区占几行（与装配层的渲染吃同一份判据；没有回调 ⇒ 不画） */
-    const propsRowCount = (id: string, data: BelowFields | undefined): number => {
-      if (!this.ed.events.propsLine || !this.ed.events.propsRows || !data) return 0
-      return this.ed.events.propsRows(id, data)
-    }
-    const rowH = (r: VisibleRow): number =>
-      visibleRowHeight(
-        r.block,
-        this.extraHeads(r),
-        (Boolean(this.ed.events.viewBody) && rowHasInlineViewBody(r) && !isFolded(this.ed.doc, r.block.id)) ||
-          (Boolean(this.ed.events.embedBody) &&
-            rowHasEmbedViewBody(r.block, (id) => this.ed.store.find(id)) &&
-            !isFolded(this.ed.doc, r.block.id)),
-        // 行数由装配层给（密度档 ＋ 单块展开）；没有这一格 ⇒ 不画属性区
-        propsRowCount(r.block.id, below.get(r.block.id)),
-      )
+    const rowH = (r: VisibleRow): number => this.rowHeight(r, below)
+    /** 换窗判据要读「现在窗口盖住哪一段」 */
+    this.winFrom = from
+    this.winTo = to
     if (from > 0) {
       const headH = rows.slice(0, from).reduce((n, r) => n + rowH(r), 0)
       this.ed.container.appendChild(this.placeholder(from, 'head', headH))

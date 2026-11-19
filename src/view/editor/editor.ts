@@ -191,6 +191,9 @@ export type Run = <R>(
   },
 ) => R
 
+/** 滚动联动换窗的提前量（行）：贴着窗口边这几行以内就换，免得看到占位区 */
+const WINDOW_SLACK = 4
+
 export interface ViewOpts {
   container: HTMLElement
   // ⚠️ 加回调（装配层 → 事件层的通知）只有一条通道：本接口加字段 → 构造器赋值 →
@@ -748,7 +751,12 @@ export class BlockEditor {
           })
     this.container.setAttribute('contenteditable', 'true')
     this.container.setAttribute('spellcheck', 'false')
-    this.unbind = this.bind()
+    const offEvents = this.bind()
+    const offScroll = this.bindScrollSync()
+    this.unbind = () => {
+      offEvents()
+      offScroll()
+    }
     this.annoHover = new AnnoHover({
       container: this.container,
       spans: () => this.annoSpans,
@@ -1177,6 +1185,59 @@ export class BlockEditor {
 
   applyWindow(centerId?: string): void {
     this.render.applyWindow(centerId)
+  }
+
+  /** rAF 节流位：同一帧里的多次 scroll 只换一次窗 */
+  private windowSyncQueued = false
+
+  /**
+   * **虚拟化的滚动联动**（rAF 节流）：视口顶部那一行贴到窗口边就换一次窗。
+   *
+   * 为什么必须有这一条：`applyWindow` 原先只在重画与跳块时算窗口，**滚动不换窗**，
+   * 往下滚到的是占位块（高度对、但没有内容）——它因此只能当调试开关，当不了阅读模式。
+   *
+   * 换窗不跳：头尾占位用的是与窗口定位**同一份**行高（`RenderOps.rowHeight`），
+   * 总高与估算一一对应；这里仍把滚动位置与选区按切换前的值写回，抵消子像素差。
+   */
+  private bindScrollSync(): () => void {
+    const onScroll = (): void => {
+      if (!this.virtualize || this.windowSyncQueued) return
+      this.windowSyncQueued = true
+      requestAnimationFrame(() => {
+        this.windowSyncQueued = false
+        this.syncWindowOnScroll()
+      })
+    }
+    this.blankArea.addEventListener('scroll', onScroll, { passive: true })
+    return () => this.blankArea.removeEventListener('scroll', onScroll)
+  }
+
+  private syncWindowOnScroll(): void {
+    if (!this.virtualize || this.layout !== 'column') return
+    /**
+     * ⚠️ **组合期不换窗**：换窗会重挂承载行的元素，输入法的组合锚点跟着丢
+     *    （`checks/probe-ime-attrib.mjs` 的场景 4 量过）。滚到的地方先留占位，
+     *    组合结束后的下一次滚动再补。
+     */
+    if (this.deferWhileComposing()) return
+    const anchor = this.render.topRowId()
+    if (anchor === null) return
+    if (!this.render.needsRecenter(anchor, WINDOW_SLACK)) return
+    const scrollTop = this.blankArea.scrollTop
+    const focused = this.container.contains(document.activeElement)
+    const sel = this.sel
+    this.applyWindow(anchor)
+    this.blankArea.scrollTop = scrollTop
+    /**
+     * 焦点只在**光标那一行仍挂着**时还回去：滚走了就不该把焦点按回一个不在窗口里的行
+     * （`restoreSel` 会去滚它，等于和用户抢滚动）。模型选区 `this.sel` 不动，⌘A／命令仍按模型走。
+     */
+    if (focused && sel && this.render.mounted.has(sel.aBlock)) {
+      this.sel = sel
+      this.restoreSel()
+      // `restoreSel` 可能把光标滚进视口；用户正在滚，保持他原来的位置
+      this.blankArea.scrollTop = scrollTop
+    }
   }
 
   markCaret(): void {
