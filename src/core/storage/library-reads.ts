@@ -266,8 +266,8 @@ export function isLibraryReadName(v: unknown): v is LibraryReadName {
  * **候选计划**（JSON 可序列化）：查询条件 → 「哪些块**可能**命中」的 SQL 形状。
  *
  * 计划是**超集**（⊇ 真命中）：matcher 仍是判定的唯一来源，SQL 只负责把候选从
- * 全库收窄到「值得装载的那一批」。收窄不了的形状（`not`／`mark`／`link`）给
- * `visible`（全部可见块）——正确性优先，成本随命中面走，这是已登记的代价。
+ * 全库收窄到「值得装载的那一批」。收窄不了的形状（`not`／方向原子／`prop exists:false`）
+ * 给 `visible`（全部可见块）——正确性优先，成本随命中面走，这是已登记的代价。
  *
  * 计划由 `query-candidates.ts` 从条件树编译；这里只有「计划 → SQL」的投影，
  * 与具名查询同一层（主进程执行，不解释块语义）。
@@ -300,6 +300,23 @@ export type CandidatePlan =
   | { k: 'journalDay'; date: string }
   | { k: 'parents' }
   | { k: 'text'; needle: string; nonempty?: boolean }
+  /**
+   * **正文里有一段 run 的 marks 盖住 `marks`**（子集匹配，与 matcher 同一条判据）。
+   *
+   * `marks` 由编译器按 `normMarks` 归一过：键只有已知的格式轴，布尔轴是 `true`，
+   * 值轴是槽名／hex 字面。空对象＝「有任何带格式的 run」（与 matcher 的循环同解）。
+   *
+   * 为什么这一条能进 SQL：判定是**单个 run 内部**的键值比较，SQL 用 `json_each`
+   * 逐 run 问同一组键即可，不需要跨 run 聚合（跨 run 才是「红字 ＋ 加粗」误配的来源）。
+   */
+  | { k: 'mark'; marks: Record<string, true | string> }
+  /**
+   * **正文里有外链 run**。`url` 只用于「此计划不精确」的判定，**不参与 SQL**：
+   * SQLite 的 `lower()` 只折 ASCII，JS 的 `toLowerCase()` 折 Unicode（带点的土耳其大写
+   * `İ`、开尔文符号这类逐码位不同），在 SQL 里按 url 窄化会**漏掉 matcher 认的命中**。
+   * ⇒ SQL 只收窄到「有外链」，url 比对留给 matcher（超集契约不许猜）。
+   */
+  | { k: 'link'; url?: string }
   | { k: 'descendantsOf'; plan: CandidatePlan }
   | { k: 'ancestorsOf'; plan: CandidatePlan }
   | { k: 'near'; plan: CandidatePlan }
@@ -322,6 +339,10 @@ export function isCandidatePlan(v: unknown, depth = 0): v is CandidatePlan {
     case 'tagged':
     case 'parents':
       return true
+    case 'mark':
+      return isMarkMap(v.marks)
+    case 'link':
+      return v.url === undefined || (typeof v.url === 'string' && v.url !== '')
     case 'ids':
       return Array.isArray(v.ids) && v.ids.every((x) => typeof x === 'string')
     case 'tags':
@@ -366,6 +387,75 @@ export function isCandidatePlan(v: unknown, depth = 0): v is CandidatePlan {
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+/**
+ * marks 的**线上形状**：键是格式轴（拼进 `$.marks.<轴>` 的路径），值是布尔轴的 `true`
+ * 或值轴的槽名／hex 字面。
+ *
+ * 这里只做**字符集**校验：轴名由编译器按 `normMarks` 过滤（未知轴在计划里就消失），
+ * 与 `ids`／`tags` 一样，边界只验容器形状、不复述块的格式表——那张表是块语义。
+ */
+function isMarkMap(v: unknown): v is Record<string, true | string> {
+  if (!isRecord(v)) return false
+  const entries = Object.entries(v)
+  if (entries.length > 8) return false
+  return entries.every(([k, x]) => /^[A-Za-z]+$/.test(k) && (x === true || (typeof x === 'string' && x !== '')))
+}
+
+/**
+ * `{mark}` 的**行本地谓词**（对 `alias.content` 逐 run 问）。
+ *
+ * 候选计划与分页查询共用这一份：两处若各写一段，等价性就只能靠人去比对 SQL 文本。
+ * 轴路径与值一律**绑定参数**（`json_extract(x, ?)`），键名不进 SQL 文本。
+ */
+function markPredicate(alias: string, want: Record<string, true | string>): { sql: string; params: (string | number)[] } {
+  const params: (string | number)[] = []
+  const axes = Object.keys(want).map((k) => {
+    params.push(`$.marks.${k}`, want[k] === true ? 1 : (want[k] as string))
+    return `json_extract(j.value, ?) = ?`
+  })
+  // 空 marks ＝「有任何带格式的 run」：matcher 对未指定的轴不参与判定，但要求 run 有 marks
+  const cond = axes.length === 0 ? `json_extract(j.value, '$.marks') is not null` : axes.join(' and ')
+  return {
+    sql: `exists (select 1 from json_each(${alias}.content) j
+      where json_extract(j.value, '$.t') <> 'asset' and ${cond})`,
+    params,
+  }
+}
+
+/**
+ * `{link}` 的**行本地谓词**：只问「有没有外链 run」，url 不在 SQL 里比（见 `link` 类型的注释）。
+ * 要与 `markPredicate` 分开写：matcher 对 link 的判定是「`t:'link'` ＋ url 归一化 contains」，
+ * 对 marks 是「run.marks 覆盖 want」——两条判据不是同一个形状的两种拼法。
+ */
+function linkPredicate(alias: string): string {
+  return `exists (select 1 from json_each(${alias}.content) j where json_extract(j.value, '$.t') = 'link')`
+}
+
+/**
+ * **能下推进页查询的部分**：返回「必要条件谓词」＋「剩下的计划」。
+ *
+ * 判据是单调的：`all` 的每个子条件都是整体成立的必要条件 ⇒ 把子条件里能写成
+ * 行本地谓词的那些 AND 进页查询，剩下的仍交给 `in (plan)`——两者合起来仍与整份
+ * 计划同集（只是让 path 序能提前停，不必每页把整份计划物化一遍）。
+ *
+ * 只有 `all` 能这样拆：`any` 的析取项不是必要条件，`notIn`／方向原子无法写成行本地谓词。
+ */
+function pushdownOf(plan: CandidatePlan): { preds: { sql: string; params: (string | number)[] }[]; rest: CandidatePlan | null } {
+  if (plan.k === 'mark') return { preds: [markPredicate('b', plan.marks)], rest: null }
+  if (plan.k === 'link') return { preds: [{ sql: linkPredicate('b'), params: [] }], rest: null }
+  if (plan.k === 'all') {
+    const preds: { sql: string; params: (string | number)[] }[] = []
+    const rest: CandidatePlan[] = []
+    for (const p of plan.plans) {
+      const part = pushdownOf(p)
+      preds.push(...part.preds)
+      if (part.rest !== null) rest.push(part.rest)
+    }
+    return { preds, rest: rest.length === 0 ? null : rest.length === 1 ? rest[0]! : { k: 'all', plans: rest } }
+  }
+  return { preds: [], rest: plan }
 }
 
 /**
@@ -513,6 +603,12 @@ export function candidatePlanSql(
             )`,
             [plan.needle],
           )
+    case 'mark': {
+      const p = markPredicate('b', plan.marks)
+      return wrap(`select b.id as id from ${B} b where ${visible('b')} and ${p.sql}`, p.params)
+    }
+    case 'link':
+      return wrap(`select b.id as id from ${B} b where ${visible('b')} and ${linkPredicate('b')}`, [])
     case 'descendantsOf': {
       const inner = candidatePlanSql(plan.plan, opts)
       return wrap(
@@ -617,10 +713,19 @@ function planIsExact(plan: CandidatePlan, derived: boolean): boolean {
     case 'ancestorsOf':
     case 'near':
       return false
-    // 值比较（`prop`）与正文（`text`/`mark`/`link`）的 SQL 都是超集，不是判定
+    // 值比较（`prop`）与正文（`text`）的 SQL 都是超集，不是判定
     case 'prop':
     case 'text':
       return false
+    /**
+     * 逐 run 问同一组键值：与 matcher 的判定集同集（可见性两处同源）⇒ 可信时精确。
+     * 不可信时可见性退回根上的 `deleted` 位（软删页的后代仍算候选）——多给的是可见块 ⇒ 不精确。
+     */
+    case 'mark':
+      return derived
+    // 「有外链」同解；带 url 时 SQL 不比 url（见 `link` 类型的注释）⇒ 只能当超集，不能拿去减
+    case 'link':
+      return derived && plan.url === undefined
     // 组合：交集/并集在「成员都精确」时精确；差集按构造精确（只在精确时才生效）
     case 'all':
     case 'any':
@@ -664,6 +769,35 @@ export function candidatePageSql(
   if (opts.derived !== true) {
     const all = candidatePlanSql(plan, { derived: false })
     return { sql: all.sql, params: all.params }
+  }
+  /**
+   * **行本地谓词直接下推进页查询**：`mark`／`link` 的判定只在单块内部，写成相关子查询后
+   * SQLite 沿 `idx_BlockIndex_path` 逐行走、凑够一页就停；而 `i.block in (plan)` 每页都会
+   * 把整份计划**重新物化**一遍（1M 行实测：约 1.0–1.5s/页 vs 约 2–35ms/页）。
+   *
+   * 谓词与 `candidatePlanSql` 是**同一个 helper** 生成的，不另写一份判据；`all` 里能下推的
+   * 子条件 AND 进来、剩下的仍走 `in (plan)`（见 `pushdownOf`）。`any`／`notIn`／方向原子
+   * 拆不动，仍走原路——它们的成本与改动前相同（每页物化一次计划）。
+   */
+  const push = pushdownOf(plan)
+  if (push.preds.length > 0) {
+    const rest = push.rest === null ? null : candidatePlanSql(push.rest, { derived: true })
+    return {
+      sql: `select i.block as id, i.path as path
+        from ${I} i join ${B} b on b.id = i.block
+       where i.hidden is null
+         ${page.after === null ? '' : 'and i.path > ?'}
+         ${rest === null ? '' : `and i.block in (${rest.sql})`}
+         ${push.preds.map((p) => `and ${p.sql}`).join(' ')}
+       order by i.path
+       limit ?`,
+      params: [
+        ...(page.after === null ? [] : [page.after]),
+        ...(rest === null ? [] : rest.params),
+        ...push.preds.flatMap((p) => p.params),
+        page.limit,
+      ],
+    }
   }
   const inner = candidatePlanSql(plan, { derived: true })
   /**

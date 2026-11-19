@@ -6,8 +6,8 @@
  *
  * 同一个问题（条件 → 候选超集）的两条投影：内存版从 `Index` 抽取，这一版从条件树
  * 编译 SQL。两者都受同一条铁律约束：**返回的集合必须 ⊇ 真命中**，否则候选迭代会
- * 静默丢行。收窄不了的形状（`not`／`mark`／`link`）给 `visible`（全部可见块）——
- * 宁可多装，不少装。
+ * 静默丢行。收窄不了的形状（方向原子／`prop exists:false`／`not` 的子计划不精确时）
+ * 给 `visible`（全部可见块）——宁可多装，不少装。
  *
  * ## matcher 环境需要的「点名块」
  *
@@ -29,6 +29,7 @@ import {
   type QueryContext,
 } from '../query/query.ts'
 import { shiftISO } from '../identity/journal.ts'
+import { normMarks, type Marks } from '../model/runs.ts'
 import type { Block } from '../model/model.ts'
 import type { CandidatePlan } from './library-reads.ts'
 
@@ -80,6 +81,13 @@ function collect(
     return
   }
   if ('children' in node) out.children = true
+}
+
+/** `Marks`（可选属性）→ 计划的线上形状（只留归一后仍在的轴，值都是布尔 `true`／字符串） */
+function planMarks(m: Marks): Record<string, true | string> {
+  const out: Record<string, true | string> = {}
+  for (const [k, v] of Object.entries(normMarks(m) ?? {})) if (v !== undefined) out[k] = v
+  return out
 }
 
 /** 系统槽的候选计划（`_date`／`_kind` 住在列上，不在属性行里） */
@@ -148,13 +156,22 @@ function planOf(
     return { k: 'text', needle: '', nonempty: true }
   }
   if ('children' in node) return { k: 'parents' }
+  if ('mark' in node) {
+    // marks 先归一：未知轴／坏值在计划里就消失，SQL 只按已知轴问（与 matcher 同一份词汇）。
+    // 空 marks（直接构造的 spec 才可能）⇒ 「有任何带格式的 run」。
+    return { k: 'mark', marks: planMarks(node.mark) }
+  }
+  if ('link' in node) {
+    // 带 url 时 SQL 不按 url 窄化（Unicode 折叠差异），但精确性随之降级 ⇒ url 进计划
+    return node.link.url === undefined ? { k: 'link' } : { k: 'link', url: node.link.url }
+  }
   if ('prop' in node) {
     const op = node.prop
     // 「没有这一栏」是补集，收窄不了（有值行/声明槽的反面没法用一张表答）
     if ('exists' in op && op.exists === false) return { k: 'visible' }
     return propPlan(op.id)
   }
-  // mark／link／不认识的形状：收窄不了 ⇒ 全部可见块（matcher 判）
+  // 不认识的形状：收窄不了 ⇒ 全部可见块（matcher 判）
   return { k: 'visible' }
 }
 

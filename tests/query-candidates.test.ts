@@ -22,6 +22,7 @@ import { readCandidatePage, readBlockTreeRows, readIdentityRows } from '../elect
 import { rowsToWorkspace } from '../src/core/storage/db-rows.ts'
 import { rebuildDerivedWrites } from '../src/core/storage/derived-rows.ts'
 import { candidateBuildOf } from '../src/core/storage/query-candidates.ts'
+import { candidatePlanSql } from '../src/core/storage/library-reads.ts'
 import { BlockStore } from '../src/core/model/store.ts'
 import { Workset } from '../src/core/storage/workset.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
@@ -56,16 +57,23 @@ const runs = (...rs: (string | { to: string; flavor?: string })[]): string =>
     ),
   )
 
+/** 原样 run 序列：格式（marks）与外链要逐键写，不走上面那个「文本/引用」简写 */
+const raw = (...rs: Record<string, unknown>[]): string => JSON.stringify(rs)
+const bold = (v: string): Record<string, unknown> => ({ t: 'text', v, marks: { bold: true } })
+const ink = (v: string, slot = 'red'): Record<string, unknown> => ({ t: 'text', v, marks: { ink: slot } })
+const link = (url: string, id: string): Record<string, unknown> => ({ t: 'link', id, v: '链接', url })
+
 /**
  * 库形状（覆盖计划器的每一条 SQL）：
  *
  *   TAG_A（标签，成员 a1/a2）── TAG_B（A 的子标签，成员 b1）
  *   PAGE_DAY（_date=今天）── d1（引用 PAGE_X、带 _status）── d2
- *   PAGE_X（页）── x1（引用 TAG_A 的行内标签、加粗文本）
+ *   PAGE_X（页）── x1（引用 TAG_A 的行内标签）
  *   PAGE_Y（页，空正文）── y1（有子级）
  *   J Yesterday（_date=昨天）── j1（正文跨 run：「黑」＋「体」两个 run）
  *   gone（软删，带 _tags）── g1
  *   DEF（字段定义 text；status 由 d1 的 _tags 声明）
+ *   E_*（格式与外链：粗／红／同一 run 的粗红／两段分开的粗＋红／两个外链／空正文／软删子树）
  */
 function seed(): RowWrite[] {
   const rows: RowWrite[] = [
@@ -110,6 +118,7 @@ function seed(): RowWrite[] {
     // j1 正文跨 run：「黑」「体」两个文本 run —— 单 run instr 找不到「黑体」
     { table: 'Block', op: 'update', key: { id: 'd1' }, values: { content: runs('一天的开始 ', { to: 'PAGE_X' }) } },
     { table: 'Block', op: 'update', key: { id: 'x1' }, values: { content: runs({ to: 'TAG_A', flavor: '#' }, { to: 'PAGE_Y' }) } },
+    { table: 'Block', op: 'update', key: { id: 'a1' }, values: { content: raw(bold('a1 是粗的')) } },
     { table: 'Block', op: 'update', key: { id: 'j1' }, values: { content: runs('黑', '体') } },
     { table: 'Block', op: 'update', key: { id: 'y1' }, values: { content: runs('有子级的一行') } },
     prop('d1', 'DEF', 0, '状态值'),
@@ -130,6 +139,30 @@ function seed(): RowWrite[] {
     prop('d4', '_embed', 0, { block: 'PAGE_X' }),
     prop('TAG_A', '_fieldDefs', 0, 'DEF', 1),
     prop('x1', '_color', 0, 'red'),
+    /**
+     * 格式与外链的夹具（`mark`／`link` 的候选是**行本地谓词**：逐 run 问同一组键值）。
+     * 关键形状是 `E_SPLIT`：粗的 run 与红的 run 分开 ⇒ **不是**「粗红」，跨 run 凑轴会误配。
+     * 软删子树各占一份（`E_GONE` 自己／`E_GONE_CHILD` 的子）：可信时都不可见，
+     * 不可信时子块会成为候选（`deleted` 只在根上）——两种情况都必须 ⊇ 真命中。
+     */
+    block('E_BOLD', null, null),
+    block('E_INK', null, null),
+    block('E_BOTH', null, null),
+    block('E_SPLIT', null, null),
+    block('E_LINK1', null, null),
+    block('E_LINK2', null, null),
+    block('E_ASSET', null, null),
+    block('E_GONE', null, null, { deleted: 9 }),
+    block('E_GONE_CHILD', 'E_GONE', null),
+    { table: 'Block', op: 'update', key: { id: 'E_BOLD' }, values: { content: raw(bold('粗')) } },
+    { table: 'Block', op: 'update', key: { id: 'E_INK' }, values: { content: raw(ink('红')) } },
+    { table: 'Block', op: 'update', key: { id: 'E_BOTH' }, values: { content: raw({ t: 'text', v: '又红又粗', marks: { bold: true, ink: 'red' } }) } },
+    { table: 'Block', op: 'update', key: { id: 'E_SPLIT' }, values: { content: raw(bold('粗'), ink('红')) } },
+    { table: 'Block', op: 'update', key: { id: 'E_LINK1' }, values: { content: raw({ t: 'text', v: '看' }, link('https://Example.com/Path', 'lk1')) } },
+    { table: 'Block', op: 'update', key: { id: 'E_LINK2' }, values: { content: raw({ t: 'text', v: '另' }, link('https://other.example.org/', 'lk2')) } },
+    { table: 'Block', op: 'update', key: { id: 'E_ASSET' }, values: { content: raw({ t: 'asset', id: 'as1', asset: 'deadbeef' }) } },
+    { table: 'Block', op: 'update', key: { id: 'E_GONE' }, values: { content: raw(bold('删掉的粗')) } },
+    { table: 'Block', op: 'update', key: { id: 'E_GONE_CHILD' }, values: { content: raw(ink('删掉的子')) } },
   ]
   return rows
 }
@@ -267,6 +300,15 @@ const CASES: { name: string; spec: QuerySpec; opts?: { selfId?: string; today?: 
   { name: 'text 跨 run 拼接', spec: { where: { text: '黑体' } } },
   { name: 'text 有正文', spec: { where: { text: { nonempty: true } } } },
   { name: 'children', spec: { where: { children: true } } },
+  { name: 'mark: 粗', spec: { where: { mark: { bold: true } } } },
+  { name: 'mark: 红字', spec: { where: { mark: { ink: 'red' } } } },
+  { name: 'mark: 同一 run 的粗＋红', spec: { where: { mark: { bold: true, ink: 'red' } } } },
+  { name: 'mark: 有任何格式', spec: { where: { mark: {} } } },
+  { name: 'link: 任意外链', spec: { where: { link: {} } } },
+  { name: 'link: url contains（大小写不敏）', spec: { where: { link: { url: 'example.COM/p' } } } },
+  { name: 'not: mark 粗（精确子集）', spec: { where: { not: { mark: { bold: true } } } } },
+  { name: 'not: link 任意（精确子集）', spec: { where: { not: { link: {} } } } },
+  { name: 'not: link 带 url（不精确 ⇒ 可见集）', spec: { where: { not: { link: { url: 'example.com' } } } } },
   { name: 'not', spec: { where: { not: { role: 'journal' } } } },
   { name: 'not 精确子集：tag', spec: { where: { not: { tag: 'TAG_A' } } } },
   { name: 'not 精确子集：is', spec: { where: { not: { is: 'PAGE_X' } } } },
@@ -362,6 +404,16 @@ test('候选收窄：否定减去精确子集；直接标签成员不再带上�
     // 不精确的子计划：否定必须退化成可见集（宽但真），不能拿会漏行的差集当候选
     const notProp = allCandidateIds(db, plan({ where: { not: { prop: { id: 'DEF', eq: '状态值' } } } }), 4000)
     assert.ok(notProp.length >= visible.length, '不精确的否定不能收窄（至少是可见集）')
+
+    // `mark` 是精确集（逐 run 同解）⇒ 否定可以真的减
+    const notMark = allCandidateIds(db, plan({ where: { not: { mark: { bold: true } } } }), 4000)
+    for (const id of ['E_BOLD', 'E_BOTH', 'E_SPLIT']) assert.ok(!notMark.includes(id), `${id} 带粗体，必须被减掉`)
+    assert.ok(notMark.includes('E_INK'), '只带红字的块不是「粗」，否定要保留它')
+    // `{link:{}}` 同解 ⇒ 精确；带 url 时 SQL 不比 url ⇒ 只能当超集
+    const notLink = allCandidateIds(db, plan({ where: { not: { link: {} } } }), 4000)
+    for (const id of ['E_LINK1', 'E_LINK2']) assert.ok(!notLink.includes(id), `${id} 有外链，必须被减掉`)
+    const notLinkUrl = allCandidateIds(db, plan({ where: { not: { link: { url: 'example.com' } } } }), 4000)
+    assert.equal(notLinkUrl.length, visible.length, '带 url 的 link 不精确 ⇒ 否定退化成可见集')
   })
 })
 
@@ -381,6 +433,12 @@ test('精确性可证：`{tag desc}` 的展开支与 `{down}`（去掉种子）�
       { where: { tag: { id: 'TAG_A', desc: true } } },
       { where: { tag: { id: 'TAG_B', desc: true } } },
       { where: { tag: 'TAG_A' } },
+      // 行本地谓词（逐 run 同解）：同一 run 覆盖 want 才算，跨 run 凑轴不算
+      { where: { mark: { bold: true } } },
+      { where: { mark: { ink: 'red' } } },
+      { where: { mark: { bold: true, ink: 'red' } } },
+      { where: { mark: {} } },
+      { where: { link: {} } },
     ] as const) {
       const c = [...cands(spec)].sort()
       const h = [...hits(spec)].sort()
@@ -388,7 +446,33 @@ test('精确性可证：`{tag desc}` 的展开支与 `{down}`（去掉种子）�
       assert.deepEqual(c, h, `候选与命中必须同集：${JSON.stringify(spec.where)}`)
     }
 
+    /**
+     * `{mark:{bold, ink:'red'}}` 的跨 run 反例：`E_SPLIT` 是一段粗、一段红，
+     * 两段分开 ⇒ 不是「粗红」。候选若按「任意 run 凑齐各轴」写，这里会多给（丢不掉）。
+     */
+    assert.ok([...cands({ where: { mark: { bold: true, ink: 'red' } } })].every((id) => id !== 'E_SPLIT'))
+
     // `{down}` 不再断言「同集」：一个块可以既是命中、又有命中后代 ⇒ 种子不能减，
     // 这一支按设计就不精确（见 `planIsExact`）。它的「候选 ⊇ 命中」由上面那条总等式覆盖。
+  })
+})
+
+test('mark／link 的「下推进页查询」与计划 SQL 同集（同一份谓词，两条投影不许漂）', () => {
+  withDb((db) => {
+    applyRowWrites(db, rebuildDerivedWrites(readContentRows(db)))
+    const { forest } = baseline(db)
+    for (const spec of [
+      { where: { mark: { bold: true } } },
+      { where: { mark: { ink: 'red' } } },
+      { where: { mark: {} } },
+      { where: { link: {} } },
+      { where: { link: { url: 'example.com' } } },
+    ] as const) {
+      const plan = candidateBuildOf(spec, undefined, forest, {}).plan
+      const paged = [...allCandidateIds(db, plan, 4000)].sort()
+      const q = candidatePlanSql(plan, { derived: true })
+      const planned = [...new Set((db.prepare(q.sql).all(...q.params) as { id: unknown }[]).map((r) => String(r.id)))].sort()
+      assert.deepEqual(paged, planned, `分页 SQL 与计划 SQL 必须同集：${JSON.stringify(spec.where)}`)
+    }
   })
 })

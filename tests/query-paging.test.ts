@@ -34,8 +34,6 @@ process.on('exit', () => {
 
 type Db = NonNullable<ReturnType<typeof openLibraryDb>['db']>
 
-const runs = (...rs: string[]): string => JSON.stringify(rs.map((v) => ({ t: 'text', v })))
-
 function block(id: string, parent: string | null, left: string | null, extra: Record<string, string | number | null> = {}): RowWrite {
   return { table: 'Block', op: 'upsert', key: { id }, values: { content: '[]', created: 1, modified: 1, parent, left, ...extra } }
 }
@@ -43,6 +41,9 @@ function block(id: string, parent: string | null, left: string | null, extra: Re
 /**
  * 一棵**必须翻页**的树：页 P 下 450 行（超过一页 400），其中 5 行带标签 TAG；
  * 另有一天日记 J。行 id 用 `c000`…`c449`（与 `runs` 的文本区分开）。
+ *
+ * 每 20 行留一行不带格式（其余带粗体 ⇒ `{mark:{bold}}` 的候选 427 条，必须翻两页），
+ * 每 9 行一枚红字、每 15 行一条外链。
  */
 function seed(): RowWrite[] {
   const rows: RowWrite[] = [
@@ -54,7 +55,11 @@ function seed(): RowWrite[] {
   for (let i = 0; i < 450; i++) {
     const id = `c${String(i).padStart(3, '0')}`
     rows.push(block(id, 'P', prev))
-    rows.push({ table: 'Block', op: 'update', key: { id }, values: { content: runs(`mark ${i}`) } })
+    const runs: Record<string, unknown>[] = [{ t: 'text', v: `mark ${i}` }]
+    if (i % 20 !== 0) runs.push({ t: 'text', v: `粗 ${i}`, marks: { bold: true } })
+    if (i % 9 === 0) runs.push({ t: 'text', v: `红 ${i}`, marks: { ink: 'red' } })
+    if (i % 15 === 0) runs.push({ t: 'link', id: `lk${i}`, v: '链接', url: `https://example.com/${i}` })
+    rows.push({ table: 'Block', op: 'update', key: { id }, values: { content: JSON.stringify(runs) } })
     if (i % 90 === 0) {
       rows.push({ table: 'BlockProperty', op: 'upsert', key: { block: id, name: '_tags', pos: 0 }, values: { multi: 0, value: 'TAG' } })
     }
@@ -109,6 +114,10 @@ const CASES: { name: string; spec: QuerySpec }[] = [
   { name: 'tag 成员', spec: { where: { tag: 'TAG' } } },
   { name: 'role page', spec: { where: { role: 'page' } } },
   { name: 'text 前缀', spec: { where: { text: 'mark' } } },
+  // 行本地谓词（mark/link）：候选本身就是命中集，分页求值仍必须 == 整库
+  { name: 'mark 粗（427 条 ⇒ 必翻页）', spec: { where: { mark: { bold: true } } } },
+  { name: 'mark 红字', spec: { where: { mark: { ink: 'red' } } } },
+  { name: 'link 任意', spec: { where: { link: {} } } },
 ]
 
 test('分页：每个条件一页页装到到底后，求值 == 整库求值', async () => {
