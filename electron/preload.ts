@@ -102,6 +102,9 @@ const qua = {
    * `catalog` 只回槽要显示的全局身份摘要。
    */
   doc: (roots: readonly string[]): Promise<unknown> => ipcRenderer.invoke('qua:library/doc', roots),
+  /** 一窗 Doc（DFS 前缀）＋下一页游标：巨大 Doc 的分段装载；`after` 是第一窗传 null */
+  docWindow: (root: string, after: string | null, limit: number): Promise<unknown> =>
+    ipcRenderer.invoke('qua:library/doc-window', root, after, limit),
   blocks: (ids: readonly string[]): Promise<unknown> => ipcRenderer.invoke('qua:library/blocks', ids),
   /** 一页候选 id（按文档序的 keyset：`after` 是上一页最后一条的 path）；主进程只执行 */
   candidates: (plan: unknown, after: string | null, limit: number): Promise<unknown> =>

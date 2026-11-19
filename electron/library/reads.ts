@@ -26,6 +26,7 @@ import {
   type CatalogTrashRoot,
   type LibraryCatalog,
   type LibraryDocRows,
+  type LibraryDocWindow,
   type RawLibraryRows,
 } from '../../src/core/storage/library-reads.ts'
 import { META_KEYS } from '../../src/core/identity/library.ts'
@@ -65,6 +66,51 @@ export function readDocRows(db: DatabaseSync, rootIds: readonly string[]): Libra
   const aliases = db.prepare(LIBRARY_READS.docAliases).all(idJson) as Row[]
   const lists = db.prepare(LIBRARY_READS.docLists).all(idJson) as Row[]
   return { rows: { blocks, props, aliases, lists, meta: {} }, ancestors, rootIds: [...rootIds] }
+}
+
+/**
+ * **一窗 Doc**（按派生路径区间的 DFS 前缀）：巨大 Doc 的分段装载。
+ *
+ * `next === null` ＝ 这一窗就是全部；`null` 返回值 ＝ 这块没有派生路径
+ * （索引未铺到它）⇒ 调用方回退整棵 `doc` 读，不猜。
+ *
+ * 祖先链只在第一窗给（`after === null`）：后面几窗都在子树内部，ancestors 不变。
+ */
+export function readDocWindow(
+  db: DatabaseSync,
+  rootId: string,
+  after: string | null,
+  limit: number,
+): LibraryDocWindow | null {
+  const at = db.prepare(LIBRARY_READS.indexPathOf).get(rootId) as { path?: unknown } | undefined
+  const rootPath = typeof at?.path === 'string' ? at.path : ''
+  if (rootPath === '') return null
+  const blocks = db
+    .prepare(LIBRARY_READS.docWindow)
+    .all(rootPath, `${rootPath}~`, after ?? '', limit) as Row[]
+  const ancestors: Row[] = []
+  if (after === null) {
+    const seen = new Set<string>()
+    for (const row of db.prepare(LIBRARY_READS.docAncestors).all(rootId) as Row[]) {
+      const key = String(row.id)
+      if (seen.has(key)) continue
+      seen.add(key)
+      ancestors.push(row)
+    }
+  }
+  const allIds = [...blocks.map((b) => String(b.id)), ...ancestors.map((a) => String(a.id))]
+  const idJson = JSON.stringify([...new Set(allIds)])
+  const props = db.prepare(LIBRARY_READS.docProps).all(idJson) as Row[]
+  const aliases = db.prepare(LIBRARY_READS.docAliases).all(idJson) as Row[]
+  const lists = db.prepare(LIBRARY_READS.docLists).all(idJson) as Row[]
+  const last = blocks[blocks.length - 1]
+  return {
+    rows: { blocks, props, aliases, lists, meta: {} },
+    ancestors,
+    rootIds: [rootId],
+    // 只有取满一窗才可能还有下一窗；不满 ⇒ 到底（省一次空往返）
+    next: blocks.length === limit && last ? String(last.path) : null,
+  }
 }
 
 /**

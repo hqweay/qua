@@ -46,6 +46,7 @@ import {
   readCandidatePage,
   readCatalogRows,
   readDocRows,
+  readDocWindow as readDocWindowRows,
   readDependents,
   readFtsMapRows,
   readIdentityRows,
@@ -62,6 +63,7 @@ import type {
   CandidatePlan,
   LibraryCatalog,
   LibraryDocRows,
+  LibraryDocWindow,
   RawLibraryRows,
 } from '../../src/core/storage/library-reads.ts'
 import type { DerivedPlan } from '../../src/core/storage/derived-plans.ts'
@@ -295,6 +297,28 @@ export function openSession(dir: string, opts: { expectId?: string; deviceId?: s
  */
 export function readDoc(session: RepoSession, roots: readonly string[]): LibraryDocRows {
   const doc = readDocRows(session.db, roots)
+  session.reads.doc += 1
+  session.reads.docRows +=
+    doc.rows.blocks.length +
+    doc.rows.props.length +
+    doc.rows.aliases.length +
+    doc.rows.lists.length +
+    doc.ancestors.length
+  return doc
+}
+
+/**
+ * **一窗 Doc**（巨大 Doc 的分段装载）：与 `doc` 同形，外加下一页游标。
+ * `null` ＝ 这块没有派生路径 ⇒ 调用方回退整棵读。计数与整棵读同一格。
+ */
+export function readDocWindow(
+  session: RepoSession,
+  rootId: string,
+  after: string | null,
+  limit: number,
+): LibraryDocWindow | null {
+  const doc = readDocWindowRows(session.db, rootId, after, limit)
+  if (!doc) return null
   session.reads.doc += 1
   session.reads.docRows +=
     doc.rows.blocks.length +

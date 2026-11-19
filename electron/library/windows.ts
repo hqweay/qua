@@ -29,7 +29,7 @@ import {
   type LibraryEntry,
 } from '../../src/core/identity/library.ts'
 import { libraryDir, loadRegistry, markOpened, saveRegistry, type RegistryIo } from './registry.ts'
-import { openSession, readBlocks, readCatalog, readCandidates, readDependentIds, readDoc, readFtsMap, readIdentity, readIndexChildren, readIndexFollowing, readIndexRows, readRelations, readRoots, readTree, saveContent, type OpenFailure, type RepoSession } from './session.ts'
+import { openSession, readBlocks, readCatalog, readCandidates, readDependentIds, readDoc, readDocWindow, readFtsMap, readIdentity, readIndexChildren, readIndexFollowing, readIndexRows, readRelations, readRoots, readTree, saveContent, type OpenFailure, type RepoSession } from './session.ts'
 import { hasContent, readMeta, readSeq, searchFts, snapshotLibrary, type RowWrite } from './sqlite.ts'
 import { META_KEYS } from '../../src/core/identity/library.ts'
 import { isCandidatePlan } from '../../src/core/storage/library-reads.ts'
@@ -446,6 +446,23 @@ export class LibraryManager {
       if (!isRootList(roots)) return { status: 'bad-args' }
       try {
         return { status: 'ok', doc: readDoc(s, roots) }
+      } catch (err) {
+        return { status: 'error', error: String(err) }
+      }
+    })
+
+    /**
+     * **巨大 Doc 的分段装载**：一窗（DFS 前缀）＋下一页游标。
+     * `doc: null` ＝ 这块没有派生路径（索引未铺到）⇒ 渲染层回退整棵读。
+     */
+    ipcMain.handle('qua:library/doc-window', (e, root: unknown, after: unknown, limit: unknown) => {
+      const s = sessionOf(e)
+      if (!s) return { status: 'no-library' }
+      if (typeof root !== 'string' || root === '' || !isNullableId(after) || !isPageLimit(limit)) {
+        return { status: 'bad-args' }
+      }
+      try {
+        return { status: 'ok', doc: readDocWindow(s, root, after, limit) }
       } catch (err) {
         return { status: 'error', error: String(err) }
       }

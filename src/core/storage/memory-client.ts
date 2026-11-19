@@ -28,7 +28,7 @@ import { isJournal, journalDate } from '../identity/journal.ts'
 import { ensureIndexLists, relationsTo, type Index } from '../infra/index-port.ts'
 import type { BlockStore } from '../model/store.ts'
 import { positionsOf, rowsOfBlock, type RawLibraryRows, type StoredWorkspace } from './db-rows.ts'
-import type { CandidatePage, LibraryCatalog, LibraryDocRows } from './library-reads.ts'
+import type { CandidatePage, LibraryCatalog, LibraryDocRows, LibraryDocWindow } from './library-reads.ts'
 import type { LibraryClient, LibraryReadResult } from './library-client.ts'
 import type { CandidatePlan } from './library-reads.ts'
 
@@ -148,6 +148,37 @@ export function createMemoryLibraryClient(deps: MemoryLibraryDeps): LibraryClien
         },
         ancestors: ancestors.blocks,
         rootIds: [...roots],
+      })
+    },
+
+    async docWindow(root, after, limit): Promise<LibraryReadResult<LibraryDocWindow>> {
+      /**
+       * 与桌面同一条契约：DFS 前缀 ＋ 不透明游标。这里的游标是**上一窗最后一块的 id**
+       * （web 没有派生路径）——调用方只把它原样传回来，两套实现的游标形态可以不同。
+       */
+      const b = findByIds(new Set([root])).get(root)
+      if (!b) return ok({ rows: emptyRows(), ancestors: [], rootIds: [root], next: null })
+      const all = subtreeOf(b)
+      let start = 0
+      if (after !== null) {
+        const at = all.findIndex((x) => x.id === after)
+        start = at < 0 ? all.length : at + 1
+      }
+      const slice = all.slice(start, start + limit)
+      const rows = rowsFor(slice.map((x) => x.id))
+      const pos = positionsOf(forest())
+      const ancestors = after === null ? rowsFor(ancestorIdsOf(root, pos)) : emptyRows()
+      return ok({
+        rows: {
+          blocks: rows.blocks,
+          props: [...rows.props, ...ancestors.props],
+          aliases: [...rows.aliases, ...ancestors.aliases],
+          lists: [...rows.lists, ...ancestors.lists],
+          meta: {},
+        },
+        ancestors: ancestors.blocks,
+        rootIds: [root],
+        next: start + slice.length < all.length && slice.length > 0 ? slice[slice.length - 1]!.id : null,
       })
     },
 

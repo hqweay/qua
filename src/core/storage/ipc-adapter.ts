@@ -57,6 +57,8 @@ export interface LibraryBridge {
    * 参数只有 id 列表，没有任意 SQL 过桥的口子。
    */
   doc?(roots: readonly string[]): Promise<unknown>
+  /** 一窗 Doc（DFS 前缀）＋下一页游标：巨大 Doc 的分段装载 */
+  docWindow?(root: string, after: string | null, limit: number): Promise<unknown>
   blocks?(ids: readonly string[]): Promise<unknown>
   /** 查询候选 id（计划由 core 编译，主进程只执行 SQL） */
   candidates?(plan: unknown): Promise<unknown>

@@ -94,6 +94,7 @@ import {
 import type { DeviceState } from './core/storage/device.ts'
 import { WORKSPACE_VERSION } from './core/infra/workspace.ts'
 import { createLibraryClient, type LibraryClient, type LibraryReadBridge } from './core/storage/library-client.ts'
+import type { LibraryDocWindow, RawLibraryRows } from './core/storage/library-reads.ts'
 import { createMemoryLibraryClient } from './core/storage/memory-client.ts'
 import { Workset, worksetClosureIds } from './core/storage/workset.ts'
 import { indexReadsOf, indexWritesOf, type IndexReads } from './core/storage/index-rows.ts'
@@ -472,13 +473,125 @@ function dockShortcutIds(device: DeviceState): string[] {
 }
 
 /**
+ * **一窗多少块**：`doc` 读面按派生路径切窗口。
+ *
+ * 100k 块的 Doc 拆成 50 窗：合成语料上每窗读取 ≈3ms、投影 ≈4ms（整棵一次性读是
+ * 530ms ＋ 投影 390ms，用户看到的是「点开一页，停一秒」）。首窗落地就交给视图，
+ * 余下窗口一窗一窗读——**每个 `await` 天然让出主线程**，不需要额外 yield；
+ * 装完再投影一次（`loadDoc` 本来就是 O(已装行)）。
+ */
+const DOC_WINDOW = 2000
+
+const pendingDocs = new Map<string, Promise<void>>()
+/**
  * **按 id 装一批块进工作集**（导航装载的唯一咽喉）。
  *
  * 工作集装载下「`kb.get` 拿不到」只说明没装；打开/聚焦一个未装载的目标必须
  * 先装再继续——把未加载当不存在去新建（或静默丢弃点击）都是事故。同一批 id 的
  * 并发装载只发一次 IPC；装载进来的根钉住（它马上要成为某个视图的当前对象）。
  * 整库模式下所有块都在内存里，直接 `then()`。
+ *
+ * **巨大 Doc 不再一次读完**：先取所有 root 的首窗就交（`then`），剩下的窗口接着
+ * 读完再投影一次并重画一次。小 Doc（≤ 一窗）与整棵读逐字相同——`next` 为 null 时
+ * 这里只有一次读、一次投影。
  */
+function ensureDocsLoaded(ids: readonly string[], then: () => void): void {
+  if (!libraryClient || !workset) {
+    then()
+    return
+  }
+  const missing = [...new Set(ids)].filter((id) => !blocks.isLoaded(id))
+  if (missing.length === 0) {
+    then()
+    return
+  }
+  const key = [...missing].sort().join(',')
+  const inflight = pendingDocs.get(key)
+  if (inflight) {
+    void inflight.then(then)
+    return
+  }
+  const run = loadDocs(missing, then).finally(() => pendingDocs.delete(key))
+  pendingDocs.set(key, run)
+}
+
+/**
+ * 装载主体：首窗落地即 `onFirst`，余下窗口读完后投影并重画。
+ *
+ * 窗口读不可用（实现没提供这条读面）或某一 root 没有派生路径（索引未铺到它）
+ * ⇒ **整批退回整棵读**：降级不是另一种语义。
+ */
+async function loadDocs(ids: readonly string[], onFirst: () => void): Promise<void> {
+  const client = libraryClient!
+  const ws = workset!
+  const readWindow = client.docWindow?.bind(client)
+  if (readWindow) {
+    const first = await Promise.all(ids.map((id) => readWindow(id, null, DOC_WINDOW)))
+    if (first.every((r) => r.status === 'ok')) {
+      const windows: LibraryDocWindow[] = []
+      for (const r of first) {
+        if (r.status !== 'ok') continue
+        ws.loadDoc(withAncestors(r.value), r.value.rootIds)
+        ws.pin(r.value.rootIds)
+        windows.push(r.value)
+      }
+      onFirst()
+      await loadRest(client, ws, windows)
+      return
+    }
+  }
+  const r = await client.doc(ids)
+  if (r.status === 'ok') {
+    ws.loadDoc(withAncestors(r.value), r.value.rootIds)
+    ws.pin(r.value.rootIds)
+  } else {
+    console.warn('[workset] doc load failed:', r.status === 'error' ? r.error : r.status)
+  }
+  onFirst()
+}
+
+/**
+ * 余下的窗口：每个 root 一窗一窗读到游标为 null，读完**一次投影**（`loadDoc`），
+ * 再重画一次活动编辑器——新装进来的子块必须出现在已经画好的树里。
+ *
+ * 重画让过输入法组合期（`deferWhileComposing`）：用户正在这一行打字时换 DOM 会把
+ * 预编辑串弄坏；那种情况下内容在下一次重画时出现。
+ */
+async function loadRest(
+  client: NonNullable<typeof libraryClient>,
+  ws: NonNullable<typeof workset>,
+  firstWindows: readonly LibraryDocWindow[],
+): Promise<void> {
+  const readWindow = client.docWindow!.bind(client)
+  let grew = false
+  for (const w of firstWindows) {
+    if (w.next === null) continue
+    const rootId = w.rootIds[0]
+    if (!rootId) continue
+    const acc: RawLibraryRows = { blocks: [], props: [], aliases: [], lists: [], meta: {} }
+    let after: string | null = w.next
+    while (after !== null) {
+      const r = await readWindow(rootId, after, DOC_WINDOW)
+      if (r.status !== 'ok') {
+        console.warn('[workset] doc window failed:', r.status === 'error' ? r.error : r.status)
+        break
+      }
+      const rows = withAncestors(r.value)
+      acc.blocks.push(...rows.blocks)
+      acc.props.push(...rows.props)
+      acc.aliases.push(...rows.aliases)
+      acc.lists.push(...rows.lists)
+      after = r.value.next
+    }
+    if (acc.blocks.length === 0) continue
+    ws.loadDoc(acc, [rootId])
+    ws.pin([rootId])
+    grew = true
+  }
+  if (!grew) return
+  if (typeof ed !== 'undefined' && ed && !ed.deferWhileComposing()) ed.reloadFromStore()
+}
+
 /**
  * **候选流分页**（查询层的装配侧）：取**一页**候选装进工作集。
  *
@@ -496,36 +609,6 @@ const loadCandidateWindow = (
   req: CandidateWindowRequest,
 ): Promise<CandidateLoadStep> =>
   loadCandidateWindowOf({ client: libraryClient, workset, store: blocks }, spec, ctx, host, req)
-
-const pendingDocs = new Map<string, Promise<void>>()
-function ensureDocsLoaded(ids: readonly string[], then: () => void): void {
-  if (!libraryClient || !workset) {
-    then()
-    return
-  }
-  const missing = [...new Set(ids)].filter((id) => !blocks.isLoaded(id))
-  if (missing.length === 0) {
-    then()
-    return
-  }
-  const key = [...missing].sort().join(',')
-  const inflight = pendingDocs.get(key)
-  const run = (async () => {
-    const r = await libraryClient.doc(missing)
-    if (r.status === 'ok') {
-      workset.loadDoc(withAncestors(r.value), r.value.rootIds)
-      workset.pin(r.value.rootIds)
-    } else {
-      console.warn('[workset] doc load failed:', r.status === 'error' ? r.error : r.status)
-    }
-  })().finally(() => pendingDocs.delete(key))
-  if (inflight) {
-    void inflight.then(then)
-    return
-  }
-  pendingDocs.set(key, run)
-  void run.then(then)
-}
 
 /**
  * 冷启动的**落点**与**物化**。两条装载路的判据来源不同：

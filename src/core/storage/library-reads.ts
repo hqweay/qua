@@ -85,6 +85,28 @@ export const LIBRARY_READS = {
     select ${BLOCK_COLUMNS} from ${B} b join anc a on b.id = a.id`,
 
   /**
+   * **一窗 Doc**（按派生路径区间的 DFS 前缀）：巨大 Doc 的分段装载单位。
+   *
+   * 区间是「root 的 path 前缀」：`path >= rootPath` 且 `path < rootPath || '~'`——
+   * 段是定宽数字，兄弟的 path 不会以本段的 path 开头，而子代的 path 一定以
+   * `rootPath + '/'` 开头（`'/'` < `'~'`）。游标是上一窗最后一条的 path，
+   * 所以同一条 SQL 一页页往前推，不用 offset（编辑时不会跳行）。
+   *
+   * 多带一列 `path`：它是下一窗的游标，`rowsToWorkspace` 不认这列、会忽略它。
+   */
+  docWindow: `select ${BLOCK_COLUMNS}, i.path as path from ${B} b join ${I} i on i.block = b.id
+    where i.path >= ?1 and i.path < ?2 and i.path > ?3
+    order by i.path
+    limit ?4`,
+
+  /**
+   * 一块的派生路径（窗口区间的起点）。
+   *
+   * 没有行 ＝ 派生表还没铺到它（重建未完成／新块）：调用方回退整棵读，不猜。
+   */
+  indexPathOf: `select path from ${I} where block = ?1`,
+
+  /**
    * **一批块 ＋ 它们的全部祖先链**（查询候选的装载单位）。
    *
    * 候选块的判定要看上下文（`{up}` 的祖先链、`_date` 排序贴着的那一天、面包屑），
@@ -249,6 +271,14 @@ export type LibraryDocRows = {
   ancestors: Record<string, unknown>[]
   rootIds: string[]
 }
+
+/**
+ * **一窗 Doc**：与整棵读同一形状，外加下一页的游标。
+ *
+ * `next === null` ＝ 这一窗就是全部（小 Doc 与整棵读逐字相同）；否则调用方拿它
+ * 继续要下一窗，直到 `null`。游标对调用方是不透明的（形态由实现定）。
+ */
+export type LibraryDocWindow = LibraryDocRows & { next: string | null }
 
 export type CatalogJournal = { id: string; date: string; deleted: number | null }
 export type CatalogTag = { id: string; name: string }

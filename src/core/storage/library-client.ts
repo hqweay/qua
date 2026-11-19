@@ -26,6 +26,7 @@ import type {
   CandidatePlan,
   LibraryCatalog,
   LibraryDocRows,
+  LibraryDocWindow,
   RawLibraryRows,
 } from './library-reads.ts'
 
@@ -33,6 +34,8 @@ import type {
 export interface LibraryReadBridge {
   /** 一个／多个 root 的子树＋祖先链（参数是 root id 列表，不是 SQL） */
   doc(roots: readonly string[]): Promise<unknown>
+  /** 一窗 Doc（DFS 前缀）＋下一页游标：巨大 Doc 的分段装载 */
+  docWindow?(root: string, after: string | null, limit: number): Promise<unknown>
   /** 一批块自己的行（**不带子树**；引用目标/标签/定义按 id 装一块） */
   blocks?(ids: readonly string[]): Promise<unknown>
   /** 一页候选 id（计划 JSON 由 core 编译；`after` 是上一页最后一条的 path） */
@@ -68,6 +71,11 @@ export type LibraryReadResult<T> =
 
 export interface LibraryClient {
   doc(roots: readonly string[]): Promise<LibraryReadResult<LibraryDocRows>>
+  /**
+   * **一窗 Doc**（巨大 Doc 的分段装载）：与 `doc` 同形，外加下一页游标。
+   * 不支持这条读面的实现返回 `bad-args`／`error`，调用方回退整棵 `doc`。
+   */
+  docWindow?(root: string, after: string | null, limit: number): Promise<LibraryReadResult<LibraryDocWindow>>
   /** 全局身份块（页/标签/定义/回收站根）：catalog 的块对象面 */
   identity(): Promise<LibraryReadResult<RawLibraryRows>>
   /** FTS 映射按块查（增量索引的装配单位） */
@@ -266,6 +274,28 @@ function createClient(bridge: LibraryReadBridge): LibraryClient {
       if (r.status !== 'ok') return clientError('library/doc', `bad reply status: ${String(r.status)}`)
       if (!isDocRows(r.doc)) return clientError('library/doc', 'bad reply shape')
       return { status: 'ok', value: r.doc }
+    },
+
+    async docWindow(root, after, limit) {
+      if (!bridge.docWindow) return clientError('library/doc-window', 'bridge has no window read')
+      let raw: unknown
+      try {
+        raw = await bridge.docWindow(root, after, limit)
+      } catch (e) {
+        return clientError('library/doc-window', e instanceof Error ? e.message : String(e))
+      }
+      const r = replyStatus(raw)
+      if (r.status === 'no-library') return { status: 'no-library' }
+      if (r.status === 'bad-args') return { status: 'bad-args' }
+      if (r.status === 'error') return clientError('library/doc-window', String(r.error ?? 'unknown'))
+      if (r.status !== 'ok') return clientError('library/doc-window', `bad reply status: ${String(r.status)}`)
+      const doc = r.doc
+      // `doc: null` ＝ 这块没有派生路径（索引未铺到）⇒ 调用方回退整棵读
+      if (doc === null) return clientError('library/doc-window', 'no derived path')
+      if (!isDocRows(doc) || !('next' in doc)) return clientError('library/doc-window', 'bad reply shape')
+      const next = (doc as { next: unknown }).next
+      if (next !== null && typeof next !== 'string') return clientError('library/doc-window', 'bad reply shape')
+      return { status: 'ok', value: doc as LibraryDocWindow }
     },
 
     async relations(ids) {

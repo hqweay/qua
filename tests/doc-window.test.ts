@@ -1,0 +1,180 @@
+/**
+ * **巨大 Doc 的分段装载**（`docWindow`）：一窗一窗读，拼起来必须与整棵读**同解**。
+ *
+ * 判据（每条都能单独证伪）：
+ *   ① 窗口序列拼起来 == `readDocRows` 的子树（按先序、无重无漏）；
+ *   ② 区间只覆盖这一棵：后面的兄弟根不进窗；
+ *   ③ 祖先链只在第一窗给；没有派生路径 ⇒ 返回 `null`（调用方回退整棵）；
+ *   ④ 用窗口装进工作集 == 整棵装进去（同一棵树的形状与兄弟序）；
+ *   ⑤ 内存读面（web）与桌面同一契约：拼起来 == `doc`。
+ */
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { openLibraryDb, applyRowWrites, type Db, type RowWrite } from '../electron/library/sqlite.ts'
+import { readDocRows, readDocWindow } from '../electron/library/reads.ts'
+import type { RawLibraryRows } from '../src/core/storage/db-rows.ts'
+import { withAncestors } from '../src/app/boot/workset-boot.ts'
+import { BlockStore } from '../src/core/model/store.ts'
+import { Workset } from '../src/core/storage/workset.ts'
+import { createMemoryLibraryClient } from '../src/core/storage/memory-client.ts'
+import { mkBlock, type Block } from '../src/core/model/model.ts'
+import type { LibraryDocRows } from '../src/core/storage/library-reads.ts'
+
+const dirs: string[] = []
+function db(): Db {
+  const d = mkdtempSync(join(tmpdir(), 'qua-docwin-'))
+  dirs.push(d)
+  const r = openLibraryDb(join(d, 'qua.db'))
+  assert.equal(r.status, 'created')
+  return r.db!
+}
+process.on('exit', () => {
+  for (const d of dirs) rmSync(d, { recursive: true, force: true })
+})
+
+const text = (v: string): string => JSON.stringify([{ t: 'text', v }])
+const seg = (n: number): string => String(n).padStart(6, '0')
+const idOfRow = (row: unknown): string => String((row as { id: unknown }).id)
+
+/**
+ * 库形状（先序）：root — a — g1..g5，后面跟一个兄弟根 next。
+ * 窗口限制 2 条时，边界会落在一棵子树的中间（这才是要验的形状）。
+ */
+function seeded(): Db {
+  const d = db()
+  const rows: RowWrite[] = []
+  const mk = (id: string, parent: string | null, left: string | null, path: string, root: string): void => {
+    rows.push({ table: 'Block', op: 'upsert', key: { id }, values: { content: text(id), created: 1, modified: 1, parent, left } })
+    rows.push({ table: 'BlockIndex', op: 'upsert', key: { block: id }, values: { root, path, hidden: null } })
+  }
+  mk('root', null, null, seg(1), 'root')
+  mk('a', 'root', null, `${seg(1)}/${seg(1)}`, 'root')
+  let prev: string | null = null
+  for (let i = 1; i <= 5; i++) {
+    mk(`g${i}`, 'a', prev, `${seg(1)}/${seg(1)}/${seg(i)}`, 'root')
+    prev = `g${i}`
+  }
+  mk('next', null, 'root', seg(2), 'next')
+  applyRowWrites(d, rows)
+  return d
+}
+
+/** 一页页读完（返回拼接的 id 与窗数） */
+function readAll(d: Db, rootId: string, limit: number): { ids: string[]; windows: number; ancestorsOnlyFirst: boolean } {
+  const ids: string[] = []
+  let after: string | null = null
+  let windows = 0
+  let ancestorsOnlyFirst = true
+  for (let i = 0; i < 100; i++) {
+    const w = readDocWindow(d, rootId, after, limit)
+    assert.ok(w, '这条 root 应当有派生路径')
+    windows++
+    if (windows > 1 && w.ancestors.length > 0) ancestorsOnlyFirst = false
+    ids.push(...w.rows.blocks.map(idOfRow))
+    after = w.next
+    if (after === null) break
+  }
+  return { ids, windows, ancestorsOnlyFirst }
+}
+
+test('窗口拼接 == 整棵读（按先序、无重无漏）', () => {
+  const d = seeded()
+  const whole = readDocRows(d, ['root']).rows.blocks.map(idOfRow)
+  for (const limit of [1, 2, 3, 4, 7, 100]) {
+    const got = readAll(d, 'root', limit)
+    assert.deepEqual(got.ids, whole, `limit=${limit}`)
+    assert.ok(got.ancestorsOnlyFirst, '祖先链只在第一窗给')
+  }
+})
+
+test('区间只覆盖这一棵：后面的兄弟根不进窗', () => {
+  const d = seeded()
+  const got = readAll(d, 'root', 2).ids
+  assert.ok(!got.includes('next'), '兄弟根不在子树的 path 区间里')
+  assert.equal(got[0], 'root', '第一窗从 root 自己开始')
+})
+
+test('没有派生路径 ⇒ null（调用方回退整棵，不猜）', () => {
+  const d = seeded()
+  assert.equal(readDocWindow(d, 'no-such-block', null, 2), null)
+})
+
+test('下一窗不重复上一窗给过的块', () => {
+  const d = seeded()
+  const w = readDocWindow(d, 'root', null, 3)
+  assert.ok(w && w.next !== null)
+  const second = readDocWindow(d, 'root', w.next, 3)
+  assert.ok(second)
+  const first = new Set(w.rows.blocks.map(idOfRow))
+  for (const row of second.rows.blocks) assert.ok(!first.has(idOfRow(row)))
+})
+
+test('用窗口装进工作集 == 整棵装进去（形状与兄弟序一致）', () => {
+  const d = seeded()
+  const whole = readDocRows(d, ['root'])
+
+  const wholeStore = new BlockStore([])
+  new Workset(wholeStore).loadDoc(withAncestors(whole), whole.rootIds)
+
+  const winStore = new BlockStore([])
+  const win = new Workset(winStore)
+  const acc: RawLibraryRows = { blocks: [], props: [], aliases: [], lists: [], meta: {} }
+  let after: string | null = null
+  for (let i = 0; i < 100; i++) {
+    const w = readDocWindow(d, 'root', after, 2)
+    assert.ok(w)
+    const rows = withAncestors(w)
+    if (after === null) {
+      win.loadDoc(rows, w.rootIds)
+    } else {
+      acc.blocks.push(...rows.blocks)
+      acc.props.push(...rows.props)
+      acc.aliases.push(...rows.aliases)
+      acc.lists.push(...rows.lists)
+    }
+    after = w.next
+    if (after === null) break
+  }
+  if (acc.blocks.length > 0) win.loadDoc(acc, ['root'])
+
+  assert.deepEqual(shapeOf(winStore), shapeOf(wholeStore), '两棵树的形状相同')
+})
+
+/** 一片森林的形状：先序 id ＋ 每个块的子块 id 列表（顺序也算） */
+function shapeOf(store: BlockStore): string[] {
+  const out: string[] = []
+  const walk = (b: Block, depth: number): void => {
+    out.push(`${'  '.repeat(depth)}${b.id}[${b.children.map((c) => c.id).join(',')}]`)
+    for (const c of b.children) walk(c, depth + 1)
+  }
+  for (const r of store.blocks) walk(r, 0)
+  return out
+}
+
+test('内存读面（web）同一契约：窗口拼接 == doc', async () => {
+  const root = mkBlock('根')
+  const a = mkBlock('A')
+  const g1 = mkBlock('G1')
+  const g2 = mkBlock('G2')
+  a.children = [g1, g2]
+  root.children = [a]
+  const store = new BlockStore([root])
+  const client = createMemoryLibraryClient({ ws: () => ({ blocks: store.blocks, activeId: '', savedAt: 1 }), store })
+  const whole = await client.doc([root.id])
+  assert.equal(whole.status, 'ok')
+  if (whole.status !== 'ok') return
+  const ids: string[] = []
+  let after: string | null = null
+  for (let i = 0; i < 50; i++) {
+    const r = await client.docWindow!(root.id, after, 1)
+    assert.equal(r.status, 'ok')
+    if (r.status !== 'ok') return
+    ids.push(...r.value.rows.blocks.map(idOfRow))
+    after = r.value.next
+    if (after === null) break
+  }
+  assert.deepEqual(ids, (whole.value as LibraryDocRows).rows.blocks.map(idOfRow))
+})
