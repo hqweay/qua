@@ -17,6 +17,7 @@ import { openLibraryDb, applyRowWrites, type Db, type RowWrite } from '../electr
 import { readDocRows, readDocWindow } from '../electron/library/reads.ts'
 import type { RawLibraryRows } from '../src/core/storage/db-rows.ts'
 import { DOC_WINDOW, finishDocWindows, pendingOf, readFirstWindows, withAncestors } from '../src/app/boot/doc-windows.ts'
+import { loadWorksetBoot } from '../src/app/boot/workset-boot.ts'
 import { BlockStore } from '../src/core/model/store.ts'
 import { Workset } from '../src/core/storage/workset.ts'
 import { createMemoryLibraryClient } from '../src/core/storage/memory-client.ts'
@@ -172,6 +173,33 @@ test('启动/导航共用的窗口装载：首窗 ＋ pendingOf ＋ finishDocWin
 
   assert.equal(await finishDocWindows(client, workset, pending), true, '续装长过')
   assert.deepEqual(shapeOf(store), shapeOf(wholeStore))
+})
+
+test('启动：active 是跨窗大页 ⇒ 首窗就返回、余下交 pending，续装后装齐', async () => {
+  const bigTree = (): Block => {
+    const root = { ...mkBlock('大页'), id: 'big-page', children: [] as Block[] }
+    for (let i = 0; i < 2100; i++) root.children.push({ ...mkBlock(`第${i}块`), id: `big-${i}`, children: [] })
+    return root
+  }
+  const source = new BlockStore([bigTree()])
+  const client = createMemoryLibraryClient({
+    ws: () => ({ blocks: source.blocks, activeId: 'big-page', savedAt: 1 }),
+    store: source,
+  })
+  const store = new BlockStore([])
+  const workset = new Workset(store)
+  const boot = await loadWorksetBoot({ client, workset })
+  assert.equal(boot.status, 'ok')
+  if (boot.status !== 'ok') return
+  assert.equal(boot.mode, 'page')
+  assert.deepEqual(boot.roots.map((b) => b.id), ['big-page'])
+  assert.equal(boot.counts.docBlocks, DOC_WINDOW, '启动只装了首窗')
+  assert.equal(boot.pending.length, 1, '余下的交给首帧后续装')
+  assert.equal(workset.isLoaded('big-2099'), false)
+
+  assert.equal(await finishDocWindows(client, workset, boot.pending), true)
+  assert.equal(workset.isLoaded('big-2099'), true, '续装把余下的装齐')
+  assert.equal(workset.size, 2101)
 })
 
 /** 一片森林的形状：先序 id ＋ 每个块的子块 id 列表（顺序也算） */
