@@ -434,28 +434,49 @@ function linkPredicate(alias: string): string {
 }
 
 /**
- * **能下推进页查询的部分**：返回「必要条件谓词」＋「剩下的计划」。
+ * **能下推进页查询的部分**：返回「必要条件谓词」＋「剩下的计划」＋「谓词要不要 Block 表」。
  *
  * 判据是单调的：`all` 的每个子条件都是整体成立的必要条件 ⇒ 把子条件里能写成
- * 行本地谓词的那些 AND 进页查询，剩下的仍交给 `in (plan)`——两者合起来仍与整份
+ * **行本地谓词**的那些 AND 进页查询，剩下的仍交给 `in (plan)`——两者合起来仍与整份
  * 计划同集（只是让 path 序能提前停，不必每页把整份计划物化一遍）。
  *
- * 只有 `all` 能这样拆：`any` 的析取项不是必要条件，`notIn`／方向原子无法写成行本地谓词。
+ * 两处「谓词」的来源：
+ * - `mark`／`link`：读正文（要 `Block b`）；
+ * - `notIn`（子计划精确时）：`i.block not in (<子计划>)`，只读 `BlockIndex i`。
+ *   `all` 里出现 `{not: …}` 就是这个形状（`{tag:X}` 且不是某一块）。
+ *
+ * `any` 的析取项不是必要条件；方向原子／`near` 的集合是递归闭包，写不成行本地谓词。
  */
-function pushdownOf(plan: CandidatePlan): { preds: { sql: string; params: (string | number)[] }[]; rest: CandidatePlan | null } {
-  if (plan.k === 'mark') return { preds: [markPredicate('b', plan.marks)], rest: null }
-  if (plan.k === 'link') return { preds: [{ sql: linkPredicate('b'), params: [] }], rest: null }
+function pushdownOf(plan: CandidatePlan): {
+  preds: { sql: string; params: (string | number)[] }[]
+  rest: CandidatePlan | null
+  needsBlock: boolean
+} {
+  if (plan.k === 'mark') return { preds: [markPredicate('b', plan.marks)], rest: null, needsBlock: true }
+  if (plan.k === 'link') return { preds: [{ sql: linkPredicate('b'), params: [] }], rest: null, needsBlock: true }
+  if (plan.k === 'notIn') {
+    // 不精确的子计划不能减（与 `candidatePlanSql` 同一条守卫）——那就整份退回去走 `in (plan)`
+    if (!planIsExact(plan.plan, true)) return { preds: [], rest: plan, needsBlock: false }
+    const inner = candidatePlanSql(plan.plan, { derived: true })
+    return {
+      preds: [{ sql: `i.block not in (${inner.sql})`, params: inner.params }],
+      rest: null,
+      needsBlock: false,
+    }
+  }
   if (plan.k === 'all') {
     const preds: { sql: string; params: (string | number)[] }[] = []
     const rest: CandidatePlan[] = []
+    let needsBlock = false
     for (const p of plan.plans) {
       const part = pushdownOf(p)
       preds.push(...part.preds)
+      needsBlock = needsBlock || part.needsBlock
       if (part.rest !== null) rest.push(part.rest)
     }
-    return { preds, rest: rest.length === 0 ? null : rest.length === 1 ? rest[0]! : { k: 'all', plans: rest } }
+    return { preds, rest: rest.length === 0 ? null : rest.length === 1 ? rest[0]! : { k: 'all', plans: rest }, needsBlock }
   }
-  return { preds: [], rest: plan }
+  return { preds: [], rest: plan, needsBlock: false }
 }
 
 /**
@@ -685,7 +706,6 @@ function planIsExact(plan: CandidatePlan, derived: boolean): boolean {
   switch (plan.k) {
     // 「是什么」在列/露面/地址上就是判定本身，matcher 与 SQL 问的是同一格
     case 'none':
-    case 'visible':
     case 'ids':
     case 'list':
     case 'journal':
@@ -695,6 +715,16 @@ function planIsExact(plan: CandidatePlan, derived: boolean): boolean {
     case 'aliased':
     case 'tagged':
       return true
+    /**
+     * ⚠️ **`visible` 不算精确**，哪怕它的集合（可见块）本身就是判定域。
+     *
+     * 它是「这个形状收窄不了」的**落点**（`prop exists:false`／`text:''`／不认识的 prop id），
+     * 这时节点的命中集是全可见块的一个**子集**：计划 ⊋ 命中。
+     * 拿它去当差集的减数，会把这些块从「否定」的候选里挖掉——它们恰恰可能命中否定。
+     * （`{not:{prop:{id:X, exists:false}}}` 的候选因此是 `visible`，不是空集。）
+     */
+    case 'visible':
+      return false
     /**
      * 直接成员＝matcher 的口径（`tagMemberIds`）。展开支现在也同解：下级标签按 `_belongsTo`
      * 递归（与 `descendantTagIds` 同一条边）、成员只收带 `tag` 露面的下级——由
@@ -771,20 +801,40 @@ export function candidatePageSql(
     return { sql: all.sql, params: all.params }
   }
   /**
-   * **行本地谓词直接下推进页查询**：`mark`／`link` 的判定只在单块内部，写成相关子查询后
-   * SQLite 沿 `idx_BlockIndex_path` 逐行走、凑够一页就停；而 `i.block in (plan)` 每页都会
-   * 把整份计划**重新物化**一遍（1M 行实测：约 1.0–1.5s/页 vs 约 2–35ms/页）。
+   * **分页从「路径序扫描」出发，不从「物化候选集」出发。**
    *
-   * 谓词与 `candidatePlanSql` 是**同一个 helper** 生成的，不另写一份判据；`all` 里能下推的
-   * 子条件 AND 进来、剩下的仍走 `in (plan)`（见 `pushdownOf`）。`any`／`notIn`／方向原子
-   * 拆不动，仍走原路——它们的成本与改动前相同（每页物化一次计划）。
+   * `i.block in (plan)` 每页都会把整份计划重新物化一遍；对 `visible` 这种「就是外层条件
+   * 本身」的计划，那等于每页扫一遍全库再逐个回表排序（1M 实测 495ms/页）。三条直路：
+   *
+   * - **visible**：页要的就是「可见块按 path 序取 400」——直接走 `idx_BlockIndex_path`；
+   * - **行本地谓词**（`mark`／`link`／`notIn`）：把谓词写进 WHERE，凑够一页就停。
+   *   谓词与 `candidatePlanSql` 是**同一个 helper** 生成的，不另写一份判据；
+   * - 其余（`any`／方向原子／不精确的否定）仍走 `in (plan)`——它们的成本与改动前相同。
+   *
+   * `all` 里能下推的子条件 AND 进来、剩下的仍走 `in (plan)`（见 `pushdownOf`）。
    */
-  const push = pushdownOf(plan)
+  /**
+   * 不精确的否定在 SQL 里本来就退化成可见集（`candidatePlanSql` 的同一条守卫）——
+   * 分页时也走同一条直路，否则「收窄不了」会以「每页物化一份全库」的形式付两次钱。
+   */
+  const effective: CandidatePlan = plan.k === 'notIn' && !planIsExact(plan.plan, true) ? { k: 'visible' } : plan
+  if (effective.k === 'visible') {
+    return {
+      sql: `select i.block as id, i.path as path
+        from ${I} i
+       where i.hidden is null
+         ${page.after === null ? '' : 'and i.path > ?'}
+       order by i.path
+       limit ?`,
+      params: [...(page.after === null ? [] : [page.after]), page.limit],
+    }
+  }
+  const push = pushdownOf(effective)
   if (push.preds.length > 0) {
     const rest = push.rest === null ? null : candidatePlanSql(push.rest, { derived: true })
     return {
       sql: `select i.block as id, i.path as path
-        from ${I} i join ${B} b on b.id = i.block
+        from ${I} i${push.needsBlock ? ` join ${B} b on b.id = i.block` : ''}
        where i.hidden is null
          ${page.after === null ? '' : 'and i.path > ?'}
          ${rest === null ? '' : `and i.block in (${rest.sql})`}

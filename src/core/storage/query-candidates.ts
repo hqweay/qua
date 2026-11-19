@@ -109,19 +109,35 @@ function planOf(
     if (node.all.length === 0) return { k: 'visible' } // 恒真
     const plans = node.all.map((n) => planOf(n, env, seen))
     if (plans.some((p) => p.k === 'none')) return NONE
-    return plans.every((p) => p.k === 'visible') ? { k: 'visible' } : { k: 'all', plans }
+    /**
+     * `visible` 是交集的**单位元**（候选全域就是可见块）⇒ 直接丢掉。
+     * 留着它没有任何语义增量，却会让分页退化成「每页物化一份全库候选」——
+     * 宽条件与窄条件组合（`{all:[{prop exists:false},{tag:X}]}`）本来是窄的。
+     */
+    const kept = plans.filter((p) => p.k !== 'visible')
+    return kept.length === 0 ? { k: 'visible' } : kept.length === 1 ? kept[0]! : { k: 'all', plans: kept }
   }
   if ('any' in node) {
     if (node.any.length === 0) return NONE // 恒假
     const plans = node.any.map((n) => planOf(n, env, seen))
-    return plans.every((p) => p.k === 'none') ? NONE : { k: 'any', plans }
+    // `visible` 是并集的**吸收元**：并出来就是全域
+    if (plans.some((p) => p.k === 'visible')) return { k: 'visible' }
+    // `none` 是并集的**单位元**（空集不贡献成员）
+    const kept = plans.filter((p) => p.k !== 'none')
+    return kept.length === 0 ? NONE : kept.length === 1 ? kept[0]! : { k: 'any', plans: kept }
   }
   if ('not' in node) {
     /**
      * 否定：候选＝可见块减去子计划的**精确**集合（`notIn`）。
      * 子计划不精确时 SQL 那边会自己退化成 `visible`——这里的计划形状不必知道。
+     *
+     * ⚠️ **不能说** `¬visible ＝ ∅`：`visible` 同时是「收窄不了的形状」的落点
+     * （`prop exists:false`／`text:''`…），它的**计划**是全域、但那个节点的**命中**不是。
+     * 一侧是候选超集、一侧是判定集，两者不是同一个集合——恒等式只对 `none` 成立。
      */
-    return { k: 'notIn', plan: planOf(node.not, env, seen) }
+    const inner = planOf(node.not, env, seen)
+    if (inner.k === 'none') return { k: 'visible' }
+    return { k: 'notIn', plan: inner }
   }
   if ('is' in node) return node.is === '' ? NONE : { k: 'ids', ids: [node.is] }
   if ('up' in node) return { k: 'descendantsOf', plan: planOf(node.up, env, seen) }

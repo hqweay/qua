@@ -309,6 +309,8 @@ const CASES: { name: string; spec: QuerySpec; opts?: { selfId?: string; today?: 
   { name: 'not: mark 粗（精确子集）', spec: { where: { not: { mark: { bold: true } } } } },
   { name: 'not: link 任意（精确子集）', spec: { where: { not: { link: {} } } } },
   { name: 'not: link 带 url（不精确 ⇒ 可见集）', spec: { where: { not: { link: { url: 'example.com' } } } } },
+  // `visible` 既是「判定域」又是「收窄不了的落点」：否定它**不能**当成「否定全域」
+  { name: 'not: prop exists:false（收窄不了 ⇒ 候选是全可见集）', spec: { where: { not: { prop: { id: 'DEF', exists: false } } } } },
   { name: 'not', spec: { where: { not: { role: 'journal' } } } },
   { name: 'not 精确子集：tag', spec: { where: { not: { tag: 'TAG_A' } } } },
   { name: 'not 精确子集：is', spec: { where: { not: { is: 'PAGE_X' } } } },
@@ -414,6 +416,18 @@ test('候选收窄：否定减去精确子集；直接标签成员不再带上�
     for (const id of ['E_LINK1', 'E_LINK2']) assert.ok(!notLink.includes(id), `${id} 有外链，必须被减掉`)
     const notLinkUrl = allCandidateIds(db, plan({ where: { not: { link: { url: 'example.com' } } } }), 4000)
     assert.equal(notLinkUrl.length, visible.length, '带 url 的 link 不精确 ⇒ 否定退化成可见集')
+
+    /**
+     * **宽度不能传染**：`visible` 是交集的单位元、并集的吸收元。
+     * - `all` 里丢掉它（否则分页每页物化全库，窄条件被拖成全库）；
+     * - `any` 里保留它就是全域；
+     * - 否定它**不是**空集（它的计划是全域，但那个节点的命中不是全域）。
+     */
+    const wide = { prop: { id: 'DEF', exists: false } } as const
+    assert.equal(plan({ where: { all: [wide, { tag: 'TAG_A' }] } }).k, 'tags')
+    assert.equal(plan({ where: { any: [wide, { tag: 'TAG_A' }] } }).k, 'visible')
+    assert.equal(plan({ where: { not: wide } }).k, 'notIn')
+    assert.ok(allCandidateIds(db, plan({ where: { not: wide } }), 4000).length > 0, '否定「收窄不了」的形状仍有候选')
   })
 })
 
