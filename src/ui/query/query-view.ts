@@ -1101,19 +1101,29 @@ export class ViewHost {
         const spec = this.effective
         if (!spec) return
         const ctx = this.evalContext(spec)
+        /**
+         * **带排序的查询不在中途画**：排序是对**全集**做的，每补一页就重排一次会让已出行
+         * 来回跳（顺序在装载过程中变三次，用户会把那读成「结果在乱跳」）。文档序则相反：
+         * 后续页只会追加在已出行之后，边装边出是安全的。
+         */
+        const sorted = (spec.sort?.length ?? 0) > 0
         const step = await load(spec, ctx, this.deps.host(), {
           after: this.cursor,
           target: this.windowTarget(spec),
           hits: () => this.frozen?.hits.length ?? 0,
           onPage: (page) => {
-            // 边装边出：装进了新块的那一页就重算重画
-            if (!page.loaded) return
+            if (!page.loaded || sorted) return
             this.frozen = freezeResult(spec, this.deps.kb, ctx, this.viewKey)
             this.sync(true)
           },
         })
         this.cursor = step.next
         if (step.next === null) this.streamDone = true
+        // 带排序：取完之后一次性画（这才是「全集的排序」的那一次）
+        if (sorted && step.loaded) {
+          this.frozen = freezeResult(spec, this.deps.kb, ctx, this.viewKey)
+          this.sync(true)
+        }
       } while (this.fillAgain && !this.streamDone)
     } catch (e) {
       this.deps.toast?.(t('ui.query.refreshFailed', { message: e instanceof Error ? e.message : String(e) }), 'warn')
