@@ -305,3 +305,15 @@ test('结果集/镜像的根不能搬：根不换位，深一层只在根子树�
   assert.equal(outdentMove(doc, 'c1'), null, '一级子块反缩进会离开根子树 ⇒ 它自己就没有落点')
   assert.equal(moveStaysInside(doc, 'c1', { parentId: 'outside', index: 0 }), false, '落点不在窗口里')
 })
+
+test('外部源（跨编辑器拖进来的块）只看落点：落点在窗口里就放行', () => {
+  // 从正文拖一块到侧槽窗口／挂载区：被拖块不在本 doc 里，它不动本视图的序，
+  // 守卫只剩落点——落点行是真实结构位（doc 根的兄弟位在 `dropMoveExternal` 已折成 inside）。
+  // 拒它就是「提示照说、松手没反应」：悬停期 `dropRefused` 对外部源不表态。
+  const doc = fixture()
+  const outside = mk('out', '外面拖来的')
+  assert.equal(moveStaysInside(doc, outside.id, { parentId: 'c2', index: 0 }), true, '落进窗口里的真实行')
+  assert.equal(moveStaysInside(doc, outside.id, { parentId: 'p', index: 3 }), true, '落进根的直接子层也是真实位')
+  assert.equal(moveStaysInside(doc, outside.id, { parentId: 'outside', index: 0 }), false, '落点不在窗口里仍拒')
+  assert.equal(moveStaysInside(doc, outside.id, { parentId: null, index: 0 }), false, '没有落点父也拒')
+})

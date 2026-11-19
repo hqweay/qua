@@ -911,12 +911,19 @@ export function moveSibling(doc: Doc, id: string, delta: -1 | 1): boolean {
  *   · 根本身不能搬（根列表是派生的，搬走/缩进/换位都会改变结果集）；
  *   · 落点必须能在本视图里找到（反缩进到根的父亲、移动到窗口外都会在这里失败）。
  *
+ * **外部源**（跨编辑器拖来的块：store 里有、本 doc 里没有）不动本视图的序，
+ * 守卫只剩落点：落点行在本 doc 里就是真实结构位——doc 根的兄弟位在
+ * `dropMoveExternal` 已折成 inside，`tx.move` 写的是全局。拒它就是把
+ * 「正文拖进窗口」变成提示照说、松手没反应；插引用那条门（`insertRefDrop`）
+ * 对外部源早就是这个口径（只查落点），这里补齐同一份答案。
+ *
  * 纯判据，不碰 DOM：编辑器在 `structuralScope === 'roots'` 时用它把门，
  * 命令层与拖拽共用同一个答案。
  */
 export function moveStaysInside(doc: Doc, id: string, plan: MovePlan): boolean {
   const loc = locate(doc, id)
-  if (!loc || loc.parent === null) return false
+  if (!loc) return plan.parentId !== null && locate(doc, plan.parentId) !== null
+  if (loc.parent === null) return false
   if (plan.parentId === null) return false
   return locate(doc, plan.parentId) !== null
 }
