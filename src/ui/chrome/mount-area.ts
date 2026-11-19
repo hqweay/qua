@@ -84,6 +84,7 @@ import { paintSortRows } from '../views/sort-rows.ts'
 import { bindDropTarget, setDragTab } from '../../view/dnd.ts'
 import { renderIcon } from '../../view/icons.ts'
 import { placeNear } from '../../view/place.ts'
+import { keepScrollWhile } from '../scroll.ts'
 import { renderQuickFilter } from './quick-filter.ts'
 
 /** 一处浮层锚点（只读的矩形形状；`DOMRect` 与普通对象都能喂） */
@@ -1132,19 +1133,28 @@ export class MountArea {
     this.hideTip()
     this.block.ed?.setMentionHits(null)
     this.paintMentionHits()
-    if (entry.kind === 'derived') {
-      this.kickDerived(host, entry)
-      this.loadDerived(host, entry, focusHint)
-      return
+    const swap = (): void => {
+      if (entry.kind === 'derived') {
+        this.kickDerived(host, entry)
+        this.loadDerived(host, entry, focusHint)
+        return
+      }
+      /**
+       * local 栏**整台都归视图宿主**（大纲也不例外）：抬头（条数/条件/切换/刷新）
+       * 由宿主统一画在右侧，条件 chip 与条件树处处可改。
+       * 过去大纲走挂载区自己的编辑器，「大纲改不了条件」与「切换下拉忽左忽右」
+       * 是同一个根因——两台身体各画各的。
+       */
+      this.derivedHeadEl.hidden = true
+      this.showView(host, entry)
     }
     /**
-     * local 栏**整台都归视图宿主**（大纲也不例外）：抬头（条数/条件/切换/刷新）
-     * 由宿主统一画在右侧，条件 chip 与条件树处处可改。
-     * 过去大纲走挂载区自己的编辑器，「大纲改不了条件」与「切换下拉忽左忽右」
-     * 是同一个根因——两台身体各画各的。
+     * 换体期间保住滚动位：旧身体摘出、新身体（首次还空着）挂上的瞬间文档变矮，
+     * 途中任何几何读取都会让浏览器按中间态收走 scrollTop——「切一下栏，整页抖一下」。
+     * 带落点的装载例外：落点行的 reveal 要滚到位，不能被写回盖掉。
      */
-    this.derivedHeadEl.hidden = true
-    this.showView(host, entry)
+    if (focusHint === undefined) keepScrollWhile(this.root, swap)
+    else swap()
   }
 
   private loadDerived(host: Block, entry: Extract<MountEntry, { kind: 'derived' }>, focusHint?: string): void {

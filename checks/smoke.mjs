@@ -31897,6 +31897,105 @@ await check(
   },
 )
 
+await check('T334 挂载区切栏不动滚动位：长栏⇄长栏 scrollTop 分毫不变（换体的中间态不许让浏览器收走位置）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const host = await page.evaluate(() => window.__qua.pages()[0].id)
+  // 先把宿主页开到中心：段尾挂载区画的是**当前段**的宿主，先开再加栏才看得见
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), host)
+  await page.waitForTimeout(400)
+  // 两栏条件都是「不是永不命中」＝恒真：身体足够高，滚动位装得下——契约才有意义
+  const tabs = await page.evaluate((id) => {
+    const spec = { where: { not: { any: [] } } }
+    for (const label of ['滚动甲', '滚动乙']) {
+      window.__qua.invoke('core.mount/add-local', { host: { kind: 'block', blockId: id }, label, spec })
+    }
+    return [...document.querySelectorAll('#editor .mount .mount-tabwrap')]
+      .map((w) => ({ id: w.dataset.tab ?? '', label: w.querySelector('.mount-tab')?.textContent ?? '' }))
+      .filter((x) => x.label === '滚动甲' || x.label === '滚动乙')
+  }, host)
+  assert(tabs.length === 2, `前置：应加出两栏 local：${JSON.stringify(tabs)}`)
+  await page.waitForTimeout(400)
+  // 给宿主页添几行：面板身体高度恒定后，页面要靠**面板上方**的内容才有得滚
+  await page.evaluate((id) => {
+    for (let i = 0; i < 30; i += 1) {
+      window.__qua.invoke('core.view/new-row', { owner: { kind: 'block', blockId: id } })
+    }
+  }, host)
+  await page.waitForTimeout(400)
+
+  // 激活甲栏，往下滚（tab 条仍要在视窗里才点得到）：这一刻滚动位非零
+  await page.evaluate(() => {
+    const tab = [...document.querySelectorAll('#editor .mount .mount-tab')].find((t) => t.textContent === '滚动甲')
+    tab?.click()
+  })
+  await page.waitForTimeout(400)
+  const pos = await page.evaluate(
+    () =>
+      new Promise((res) => {
+        const s = document.getElementById('scroll')
+        const strip = document.querySelector('#editor .mount-tabs')
+        s.scrollTop += strip.getBoundingClientRect().top - 40
+        setTimeout(() => {
+          const rows = document.querySelectorAll('#editor .mount .queryview-editor .blk, #editor .mount .mount-editor .blk').length
+          res({ top: s.scrollTop, sh: s.scrollHeight, ch: s.clientHeight, rows })
+        }, 150)
+      }),
+  )
+  assert(pos.rows > 0, `前置：甲栏应有命中行：${JSON.stringify(pos)}`)
+  assert(pos.top > 0, `前置：滚动位应非零：${JSON.stringify(pos)}`)
+  assert(pos.sh >= pos.ch + pos.top, `前置：滚动位应装得下：${JSON.stringify(pos)}`)
+
+  // 真输入切乙栏（首次激活＝身体从空装起的那条路）：换完滚动位必须还在
+  const at = await page.evaluate(() => {
+    const tab = [...document.querySelectorAll('#editor .mount .mount-tab')].find((t) => t.textContent === '滚动乙')
+    const r = tab.getBoundingClientRect()
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
+  })
+  await page.mouse.click(at.x, at.y)
+  await page.waitForTimeout(450)
+  const after = await page.evaluate(() => {
+    const s = document.getElementById('scroll')
+    const strip = document.querySelector('#editor .mount-tabs').getBoundingClientRect()
+    const rows = document.querySelectorAll('#editor .mount .queryview-editor .blk, #editor .mount .mount-editor .blk').length
+    return { top: s.scrollTop, sh: s.scrollHeight, ch: s.clientHeight, stripTop: strip.top, rows }
+  })
+  assert(after.rows > 0, `前置：乙栏应有命中行：${JSON.stringify(after)}`)
+  assert(after.sh >= after.ch + after.top, `前置：乙栏滚动位也应装得下：${JSON.stringify(after)}`)
+  assert(after.top === pos.top, `切栏后 scrollTop 应分毫不变：${pos.top} → ${after.top}`)
+
+  // 切回甲栏（两栏都已缓存）：同一条契约
+  const back = await page.evaluate(() => {
+    const tab = [...document.querySelectorAll('#editor .mount .mount-tab')].find((t) => t.textContent === '滚动甲')
+    const r = tab.getBoundingClientRect()
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
+  })
+  await page.mouse.click(back.x, back.y)
+  await page.waitForTimeout(450)
+  const top2 = await page.evaluate(() => document.getElementById('scroll').scrollTop)
+  assert(top2 === pos.top, `切回甲栏滚动位仍应不变：${pos.top} → ${top2}`)
+
+  // 再切到**没有数据的派生栏**（成员）：面板身体高度恒定，页高不塌缩——位置照旧分毫不动
+  // （这是真机报的原案：长栏切到空栏，整页被原生按塌后的上限收走。）
+  const empty = await page.evaluate(() => {
+    const tab = [...document.querySelectorAll('#editor .mount .mount-tab')].find((t) => t.textContent === '成员')
+    const r = tab.getBoundingClientRect()
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
+  })
+  await page.mouse.click(empty.x, empty.y)
+  await page.waitForTimeout(450)
+  const short = await page.evaluate(() => {
+    const s = document.getElementById('scroll')
+    const rows = document.querySelectorAll('#editor .mount .queryview-editor .blk, #editor .mount .mount-editor .blk').length
+    return { top: s.scrollTop, sh: s.scrollHeight, rows }
+  })
+  assert(short.top === pos.top, `切到空栏 scrollTop 也应不变：${pos.top} → ${short.top}`)
+  assert(short.sh === after.sh, `切到空栏页高不应塌缩：${after.sh} → ${short.sh}`)
+
+  await ctx.close()
+  return `长⇄长⇄空三连切，scrollTop ${pos.top} 全程不变；页高 ${after.sh} 恒定`
+})
+
 /**
  * **跨表面拖拽之后，正文要当场跟上**（真机的拖源在正文、落点在右槽窗口）。
  *

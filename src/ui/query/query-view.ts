@@ -100,6 +100,7 @@ import { EditableBlock } from '../block-ui/editable-block.ts'
 import { mountTitleEditor, type TitleEditor } from '../block-ui/title-editor.ts'
 import { queryChips } from './query-builder.ts'
 import { QueryTree, treeSummary } from './query-tree.ts'
+import { scrollParentOf } from '../scroll.ts'
 import { ViewOptionsPanel } from '../views/view-options.ts'
 import { ViewCards } from '../views/view-cards.ts'
 import { ViewTabs } from '../views/view-tabs.ts'
@@ -481,15 +482,6 @@ export function createViewHostEls(): ViewHostEls {
 const HITS_PER_WINDOW = 30
 /** 距底部多少像素算「滚近底」 */
 const PAGE_SCROLL_AHEAD = 400
-
-/** 最近的可滚动祖先（真的在滚的那个）；找不到 ⇒ null（这一屏不滚，也就没有「更多」） */
-function scrollParentOf(el: HTMLElement): HTMLElement | null {
-  for (let cur = el.parentElement; cur !== null; cur = cur.parentElement) {
-    const style = getComputedStyle(cur)
-    if (/(auto|scroll)/.test(style.overflowY) && cur.scrollHeight > cur.clientHeight) return cur
-  }
-  return null
-}
 
 export class ViewHost {
   private readonly els: ViewHostEls
