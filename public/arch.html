@@ -769,6 +769,187 @@
   </div>
 </section>
 
+<!-- ───────────── 九、库内形状 ───────────── -->
+<section class="sec">
+  <div class="sec-h"><b>九、库内形状：一张 SQLite 文件，源表与派生表分开记账</b><i>electron/library/sqlite.ts（DDL·迁移）· src/core/storage/db-rows.ts（行编码）· derived-rows.ts（派生编码）</i></div>
+  <div class="grid2">
+    <div class="card pad">
+      <div class="subh">表清单 <span>schema {{DB_SCHEMA_VERSION}} · 源表 4 · 派生 5 · 库级 4</span></div>
+      <table class="tbl">
+        <thead><tr><th>表</th><th>键</th><th>职责与形状判据</th></tr></thead>
+        <tbody>
+          <tr><td>Block</td><td class="m">id PK</td><td>一行一块：正文 run 序列／annos／<code>parent＋left</code>（落库编码）／created·modified／deleted（软删）；<code>display·kind·date·query·type</code> 升列——每行渲染或每次条件求值都要读的东西，不值当逐次解析 JSON</td></tr>
+          <tr><td>BlockProperty</td><td class="m">(block,name,pos)</td><td>属性一格一行，有序列表拆行；<code>pos</code> 进主键——顺序本身是语义，不留给隐式 rowid</td></tr>
+          <tr><td>BlockAlias</td><td class="m">name PK</td><td>地址：原样拼写是主键；<code>norm</code> 列是按名点查的索引（「这个名字归谁」一次查找，不读全表）</td></tr>
+          <tr><td>BlockList</td><td class="m">(block,list)</td><td>露面（page／tag）；页列表与标签列表只按它过滤</td></tr>
+          <tr><td>BlockFTS ＋ Map</td><td class="m">派生</td><td>contentless FTS5：词级／逐字／拼音三列各司其职；Map 把「块 id＋来源」映射到稳定 rowid——可搜文本不止正文（正文／地址／标签／属性值／链接各一行，独立维护）</td></tr>
+          <tr><td>BlockGram</td><td class="m">派生</td><td>trigram 三字滑窗：只答「库里有没有这一串」（子串命中可走索引）；rowid 与 FTS 正文行同址，不存第二张映射；两字以下退回扫描</td></tr>
+          <tr><td>BlockIndex</td><td class="m">block PK</td><td>位置派生：<code>root</code>／<code>path</code>／<code>hidden</code>。path 是定长段——前缀查询＝子树、字典序＝先序；<code>hidden=1</code>＝自己或祖先被软删（被删子树仍留表里）</td></tr>
+          <tr><td>BlockRelation</td><td class="m">(from,to,kind)</td><td>「谁指向谁」，按三元组去重；<code>from_root</code> 让反链按来源根聚合，不必回查位置表</td></tr>
+          <tr><td>meta · settings</td><td class="m">key PK</td><td>派生状态（pending/ready）、FTS 状态与分词器版本、库级水位；与内容表分开——它们换库不换形状</td></tr>
+          <tr><td>op_log</td><td class="m">(device,seq)</td><td><b>变更流</b>：与内容行<b>同一个事务</b>追加；<code>PK(device_id,seq)</code> 让重发天然幂等。整份替换＝新 genesis：清旧日志、序号归零，这一批成为新历史的第一段——日志永远不混两段历史</td></tr>
+          <tr><td>assets</td><td class="m">hash PK</td><td>资产元信息一行一档案；字节在 <code>assets/&lt;hash前2&gt;/</code>。字节不入库文件：库要整个目录可拷走，几百 MB 二进制塞进一个 SQLite 文件会让每次同步变成整文件冲突</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card pad">
+      <div class="subh">派生表的三条纪律 <span>悬空是中间态，漏记靠等式拦</span></div>
+      <div class="must">
+        <div class="row"><span class="n">1</span><div><b>可全量重建，「重建＝增量」是验收标准</b>：从内容行全量重建与一路增量累积必须得到同一份结果（指纹逐字节相等，等式测试钉住）。派生行漏记一种变更，界面上只是「偶尔少一条」——静默错误没有报错可看，只能用等式拦。</div></div>
+        <div class="row"><span class="n">2</span><div><b>状态在 meta，pending 不许信</b>：派生表作废回 <code>pending</code>，重建完成前读路径退回宽超集（宁可多读，不许静默漏）。重建是流式的（逐根读子树→提交），大库的全文重建不占首帧。</div></div>
+        <div class="row"><span class="n">3</span><div><b>不设外键</b>：悬空边与悬空块是可重建的中间态，写入顺序由重建／维护批次决定；真实约束只落在源表。</div></div>
+      </div>
+      <div class="hr"></div>
+      <div class="kv">
+        <dt>主进程边界</dt><dd>只执行<b>通用 SQL</b>（表/列白名单＋参数），不 import 块语义；「一个块长成哪几行」只有一份定义（db-rows.ts）。查询域在库里，渲染层就不必在 JS 里把数据库再造一遍。</dd>
+        <dt>schema 版本</dt><dd><code>PRAGMA user_version</code> 是唯一判据，且随事务原子回滚（实测）；迁移只加表/索引不搬内容，迁移前快照失败即中止。</dd>
+        <dt>写成本</dt><dd>一次编辑只写动过的那几块 ⇒ 不随库体量增长；批＝一次用户动作，没有半批——半批会让日志声称一件表里没发生的事。</dd>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── 十、缓存 ───────────── -->
+<section class="sec">
+  <div class="sec-h"><b>十、缓存：三层派生，各答各的问题</b><i>src/core/infra/index-port.ts（内存索引与失效）· infra/order.ts（先序）· query/candidates.ts ＋ storage/query-candidates.ts（候选）· model/store.ts（工作集淘汰）· storage/workset.ts（行缓存）</i></div>
+  <div class="card">
+    <div class="flow">
+      <div class="step">
+        <div class="k">① 库内</div>
+        <div class="v">SQLite 派生表</div>
+        <div class="d">查询候选／全文／关系／路径都住在库里（第九节）；启动不再在 JS 里重建全库索引</div>
+      </div>
+      <div class="step">
+        <div class="k">② 内存</div>
+        <div class="v">全局列表＋字段表</div>
+        <div class="d">Index 上的派生缓存：null＝未建、读时重建；按 op 标脏——<b>写什么不失效</b>比失效什么更关键</div>
+      </div>
+      <div class="step">
+        <div class="k">③ 求值</div>
+        <div class="v">先序 rank ＋ 候选集</div>
+        <div class="d">延迟跟候选数走；收窄不了的条件显式回退，计数器把回退报出来，不许静默</div>
+      </div>
+      <div class="step accent">
+        <div class="k">④ 手里</div>
+        <div class="v">工作集 WorkingSet</div>
+        <div class="d">渲染层只有有界工作集，不再持有整库模型；行缓存合并保对象身份；pin／LRU 整树淘汰</div>
+      </div>
+    </div>
+  </div>
+  <div class="grid2" style="margin-top:18px">
+    <div class="card pad">
+      <div class="subh">内存缓存（Index，建在工作集森林上） <span>失效判据按 op 逐类登记</span></div>
+      <div class="struct" style="line-height:1.85"><span class="type">Index</span> <span class="pipe">= {</span>
+  <span class="key">lists</span>: { pages, tags, propDefs, trash, journals }
+                                        <span class="cmt">全局列表；逐成员判 null：未建的才重建</span>
+  <span class="key">fields</span>: FieldTable | null           <span class="cmt">字段表：查询与属性区共用，懒建</span>
+  <span class="key">order</span>: RankMap                   <span class="cmt">先序 rank：步长 1024、中点插入；覆盖全部块（含软删）</span>
+  <span class="key">cacheProbe</span>: { listsBuilds, fieldBuilds,
+               candidateQueries, fallbackQueries } <span class="cmt">计数器：让「静默全林」变成可数的数</span>
+<span class="pipe">}</span></div>
+      <div class="note" style="margin-top:9px">
+        <b>失效的另一半</b>：正文／行内原子／<code>_tags</code>／<code>_date</code>／<code>_aliases</code> 的写<b>不</b>失效这些缓存——它们在打字热路径上，失效等于每敲一个字一趟全林。只有结构与身份类写（露面／定义声明／存在）才标脏。
+        <br><b>先序 rank 的契约是 id 序列</b>，数值不进（给中点留空间）；同层多个变动 ⇒ 该层重编号；软删保留、恢复免费、purge 才摘。
+      </div>
+    </div>
+    <div class="card pad">
+      <div class="subh">候选集 <span>两条投影，一个判据</span></div>
+      <div class="note">
+        候选只答「哪些块<b>可能</b>命中」，判据只有一条：<b>⊇ 真命中</b>（超集）。matcher 仍是判定的唯一来源，候选只负责把求值范围从全库收窄到「值得判的那一批」——桌面把它编译成 SQL 计划，web 走内存集合，两路用等式测试钉住同义。
+      </div>
+      <div class="kv" style="margin-top:9px;gap:5px 14px">
+        <dt>不知道 ≠ 空集</dt><dd>收窄不了的条件显式回退（内存路径 <code>undefined</code>＝回退全林；SQL 计划给「全部可见块」，成本随命中面走）。空集是合法答案——拿它冒充「不知道」会把整批结果吞掉</dd>
+        <dt>求值次序</dt><dd>先按树序（rank）、再按条件（sort）、最后 limit；延迟跟候选数走，不跟库走</dd>
+        <dt>分页</dt><dd>游标是上一页最后一条的 <code>path</code>；分页单位是候选流，不是结果集（判定在本地）</dd>
+      </div>
+    </div>
+  </div>
+  <div class="grid2e" style="margin-top:18px">
+    <div class="card pad">
+      <div class="subh">工作集（BlockStore · workset.ts） <span>部分装载的五条底线</span></div>
+      <div class="kv" style="gap:6px 14px">
+        <dt>首帧</dt><dd>目录＋今日窗口（或上次活跃位置），引用目标与身份块按需批量预取——启动成本与库大小解耦</dd>
+        <dt>行缓存合并</dt><dd>已加载的 id <b>不换对象、不改内容</b>：本地编辑永远比缓存行新，只有新 id 才建对象。否则同一块两个对象，编辑会静默丢</dd>
+        <dt>装载窗口</dt><dd>窗口是 DFS 前缀：新块永远接在已装兄弟后面 ⇒ 增量挂接 O(本窗)，装载出的索引与整份重建逐条一致</dd>
+        <dt>pin／LRU</dt><dd>超预算按 LRU 整树摘（最久没被读到的先走；钉住的子树不走）。淘汰只丢内存副本——库里都在，丢的不是数据</dd>
+        <dt>未加载 ≠ 删除</dt><dd>渲染层永远不为未加载块生成「删除／不存在」的 diff；保存只覆盖已加载范围。这是部分装载的数据安全底线，优先级高于任何性能数字</dd>
+      </div>
+    </div>
+    <div class="card pad">
+      <div class="subh">预算观 <span>缓存有预算，不是产品上限</span></div>
+      <div class="note">
+        小库首帧后可在内存预算内缓存整库；大库只缓存当前 Doc／最近页／查询页——同一套架构，不设「大库模式」。
+        护栏按 Doc 与查询结果设，不按库大小设：库多大都能开，慢的是那一次操作，不是启动。
+        <br><b>为什么行缓存留在工作集而不每次重读</b>：部分装载下会反复打开同一批块（今日窗口、引用目标、标签），每次重读会把同一块变成第二个对象，也会把本地没落盘的编辑覆盖回旧行。
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── 十一、同步 ───────────── -->
+<section class="sec">
+  <div class="sec-h"><b>十一、同步：S3 是唯一后端，设备自己协调</b><i>形状已定 · 实现未开工——写侧的变更流已就位（可被直接消费），协议与传输未动</i></div>
+  <div class="note" style="margin:-2px 0 12px 2px">
+    一句话：库存在用户自己的 S3 兼容桶里，端到端加密；没有服务器，也没有账号；每台设备自己同步、自己合并，仓库只保管加密文件。
+    协调面下沉客户端不是过渡——端到端加密下服务器读不懂内容，本来就不能做语义判断；把协调放回唯一可信方。
+  </div>
+  <div class="grid2">
+    <div class="card pad">
+      <div class="subh">桶布局 <span>对象全部不可变 ·「最新」由 listing 计算</span></div>
+      <div class="struct" style="line-height:1.9"><span class="key">&lt;prefix&gt;/&lt;libId&gt;/&lt;schemaEpoch&gt;/</span>
+  <span class="key">devices/&lt;deviceId&gt;/head</span>                    <span class="cmt">{seq,hlc} 只做轮询加速；丢了可从 listing 重建</span>
+  <span class="key">…/changes/&lt;from&gt;-&lt;to&gt;-&lt;hash&gt;.cbin</span>    <span class="cmt">加密 op 段，只追加；上传单元≠事务</span>
+  <span class="key">snapshots·baselines/…sbin</span>              <span class="cmt">不可变 manifest＝cursor 向量 {device:seq}</span>
+  <span class="key">chunks/&lt;hmac&gt;.cbin</span>                      <span class="cmt">加密快照块，按明文 hash 寻址（CDC）</span>
+  <span class="key">assets/&lt;hmac&gt;.abin</span>                      <span class="cmt">加密资产块：同形状，独立命名空间</span>
+  <span class="key">keys/&lt;epoch&gt;/&lt;wrapId&gt;.kbin</span>                <span class="cmt">根密钥的包裹（口令／恢复码／设备）</span>
+  <span class="key">gc/&lt;epoch&gt;/…</span>                              <span class="cmt">两阶段 GC 的候选</span></div>
+      <div class="note" style="margin-top:9px">
+        桶上没有可变根、没有锁、没有服务端数据库；桶要求只有 PUT/GET/LIST/DELETE＋读己写。
+        防回滚＝本地高水位＋多设备互证：恶意服务商隐藏／回滚挡不住，这是接受的代价，不是疏忽。
+      </div>
+      <div class="note" style="margin-top:9px">
+        <b>密钥</b>：口令→主钥→包裹根密钥（恢复码与设备各包一份），子钥按用途分开派生。
+        内容对象名＝HMAC(名钥, 明文 hash)——<b>不绑位置 ⇒ 去重可用</b>；唯一对象（段/快照/密钥）才把位置绑进认证数据。
+        服务端可见对象数／大小／时间，不可见内容、标题、标签与搜索索引。密钥只住同步进程，渲染层与插件不持有。
+      </div>
+    </div>
+    <div class="card pad">
+      <div class="subh">三条机制 <span>增量、快照、合并</span></div>
+      <div class="kv" style="gap:6px 14px">
+        <dt>增量＝段</dt><dd>每 N 个 op／T 秒封一段 PUT；拉取＝按设备前缀 LIST（起点＝各自水位）。重传同内容同名，服务端视为成功——幂等靠名字，不靠状态</dd>
+        <dt>快照＝CDC</dt><dd>确定性序列化→切块→只传缺失块→manifest 最后写（manifest 是提交点，中断只留孤儿块）。新设备＝最新快照＋各设备尾巴，唯一一次全量</dd>
+        <dt>合并</dt><dd>段头带因果水位 {device:seq}：收端满足才应用，否则暂存；逐寄存器 LWW 判赢，被覆盖版本留日志。这是「不丢」的合并，不是「无冲突」——同时编辑同一段是另立项</dd>
+        <dt>GC 三层</dt><dd>根（op 段／资产／密钥／基线）／缓存（快照与块，可从根重建）／垃圾。日志默认不删；要截断先有基线覆盖；两阶段候选＋宽限期，误删可由任一有明文的设备重传</dd>
+        <dt>schema epoch</dt><dd>路径含 epoch：不兼容变更开新 epoch＋新基线，旧格式变更禁止回灌；epoch 是命名空间，不是密钥轮换</dd>
+      </div>
+    </div>
+  </div>
+  <div class="grid2e" style="margin-top:18px">
+    <div class="card pad">
+      <div class="subh">写侧已就位 <span class="chip ok">可被直接消费</span></div>
+      <div class="must">
+        <div class="row"><span class="n">1</span><div><b>变更流唯一生产者</b>：一次用户动作＝一笔事务＝op_log 连续一段（同事务，没有半批）。</div></div>
+        <div class="row"><span class="n">2</span><div><b>幂等键 (device_id, seq)</b>：重发同一段不会变成两行。</div></div>
+        <div class="row"><span class="n">3</span><div><b>重放等价</b>：从空库重放日志与当前模型逐字节一致（等式测试钉住）。</div></div>
+        <div class="row"><span class="n">4</span><div><b>自足排序</b>：op 自带位置值，落库解析成兄弟链——重放不依赖应用时刻。</div></div>
+        <div class="row"><span class="n">5</span><div><b>收端校验</b>：系统属性有登记表，未登记的键拒绝落格；资产内容寻址，同字节只存一份。</div></div>
+      </div>
+      <div class="note" style="margin-top:9px">还缺的第一读者：按 (device, seq) 拉增量的读 API——生产路径现在零读者，只有重放测试在读。</div>
+    </div>
+    <div class="card pad">
+      <div class="subh">未定四件 <span class="chip warn">定稿前不动传输</span></div>
+      <div class="must">
+        <div class="row"><span class="n">1</span><div><b>同字段并发写的冲突策略</b>：逐寄存器 LWW 是方向，「保留双方」的具体形状未定。</div></div>
+        <div class="row"><span class="n">2</span><div><b>同组并发插入／移动的确定性 tie-break</b>：「插在哪」有解，「两台设备同时插同一处谁先」没有。</div></div>
+        <div class="row"><span class="n">3</span><div><b>撤销插入后的复活守卫</b>：单设备恒成立，多设备要显式语义（别的设备可能已重建同名内容）。</div></div>
+        <div class="row"><span class="n">4</span><div><b>删除权边界</b>：「彻底遗忘」要连日志段一起截，hard delete 的语义未声明。</div></div>
+      </div>
+      <div class="note" style="margin-top:9px">这四件决定 op 形状与落库，必须在有真数据之前定下来；先写传输等于把冲突与序号问题留给有真数据之后。</div>
+    </div>
+  </div>
+</section>
+
 <footer>
   <span>qua · 一切皆块 · 块的身份与内容槽：id / content / children / created / modified / props</span>
   <span>结构取自代码类型与架构断言；数字由 render 脚本现读</span>
