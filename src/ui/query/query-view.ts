@@ -152,6 +152,21 @@ export function openQueryTreeFor(owner: ViewOwnerRef, surface: ViewSurface): voi
   treeOpen.set(treeKeyOf(owner, surface), true)
 }
 
+/**
+ * 条件 chip 的字装进**内层块**再省略。
+ *
+ * chip 自己是 `inline-flex`（要把内容垂直居中），而 `text-overflow: ellipsis` 对
+ * flex 容器里的**匿名文本项**不生效——把 `ui-ellipsis` 挂在 chip 上只会得到
+ * 「硬切半个字、没有省略号」的观感（实测：条件摘要被切成「…有这一木」）。
+ * 省略是文本行为，得有一个块级子项去承担它。
+ */
+function setChipText(el: HTMLElement, text: string): void {
+  const span = document.createElement('span')
+  span.className = 'ui-ellipsis'
+  span.textContent = text
+  el.replaceChildren(span)
+}
+
 export interface ViewHostDeps {
   store: BlockStore
   /** 读门面：求值走 `kb.query`（索引），现读按 id（`kb.get`／`kb.pathOf`） */
@@ -1395,15 +1410,16 @@ export class ViewHost {
     if (this.treeAllowed()) {
       const summary = document.createElement('button')
       summary.type = 'button'
-      summary.className = 'queryview-chip ui-ellipsis'
+      summary.className = 'queryview-chip'
       summary.dataset.queryChip = 'summary'
       // 收起态要读得出「这一屏按什么选的」：拆得动就只给条件本身——
       // 「条件 · N 条」是在数数，条数抬头已有，重复一遍只是辅助文字。
       // 拆不动的形状 queryChips 会整块给「复合条件」，那时才退回到条数摘要。
       const labels = queryChips(spec, this.deps.fields(this.source.kind === 'query' ? this.source.spec : undefined), this.deps.choices, this.deps.refLabel, this.deps.tagLabel)
-      summary.textContent = labels.length > 0 ? labels.join(' · ') : treeSummary(spec)
+      const summaryText = labels.length > 0 ? labels.join(' · ') : treeSummary(spec)
+      setChipText(summary, summaryText)
       // 抬头窄时省略几何走 ui-ellipsis 原语；title 给全文，不让「读得出内容」变成「读不全」
-      summary.dataset.tip = summary.textContent
+      summary.dataset.tip = summaryText
       summary.addEventListener('click', () => this.openTree())
       box.appendChild(summary)
       if (slice) box.appendChild(slice)
@@ -1413,8 +1429,8 @@ export class ViewHost {
     for (const label of queryChips(spec, this.deps.fields(this.source.kind === 'query' ? this.source.spec : undefined), this.deps.choices, this.deps.refLabel, this.deps.tagLabel)) {
       const chip = document.createElement('span')
       // 单行省略是**原语**（`primitives.css`），组件里不再抄一份几何
-      chip.className = 'queryview-chip ui-ellipsis'
-      chip.textContent = label
+      chip.className = 'queryview-chip'
+      setChipText(chip, label)
       box.appendChild(chip)
     }
     if (slice) box.appendChild(slice)
@@ -1468,9 +1484,9 @@ export class ViewHost {
     if (!filter) return null
     const chip = document.createElement('button')
     chip.type = 'button'
-    chip.className = 'queryview-chip queryview-chip--slice ui-ellipsis'
+    chip.className = 'queryview-chip queryview-chip--slice'
     chip.dataset.queryChip = 'slice'
-    chip.textContent = t('ui.view.sliceChip', { text: treeSummary({ where: filter }) })
+    setChipText(chip, t('ui.view.sliceChip', { text: treeSummary({ where: filter }) }))
     chip.dataset.tip = t('ui.view.sliceHint')
     // 基础条件那颗是按钮，这一颗也必须是按钮：切片存在时任何激活视图都能就地改，
     // 不必先绕进「视图…」菜单（同一个落点，两条路）

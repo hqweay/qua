@@ -586,6 +586,9 @@
   align-items: center;
   gap: var(--ui-gap-1);
   min-width: 0;
+  /* 抬头里唯一能长宽的一格：条件摘要先吃掉剩余宽度，两侧的固定件（条数／看法／
+     刷新）保持原尺寸 —— 收缩量归能省略的格，但「能省略」不该等于「只给 15rem」 */
+  flex: 1 1 auto;
 }
 .queryview-chip {
   display: inline-flex;
@@ -600,6 +603,19 @@
 }
 button.queryview-chip {
   cursor: pointer;
+}
+/*
+ * **条件摘要**是唯一一颗会长到抬头宽度的 chip。
+ *
+ * 15rem 的上限对短标签够用，对「一层层条件叠起来的一句话」就是硬切——那句话正是
+ * 抬头要回答的问题（这一屏按什么选的），截掉一半等于没写。上限改成「剩余宽度」：
+ * 放得下就整句显示，真放不下才省略（省略号由内层 `ui-ellipsis` 的 span 画）。
+ * `min-width: 0` 是省略能发生的条件：不放宽的话 flex item 的自动最小尺寸是
+ * min-content，chip 会顶出容器而不是让字去省略。
+ */
+.queryview-chip[data-query-chip='summary'] {
+  max-width: 100%;
+  min-width: 0;
 }
 /* 分组下拉（查询抬头与派生栏抬头共用一颗原语）：与旁边的看法按钮同高同字，
    不然就是原生控件默认样式的「不分组」孤零零杵着（实测难看） */
