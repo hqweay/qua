@@ -101,6 +101,7 @@ import { UnloadedAliasError } from './core/kb/unsupported.ts'
 import type { RelationEdge, RelationKind } from './core/relations/relations.ts'
 import { loadWorksetBoot, withAncestors, type WorksetBootResult } from './app/boot/workset-boot.ts'
 import { rebuildDerivedTables } from './app/boot/derived-rebuild.ts'
+import { ensureDerivedLoaded } from './app/boot/derived-load.ts'
 import { rebuildFtsStreaming } from './app/boot/fts-rebuild.ts'
 import { FTS_TOKENIZER_VERSION } from './core/search/tokenizer.ts'
 import { candidateBuildOf } from './core/storage/query-candidates.ts'
@@ -2174,6 +2175,12 @@ const {
   layers,
   owners,
   ensureQueryLoaded,
+  /**
+   * **派生栏的候选装载**（反链/备注/成员/同类/提及/谁在用）：与查询视图同一条管道。
+   * 读库归这里（装配层），视图只报「哪一格的哪个来源」。
+   */
+  ensureDerivedLoaded: (host, source) =>
+    ensureDerivedLoaded({ client: libraryClient, workset, store: blocks, ensureQueryLoaded }, host, source),
   journalMounts: () => prefs().journalMounts,
   prefs,
   scheduleDeviceSave: () => scheduleDeviceSave(),

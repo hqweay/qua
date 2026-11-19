@@ -138,6 +138,14 @@ export interface MountAreaDeps {
   /** 「×」：摘掉一栏（`tabId` 是**稳定 id**，不是数组下标） */
   onRemoveTab?: (host: MountHost, tabId: string) => void
   /**
+   * **这一栏的候选先装载**（与查询视图同一条管道：候选从库里来、超集，判定仍在本层）。
+   *
+   * 为什么是「报出哪一格的哪个来源」而不是自己读库：读库归装配层，这一层只回答
+   * 「现在显示的是哪一栏」。返回 `true` ＝ 真装进了新块 ⇒ 装载完成后重画一次；
+   * 没装（已齐 / 派生表没建好 / 没有库面）⇒ 不重画。
+   */
+  ensureDerivedLoaded?: (host: Block, source: DerivedSource) => Promise<boolean>
+  /**
    * **双击改名**（只有 local 栏有名字；派生栏的名字由来源字典给）。
    *
    * 输入框在装配层弹：这一层不认识浮层、也不碰命令。`anchor` 是那一栏的矩形
@@ -393,6 +401,14 @@ export class MountArea {
   private readonly sessionLenses = new Map<DerivedSource, DerivedLens>()
   /** 上一次读到的那组条目的串（`refreshEntries` 用它判「要不要重排」） */
   private entrySig = ''
+  /**
+   * 已经问过候选装载的「宿主 + 栏」（`refreshEntries` 不会清它）。
+   *
+   * 候选补的是**没装载**的内容；已装载的内容本来就在内存索引里、编辑后立刻可见。
+   * ⇒ 同一个宿主的同一栏不必每次重画都回库问一遍（那会把打字变成一次次查询）。
+   * 换宿主时清空——那是另一份事实。
+   */
+  private readonly kickedDerived = new Set<string>()
 
   constructor(deps: MountAreaDeps) {
     this.deps = deps
@@ -566,6 +582,7 @@ export class MountArea {
       this.covers = new Map()
       this.refKind = 'all'
       this.sessionLenses.clear()
+      this.kickedDerived.clear()
       // 折叠播种也跟着宿主走：中心段尾一台实例只服务一个宿主，感知不到这条；
       // 右槽卡一台实例跟着导航换宿主，播种标记不清就会让第二位宿主永远摊开
       this.foldSeeded.clear()
@@ -602,6 +619,7 @@ export class MountArea {
        */
       const first = this.entries[0]
       if (first?.kind === 'derived') {
+        this.kickDerived(host, first)
         const count = derivedRecordsOf(host, this.deps.kb, first.source).length
         this.summaryEl.textContent = `${t(BUILTIN_LABEL[first.source])} ${t('ui.mount.count', { count })}`
       } else {
@@ -1063,6 +1081,7 @@ export class MountArea {
     this.block.ed?.setMentionHits(null)
     this.paintMentionHits()
     if (entry.kind === 'derived') {
+      this.kickDerived(host, entry)
       this.loadDerived(host, entry, focusHint)
       return
     }
@@ -1181,6 +1200,32 @@ export class MountArea {
     if (!page) return t('ui.query.group.topLevel')
     if (isJournal(page)) return journalDateLabel(journalDate(page))
     return blockLabel(page, (id) => this.deps.kb.get(id))
+  }
+
+  /**
+   * **这一栏的候选先装载**（与查询视图同一条管道）：本帧按已装载求值（可能少几行），
+   * 装载完成且**记录真的变了**才重画一次。
+   *
+   * 「真的变了」是必须的比较：装载函数在「什么都不缺」时不该引起重画，而重画又会
+   * 再问一次——只按返回值判，等于让「已齐」变成一次次的空转。
+   *
+   * 同一个（宿主，栏）只问一次：候选补的是没装载的内容；已装载的内容在编辑后立刻可见，
+   * 不需要每次重画都回库。换宿主时清账。
+   */
+  private kickDerived(host: Block, entry: Extract<MountEntry, { kind: 'derived' }>): void {
+    const load = this.deps.ensureDerivedLoaded
+    if (!load) return
+    const key = `${host.id}\u0000${entry.id}`
+    if (this.kickedDerived.has(key)) return
+    this.kickedDerived.add(key)
+    const before = derivedIdsOf(host, this.deps.kb, entry.source)
+    void load(host, entry.source)
+      .then((loaded) => {
+        if (!loaded || this.hostId !== host.id) return
+        if (derivedIdsOf(host, this.deps.kb, entry.source) === before) return
+        this.render()
+      })
+      .catch(() => this.kickedDerived.delete(key))
   }
 
   /**
@@ -1949,3 +1994,14 @@ export class MountArea {
   /* ------------------------------------------------------------ 数据 */
 
 }
+
+/**
+ * 一栏当前记录的 id 串：判「装完要不要重画」。只比 id 不比行内容——行内容随编辑变，
+ * 而编辑引起的重画与「候选补齐」是两件事。
+ */
+function derivedIdsOf(host: Block, kb: KbClient, source: DerivedSource): string {
+  return derivedRecordsOf(host, kb, source)
+    .map((r) => r.block.id)
+    .join('\u0000')
+}
+
