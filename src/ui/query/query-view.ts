@@ -1141,6 +1141,16 @@ export class ViewHost {
   /** 滚近底：再补一窗（与首屏同一个循环、同一条早停口径） */
   private loadMore(): void {
     if (this.streamDone) return
+    const spec = this.effective
+    if (!spec) return
+    /**
+     * **已经够数就别再取**：文档序 + 声明了 `limit` 时，再往后全是显示之外的行
+     * （显示按 `limit` 截断）——继续取页只是白读。这里把流标成到底，滚动不再触发装载。
+     */
+    if ((spec.sort?.length ?? 0) === 0 && spec.limit !== undefined && (this.frozen?.hits.length ?? 0) >= spec.limit) {
+      this.streamDone = true
+      return
+    }
     void this.fillPages()
   }
 
