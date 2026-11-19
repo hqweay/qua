@@ -96,6 +96,7 @@ export function seedWorkspace(): Workspace {
         { text: '还没写的页面也能先引用：[[以后再写的页面]]——它只是悬着，不是坏数据。' },
         { text: '左槽「常用」那格里收着两处值得去的地方：功能看板与写作示范，点一颗就过去。' },
         { text: '正文里打 #功能 会创建或关联一个标签——标签是挂在块上的归属，不占正文的字。' },
+        { text: '普通块也能取名字：右键一块选「块配置…」加一个别名——之后敲 @ 打这个名字，首行就是它。' },
         { text: '这一屏之外还有两页值得翻：[[写作示范]] 与 [[每周复盘]]。' },
       ],
     },
@@ -143,6 +144,7 @@ export function seedWorkspace(): Workspace {
     ...filler([
       '看板上的分组是按「状态」这个属性排的：列不是手工拖出来的顺序，是值。'
       ,
+      '看法能自定义：表格挑要显示的栏，排序选「随机」——点刷新换一批顺序，重开这一屏还是原来那份。',
       '没填日期的卡在日历里会去「未填」那一格，不会丢。',
       '今天试着把一条没做完的事留在日记里——左槽「今天的待办」真的把它捞出来了。',
     ]),
@@ -482,9 +484,9 @@ function featureVocabulary(): { blocks: Block[]; tagId: string } {
 /**
  * 实例样本：**一条普通的内容块**，靠 `props._tags` 归属在「功能」下——没有新实体。
  *
- * 内容是自指的：这几条就是相自己的功能清单。值的分布是刻意的：
- * 已落地的带日期（日历有落点）、「快速筛选」不填状态（缺省读出「探索中」）、
- * 探索与搁置各有一条（看板每一列都有卡）。
+ * 内容是自指的：这几条就是相自己的功能清单，随阶段翻新。值的分布是刻意的：
+ * 已落地的带日期（日历有落点）、「自动化」不填状态（缺省读出「探索中」，看板的
+ * 「未设置」列也要有一条撑着）、探索与搁置各有一条（看板每一列都有卡）。
  */
 function featureInstances(tagId: string): Block[] {
   const record = (name: string, status?: string, shippedOn?: string): Block => {
@@ -501,8 +503,14 @@ function featureInstances(tagId: string): Block[] {
     record('行内图片', FEATURE_STATUS_SHIPPED_ID, '2026-10-27'),
     record('多库与库根', FEATURE_STATUS_SHIPPED_ID, '2026-11-05'),
     record('回收站', FEATURE_STATUS_SHIPPED_ID, '2026-11-09'),
-    record('快速筛选'),
+    record('快速筛选', FEATURE_STATUS_SHIPPED_ID, '2026-11-05'),
+    record('备注', FEATURE_STATUS_SHIPPED_ID, '2026-11-13'),
+    record('查询镜头', FEATURE_STATUS_SHIPPED_ID, '2026-11-14'),
+    record('多值与附件', FEATURE_STATUS_SHIPPED_ID, '2026-11-15'),
+    record('块取名', FEATURE_STATUS_SHIPPED_ID, '2026-11-18'),
+    record('视图显示与排序', FEATURE_STATUS_SHIPPED_ID, '2026-11-19'),
     record('引用某一段', FEATURE_STATUS_EXPLORING_ID),
+    record('自动化'),
     record('图库管理', FEATURE_STATUS_SHELVED_ID),
   ]
 }
