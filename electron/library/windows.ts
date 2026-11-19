@@ -29,7 +29,7 @@ import {
   type LibraryEntry,
 } from '../../src/core/identity/library.ts'
 import { libraryDir, loadRegistry, markOpened, saveRegistry, type RegistryIo } from './registry.ts'
-import { openSession, readBlocks, readCatalog, readCandidates, readDependentIds, readDoc, readDocWindow, readFtsMap, readIdentity, readIndexChildren, readIndexFollowing, readIndexRows, readRelations, readRoots, readTree, saveContent, type OpenFailure, type RepoSession } from './session.ts'
+import { openSession, readAliasTargets, readBlocks, readCatalog, readCandidates, readDependentIds, readDoc, readDocWindow, readFtsMap, readIdentity, readIndexChildren, readIndexFollowing, readIndexRows, readRelations, readRoots, readTree, saveContent, type OpenFailure, type RepoSession } from './session.ts'
 import { hasContent, readMeta, readSeq, searchFts, snapshotLibrary, type RowWrite } from './sqlite.ts'
 import { META_KEYS } from '../../src/core/identity/library.ts'
 import { isCandidatePlan } from '../../src/core/storage/library-reads.ts'
@@ -50,6 +50,19 @@ function isRootList(v: unknown): v is string[] {
     Array.isArray(v) &&
     v.length > 0 &&
     v.length <= 512 &&
+    v.every((x) => typeof x === 'string' && x.length > 0 && x.length <= 256)
+  )
+}
+
+/**
+ * 一批地址名（已归一化）。上限比 id 清单低：它只装「这一笔要建的名字」，
+ * 几十个就已经是批量导入的形态了。
+ */
+function isNameList(v: unknown): v is string[] {
+  return (
+    Array.isArray(v) &&
+    v.length > 0 &&
+    v.length <= 128 &&
     v.every((x) => typeof x === 'string' && x.length > 0 && x.length <= 256)
   )
 }
@@ -520,6 +533,21 @@ export class LibraryManager {
       if (!s) return { status: 'no-library' }
       try {
         return { status: 'ok', catalog: readCatalog(s) }
+      } catch (err) {
+        return { status: 'error', error: String(err) }
+      }
+    })
+
+    /**
+     * **按名点查归属**：这批归一化名字各自归谁。参数已经是归一化键（渲染层派生），
+     * 主进程不做字符串处理——它与 `catalog` 分开，是因为它随「新建意图」走，不随启动走。
+     */
+    ipcMain.handle('qua:library/alias-targets', (e, names: unknown) => {
+      const s = sessionOf(e)
+      if (!s) return { status: 'no-library' }
+      if (!isNameList(names)) return { status: 'bad-args' }
+      try {
+        return { status: 'ok', rows: readAliasTargets(s, names) }
       } catch (err) {
         return { status: 'error', error: String(err) }
       }

@@ -20,6 +20,7 @@
  * 就是「同一件事有多个答案」。
  */
 import type {
+  AliasTarget,
   BlockIndexRow,
   CandidatePage,
   CandidatePageQuery,
@@ -42,8 +43,10 @@ export interface LibraryReadBridge {
   candidates?(plan: unknown, after: string | null, limit: number): Promise<unknown>
   /** 候选装载：块＋全部祖先链（可选一层子级） */
   tree?(ids: readonly string[], withChildren: boolean): Promise<unknown>
-  /** 槽要显示的全局身份摘要（日记／标签／字段定义／地址表／回收站根） */
+  /** 槽要显示的全局身份摘要（日记／标签／字段定义／回收站根） */
   catalog(): Promise<unknown>
+  /** 按名点查归属（参数是归一化键）：只问这一批名字，不读全表 */
+  aliasTargets?(names: readonly string[]): Promise<unknown>
   /** 全局身份块（页/标签/定义/回收站根） */
   identity?(): Promise<unknown>
   /** FTS 映射按块查（增量索引用） */
@@ -106,6 +109,13 @@ export interface LibraryClient {
    */
   blocks(ids: readonly string[]): Promise<LibraryReadResult<RawLibraryRows>>
   catalog(): Promise<LibraryReadResult<LibraryCatalog>>
+  /**
+   * **按名点查归属**：这批归一化名字各自归谁（不在结果里的 ＝ 库里没有）。
+   *
+   * 为什么是「这一批名字」而不是整张表：这张表随库线性长，而问它的人只有创建路径的
+   * 防重判据——问一个名字一次点查就够。返回的行**不过滤软删**（回收站里的名字仍算被占）。
+   */
+  aliasTargets?(names: readonly string[]): Promise<LibraryReadResult<AliasTarget[]>>
   /**
    * **派生位置行的三条读面**（结构写的增量维护用）。
    *
@@ -186,7 +196,7 @@ function isDocRows(v: unknown): v is LibraryDocRows {
   )
 }
 
-/** 回复能不能当 `LibraryCatalog` 用（meta ＋ 五张表的数组） */
+/** 回复能不能当 `LibraryCatalog` 用（meta ＋ 四张表的数组） */
 function isCatalog(v: unknown): v is LibraryCatalog {
   return (
     isRecord(v) &&
@@ -194,7 +204,6 @@ function isCatalog(v: unknown): v is LibraryCatalog {
     Array.isArray(v.journals) &&
     Array.isArray(v.tags) &&
     Array.isArray(v.propDefs) &&
-    Array.isArray(v.aliases) &&
     Array.isArray(v.trash)
   )
 }
@@ -256,6 +265,14 @@ function isIndexRow(v: unknown): v is BlockIndexRow {
 
 function isIndexRowList(v: unknown): v is BlockIndexRow[] {
   return Array.isArray(v) && v.every(isIndexRow)
+}
+
+/** 按名点查的回复：每行两格字符串（`norm` 键与块 id），只校验形状不校验归属 */
+function isAliasTargetList(v: unknown): v is AliasTarget[] {
+  return (
+    Array.isArray(v) &&
+    v.every((r) => isRecord(r) && typeof r.norm === 'string' && typeof r.block === 'string')
+  )
 }
 
 function createClient(bridge: LibraryReadBridge): LibraryClient {
@@ -494,6 +511,15 @@ function createClient(bridge: LibraryReadBridge): LibraryClient {
       if (r.status !== 'ok') return clientError('library/catalog', `bad reply status: ${String(r.status)}`)
       if (!isCatalog(r.catalog)) return clientError('library/catalog', 'bad reply shape')
       return { status: 'ok', value: r.catalog }
+    },
+
+    async aliasTargets(names) {
+      if (!bridge.aliasTargets) return clientError('library/alias-targets', 'bridge has no alias-targets read')
+      const uniq = [...new Set(names.filter((x) => typeof x === 'string' && x !== ''))]
+      if (uniq.length === 0) return { status: 'ok', value: [] }
+      return invoke('library/alias-targets', () => bridge.aliasTargets!(uniq), (r) =>
+        isAliasTargetList(r.rows) ? r.rows : undefined,
+      )
     },
 
     async indexRows(ids) {

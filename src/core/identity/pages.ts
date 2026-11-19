@@ -11,8 +11,8 @@
  * ⚠️ 与 `ensureTag` 同一判据：名字解析只走 `findByAlias`，不另写一份 trim/规范化。
  */
 import { findByAlias } from './alias.ts'
-import type { Tx } from '../kb/types.ts'
-import { UnloadedAliasError } from '../kb/unsupported.ts'
+import type { AliasState, Tx } from '../kb/types.ts'
+import { AliasUncheckedError, UnloadedAliasError } from '../kb/unsupported.ts'
 import {
   ALIASES_PROP,
   DISPLAY_PROP,
@@ -66,9 +66,11 @@ export function nearestPageInChain(b: Block, ancestors: readonly Block[]): Block
 export interface PageLookup {
   resolveAlias(name: string): Block | undefined
   roots(): readonly Block[]
-  /** 防重判据（工作集装载）：命中但目标未装载 ⇒ 拒绝新建，见 `UnloadedAliasError` */
-  aliasTargetId?: (name: string) => string | undefined
-  isLoaded?: (id: string) => boolean
+  /**
+   * 防重判据（三态）：命中但目标未装载 ⇒ `UnloadedAliasError`；还没核定 ⇒
+   * `AliasUncheckedError`。两种都不许新建（否则地址空间出现第二个同名身份）。
+   */
+  aliasState?: (name: string) => AliasState
 }
 
 /**
@@ -87,9 +89,10 @@ export function ensurePageInTx(lookup: PageLookup, name: string, tx: Tx): Block 
     if (prop(existing, DISPLAY_PROP) === undefined) tx.setProp(existing.id, DISPLAY_PROP, 'alias')
     return existing
   }
-  // 名字被一个未装载的块占着 ⇒ 不新建（否则地址空间出现第二个同名身份）
-  const known = lookup.aliasTargetId?.(title)
-  if (known !== undefined && lookup.isLoaded?.(known) === false) throw new UnloadedAliasError(title, known)
+  // 这个名字此刻不能拿去新建：未装载的目标先装、未核定的先问库
+  const state = lookup.aliasState?.(title)
+  if (state?.kind === 'unchecked') throw new AliasUncheckedError(title)
+  if (state?.kind === 'owned' && !state.loaded) throw new UnloadedAliasError(title, state.id)
   const block = mkPageBlock(title)
   tx.insert(block, null, lookup.roots().length)
   return block

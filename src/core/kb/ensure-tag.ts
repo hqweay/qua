@@ -14,8 +14,8 @@
 import { findByAlias } from '../identity/alias.ts'
 import { DISPLAY_PROP, listsOf, prop, type Block } from '../model/model.ts'
 import { findTagByName, mkTagBlock, normalizeTag } from '../identity/tags.ts'
-import { UnloadedAliasError } from './unsupported.ts'
-import type { KbClient, Tx } from './types.ts'
+import { AliasUncheckedError, UnloadedAliasError } from './unsupported.ts'
+import type { AliasState, KbClient, Tx } from './types.ts'
 
 /**
  * 名字解析的**窄口**：找标签块／找同名块都经它 —— 调用方不必持有整片森林。
@@ -23,12 +23,11 @@ import type { KbClient, Tx } from './types.ts'
  */
 export interface TagLookup extends Pick<KbClient, 'findTag' | 'resolveAlias' | 'roots'> {
   /**
-   * **全量地址表的两格**（工作集装载的防重判据）：名字 → 目标 id（未装载也回答）
-   * 与「这块在不在内存里」。两格都在场 ⇒ 名字命中但目标未装载时**拒绝新建**
-   * （`UnloadedAliasError`）；只给老三样的调用方（整库模式）保持原行为。
+   * **名字此刻的归属（三态）**：给了它 ⇒ 未装载的目标与未核定的名字都**拒绝新建**
+   * （`UnloadedAliasError`／`AliasUncheckedError`）。调用方要么先装载再重放，要么先
+   * `prepareAlias` 再进事务；只给老三样的调用方（整库模式）保持原行为——那里的索引就是全库。
    */
-  aliasTargetId?: (name: string) => string | undefined
-  isLoaded?: (id: string) => boolean
+  aliasState?: (name: string) => AliasState
 }
 
 /**
@@ -53,33 +52,33 @@ export function ensureTagInTx(lookup: TagLookup, name: string, tx: Tx): Block | 
     if (prop(existing, DISPLAY_PROP) === undefined) tx.setProp(existing.id, DISPLAY_PROP, 'alias')
     return existing
   }
-  refuseUnloaded(lookup, name)
+  refuseClaim(lookup, name)
   // 身份块住森林顶层：位置对身份不承载信息，而树操作会把住在子树里的标签当货物搬走
   const block = mkTagBlock(name.trim())
   tx.insert(block, null, lookup.roots().length)
   return block
 }
 
-/** 名字被一个未装载的块占着 ⇒ 抛 `UnloadedAliasError`（调用方决定装载还是留成纯文本） */
-function refuseUnloaded(lookup: { aliasTargetId?: (name: string) => string | undefined; isLoaded?: (id: string) => boolean }, name: string): void {
-  const known = lookup.aliasTargetId?.(name)
-  if (known !== undefined && lookup.isLoaded?.(known) === false) throw new UnloadedAliasError(name, known)
+/** 这个名字此刻不能拿去新建 ⇒ 抛（未装载：先装再重放；未核定：先问库） */
+function refuseClaim(lookup: { aliasState?: (name: string) => AliasState }, name: string): void {
+  const state = lookup.aliasState?.(name)
+  if (!state) return
+  if (state.kind === 'unchecked') throw new AliasUncheckedError(name)
+  if (state.kind === 'owned' && !state.loaded) throw new UnloadedAliasError(name, state.id)
 }
 
 /**
  * 供无门面调用方（编辑器持 store）现造解析器的同判据转调，判据只有 `core/alias.ts` 那一份。
  *
- * `world` 给了 store（编辑器的情形）⇒ 防重判据的两格也接上：名字被未装载块占着时
- * 新建会被拒绝（`UnloadedAliasError`），不会造出第二个同名身份。
+ * `world` 给了 store（编辑器的情形）⇒ 防重判据也接上：名字被未装载块占着、
+ * 或还没核定归属时，新建会被拒绝（见 `refuseClaim`），不会造出第二个同名身份。
  */
 export const tagLookupOf = (
   forest: readonly Block[],
-  world?: { aliasTargetId(name: string): string | undefined; isLoaded(id: string): boolean },
+  world?: { aliasState(name: string): AliasState },
 ): TagLookup => ({
   findTag: (name) => findTagByName(forest, name),
   resolveAlias: (name) => findByAlias(forest, name),
   roots: () => forest,
-  ...(world
-    ? { aliasTargetId: (name: string) => world.aliasTargetId(name), isLoaded: (id: string) => world.isLoaded(id) }
-    : {}),
+  ...(world ? { aliasState: (name: string) => world.aliasState(name) } : {}),
 })

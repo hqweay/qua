@@ -661,8 +661,9 @@ function commandDecls() {
    * 判据不是「哪些 import 危险」（黑名单永远列不全），而是**主进程该做什么**：
    * 窗口／会话／DB／fs／路径／菜单。块语义、查询、渲染一律不许。
    * ⇒ 白名单只放三样：`node:*`（fs/sqlite/path）、`electron`（壳本体）、
-   *   以及两个**零依赖叶子**：`src/core/infra/msg.ts`（纯文案字典）与 `src/core/identity/library.ts`
-   *   （库身份/版本判据，两个进程共读同一份口径，故必须零依赖）。
+   *   以及几个**零依赖叶子**：`src/core/infra/msg.ts`（纯文案字典）、`src/core/identity/library.ts`
+   *   （库身份/版本判据，两个进程共读同一份口径）、`src/core/identity/address-key.ts`
+   *   （地址归一化键，库里的键列与内存表必须同解），故都必须零依赖。
    */
   const ALLOWED = [
     /^node:/,
@@ -694,6 +695,13 @@ function commandDecls() {
      * 只能由 core 写成 SQL、主进程照跑；参数只有前缀串／块 id／0-1 位。
      */
     /^(\.\.\/)+src\/core\/storage\/derived-plans(\.ts)?$/,
+    /**
+     * `src/core/identity/address-key.ts` 是**存储键的派生**：只有一个纯字符串函数
+     * （地址的归一化，无块模型／无 DOM／无存储）。库里那一列键（`BlockAlias.norm`，
+     * 迁移回填与按名查询的索引）与内存里的地址表必须逐字同解 —— 两处各写一份
+     * lower/trim 就会在分段与大小写上分叉，而分叉的后果是同一个名字出现两个身份。
+     */
+    /^(\.\.\/)+src\/core\/identity\/address-key(\.ts)?$/,
   ]
   const hits = []
   for (const f of electronFiles) {
@@ -712,12 +720,12 @@ function commandDecls() {
   }
   add({
     id: '2+',
-    title: '主进程准入白名单：只许 node:* / electron / core/infra/msg / core/identity/library / core/infra/assets / core/storage/library-reads（纯查询计划）/ core/storage/derived-plans（纯写计划）（块语义、查询、渲染一律不许）',
+    title: '主进程准入白名单：只许 node:* / electron / core/infra/msg / core/identity/library / core/identity/address-key / core/infra/assets / core/storage/library-reads（纯查询计划）/ core/storage/derived-plans（纯写计划）（块语义、查询、渲染一律不许）',
     method:
-      'AST 遍历 electron/**/*.ts 的 import/export-from，**白名单**逐条比：`node:*`／`electron`／`src/core/infra/msg`／`src/core/identity/library`／`src/core/infra/assets`／`src/core/storage/library-reads`（纯 SQL 计划）／`src/core/storage/derived-plans`（纯 SQL 计划）；其余一律命中',
+      'AST 遍历 electron/**/*.ts 的 import/export-from，**白名单**逐条比：`node:*`／`electron`／`src/core/infra/msg`／`src/core/identity/library`／`src/core/identity/address-key`／`src/core/infra/assets`／`src/core/storage/library-reads`（纯 SQL 计划）／`src/core/storage/derived-plans`（纯 SQL 计划）；其余一律命中',
     scope: `electron/**/*.ts（${electronFiles.length} 个文件：${electronFiles.map(rel).join(' · ')}）`,
     whitelist:
-      '`node:*`（fs／sqlite／path）· `electron`（壳本体）· `./x.ts`（主进程自己目录内）· `src/core/infra/msg`（纯文案字典）· `src/core/identity/library`（库身份与版本判据，零依赖、两进程共读）· `src/core/infra/assets`（字节→类型/后缀/地址的纯函数，同一份判据给协议两端）· `src/core/storage/library-reads`（只读查询计划：具名 SQL＋类型，无块模型/渲染/存储实现）· `src/core/storage/derived-plans`（派生表写计划：SQL 文本＋形状校验，参数只有前缀/块 id/0-1 位）',
+      '`node:*`（fs／sqlite／path）· `electron`（壳本体）· `./x.ts`（主进程自己目录内）· `src/core/infra/msg`（纯文案字典）· `src/core/identity/library`（库身份与版本判据，零依赖、两进程共读）· `src/core/identity/address-key`（地址的归一化键：库里的键列与内存表必须同解）· `src/core/infra/assets`（字节→类型/后缀/地址的纯函数，同一份判据给协议两端）· `src/core/storage/library-reads`（只读查询计划：具名 SQL＋类型，无块模型/渲染/存储实现）· `src/core/storage/derived-plans`（派生表写计划：SQL 文本＋形状校验，参数只有前缀/块 id/0-1 位）',
     hits: hits.length,
     detail: hits,
     note: '为什么是白名单：黑名单版本实测放行 core/query、core/kb/types、view/editor、app/handlers —— 「块语义搬进主进程」时门禁不会红，而那时块语义已经有两个实现',

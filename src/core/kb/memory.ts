@@ -39,7 +39,7 @@ import { changesOf } from './changes.ts'
 import { applyOps, cellsOf, diffTouched, type BeforeBlock, type Placement, type TouchedBlock } from './diff.ts'
 import { captureOf } from './scoped.ts'
 import type { UndoCapture } from './scoped.ts'
-import type { KbClient, Op, PathEntry, Tx, TxOpts, TxResult } from './types.ts'
+import type { AliasState, KbClient, Op, PathEntry, Tx, TxOpts, TxResult } from './types.ts'
 import type { Anno } from '../model/runs.ts'
 
 /** 按含**被删块**的遍历找块（可见遍历看不见它们；恢复路径用） */
@@ -94,7 +94,7 @@ export class MemoryKb implements KbClient {
    * 喂 catalog 摘要（全库的地址表与日记日期）。摘要住 store 上（编辑器/命令/读门面
    * 共同持有的唯一对象）；门面只是转发，见 `BlockStore.setCatalog`。
    */
-  setCatalog(catalog: { journals: readonly { id: string; date: string; deleted: number | null }[]; aliases: readonly { name: string; block: string }[] } | null): void {
+  setCatalog(catalog: { journals: readonly { id: string; date: string; deleted: number | null }[] } | null): void {
     this.store.setCatalog(catalog)
   }
 
@@ -152,14 +152,24 @@ export class MemoryKb implements KbClient {
   }
 
   /**
-   * **这个名字现在归谁**（只回答 id，不要求块已装载）。
+   * **这个名字现在归谁**（只回答 id）。
    *
    * 创建路径的防重判据：`#名字`／`[[名字]]` 在本地 miss 时，先问这一格——
    * 名字可能属于一个还没装载的块，把「未加载」当「不存在」去新建就是第二个同名身份。
-   * 判据住 store（catalog 摘要与索引都在它身上），见 `BlockStore.aliasTargetId`。
+   * 「没问过」与「没有」的区分见 `aliasState`（判据住 store）。
    */
   aliasTargetId(name: string): string | undefined {
     return this.store.aliasTargetId(name)
+  }
+
+  /** 三态归属：`owned`／`absent`（问过了）／`unchecked`（还没问） */
+  aliasState(name: string): AliasState {
+    return this.store.aliasState(name)
+  }
+
+  /** 去库里核定这批名字（创建入口在开事务之前调一次） */
+  prepareAlias(names: readonly string[]): Promise<void> {
+    return this.store.prepareAlias(names)
   }
 
   allPaths(): readonly PathEntry[] {

@@ -47,6 +47,7 @@ import {
   derivedPlanParams,
   type DerivedPlan,
 } from '../../src/core/storage/derived-plans.ts'
+import { normalizeAlias } from '../../src/core/identity/address-key.ts'
 
 export type Db = DatabaseSync
 
@@ -103,9 +104,11 @@ create table if not exists ${DB_TABLES.property} (
 create table if not exists ${DB_TABLES.alias} (
   name text primary key,
   block text not null,
-  pos integer not null
+  pos integer not null,
+  norm text
 );
 create index if not exists idx_BlockAlias_block on ${DB_TABLES.alias}(block);
+create index if not exists idx_BlockAlias_norm on ${DB_TABLES.alias}(norm);
 
 create table if not exists ${DB_TABLES.list} (
   block text not null,
@@ -481,6 +484,32 @@ export const MIGRATIONS: Migration[] = [
       writeMeta(db, META_KEYS.ftsRowidSeq, '0')
     },
   },
+  {
+    to: 16,
+    up: (db) => {
+      /**
+       * **地址的归一化键落成列**：`norm`（`normalizeAlias(name)`）。
+       *
+       * 为什么要它：名字的「同名」判据一直是归一化后的键（分段 trim、丢空段、大小写折叠），
+       * 而落盘只有原样拼写。以前启动把整张地址表搬进内存、在 JS 里归一化建表；那条路
+       * 的读成本随库线性长（大方量库上是启动的大头）。键落成列 + 索引之后，「这个名字归谁」
+       * 是一次点查，不再需要全表。
+       *
+       * 原样拼写仍然是主键与显示来源（`_aliases` 只在表里住这一份，不能改写成归一化值：
+       * 页/标签的显示名读的就是它）。
+       *
+       * 回填走一次性 UPDATE：2M 行实测约 2.1s，只在升级后第一次开库付一次。
+       * 归一化函数是两进程共读的零依赖叶子，与渲染层建内存表用的是同一份实现
+       * （自写一份 SQL 版 lower/trim 会在分段与大小写上分叉，正是这个键要防的事）。
+       */
+      const cols = (db.prepare(`pragma table_info(${DB_TABLES.alias})`).all() as { name: string }[]).map((c) => c.name)
+      if (!cols.includes('norm')) db.exec(`alter table ${DB_TABLES.alias} add column norm text`)
+      // 迁移用的临时函数：只在这条连接上注册，回填完就不再需要（索引建在普通列上）
+      db.function('norm_alias', { deterministic: true }, (v: unknown) => (typeof v === 'string' ? normalizeAlias(v) : null))
+      db.exec(`update ${DB_TABLES.alias} set norm = norm_alias(name) where norm is null`)
+      db.exec(`create index if not exists idx_BlockAlias_norm on ${DB_TABLES.alias}(norm)`)
+    },
+  },
 ]
 
 export type OpenResult =
@@ -802,7 +831,7 @@ const WRITABLE = new Set<string>([
 const COLUMNS: Record<string, ReadonlySet<string>> = {
   Block: new Set(['id', 'content', 'annos', 'parent', 'left', 'created', 'modified', 'deleted', 'display', 'kind', 'date', 'query', 'type']),
   BlockProperty: new Set(['block', 'name', 'pos', 'multi', 'value']),
-  BlockAlias: new Set(['block', 'pos', 'name']),
+  BlockAlias: new Set(['block', 'pos', 'name', 'norm']),
   BlockList: new Set(['block', 'list']),
   meta: new Set(['key', 'value']),
   BlockFTS: new Set(['rowid', 'seg', 'chars', 'pinyin']),
@@ -820,6 +849,14 @@ function sqlOf(w: RowWrite): string {
   const vals = Object.keys(w.values ?? {})
   for (const c of [...keys, ...vals]) if (!allowed.has(c)) throw new Error(`row write: unknown column "${w.table}.${c}"`)
   if (keys.length === 0) throw new Error('row write: empty key')
+  /**
+   * **地址行必须带归一化键**：它既是「同名」的唯一判据，也是按名点查的索引。
+   * 漏写会静默退化成「这个名字谁都不认」⇒ 下一次创建就是第二个同名身份。
+   * 这里挡在唯一的写入口上，而不是指望每个调用方记得。
+   */
+  if (w.table === 'BlockAlias' && w.op !== 'delete' && w.values?.norm === undefined) {
+    throw new Error('row write: BlockAlias requires norm (the normalized lookup key)')
+  }
   const where = keys.map((c) => `${c} = ?`).join(' and ')
   if (w.op === 'delete') {
     // 只给一部分主键 ＝ 删这块的全部行（`{block}`），给全 ＝ 删那一行

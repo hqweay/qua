@@ -17,14 +17,13 @@
 import { UndoStack, type DeviceUndoStep, type UndoKind } from './undo.ts'
 import type { Block } from './model.ts'
 import { DELETED_AT_PROP, isDeleted } from './model.ts'
-import type { Op } from '../kb/types.ts'
 import type { Sel } from './selection.ts'
 import { applyOps as patchIndex, blockIdByAlias, lookupBlock, rebuild, type Index } from '../infra/index-port.ts'
 import { normalizeAlias } from '../identity/alias.ts'
 import { applyOps } from '../kb/diff.ts'
 import type { UndoCapture } from '../kb/scoped.ts'
 import { scopedOps } from '../kb/scoped.ts'
-import type { ForestLookup } from '../kb/types.ts'
+import type { AliasState, ForestLookup, Op } from '../kb/types.ts'
 import { changesOf, structuralOf } from '../kb/changes.ts'
 import { walkForest } from './walk.ts'
 
@@ -330,39 +329,100 @@ export class BlockStore {
   /* ------------------------------------------------------------ catalog（工作集外的全库身份摘要） */
 
   /**
-   * **catalog 摘要**：全库的地址表与日记日期（由装载器喂进来，整库模式也可以喂）。
+   * **catalog 摘要**：全库的日记日期（由装载器喂进来，整库模式也可以喂）。
    *
    * 为什么挂在 store 上：创建路径的防重判据（`#名字` 归谁、这一天在不在）是
    * **全局**问题，而工作集只有当前视图的闭包。store 是编辑器、命令、读门面
    * 共同持有的唯一对象——把摘要放这里，三层都不必各自传一份。
    */
-  private catalogAliases: Map<string, string> | null = null
   private catalogJournals: { id: string; date: string; deleted: number | null }[] | null = null
 
-  setCatalog(catalog: { aliases: readonly { name: string; block: string }[]; journals: readonly { id: string; date: string; deleted: number | null }[] } | null): void {
-    if (catalog === null) {
-      this.catalogAliases = null
-      this.catalogJournals = null
-      return
-    }
-    // 地址表按**规范化名字**建（与索引表同一条规范化）：查表不再各自 trim
-    const aliases = new Map<string, string>()
-    for (const a of catalog.aliases) {
-      const key = normalizeAlias(a.name)
-      if (key !== '' && !aliases.has(key)) aliases.set(key, a.block)
-    }
-    this.catalogAliases = aliases
-    this.catalogJournals = [...catalog.journals]
+  setCatalog(catalog: { journals: readonly { id: string; date: string; deleted: number | null }[] } | null): void {
+    this.catalogJournals = catalog === null ? null : [...catalog.journals]
+  }
+
+  /* ------------------------------------------------------------ 地址归属（全局，按名点查） */
+
+  /**
+   * **「这个名字归谁」的两半**：内存里已知的 ＋ 去库里问过的。
+   *
+   * 为什么不再在启动时读全表：那张表随库线性长（大方量库上是启动的大头），而问它的
+   * 只有创建路径的防重判据——一次点查就够。问到的答案在这次打开期间**是定论**：
+   * 要改一个未装载块的名字，必须先把它装载进来，而装载过的块由（永远新鲜的）索引
+   * 先回答；新造出来的块也当场进索引。所以这里没有失效问题，只有一个「问过没有」。
+   */
+  private aliasFacts = new Map<string, string | null>()
+  private aliasResolver: ((norms: readonly string[]) => Promise<ReadonlyMap<string, string>>) | null = null
+
+  /** 喂「按名点查」的库面（桌面＝IPC 具名读，web＝内存全森林）；没有它 ⇒ 永远 `unchecked` */
+  setAliasResolver(fn: ((norms: readonly string[]) => Promise<ReadonlyMap<string, string>>) | null): void {
+    this.aliasResolver = fn
+    this.aliasFacts.clear()
   }
 
   /**
-   * **这个名字现在归谁**（只回答 id；目标块未装载也回答）。
-   * 索引的地址表优先（它反映**已装载块**的最新名字），miss 才问 catalog。
+   * **这个名字此刻的归属**：三态。
+   *
+   * - `owned`：有人认领（索引里的活块，或库里查到的、可能未装载的块）；
+   * - `absent`：**问过了**，库里没有——新建是安全的；
+   * - `unchecked`：内存里没有、也没问过——**建块前必须先 `prepareAlias`**。
+   *
+   * `absent` 与 `unchecked` 必须分开：把「还没问」当作「没有」，就是造出第二个同名身份。
+   */
+  aliasState(name: string): AliasState {
+    const local = blockIdByAlias(this.index, name)
+    if (local !== undefined) return { kind: 'owned', id: local, loaded: this.isLoaded(local) }
+    const norm = normalizeAlias(name)
+    if (norm === '') return { kind: 'absent' }
+    const fact = this.aliasFacts.get(norm)
+    /**
+     * **事实只对「未装载的块」有发言权**：装载过的块由索引回答（它是活的）。
+     * 走到这里而事实指向一个**已装载**的块 ⇒ 那块已经把这个名字让出去了（改名／软删），
+     * 事实过期 ⇒ 弃掉它、按「还不知道」处理（下次问库时会有新答案）。
+     */
+    if (fact !== undefined) {
+      if (fact === null) return { kind: 'absent' }
+      if (!this.isLoaded(fact)) return { kind: 'owned', id: fact, loaded: false }
+      this.aliasFacts.delete(norm)
+    }
+    /**
+     * 整库模式（索引覆盖全库）⇒ 查不到就是真的没有；只有工作集模式才存在「还没问」。
+     * 这条判据与 `partial` 同源，不能靠「库小」去猜。
+     */
+    if (!this.partial) return { kind: 'absent' }
+    return { kind: 'unchecked' }
+  }
+
+  /**
+   * **去库里核定这一批名字**，把它变成这次打开期间的事实。没有解析器（整库模式）：无事可做，
+   * 因为整库模式的索引就是全库。失败**不**记成「没有」——留成 `unchecked`，让调用方拒建。
+   */
+  async prepareAlias(names: readonly string[]): Promise<void> {
+    const pending = [...new Set(names.map((n) => normalizeAlias(n)).filter((n) => n !== ''))].filter(
+      (n) => !this.aliasFacts.has(n),
+    )
+    if (pending.length === 0 || this.aliasResolver === null) return
+    let found: ReadonlyMap<string, string>
+    try {
+      found = await this.aliasResolver(pending)
+    } catch (e) {
+      // 问不到 ≠ 没有：留成 `unchecked`（调用方据此拒建），下一次再问
+      console.warn('[alias] lookup failed:', e)
+      return
+    }
+    for (const norm of pending) this.aliasFacts.set(norm, found.get(norm) ?? null)
+  }
+
+  /**
+   * **这个名字现在归谁**（只回答 id）。索引优先（它反映已装载块的最新名字），
+   * 其次是这次打开期间**问过**的库答案；`unchecked` 仍返回 `undefined`——调用方要
+   * 区分「没有」与「还没问」就改用 `aliasState`。
    */
   aliasTargetId(name: string): string | undefined {
     const local = blockIdByAlias(this.index, name)
     if (local !== undefined) return local
-    return this.catalogAliases?.get(normalizeAlias(name))
+    const norm = normalizeAlias(name)
+    return this.aliasFacts.get(norm) ?? undefined
   }
 
   /** 这一天在库里的记录（含软删）；catalog 在场回答全库，不在场走含软删的索引块表 */
@@ -432,6 +492,8 @@ export class BlockStore {
     this.workset = { loaded: null, pinned: new Set(), order: new Map(), tick: 0 }
     this.worksetProbe.loaded = 0
     this.worksetProbe.pinned = 0
+    /** 名字归属的答案只属于上一份库：换库必须连它一起清 */
+    this.aliasFacts.clear()
     this.discardIndex()
     this.undoStack.clear()
     this.notify()

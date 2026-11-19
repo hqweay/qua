@@ -58,7 +58,7 @@ function seeded(): Db {
   }
   for (const id of ['a', 'b', 'c']) rows.push({ table: 'BlockList', op: 'upsert', key: { block: id, list: 'page' }, values: {} })
   for (const id of ['c', 'd', 'e']) {
-    rows.push({ table: 'BlockAlias', op: 'upsert', key: { name: `页-${id}` }, values: { block: id, pos: 0 } })
+    rows.push({ table: 'BlockAlias', op: 'upsert', key: { name: `页-${id}` }, values: { block: id, pos: 0, norm: `页-${id}` } })
   }
   rows.push(
     { table: 'meta', op: 'upsert', key: { key: META_KEYS.derivedState }, values: { value: 'ready' } },

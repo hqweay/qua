@@ -13,6 +13,7 @@
  * 模式下不同源，只测一种会漏掉另一半——旧夹具只有行内引用，就漏掉了「属性指向／嵌入」的候选。
  */
 import { test } from 'node:test'
+import { normalizeAlias } from '../src/core/identity/address-key.ts'
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -43,7 +44,8 @@ const alias = (name: string, b: string, pos = 0): RowWrite => ({
   table: 'BlockAlias',
   op: 'upsert',
   key: { name },
-  values: { block: b, pos },
+  // 归一化键是写入契约的一部分：漏写在这里就该炸（`sqlOf` 有闸）
+  values: { block: b, pos, norm: normalizeAlias(name) },
 })
 const list = (b: string, name: 'page' | 'tag'): RowWrite => ({ table: 'BlockList', op: 'upsert', key: { block: b, list: name } })
 

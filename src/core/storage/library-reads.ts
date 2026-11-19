@@ -71,7 +71,11 @@ export const LIBRARY_READS = {
   docProps: `select block, name, pos, multi, value from ${P} where block in (select value from json_each(?1))`,
 
   /** 子树里的地址行（pos 有序，首个是主名） */
-  docAliases: `select name, block, pos from ${A} where block in (select value from json_each(?1))`,
+  /**
+   * 子树里的地址行。`norm` 与主键一起取：一行的形状只有一份答案
+   * （写入侧 `db-rows.ts` 的 `aliasRows` 也是这四格），读回来与写出去不会长出两种行。
+   */
+  docAliases: `select name, block, pos, norm from ${A} where block in (select value from json_each(?1))`,
 
   /** 子树里的露面行（page／tag） */
   docLists: `select block, list from ${L} where block in (select value from json_each(?1))`,
@@ -244,14 +248,19 @@ export const LIBRARY_READS = {
     order by a.name`,
 
   /**
-   * **全量地址表**（name → block）：创建路径的防重判据。
+   * **按名点查归属**（归一化键 → 块）：创建路径的防重判据。
    *
    * 打字里出现的 `#名字`／`[[名字]]` 在本地工作集里 miss 时，不能当成「库里没有」
-   * 去新建：名字可能属于一个还没加载的块，新建就是第二个同名身份。这张表回答
-   * 「这个名字已经归谁」，与 `Index.aliases` 同一口径（全局唯一；重复只可能来自
-   * 历史脏数据，取任一都指向同一个名字空间）。
+   * 去新建：名字可能属于一个还没加载的块，新建就是第二个同名身份。这一条回答
+   * 「这个名字已经归谁」——不是全表，只问这一批名字。
+   *
+   * 参数是**归一化后的名字**（`normalizeAlias`，与写入 `norm` 列的是同一个函数）；
+   * `order by block, pos` 让「归一化后撞在一起的历史脏数据」也按同一顺序取第一个
+   * （以前在 JS 里建表时就是这条次序）。不过滤 `deleted`：回收站里的名字仍算被占。
    */
-  catalogAliases: `select name, block from ${A} order by block, pos`,
+  aliasTargets: `select norm, block from ${A}
+    where norm in (select value from json_each(?1))
+    order by block, pos`,
 
   /**
    * 回收站：被软删的操作根（子孙不各写标记，所以这里就是整座回收站）。
@@ -284,7 +293,8 @@ export type CatalogJournal = { id: string; date: string; deleted: number | null 
 export type CatalogTag = { id: string; name: string }
 export type CatalogPropDef = { id: string; kind: string; name: string | null }
 export type CatalogTrashRoot = { id: string; deleted: number }
-export type CatalogAlias = { name: string; block: string }
+/** 一条「这个名字归谁」的行：`norm` 是归一化后的键（查询参数与它同一个派生函数） */
+export type AliasTarget = { norm: string; block: string }
 
 /** 槽的全局身份摘要；页列表刻意不在这里（它是查询视图，按页查） */
 export type LibraryCatalog = {
@@ -304,7 +314,6 @@ export type LibraryCatalog = {
   journals: CatalogJournal[]
   tags: CatalogTag[]
   propDefs: CatalogPropDef[]
-  aliases: CatalogAlias[]
   trash: CatalogTrashRoot[]
 }
 

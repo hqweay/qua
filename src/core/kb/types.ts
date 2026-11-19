@@ -254,6 +254,21 @@ export interface PathEntry {
  * 阶段 1 的实现可以整库缓存，但调用方写不出来「遍历全库」——
  * 否则懒加载（P5）那天要改遍每个调用方。
  */
+/**
+ * **一个名字此刻的归属**（三态）。
+ *
+ * 为什么不是 `string | undefined`：部分装载下，「库里没有这个名字」与「还没去库里问」
+ * 必须分开——前者的正确处理是**新建**，后者是**先问再建**。把两者混成一个值，
+ * 就会在「名字属于一个未装载的块」时造出第二个同名身份。
+ */
+export type AliasState =
+  /** 有人认领。`loaded` 说明这块此刻在不在内存里——不在就得先装载再复用 */
+  | { kind: 'owned'; id: string; loaded: boolean }
+  /** 问过了：库里没有这个名字 */
+  | { kind: 'absent' }
+  /** 内存里没有、也还没问过库 */
+  | { kind: 'unchecked' }
+
 export interface KbClient {
   get(id: string): Block | undefined
   /**
@@ -274,10 +289,19 @@ export interface KbClient {
   /** 按地址找块（先序第一个命中，比较口径只在 `core/alias.ts` 里有一份） */
   resolveAlias(name: string): Block | undefined
   /**
-   * **这个名字现在归谁**（只回答 id；目标块未装载也回答）。
-   * 创建路径的防重判据：把「未加载」当「不存在」去新建，就是第二个同名身份。
+   * **这个名字现在归谁**（只回答 id）。索引里有的当场答；问过库的也答；
+   * **没问过的返回 `undefined`**——要与「库里没有」区分就用 `aliasState`。
    */
   aliasTargetId(name: string): string | undefined
+  /** **三态归属**：`owned`／`absent`（问过了，库里没有）／`unchecked`（还没问） */
+  aliasState(name: string): AliasState
+  /**
+   * **去库里核定这批名字**（创建路径在开事务之前调一次）。
+   *
+   * 事务是同步的、库是异步的：把 await 放在**入口**、判据留在核心，同步路径
+   * 就永远只会见到两种答案（`owned`／`absent`），见到 `unchecked` 就拒建。
+   */
+  prepareAlias(names: readonly string[]): Promise<void>
   allPaths(): readonly PathEntry[]
 
   fieldsOf(id: string): readonly FieldRow[]

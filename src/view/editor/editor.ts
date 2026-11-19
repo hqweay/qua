@@ -128,7 +128,8 @@ import { mergeCapture, type UndoCapture } from '../../core/kb/scoped.ts'
 import type { AssetView } from '../../core/infra/assets.ts'
 // 标签块的「找到或创建」有两种落地（直写 / 事务），判据只有一份
 import { ensureTagInTx, tagLookupOf } from '../../core/kb/ensure-tag.ts'
-import { UnloadedAliasError } from '../../core/kb/unsupported.ts'
+import { deferAliasGate } from '../../core/kb/alias-gate.ts'
+import { AliasClaimError } from '../../core/kb/unsupported.ts'
 // 任务状态定义块的事务内按需物化：落值之前保证定义在，面板才有行可画
 import { ensureTaskStatusInTx } from '../../core/kb/ensure-task.ts'
 // 用户可见文案一律走 t
@@ -1975,6 +1976,8 @@ export class BlockEditor {
   addTag(blockId: string, name: string): boolean {
     const b = this.store.find(blockId)
     if (!b) return false
+    // 归属还没核定 ⇒ 先问一次库再重放（闸的语义见 `core/kb/alias-gate.ts`）
+    if (deferAliasGate(this.store, name, () => this.addTag(blockId, name))) return true
     // 快照取在**建标签**之前：撤销这次挂标签时，顺手建出的标签块也该一起回滚
     this.beginUndoEntry()
     // 建标签块（可能）＋写归属是同一笔：拆开就会留下「只有标签、没有归属」的半批。
@@ -1989,7 +1992,7 @@ export class BlockEditor {
       })
     } catch (e) {
       // 名字被一个未装载的块占着 ⇒ 不新建（否则地址空间出现第二个同名身份）；留成纯文本
-      if (e instanceof UnloadedAliasError) {
+      if (e instanceof AliasClaimError) {
         console.warn(`[editor] tag "${e.aliasName}" exists on an unloaded block; left as text`)
         return false
       }
@@ -2640,6 +2643,8 @@ export class BlockEditor {
     const to = run.to ?? ''
     if (to !== '' && this.store.find(to)) return 'none'
     const label = (run.anchor ?? run.label ?? '').trim()
+    // 归属还没核定 ⇒ 先问一次库再重放（要按名字新建那条路用得上；目标在回收站那条不需要）
+    if (deferAliasGate(this.store, label, () => this.repairRef(runId))) return 'none'
     this.beginUndoEntry()
     let mode: 'restored' | 'repointed' | 'none' = 'none'
     const ok = this.write((tx) => {
@@ -2658,7 +2663,7 @@ export class BlockEditor {
         target = run.flavor === '#' ? ensureTagInTx(lookup, label, tx) : ensurePageInTx(lookup, label, tx)
       } catch (e) {
         // 名字被一个未装载的块占着 ⇒ 不按名字新建（新 id 指不到原来的目标）；留作 dangling
-        if (e instanceof UnloadedAliasError) {
+        if (e instanceof AliasClaimError) {
           console.warn(`[editor] repair target "${e.aliasName}" exists on an unloaded block; not repointed`)
           return false
         }

@@ -51,6 +51,7 @@
  */
 import { ALIASES_PROP, DELETED_AT_PROP, DISPLAY_PROP, LISTS_PROP, type Block, type BlockList } from '../model/model.ts'
 import { META_KEYS } from '../identity/library.ts'
+import { normalizeAlias } from '../identity/address-key.ts'
 import type { Op } from '../kb/types.ts'
 import type { Workspace } from './shape.ts'
 import { walkForest } from '../model/walk.ts'
@@ -302,12 +303,21 @@ function aliasWrites(b: Block): RowWrite[] {
  *
  * 主键是**名字**（地址全局唯一）：换一块认领同一个名字时，upsert 会连 `block` 一起改掉，
  * 于是「这个名字归谁」永远只有一行答案。
+ *
+ * `norm` 是「同名」的判据键（归一化后），与主键不是一件事：主键防**逐字**重复，
+ * `norm` 防**同解**重复，也是按名点查的索引。它由同一份函数算出来（渲染层与主进程
+ * 共读），不在这里另写一份字符串处理。
  */
 function aliasRows(block: string, raw: unknown): RowWrite[] {
   if (!Array.isArray(raw)) return []
   return raw
     .filter((x): x is string => typeof x === 'string' && x.trim() !== '')
-    .map((name, pos) => ({ table: 'BlockAlias' as const, op: 'upsert' as const, key: { name }, values: { block, pos } }))
+    .map((name, pos) => ({
+      table: 'BlockAlias' as const,
+      op: 'upsert' as const,
+      key: { name },
+      values: { block, pos, norm: normalizeAlias(name) },
+    }))
 }
 
 function listWrites(b: Block): RowWrite[] {

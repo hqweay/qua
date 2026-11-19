@@ -25,10 +25,11 @@
 import { walkForest } from '../model/walk.ts'
 import { DELETED_AT_PROP, aliasesOf, hasList, isDeleted, type Block } from '../model/model.ts'
 import { isJournal, journalDate } from '../identity/journal.ts'
+import { normalizeAlias } from '../identity/address-key.ts'
 import { ensureIndexLists, relationsTo, type Index } from '../infra/index-port.ts'
 import type { BlockStore } from '../model/store.ts'
 import { positionsOf, rowsOfBlock, type RawLibraryRows, type StoredWorkspace } from './db-rows.ts'
-import type { CandidatePage, LibraryCatalog, LibraryDocRows, LibraryDocWindow } from './library-reads.ts'
+import type { AliasTarget, CandidatePage, LibraryCatalog, LibraryDocRows, LibraryDocWindow } from './library-reads.ts'
 import type { LibraryClient, LibraryReadResult } from './library-client.ts'
 import type { CandidatePlan } from './library-reads.ts'
 
@@ -315,7 +316,6 @@ export function createMemoryLibraryClient(deps: MemoryLibraryDeps): LibraryClien
       const ws = deps.ws()
       const journals: { id: string; date: string; deleted: number | null }[] = []
       const trash: { id: string; deleted: number }[] = []
-      const aliasRows: { name: string; block: string }[] = []
       walkForest(
         forest(),
         (b) => {
@@ -328,7 +328,6 @@ export function createMemoryLibraryClient(deps: MemoryLibraryDeps): LibraryClien
             const at = b.props?.[DELETED_AT_PROP]
             if (typeof at === 'number') trash.push({ id: b.id, deleted: at })
           }
-          for (const name of aliasesOf(b)) aliasRows.push({ name, block: b.id })
         },
         { includeDeleted: true },
       )
@@ -355,9 +354,33 @@ export function createMemoryLibraryClient(deps: MemoryLibraryDeps): LibraryClien
         journals,
         tags,
         propDefs,
-        aliases: aliasRows,
         trash,
       })
+    },
+
+    /**
+     * **按名点查归属**：内存读面覆盖**整片森林**（含软删），所以标准工作集装载下
+     * 这条读面回答的就是旧全量地址表的那一整个名字空间——这正是它与具名 SQL 读面
+     * 对拍的意义（`tests/memory-client.test.ts`）。
+     *
+     * 归一化键与桌面同一份函数；同一键撞上两块时**先序第一个赢**（与 `Index.aliases`
+     * 及桌面 `order by block, pos` 的口径一致）。
+     */
+    async aliasTargets(names): Promise<LibraryReadResult<AliasTarget[]>> {
+      const want = new Set(names.map((n) => normalizeAlias(n)).filter((n) => n !== ''))
+      if (want.size === 0) return ok([])
+      const hit = new Map<string, string>()
+      walkForest(
+        forest(),
+        (b) => {
+          for (const raw of aliasesOf(b)) {
+            const key = normalizeAlias(raw)
+            if (want.has(key) && !hit.has(key)) hit.set(key, b.id)
+          }
+        },
+        { includeDeleted: true },
+      )
+      return ok([...hit.entries()].map(([norm, block]) => ({ norm, block })))
     },
   }
 }

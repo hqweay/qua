@@ -19,25 +19,16 @@ import { ALIASES_PROP, aliasesOf, listsOf, primaryAliasOf, type Block } from '..
 import { isJournal, journalDate, journalDateLabel } from './journal.ts'
 import { plainText } from '../model/runs.ts'
 import { walkForest } from '../model/walk.ts'
+import { normalizeAlias } from './address-key.ts'
 
 /** 旧落盘键（v13 及以前）。新代码**不读**它；形状校验把它判成 corrupt。 */
 export const LEGACY_ALIAS_PROP = '_alias' as const
 
 /**
- * 地址的规范化 —— **唯一定义点**（tag 名、页名、`[[ ]]` 查找共用）。
- *
- * 按 `/` 分段逐段 trim 并丢掉空段：`A / B` → `a/b`，`a//b` → `a/b`。
- * 丢空段而不是保留，是因为空段在显示上不可见、在比较上却会分出一个新地址。
+ * 地址的规范化 —— **唯一定义点**在 `address-key.ts`（零依赖叶子：库里那一列键与内存
+ * 地址表必须同解，主进程也要读同一份），这里转出，本文件的查找也都走这一份。
  */
-export function normalizeAlias(name: string): string {
-  return name
-    .trim()
-    .toLowerCase()
-    .split('/')
-    .map((seg) => seg.trim())
-    .filter((seg) => seg !== '')
-    .join('/')
-}
+export { normalizeAlias }
 
 /**
  * `_aliases` 的形状判据（**读路径与落盘校验共用同一份**，`storage/shape.ts` 也吃它）：

@@ -41,6 +41,7 @@ import {
 } from '../../src/core/identity/library.ts'
 import { createFolderAssetStore, type AssetStore } from './assets.ts'
 import {
+  readAliasTargets as readAliasTargetsFor,
   readBlockRows,
   readBlockTreeRows,
   readCandidatePage,
@@ -58,6 +59,7 @@ import {
   readRootIds,
 } from './reads.ts'
 import type {
+  AliasTarget,
   BlockIndexRow,
   CandidatePage,
   CandidatePlan,
@@ -128,6 +130,9 @@ export interface RepoSession {
     candidateIds: number
     identity: number
     identityRows: number
+    /** 按名点查：次数与问了几个名字（它该随「新建意图」长，不该随库长） */
+    aliasQueries: number
+    aliasRows: number
   }
   /**
    * 这个会话**累计写进去多少行**（`saveContent` 的返回值累加）。
@@ -216,7 +221,7 @@ function makeSession(id: string, dir: string, db: Db, deviceId: string): RepoSes
     assets,
     windows: new Set<number>(),
     deviceId,
-    reads: { doc: 0, docRows: 0, catalog: 0, catalogRows: 0, blocks: 0, blockRows: 0, candidates: 0, candidateIds: 0, identity: 0, identityRows: 0 },
+    reads: { doc: 0, docRows: 0, catalog: 0, catalogRows: 0, blocks: 0, blockRows: 0, candidates: 0, candidateIds: 0, identity: 0, identityRows: 0, aliasQueries: 0, aliasRows: 0 },
     writes: { rows: 0, ftsRows: 0, saves: 0 },
     candidateRoute: new Map<string, boolean>(),
     close: () => {
@@ -351,9 +356,15 @@ export function readCatalog(session: RepoSession): LibraryCatalog {
     catalog.journals.length +
     catalog.tags.length +
     catalog.propDefs.length +
-    catalog.aliases.length +
     catalog.trash.length
   return catalog
+}
+
+/** 按名点查归属（归一化键 → 块）：创建路径的防重判据，问几个名字查几个 */
+export function readAliasTargets(session: RepoSession, norms: readonly string[]): AliasTarget[] {
+  session.reads.aliasQueries += 1
+  session.reads.aliasRows += norms.length
+  return readAliasTargetsFor(session.db, norms)
 }
 
 /**

@@ -234,6 +234,42 @@ test('v4 → v5：查询条件换了形状 ⇒ 只丢内容（旧 `_query` 读�
 })
 
 /* ------------------------------------------------------------ ② 偏小 ⇒ 迁移 */
+/**
+ * v15 → v16：**地址的归一化键一次补齐**。
+ *
+ * 这一格是「同名」判据的存储形态：老库只有原样拼写，迁移必须把 `norm` 按同一个
+ * 归一化函数填好（分段 trim、丢空段、大小写折叠），否则按名点查会对这些名字一律
+ * 答「没有」⇒ 下一次建同名块就是第二个身份。主键（原样拼写）与内容一个字节不动。
+ */
+test('v15 → v16：地址的归一化键一次回填，原样拼写与内容不动', () => {
+  const file = tmpDb()
+  const first = openLibraryDb(file, { target: 15 })
+  assert.equal(first.status, 'created')
+  applyRowWrites(first.db!, [blockRow('b1'), blockRow('b2')])
+  applyRowWrites(first.db!, [
+    { table: 'BlockAlias', op: 'upsert', key: { name: 'Project Plan' }, values: { block: 'b1', pos: 0, norm: '' } },
+    { table: 'BlockAlias', op: 'upsert', key: { name: ' 甲 / 乙 ' }, values: { block: 'b2', pos: 0, norm: '' } },
+  ])
+  // 模拟 v15 留在盘上的行：那时没有这一列的值
+  first.db!.exec(`update ${DB_TABLES.alias} set norm = null`)
+  first.db!.close()
+
+  const r = openLibraryDb(file)
+  assert.equal(r.status, 'migrated', `v15 应当被迁移到当前版本，实际 ${r.status}`)
+  const db = r.db!
+  const rows = db.prepare(`select name, norm from ${DB_TABLES.alias} order by name`).all() as { name: string; norm: string }[]
+  assert.deepEqual(
+    rows.map((x) => [x.name, x.norm]),
+    [
+      [' 甲 / 乙 ', '甲/乙'],
+      ['Project Plan', 'project plan'],
+    ],
+    '原样拼写留着（显示与主键），归一化键按同一份函数填好',
+  )
+  assert.equal(hasContent(db), true, '回填不碰内容')
+  db.close()
+})
+
 test('user_version 偏小 ⇒ migrate：旧形状退场、内容表建好、版本号升到当前', () => {
   const file = tmpDb()
   legacyDb(file, 1)

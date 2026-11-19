@@ -31,7 +31,8 @@ import {
   type Block,
 } from '../../core/index.ts'
 import { ensureTagInTx } from '../../core/kb/ensure-tag.ts'
-import { UnloadedAliasError } from '../../core/kb/unsupported.ts'
+import { deferAliasGate } from '../../core/kb/alias-gate.ts'
+import { AliasClaimError } from '../../core/kb/unsupported.ts'
 import { t } from '../../core/infra/msg.ts'
 import type { App } from '../../core/infra/ports.ts'
 import type { Row } from '../../ui/overlay/layers.ts'
@@ -144,7 +145,72 @@ export function pageCommands(d: PageDeps): Pick<
     else loadAndShow([])
   }
 
-  return {
+  /** 打标签的实现（命令面那一份；公开形状与判据见下面 `insertTag` 的文档） */
+  const insertTagIn = (tag: string): void => {
+    const hostId = d.caretBlockId()
+    const host = hostId ? d.kb.get(hostId) : undefined
+    if (!host) return
+    // 归属还没问过库 ⇒ 问一次再重放（闸的语义见 `core/kb/alias-gate.ts`）
+    if (deferAliasGate(d.kb, tag, () => insertTagIn(tag))) return
+    // 这名字此刻有没有主：决定 toast 是「新建」还是「复用」（判据与 ensureTag 同一份）
+    const wasTag = d.kb.findTag(tag) !== undefined
+    const wasAddress = wasTag || d.kb.aliasState(tag).kind === 'owned'
+    // 找到或创建 ＋ 写归属，**同一笔事务**（与编辑器打行内标签同形）：
+    // 拆开就会留下「只有标签、没有归属」或「归属指向不存在 id」的半批
+    let r: { block: Block; tagged: boolean } | null
+    try {
+      r = d.run((tx) => {
+        const block = ensureTagInTx(d.kb, tag, tx)
+        if (!block) return null
+        if (hasTag(host, block.id)) return { block, tagged: false }
+        tx.setTags(host.id, [...tagIdsOf(host), block.id])
+        return { block, tagged: true }
+      }).result
+    } catch (e) {
+      // 名字被一个未装载的块占着 ⇒ 不新建；说一句实话，归属一个字节不动
+      if (e instanceof AliasClaimError) {
+        d.toast(t('ui.toast.aliasUnloaded'), 'warn')
+        return
+      }
+      throw e
+    }
+    if (!r) {
+      d.toast(t('ui.toast.tagEmpty'), 'warn')
+      return
+    }
+    if (!r.tagged) {
+      d.toast(t('ui.toast.tagAlready', { tag: displayNameOf(r.block) }), 'info')
+      return
+    }
+    if (!wasAddress) {
+      d.refreshList()
+      d.toast(t('ui.toast.tagCreated', { tag: displayNameOf(r.block) }))
+    } else if (!wasTag) {
+      // 同名块已存在 ⇒ 复用它并加 tag 露面。**必须让用户看见**，否则这是一次静默的模型改动
+      d.refreshList()
+      d.toast(t('ui.toast.tagReused', { tag: displayNameOf(r.block) }), 'info')
+    } else {
+      d.toast(t('ui.toast.tagAdded', { tag: displayNameOf(r.block) }))
+    }
+  }
+
+  /** 命令面对象：闸的重放要按名字重入同一个入口 */
+  const cmds: Pick<
+    App,
+    | 'listPages'
+    | 'activePageId'
+    | 'newPage'
+    | 'openPage'
+    | 'deletePage'
+    | 'renamePage'
+    | 'focusTitle'
+    | 'showRefPicker'
+    | 'showDatePicker'
+    | 'showEmbedPicker'
+    | 'showViewPicker'
+    | 'insertTag'
+    | 'extractToPage'
+  > = {
     // ⚠️ **只列 `page` 露面**：journal 也是一块，但它不是「页」的不变量是「一天一个」），
     //    混进来会让「页数」「下一页」这类语义变成说不清的数。
     listPages: () => pages().map((p) => ({ id: p.id, title: d.pageTitle(p), icon: d.pageIcon(p), blocks: count(p) })),
@@ -206,12 +272,15 @@ export function pageCommands(d: PageDeps): Pick<
         return
       }
       // 撞名就**停在原地**：地址是引用能落到哪儿的唯一依据，两个块同地址等于
-      // 其中一个从此引用不到。判据与 `claimAlias` 同一份（`kb.resolveAlias` 就是
-      // 「这个地址现在归谁」）；拒绝之后列表与标题都按库里的旧名字重画，
-      // 让界面立刻回到「这次没改成功」的样子，而不是留着一个假装改了的标题。
-      const hit = d.kb.resolveAlias(title)
-      if (hit && hit.id !== p.id) {
-        d.toast(t('ui.toast.nameTaken', { name: title, where: takenWhere(hit) }), 'warn')
+      // 其中一个从此引用不到。判据是**三态归属**（不是「已装载的名字表」）：
+      // 名字可能属于一个还没装载的块，把「未加载」当「没有」就是把它抢走。
+      // 归属还没核定 ⇒ 先问一次库再重放这次改名。
+      if (deferAliasGate(d.kb, title, () => cmds.renamePage(id, title))) return
+      const state = d.kb.aliasState(title)
+      if (state.kind === 'owned' && state.id !== p.id) {
+        const holder = state.loaded ? d.kb.get(state.id) : undefined
+        if (holder) d.toast(t('ui.toast.nameTaken', { name: title, where: takenWhere(holder) }), 'warn')
+        else d.toast(t('ui.toast.aliasUnloaded'), 'warn')
         if (p.id === d.activeId()) d.refreshTitle()
         d.refreshList()
         return
@@ -238,51 +307,7 @@ export function pageCommands(d: PageDeps): Pick<
      * ⚠️ 空名字直接拒绝（不建无名标签）：没有名字的标签没有身份，建了就是孤儿。
      * ⚠️ 建了新标签要 `refreshList`：森林变了，左槽的标签清单要跟着更新。
      */
-    insertTag: (tag) => {
-      const hostId = d.caretBlockId()
-      const host = hostId ? d.kb.get(hostId) : undefined
-      if (!host) return
-      // 这名字此刻有没有主：决定 toast 是「新建」还是「复用」（判据与 ensureTag 同一份）
-      const wasTag = d.kb.findTag(tag) !== undefined
-      const wasAddress = wasTag || d.kb.resolveAlias(tag) !== undefined
-      // 找到或创建 ＋ 写归属，**同一笔事务**（与编辑器打行内标签同形）：
-      // 拆开就会留下「只有标签、没有归属」或「归属指向不存在 id」的半批
-      let r: { block: Block; tagged: boolean } | null
-      try {
-        r = d.run((tx) => {
-          const block = ensureTagInTx(d.kb, tag, tx)
-          if (!block) return null
-          if (hasTag(host, block.id)) return { block, tagged: false }
-          tx.setTags(host.id, [...tagIdsOf(host), block.id])
-          return { block, tagged: true }
-        }).result
-      } catch (e) {
-        // 名字被一个未装载的块占着 ⇒ 不新建；说一句实话，归属一个字节不动
-        if (e instanceof UnloadedAliasError) {
-          d.toast(t('ui.toast.aliasUnloaded'), 'warn')
-          return
-        }
-        throw e
-      }
-      if (!r) {
-        d.toast(t('ui.toast.tagEmpty'), 'warn')
-        return
-      }
-      if (!r.tagged) {
-        d.toast(t('ui.toast.tagAlready', { tag: displayNameOf(r.block) }), 'info')
-        return
-      }
-      if (!wasAddress) {
-        d.refreshList()
-        d.toast(t('ui.toast.tagCreated', { tag: displayNameOf(r.block) }))
-      } else if (!wasTag) {
-        // 同名块已存在 ⇒ 复用它并加 tag 露面。**必须让用户看见**，否则这是一次静默的模型改动
-        d.refreshList()
-        d.toast(t('ui.toast.tagReused', { tag: displayNameOf(r.block) }), 'info')
-      } else {
-        d.toast(t('ui.toast.tagAdded', { tag: displayNameOf(r.block) }))
-      }
-    },
+    insertTag: insertTagIn,
 
     /**
      * **提取为页**：把一块（连子树）搬到森林顶层，补 `page` 露面，并在原位置留一枚引用。
@@ -312,9 +337,13 @@ export function pageCommands(d: PageDeps): Pick<
       const current = primaryAliasOf(b).trim()
       const text = plainText(b.content).trim()
       const name = current || text || t('ui.page.untitledAlias', { id: b.id.slice(-6) })
-      const hit = d.kb.resolveAlias(name)
-      if (hit && hit.id !== b.id) {
-        d.toast(t('ui.toast.nameTaken', { name, where: takenWhere(hit) }), 'warn')
+      // 提取会**认领这个名字**（写进 `_aliases`）⇒ 判据是三态归属，不是「已装载的名字表」
+      if (deferAliasGate(d.kb, name, () => cmds.extractToPage(id))) return false
+      const state = d.kb.aliasState(name)
+      if (state.kind === 'owned' && state.id !== b.id) {
+        const holder = state.loaded ? d.kb.get(state.id) : undefined
+        if (holder) d.toast(t('ui.toast.nameTaken', { name, where: takenWhere(holder) }), 'warn')
+        else d.toast(t('ui.toast.aliasUnloaded'), 'warn')
         return false
       }
       const at = parent.children.findIndex((x) => x.id === b.id)
@@ -422,4 +451,5 @@ export function pageCommands(d: PageDeps): Pick<
       d.openDatePicker()
     },
   }
+  return cmds
 }

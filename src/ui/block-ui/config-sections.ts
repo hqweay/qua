@@ -33,6 +33,7 @@ import {
 } from '../../core/index.ts'
 import type { KbClient } from '../../core/kb/types.ts'
 import { t } from '../../core/infra/msg.ts'
+import { deferAliasGate } from '../../core/kb/alias-gate.ts'
 import { renderIcon } from '../../view/icons.ts'
 import type { Layers } from '../overlay/layers.ts'
 
@@ -149,11 +150,13 @@ export function namesContent(ctx: ConfigSectionsCtx, root: HTMLElement): HTMLEle
   }
   box.appendChild(list)
 
-  const form = document.createElement('form')
-  form.className = 'alias-add'
-  form.addEventListener('submit', (e) => {
-    e.preventDefault()
-    const name = input.value.trim()
+  /**
+   * **加一个地址**。查重用的是三态归属（`aliasState`），不是「已装载的名字表」：
+   * 名字可能属于一个还没装载的块，把它当「没有」写进来，就是把那一块的地址抢走
+   * （`BlockAlias` 的主键会让这一行换主人，而那一块还在别处自称这个名字）。
+   * 归属还没核定 ⇒ 先问一次库再重放这次提交。
+   */
+  const submitAlias = (name: string): void => {
     if (name === '') {
       toast(t('ui.alias.emptyName'), 'warn')
       return
@@ -164,11 +167,12 @@ export function namesContent(ctx: ConfigSectionsCtx, root: HTMLElement): HTMLEle
       toast(t('ui.alias.exists'), 'info')
       return
     }
-    // 即将写进 `_aliases` ⇒ 一律按「要占地址」查重，不看它此刻有没有名字。
-    // 判据与 `claimAlias` 同一份（`kb.resolveAlias` 就是「这个地址现在归谁」）
-    const claim = ctx.kb.resolveAlias(name)
-    if (claim && claim.id !== b.id) {
-      toast(t('ui.toast.nameTaken', { name, where: whereOf(claim) }), 'warn')
+    if (deferAliasGate(ctx.kb, name, () => submitAlias(name))) return
+    const state = ctx.kb.aliasState(name)
+    if (state.kind === 'owned' && state.id !== b.id) {
+      const holder = state.loaded ? ctx.kb.get(state.id) : undefined
+      if (holder) toast(t('ui.toast.nameTaken', { name, where: whereOf(holder) }), 'warn')
+      else toast(t('ui.toast.aliasUnloaded'), 'warn')
       return
     }
     ctx.write(() => {
@@ -180,6 +184,12 @@ export function namesContent(ctx: ConfigSectionsCtx, root: HTMLElement): HTMLEle
     })
     // 重画后把焦点放回输入框：连着加第二个名字时不用再点一次
     root.querySelector<HTMLInputElement>('.alias-input')?.focus()
+  }
+  const form = document.createElement('form')
+  form.className = 'alias-add'
+  form.addEventListener('submit', (e) => {
+    e.preventDefault()
+    submitAlias(input.value.trim())
   })
   const input = document.createElement('input')
   input.className = 'alias-input ui-field'

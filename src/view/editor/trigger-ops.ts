@@ -22,7 +22,8 @@ import {
 } from '../../core/index.ts'
 import { fromProjection, plainText, projectOff, spliceRuns, type RefRun } from '../../core/model/runs.ts'
 import { ensureTagInTx, tagLookupOf } from '../../core/kb/ensure-tag.ts'
-import { UnloadedAliasError } from '../../core/kb/unsupported.ts'
+import { deferAliasGate } from '../../core/kb/alias-gate.ts'
+import { AliasClaimError } from '../../core/kb/unsupported.ts'
 import type { Tx } from '../../core/kb/types.ts'
 import type { AcceptPick, BlockEditor } from './editor.ts'
 
@@ -97,15 +98,17 @@ export class TriggerOps {
     if (!id || !loc) return false
     const pick = opts.pick
     /**
-     * **按名字落点的目标先装载**：名字被一个未装载的块占着 ⇒ 先装它再重放这次落点
-     * （复用同一块，不建第二个同名身份）。触发词还在正文里 ⇒ 重放时 `triggerAt`
-     * 仍能找到落点。装载失败就落空（编辑器 catch 住，触发词留成纯文本）。
+     * **按名字落点的目标先装载／先核定**：名字被一个未装载的块占着 ⇒ 先装它再重放这次
+     * 落点（复用同一块，不建第二个同名身份）；归属还没问过库 ⇒ 先问一次再重放。
+     * 触发词还在正文里 ⇒ 重放时 `triggerAt` 仍能找到落点。问不到就落空（触发词留成纯文本）。
      */
     const named = pick.kind === 'newTag' || pick.kind === 'newPage' || pick.kind === 'tag' ? pick.name : null
-    if (named !== null && this.ed.ensureLoaded) {
-      const known = this.ed.store.aliasTargetId(named)
-      if (known !== undefined && !this.ed.store.isLoaded(known)) {
-        this.ed.ensureLoaded([known], () => {
+    if (named !== null) {
+      // 归属还没问过库 ⇒ 问一次再重放（闸的语义见 `core/kb/alias-gate.ts`）
+      if (deferAliasGate(this.ed.store, named, () => this.acceptTrigger(opts))) return true
+      const state = this.ed.store.aliasState(named)
+      if (state.kind === 'owned' && !state.loaded && this.ed.ensureLoaded) {
+        this.ed.ensureLoaded([state.id], () => {
           this.acceptTrigger(opts)
         })
         return true
@@ -212,7 +215,7 @@ export class TriggerOps {
       // begin/finish 不配对会让此后所有编辑都记不进撤销栈
       this.ed.finishUndoEntry('other')
       // 名字被一个未装载的块占着 ⇒ 不新建（否则地址空间出现第二个同名身份）；这次落点取消
-      if (e instanceof UnloadedAliasError) {
+      if (e instanceof AliasClaimError) {
         console.warn(`[trigger] "${e.aliasName}" exists on an unloaded block; pick cancelled`)
         return false
       }

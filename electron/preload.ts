@@ -113,6 +113,8 @@ const qua = {
   tree: (ids: readonly string[], withChildren: boolean): Promise<unknown> =>
     ipcRenderer.invoke('qua:library/tree', ids, withChildren),
   catalog: (): Promise<unknown> => ipcRenderer.invoke('qua:library/catalog'),
+  /** 按名点查归属（参数是归一化键；创建路径的防重判据） */
+  aliasTargets: (names: readonly string[]): Promise<unknown> => ipcRenderer.invoke('qua:library/alias-targets', names),
   /** 全局身份块（页/标签/定义/回收站根）：catalog 的块对象面 */
   identity: (): Promise<unknown> => ipcRenderer.invoke('qua:library/identity'),
   /** FTS 映射按块查（增量索引用） */

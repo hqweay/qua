@@ -170,8 +170,8 @@ test('session 读计数：每个读面各记各的行数', () => {
     { table: 'Block', op: 'upsert', key: { id: 'p' }, values: { content: '[]', created: 1, modified: 1, parent: null, left: null } },
     { table: 'Block', op: 'upsert', key: { id: 'a' }, values: { content: '[]', created: 1, modified: 1, parent: 'p', left: null } },
     { table: 'Block', op: 'upsert', key: { id: 'tag' }, values: { content: '[]', created: 1, modified: 1, parent: null, left: 'p' } },
-    { table: 'BlockAlias', op: 'upsert', key: { name: 'P' }, values: { block: 'p', pos: 0 } },
-    { table: 'BlockAlias', op: 'upsert', key: { name: 'Tag' }, values: { block: 'tag', pos: 0 } },
+    { table: 'BlockAlias', op: 'upsert', key: { name: 'P' }, values: { block: 'p', pos: 0, norm: 'p' } },
+    { table: 'BlockAlias', op: 'upsert', key: { name: 'Tag' }, values: { block: 'tag', pos: 0, norm: 'tag' } },
     { table: 'BlockList', op: 'upsert', key: { block: 'p', list: 'page' } },
     { table: 'BlockList', op: 'upsert', key: { block: 'tag', list: 'tag' } },
     { table: 'BlockProperty', op: 'upsert', key: { block: 'a', name: 'x', pos: 0 }, values: { multi: 0, value: '"v"' } },
@@ -188,13 +188,15 @@ test('session 读计数：每个读面各记各的行数', () => {
     doc: 1,
     docRows: 5, // blocks 2 + props 1 + aliases 1 + lists 1（祖先链 0）
     catalog: 1,
-    catalogRows: 3, // tags 1 + aliases 2（P／Tag）
+    catalogRows: 1, // tags 1（地址表已不在 catalog 里：归属按名点查）
     blocks: 1,
     blockRows: 3, // blocks 1 + aliases 1 + lists 1
     candidates: 0,
     candidateIds: 0,
     identity: 0,
     identityRows: 0,
+    aliasQueries: 0,
+    aliasRows: 0,
   })
   s!.close()
 })

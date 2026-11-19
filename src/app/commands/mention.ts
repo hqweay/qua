@@ -26,7 +26,8 @@ import {
   type Block,
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
-import { UnloadedAliasError } from '../../core/kb/unsupported.ts'
+import { AliasClaimError } from '../../core/kb/unsupported.ts'
+import { deferAliasGate } from '../../core/kb/alias-gate.ts'
 import type { App, SelectionToRefRequest } from '../../core/infra/ports.ts'
 import type { KbClient } from '../../core/kb/types.ts'
 import type { MentionDeps } from './types.ts'
@@ -47,7 +48,8 @@ function nextSiblingSlot(kb: KbClient, hostId: string): { parentId: string | nul
 }
 
 export function mentionCommands(d: MentionDeps): Pick<App, 'convertMention' | 'convertSelectionToRef'> {
-  return {
+  /** 两个入口同形地挂在命令面上；命名一次是为了「闸」能在异步回来时重放同一个入口 */
+  const cmds: Pick<App, 'convertMention' | 'convertSelectionToRef'> = {
     convertMention: (blockId, to, start, end) => {
       const src = d.kb.get(blockId)
       const target = d.kb.get(to)
@@ -87,6 +89,8 @@ export function mentionCommands(d: MentionDeps): Pick<App, 'convertMention' | 'c
         d.toast(t('ui.toast.mentionReadonly'), 'warn')
         return false
       }
+      // 按名字建目标那两条（默认建页／⌥↵ 建块也走同一句话）要先核定归属：未核定 ⇒ 问一次再重放
+      if (!req.to && deferAliasGate(d.kb, spot.text, () => cmds.convertSelectionToRef(req))) return true
       /**
        * 写前复核与提及那条同口径：区间里必须仍是那串**纯文本**。选区从渲染到点击
        * 之间正文可能已经变了（或选区里夹着原子），复核不过就一个字节不写。
@@ -134,7 +138,7 @@ export function mentionCommands(d: MentionDeps): Pick<App, 'convertMention' | 'c
         })
       } catch (e) {
         // 名字被一个未装载的块占着 ⇒ 不新建（否则地址空间出现第二个同名身份）；说一句实话
-        if (e instanceof UnloadedAliasError) {
+        if (e instanceof AliasClaimError) {
           d.toast(t('ui.toast.aliasUnloaded'), 'warn')
           return false
         }
@@ -155,4 +159,5 @@ export function mentionCommands(d: MentionDeps): Pick<App, 'convertMention' | 'c
       return true
     },
   }
+  return cmds
 }

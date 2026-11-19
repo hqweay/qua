@@ -169,7 +169,6 @@ export async function loadWorksetBoot(deps: WorksetBootDeps): Promise<WorksetBoo
         catalog.journals.length +
         catalog.tags.length +
         catalog.propDefs.length +
-        catalog.aliases.length +
         catalog.trash.length,
       identityRows:
         idn.value.blocks.length + idn.value.props.length + idn.value.aliases.length + idn.value.lists.length,

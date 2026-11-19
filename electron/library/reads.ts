@@ -17,9 +17,9 @@ import {
   LIBRARY_READS,
   necessaryTextNeedles,
   type CandidatePlan,
+  type AliasTarget,
   type BlockIndexRow,
   type CandidatePage,
-  type CatalogAlias,
   type CatalogJournal,
   type CatalogPropDef,
   type CatalogTag,
@@ -140,7 +140,6 @@ export function readCatalogRows(db: DatabaseSync): LibraryCatalog {
   const journals = db.prepare(LIBRARY_READS.catalogJournals).all() as CatalogJournal[]
   const tags = db.prepare(LIBRARY_READS.catalogTags).all() as CatalogTag[]
   const propDefs = db.prepare(LIBRARY_READS.catalogPropDefs).all() as CatalogPropDef[]
-  const aliases = db.prepare(LIBRARY_READS.catalogAliases).all() as CatalogAlias[]
   const trash = db.prepare(LIBRARY_READS.catalogTrash).all() as CatalogTrashRoot[]
   return {
     meta: {
@@ -154,9 +153,19 @@ export function readCatalogRows(db: DatabaseSync): LibraryCatalog {
     journals,
     tags,
     propDefs,
-    aliases,
     trash,
   }
+}
+
+/**
+ * **按名点查归属**：这批归一化名字各自归谁（不在结果里的 ＝ 库里没有）。
+ *
+ * 参数已经是归一化键（渲染层用 `normalizeAlias` 派生，与写入时同一个函数），
+ * 主进程不再做字符串处理——它只认这一列。
+ */
+export function readAliasTargets(db: DatabaseSync, norms: readonly string[]): AliasTarget[] {
+  if (norms.length === 0) return []
+  return db.prepare(LIBRARY_READS.aliasTargets).all(JSON.stringify([...new Set(norms)])) as AliasTarget[]
 }
 
 /* ------------------------------------------------------------ 查询候选 */

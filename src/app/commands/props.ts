@@ -55,7 +55,8 @@ import {
   type UiPosition,
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
-import { UnloadedAliasError } from '../../core/kb/unsupported.ts'
+import { AliasClaimError } from '../../core/kb/unsupported.ts'
+import { deferAliasGate } from '../../core/kb/alias-gate.ts'
 import type { App, PropCreateMode, PropTarget } from '../../core/infra/ports.ts'
 import type { PropsDeps } from './types.ts'
 
@@ -153,6 +154,53 @@ export function propsCommands(
    */
   const defOfChoice = (choiceId: string): Block | undefined =>
     d.kb.propDefs().find((def) => allChoicesOf(def).some((c) => c.id === choiceId))
+
+  /** 新建并引用的实现（公开形状与判据见下面 `createPropRefTarget` 的文档） */
+  const createPropRefTargetIn = (blockId: string, propId: string, name: string): string => {
+    if (!find(blockId)) return ''
+    const def = d.kb.propDefs().find((x) => x.id === propId)
+    if (!def || propKindOf(def) !== 'ref') return ''
+    const title = name.trim()
+    if (title === '') return ''
+    // 归属还没问过库 ⇒ 问一次再重放（闸的语义见 `core/kb/alias-gate.ts`）
+    if (deferAliasGate(d.kb, title, () => createPropRefTargetIn(blockId, propId, name))) return ''
+    const made: { id: string } = { id: '' }
+    try {
+      d.run((tx) => {
+        const target = ensurePageInTx(d.kb, title, tx)
+        if (!target) return
+        made.id = target.id
+        tx.patch(blockId, (b) => {
+        /**
+         * 多值：**追加**（与多值控件写回整份数组同一条语义）。
+         * 已经引用过 ⇒ 零 op —— 不重写、也不「摘出来再追加」（那会把顺序换一遍，
+         * 用户看到的是一次无意义的位移）。
+         */
+        if (cardinalityOf(def) === 'many') {
+          const list = valueListOf(b.props?.[propId])
+          if (list.includes(target.id)) return
+          setValue(b, propId, [...list, target.id])
+          return
+        }
+          setValue(b, propId, target.id)
+        })
+      })
+    } catch (e) {
+      // 名字被一个未装载的块占着 ⇒ 不新建；说一句实话，值格一个字节不动
+      if (e instanceof AliasClaimError) {
+        d.toast(t('ui.toast.aliasUnloaded'), 'warn')
+        return ''
+      }
+      throw e
+    }
+    // 值变了但块不是「写入回调」那一块：这一行要当场重画（不等下一次 store 通知）
+    if (made.id !== '') {
+      d.repaintBlocks([blockId])
+      // 选择器关掉就走了，「建了什么」得有一句回执（否则同名复用与新建成页看起来一样）
+      d.toast(t('ui.props.newRefTargetDone', { name: title }), 'ok')
+    }
+    return made.id
+  }
 
   return {
     /**
@@ -523,49 +571,7 @@ export function propsCommands(
      *
      * 返回新值指向的 id（空串＝没写：名字空 / 不是 `ref` 定义 / 块不在）。
      */
-    createPropRefTarget: (blockId, propId, name) => {
-      if (!find(blockId)) return ''
-      const def = d.kb.propDefs().find((x) => x.id === propId)
-      if (!def || propKindOf(def) !== 'ref') return ''
-      const title = name.trim()
-      if (title === '') return ''
-      const made: { id: string } = { id: '' }
-      try {
-        d.run((tx) => {
-          const target = ensurePageInTx(d.kb, title, tx)
-          if (!target) return
-          made.id = target.id
-          tx.patch(blockId, (b) => {
-          /**
-           * 多值：**追加**（与多值控件写回整份数组同一条语义）。
-           * 已经引用过 ⇒ 零 op —— 不重写、也不「摘出来再追加」（那会把顺序换一遍，
-           * 用户看到的是一次无意义的位移）。
-           */
-          if (cardinalityOf(def) === 'many') {
-            const list = valueListOf(b.props?.[propId])
-            if (list.includes(target.id)) return
-            setValue(b, propId, [...list, target.id])
-            return
-          }
-            setValue(b, propId, target.id)
-          })
-        })
-      } catch (e) {
-        // 名字被一个未装载的块占着 ⇒ 不新建；说一句实话，值格一个字节不动
-        if (e instanceof UnloadedAliasError) {
-          d.toast(t('ui.toast.aliasUnloaded'), 'warn')
-          return ''
-        }
-        throw e
-      }
-      // 值变了但块不是「写入回调」那一块：这一行要当场重画（不等下一次 store 通知）
-      if (made.id !== '') {
-        d.repaintBlocks([blockId])
-        // 选择器关掉就走了，「建了什么」得有一句回执（否则同名复用与新建成页看起来一样）
-        d.toast(t('ui.props.newRefTargetDone', { name: title }), 'ok')
-      }
-      return made.id
-    },
+    createPropRefTarget: createPropRefTargetIn,
 
     /** 写定义块的快捷入口位置（`panel` ＝ 摘键，回到缺省） */
     setUiPosition: (defId, position: UiPosition) => {

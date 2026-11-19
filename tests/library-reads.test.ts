@@ -15,8 +15,9 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openLibraryDb, applyRowWrites, type RowWrite } from '../electron/library/sqlite.ts'
-import { readBlockRows, readCatalogRows, readDocRows, readIdentityRows } from '../electron/library/reads.ts'
+import { readAliasTargets, readBlockRows, readCatalogRows, readDocRows, readIdentityRows } from '../electron/library/reads.ts'
 import { rowsToWorkspace } from '../src/core/storage/db-rows.ts'
+import { normalizeAlias } from '../src/core/identity/address-key.ts'
 
 function block(
   id: string,
@@ -36,7 +37,8 @@ const alias = (name: string, block: string, pos: number): RowWrite => ({
   table: 'BlockAlias',
   op: 'upsert',
   key: { name },
-  values: { block, pos },
+  // 归一化键与写入侧同一个派生（`readAliasTargets` 就按它查）
+  values: { block, pos, norm: normalizeAlias(name) },
 })
 
 const list = (block: string, name: 'page' | 'tag'): RowWrite => ({
@@ -147,18 +149,23 @@ test('catalog：只回槽要显示的全局身份，不含页列表', () => {
     assert.deepEqual(plain(catalog.journals), [{ id: 'j', date: '2026-11-18', deleted: null }], '日记含 deleted：打开软删天要能认出「这一天存在过」')
     assert.deepEqual(plain(catalog.tags), [{ id: 'tag', name: 'Tag' }])
     assert.deepEqual(plain(catalog.propDefs), [{ id: 'def', kind: 'text', name: 'Def' }])
-    assert.deepEqual(
-      plain(catalog.aliases).sort((a, b) => (a.block < b.block ? -1 : a.block > b.block ? 1 : 0)),
-      [
-        { name: 'Child', block: 'a' },
-        { name: 'Def', block: 'def' },
-        { name: 'Page', block: 'p' },
-        { name: 'Tag', block: 'tag' },
-      ],
-      '全量地址表：未加载名字的创建路径靠它防重复',
-    )
+    // 地址表**不在** catalog 里：归属是按名点查的（见下面 `aliasTargets` 那条）
+    assert.ok(!('aliases' in catalog), '全量地址表不再随启动装载')
     assert.deepEqual(plain(catalog.trash), [{ id: 'x', deleted: 1 }])
     assert.ok(!('pages' in catalog), '页列表是查询视图，不在首帧目录')
+  })
+})
+
+test('aliasTargets：按归一化键点查归属（不过滤软删；撞键先序取首）', () => {
+  withDb((db) => {
+    const rows = readAliasTargets(db, ['page', 'child', 'nope', 'def'])
+    const got = rows.map((r) => ({ ...r })).sort((a, b) => a.norm.localeCompare(b.norm))
+    assert.deepEqual(got, [
+      { norm: 'child', block: 'a' },
+      { norm: 'def', block: 'def' },
+      { norm: 'page', block: 'p' },
+    ])
+    assert.deepEqual(readAliasTargets(db, []), [])
   })
 })
 

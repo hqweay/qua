@@ -62,12 +62,14 @@ export const LIBRARY_FORMAT = 1
  * v13 给关系行加 `count`；v14 让位置行进入增量维护（派生两表整表作废回 `pending`）。
  * v15 加**子串索引** `BlockGram`（trigram FTS，rowid 与正文索引行相同）：只加表、
  * 不动内容；它的行由索引重建铺底，所以同样把 `fts_state` 打回 `pending`。
+ * v16 给地址加**归一化键** `norm`（见 `address-key.ts`）：一次回填、一条索引，
+ * 让「这个名字归谁」从「启动读全表」变成一次点查。
  *
  * **不写数据迁移**：原型不做旧数据迁移，旧库作废重 seed（`judgeDbVersion` 判到
  * `migrate` 时跑 `MIGRATIONS` 里那一步**只丢旧形状、不搬数据**的 DDL）。
  * `user_version` 只增不减。
  */
-export const DB_SCHEMA_VERSION = 15
+export const DB_SCHEMA_VERSION = 16
 
 /** `meta` 表里被代码解释的键（其余键归将来，不在这里登记）。 */
 export const META_KEYS = {

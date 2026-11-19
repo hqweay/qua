@@ -25,7 +25,8 @@ import { BlockStore } from '../src/core/model/store.ts'
 import type { Block } from '../src/core/model/model.ts'
 import { createMemoryLibraryClient } from '../src/core/storage/memory-client.ts'
 import { applyRowWrites, openLibraryDb } from '../electron/library/sqlite.ts'
-import { readBlockRows, readBlockTreeRows, readCatalogRows, readDependents, readDocRows, readIdentityRows, readRootIds } from '../electron/library/reads.ts'
+import { readAliasTargets, readBlockRows, readBlockTreeRows, readCatalogRows, readDependents, readDocRows, readIdentityRows, readRootIds } from '../electron/library/reads.ts'
+import { normalizeAlias } from '../src/core/identity/address-key.ts'
 
 const dirs: string[] = []
 process.on('exit', () => {
@@ -189,13 +190,39 @@ test('catalog：四表与 meta 同解', async () => {
   assert.deepEqual(c.journals, plain(sql.journals))
   assert.deepEqual(c.tags, plain(sql.tags))
   assert.deepEqual(c.propDefs, plain(sql.propDefs))
-  assert.deepEqual(
-    [...c.aliases].sort((a, b) => a.name.localeCompare(b.name)),
-    plain([...sql.aliases].sort((a, b) => a.name.localeCompare(b.name))),
-  )
   assert.deepEqual(c.trash, plain(sql.trash))
   assert.equal(c.meta.activeId, sql.meta.activeId)
   assert.equal(c.meta.savedAt, sql.meta.savedAt)
+  // 地址表**不在** catalog 里：归属是按名点查的（下面那条等式钉住它）
+  assert.equal('aliases' in (c as object), false)
+})
+
+/**
+ * **按名点查归属**：内存读面 == 桌面具名读。
+ *
+ * 旧口径是「启动读全量地址表、在 JS 里归一化建表」；现在两边都按归一化键点查，
+ * 所以这条等式就是「新口径在每一个名字上给出旧口径的答案」——覆盖真名、缺名、
+ * 大小写变体、`A / B` 分段变体、软删块占着的名字，以及两条归一化撞同一键时的先序取首。
+ */
+test('aliasTargets：两套实现的答案逐条相同（含大小写与分段变体）', async () => {
+  const ws = richWorkspace()
+  // 归一化撞键：同一块上的两个地址只差大小写与分段空白
+  const clash = block(id('z'), '撞键')
+  clash.props = { ...clash.props, _aliases: ['Project Plan', 'Project/Plan'] }
+  ws.blocks.push(clash)
+  const db = sqlSide(ws)
+  const asked = ['页名', '页别名', '不存在', 'PROJECT PLAN', ' project/plan ', '标签', '定义', '被删的根']
+  const sql = readAliasTargets(db, asked.map((n) => normalizeAlias(n)))
+  db.close()
+  const mem = await memSide(ws).aliasTargets!(asked)
+  assert.equal(mem.status, 'ok')
+  if (mem.status !== 'ok') return
+  const key = (rows: readonly { norm: string; block: string }[]) =>
+    [...rows].sort((a, b) => a.norm.localeCompare(b.norm)).map((r) => [r.norm, r.block])
+  assert.deepEqual(key(mem.value), key(sql))
+  // 归一化后同一个键只答一行：`Project Plan` / `Project/Plan` 落成同一个键
+  const hit = mem.value.filter((r) => r.norm === 'project/plan')
+  assert.equal(hit.length, 1)
 })
 
 test('dependents：正文引用／标签成员／属性值三路分类', async () => {

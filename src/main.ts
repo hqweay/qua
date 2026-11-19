@@ -97,7 +97,8 @@ import { createLibraryClient, type LibraryClient, type LibraryReadBridge } from 
 import { createMemoryLibraryClient } from './core/storage/memory-client.ts'
 import { Workset, worksetClosureIds } from './core/storage/workset.ts'
 import { indexReadsOf, indexWritesOf, type IndexReads } from './core/storage/index-rows.ts'
-import { UnloadedAliasError } from './core/kb/unsupported.ts'
+import { AliasClaimError } from './core/kb/unsupported.ts'
+import { deferAliasGate } from './core/kb/alias-gate.ts'
 import type { RelationEdge, RelationKind } from './core/relations/relations.ts'
 import { loadWorksetBoot, type WorksetBootResult } from './app/boot/workset-boot.ts'
 import { finishDocWindows, pendingOf, readFirstWindows, withAncestors } from './app/boot/doc-windows.ts'
@@ -356,6 +357,21 @@ if (!worksetBoot) {
   // web 单库的读面：内存全量实现（代价登记见 `memory-client.ts`）。
   // 模型已就位才建——现场编码读的是活森林；消费面只认契约，web 与桌面同一批代码。
   libraryClient = createMemoryLibraryClient({ ws: () => ws, store: blocks })
+}
+/**
+ * **名字归属的按名点查**（创建路径的防重判据）：启动不再读全量地址表，问一个名字查一行。
+ * 两个宿主同一个契约——桌面走库的具名读，web 单库的内存读面覆盖整片森林。
+ * 没有库面 ⇒ 不装解析器：归属永远 `unchecked`（也就没有任何创建路径能落笔）。
+ */
+if (libraryClient) {
+  const client = libraryClient
+  blocks.setAliasResolver(async (norms) => {
+    const r = await client.aliasTargets?.(norms)
+    if (!r || r.status !== 'ok') throw new Error(`alias-targets: ${r ? (r.status === 'error' ? r.error : r.status) : 'unavailable'}`)
+    const out = new Map<string, string>()
+    for (const row of r.value) if (!out.has(row.norm)) out.set(row.norm, row.block)
+    return out
+  })
 }
 /**
  * 种子库的**设备侧**演示配置：日记面板的演示栏 ＋ 左槽的演示收纳盘（`seedDock`）。
@@ -849,6 +865,24 @@ const faceEditorSlot = (): {
  */
 const searchFaceDeps = (): SearchFaceDeps => {
   const slot = faceEditorSlot()
+  /** 搜索面无结果时的创建入口（公开形状与判据见 `searchFaceDeps` 里 `createPage` 的注释） */
+  const createPageIn = (name: string): void => {
+    // 归属还没问过库 ⇒ 问一次再重放（闸的语义见 `core/kb/alias-gate.ts`）
+    if (deferAliasGate(kb, name, () => createPageIn(name))) return
+    let id = ''
+    try {
+      id = pageDeps.run((tx) => ensurePageInTx(kb, name, tx)?.id ?? '').result
+    } catch (e) {
+      // 名字被一个未装载的块占着 ⇒ 不新建；说一句实话（搜索面的「创建」入口）
+      if (e instanceof AliasClaimError) {
+        app.toast(t('ui.toast.aliasUnloaded'), 'warn')
+        return
+      }
+      throw e
+    }
+    if (id !== '') app.openBlock(id, 'center')
+  }
+
   return {
     kb,
     /**
@@ -883,20 +917,7 @@ const searchFaceDeps = (): SearchFaceDeps => {
     // 晋升：把词写进 {text} 条件建查询块（与手建同一份创建路径，落森林顶层，一笔回滚）
     promote: (term) => app.createQuery(term, { where: { text: term } }),
     // 无结果的创建入口：找到或创建页（与引用浮层同一条创建路径），建好当场打开
-    createPage: (name) => {
-      let id = ''
-      try {
-        id = pageDeps.run((tx) => ensurePageInTx(kb, name, tx)?.id ?? '').result
-      } catch (e) {
-        // 名字被一个未装载的块占着 ⇒ 不新建；说一句实话（搜索面的「创建」入口）
-        if (e instanceof UnloadedAliasError) {
-          app.toast(t('ui.toast.aliasUnloaded'), 'warn')
-          return
-        }
-        throw e
-      }
-      if (id !== '') app.openBlock(id, 'center')
-    },
+    createPage: createPageIn,
     copyRef: (id) => {
       void registry.invoke('core.editor/copy-block-ref', { blockId: id }, 'surface')
     },
