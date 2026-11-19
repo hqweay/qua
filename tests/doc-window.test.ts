@@ -15,13 +15,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openLibraryDb, applyRowWrites, type Db, type RowWrite } from '../electron/library/sqlite.ts'
 import { readDocRows, readDocWindow } from '../electron/library/reads.ts'
-import type { RawLibraryRows } from '../src/core/storage/db-rows.ts'
 import { DOC_WINDOW, finishDocWindows, pendingOf, readFirstWindows, withAncestors } from '../src/app/boot/doc-windows.ts'
 import { loadWorksetBoot } from '../src/app/boot/workset-boot.ts'
 import { BlockStore } from '../src/core/model/store.ts'
 import { Workset } from '../src/core/storage/workset.ts'
 import { createMemoryLibraryClient } from '../src/core/storage/memory-client.ts'
 import { mkBlock, type Block } from '../src/core/model/model.ts'
+import { fingerprint } from '../src/core/infra/index-port.ts'
 import type { LibraryDocRows } from '../src/core/storage/library-reads.ts'
 
 const dirs: string[] = []
@@ -113,35 +113,36 @@ test('下一窗不重复上一窗给过的块', () => {
   for (const row of second.rows.blocks) assert.ok(!first.has(idOfRow(row)))
 })
 
-test('用窗口装进工作集 == 整棵装进去（形状与兄弟序一致）', () => {
+test('**逐窗**装进工作集 == 整棵装进去（形状／兄弟序／索引逐条一致）', () => {
   const d = seeded()
   const whole = readDocRows(d, ['root'])
 
   const wholeStore = new BlockStore([])
   new Workset(wholeStore).loadDoc(withAncestors(whole), whole.rootIds)
 
-  const winStore = new BlockStore([])
-  const win = new Workset(winStore)
-  const acc: RawLibraryRows = { blocks: [], props: [], aliases: [], lists: [], meta: {} }
-  let after: string | null = null
-  for (let i = 0; i < 100; i++) {
-    const w = readDocWindow(d, 'root', after, 2)
-    assert.ok(w)
-    const rows = withAncestors(w)
-    if (after === null) {
-      win.loadDoc(rows, w.rootIds)
-    } else {
-      acc.blocks.push(...rows.blocks)
-      acc.props.push(...rows.props)
-      acc.aliases.push(...rows.aliases)
-      acc.lists.push(...rows.lists)
+  /**
+   * 每一个窗口都**真的装一次**（不是攒起来最后装一次）：装载是增量路径，
+   * 「装到第 N 窗时的索引」与「整棵装完重建的索引」必须逐条相同——`fingerprint`
+   * 比的是先序 id 序列，不是 rank 数值，所以中点/整步长的差别不会假红。
+   */
+  for (const limit of [1, 2, 7]) {
+    const winStore = new BlockStore([])
+    const win = new Workset(winStore)
+    let after: string | null = null
+    for (let i = 0; i < 1000; i++) {
+      const w = readDocWindow(d, 'root', after, limit)
+      assert.ok(w)
+      win.loadDoc(withAncestors(w), w.rootIds)
+      after = w.next
+      if (after === null) break
     }
-    after = w.next
-    if (after === null) break
+    assert.deepEqual(shapeOf(winStore), shapeOf(wholeStore), `两棵树的形状相同（limit=${limit}）`)
+    assert.equal(
+      fingerprint(winStore.index),
+      fingerprint(wholeStore.index),
+      `装载出来的索引与整棵装载逐条一致（limit=${limit}）`,
+    )
   }
-  if (acc.blocks.length > 0) win.loadDoc(acc, ['root'])
-
-  assert.deepEqual(shapeOf(winStore), shapeOf(wholeStore), '两棵树的形状相同')
 })
 
 test('启动/导航共用的窗口装载：首窗 ＋ pendingOf ＋ finishDocWindows == 整棵（跨窗的大 Doc）', async () => {

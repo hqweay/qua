@@ -16,7 +16,7 @@ import type { Anno } from '../model/runs.ts'
 import { walkForest } from '../model/walk.ts'
 import { normalizeAlias } from '../identity/alias.ts'
 import { journalDate, isJournal } from '../identity/journal.ts'
-import { assignSubtreeRanks, compareRanks, ORDER_STEP, rankBetween, renumberLevel, type RankMap } from './order.ts'
+import { assignSubtreeRanks, assignTailRanks, compareRanks, ORDER_STEP, rankBetween, renumberLevel, type RankMap } from './order.ts'
 import {
   CARDINALITY_PROP,
   CHECK_PROP,
@@ -231,6 +231,42 @@ export function rebuild(forest: readonly Block[]): Index {
   rebuildJournalMap(idx, forest)
 
   return idx
+}
+
+/**
+ * **装载路径的索引接入**：一批已知对象的新片段根（父可能已装载，也可能为顶层）。
+ *
+ * 与 `applyOps` 里 `block.upsert{parent}` 那一支同一份判据（`indexSubtree` ＋ 秩 ＋
+ * 派生列表失效），差别只在**对象直接由调用方给**：装载时刚建好的块就在手上，不必再按 id
+ * 在森林里走一遍——那是 O(树)，批量装载会退化成 O(N²)（实测 10 万块分 50 窗要几分钟）。
+ */
+export function indexInsertedSubtrees(
+  index: Index,
+  entries: readonly { block: Block; parent: string | null }[],
+  forest: readonly Block[],
+): void {
+  if (entries.length === 0) return
+  const orderTouched = new Map<string | null, Set<string>>()
+  let journalsDirty = false
+  for (const { block, parent } of entries) {
+    const rootId = parent === null ? block.id : (index.rootOf.get(parent) ?? block.id)
+    /**
+     * 已经索引过的块只可能是**换位置**（先当根装进来、后来父也装进来）：与
+     * `applyBlockUpsert` 的 known 分支同口径——父指针与 root 前缀要跟着改，
+     * 名字/成员/边都不动（内容没变）。
+     */
+    if (index.all.has(block.id)) {
+      index.parentOf.set(block.id, parent)
+      index.parentOfAll.set(block.id, parent)
+      reindexSubtreeRoot(index, block, rootId)
+    } else {
+      indexSubtree(index, block, rootId, parent)
+      if (invalidateForSubtree(index, block)) journalsDirty = true
+    }
+    markOrderTouched(orderTouched, parent, block.id)
+  }
+  flushOrder(index, orderTouched, forest)
+  if (journalsDirty) rebuildJournalMap(index, forest)
 }
 
 /* ------------------------------------------------------------ 派生缓存 */
@@ -613,6 +649,8 @@ function flushOrder(index: Index, touched: Map<string | null, Set<string>>, fore
         }
       }
     }
+    // 这一批恰好排在层尾（装载、文末回车）⇒ 顺序记下去就够，不必整层重编号
+    if (assignTailRanks(index.order, children, ids)) continue
     renumberLevel(index.order, children)
   }
 }

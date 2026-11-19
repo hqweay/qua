@@ -21,9 +21,17 @@
  *
  * ## 边界
  *
- * 不变量：`store.blocks` 与 `store.isLoaded` 只经 `setWorkset` 一起更新。
- * 本文件不做淘汰决策（预算与 pin 判据在 `BlockStore.trimWorkset`），只在淘汰后
- * 把被淘汰块的行一起丢掉，防止下一次装载把它们又算进来。
+ * 不变量：`store.blocks` 与「已加载集合」只在这里一起更新（装载是 `adoptLoaded` 的
+ * 增量路径，换库是 `reset`）。本文件不做淘汰决策（预算与 pin 判据在
+ * `BlockStore.trimWorkset`），只在淘汰后把被淘汰块的行一起丢掉，防止下一次装载
+ * 把它们又算进来。
+ *
+ * ## 为什么是「只装这一批」而不是「攒起来一起投影」
+ *
+ * 整份投影是 O(已装)：装第 N 窗要重算前面全部，分 50 窗装 10 万块要 31 秒（实测），
+ * 而一次装完只要 0.39 秒。窗口是 **DFS 前缀**，新块永远接在已装兄弟后面，所以增量挂接
+ * 是 O(本窗)（同一次实测 0.7 秒／每窗 8–12ms）。索引走 `applyOps` 的同一份增量判据，
+ * 装载出来的索引与整份重建逐条一致（`tests/doc-window.test.ts` 的 `fingerprint` 等式）。
  */
 import type { Op } from '../kb/types.ts'
 import type { Block } from '../model/model.ts'
@@ -89,8 +97,7 @@ export class Workset {
    * @returns `rootIds` 对应的活块（按传入顺序；未装载的 id 跳过）
    */
   loadDoc(rows: RawLibraryRows, rootIds: readonly string[]): Block[] {
-    this.mergeRows(rows)
-    this.apply()
+    this.absorb(rows)
     // Doc 行自带完整祖先链：这一批的块从此都可算 from_root
     for (const r of rows.blocks) this.complete.add(idOf(r))
     const out: Block[] = []
@@ -109,8 +116,7 @@ export class Workset {
    */
   loadBlocks(rows: RawLibraryRows, complete = false): void {
     if (rows.blocks.length === 0) return
-    this.mergeRows(rows)
-    this.apply()
+    this.absorb(rows)
     if (complete) for (const r of rows.blocks) this.complete.add(idOf(r))
   }
 
@@ -148,104 +154,157 @@ export class Workset {
 
   /* ------------------------------------------------------------ 内部 */
 
-  private mergeRows(incoming: RawLibraryRows): void {
-    const blockById = new Map<string, Row>()
-    for (const r of this.rows.blocks) {
-      const id = idOf(r)
-      if (id !== '') blockById.set(id, r)
-    }
+  /**
+   * 行缓存合并，返回**这次新见的 id**。
+   *
+   * 纯追加（装载一个从没见过的窗口）时不再整表拷贝、不再按 id 去重——那是 O(已装)。
+   * 只有与已装块重合（重复装载同一片、或按 id 预取已装块）才走整表替换：
+   * 那种时候后到的行可能更新，得按块整组换掉。
+   */
+  private mergeRows(incoming: RawLibraryRows): string[] {
+    const fresh: string[] = []
     for (const r of incoming.blocks) {
       const id = idOf(r)
-      if (id !== '') blockById.set(id, r)
+      if (id !== '' && !this.ids.has(id)) fresh.push(id)
     }
-    this.rows = {
-      blocks: [...blockById.values()],
-      props: mergeGrouped(this.rows.props, incoming.props),
-      aliases: mergeGrouped(this.rows.aliases, incoming.aliases),
-      lists: mergeGrouped(this.rows.lists, incoming.lists),
-      meta: { ...this.rows.meta, ...incoming.meta },
+    const overlapping = fresh.length !== incoming.blocks.length
+    if (!overlapping) {
+      this.rows.blocks.push(...incoming.blocks)
+      this.rows.props.push(...incoming.props)
+      this.rows.aliases.push(...incoming.aliases)
+      this.rows.lists.push(...incoming.lists)
+      this.rows.meta = { ...this.rows.meta, ...incoming.meta }
+    } else {
+      const blockById = new Map<string, Row>()
+      for (const r of this.rows.blocks) blockById.set(idOf(r), r)
+      for (const r of incoming.blocks) blockById.set(idOf(r), r)
+      this.rows = {
+        blocks: [...blockById.values()],
+        props: mergeGrouped(this.rows.props, incoming.props),
+        aliases: mergeGrouped(this.rows.aliases, incoming.aliases),
+        lists: mergeGrouped(this.rows.lists, incoming.lists),
+        meta: { ...this.rows.meta, ...incoming.meta },
+      }
     }
-    for (const id of blockById.keys()) this.ids.add(id)
+    for (const id of fresh) this.ids.add(id)
+    return fresh
   }
 
   /**
-   * 把累计行投影成一片部分森林，再**只接新增的块**。
+   * **把一批行接进树上**——装载的唯一入口：只投影这一批，增量挂接、增量索引。
    *
-   * `rowsToWorkspace` 对整份累计行跑一遍：它给出的树让新块知道自己该挂在谁下面、
-   * 排在前兄弟之后；已经加载的块只借它的 `children` 关系，不拿它的内容覆盖对象。
+   * 为什么不是「攒着一起投影」：那样每装一窗都要 O(已装) 重算，10 万块分 50 窗要 31 秒
+   * （实测），而一次装完只要 0.39 秒。窗口是 **DFS 前缀**，所以新块永远接在已装兄弟后面：
+   * `left` 只用来定位「接在哪一位」，不需要整树 diff。
+   *
+   * 已装块的对象与内容一律不动（本地未落盘的编辑永远比缓存行新）——这也是「同一个 id
+   * 只有一个对象」这条的落点。
    */
-  private apply(): void {
-    const fresh = rowsToWorkspace(this.rows)
-    const freshInfo = new Map<string, { block: Block; parent: Block | null }>()
+  private absorb(incoming: RawLibraryRows): void {
+    const fresh = this.mergeRows(incoming)
+    const fragment = rowsToWorkspace(incoming)
+    /** 片段里的块与它**在片段内**的父（`null` ＝ 片段根） */
+    const frag = new Map<string, { block: Block; parent: string | null }>()
     walkForest(
-      fresh.blocks,
+      fragment.blocks,
       (b, ctx) => {
-        freshInfo.set(b.id, { block: b, parent: ctx.parent })
+        frag.set(b.id, { block: b, parent: ctx.parent?.id ?? null })
       },
       { includeDeleted: true },
     )
-    const existingInfo = new Map<string, { block: Block; parent: Block | null }>()
-    walkForest(
-      this.store.blocks,
-      (b, ctx) => {
-        existingInfo.set(b.id, { block: b, parent: ctx.parent })
-      },
-      { includeDeleted: true },
-    )
+    if (frag.size === 0) return
 
-    // 1) 老对象优先：同一个 id 只有一个对象
-    const mapped = new Map<string, Block>()
-    for (const [id, info] of freshInfo) mapped.set(id, existingInfo.get(id)?.block ?? info.block)
-
-    // 2) 已加载块在新树里换了位置（根 ↔ 子、换了父）：先摘旧位置
-    for (const [id, info] of freshInfo) {
-      const existing = existingInfo.get(id)
-      if (!existing) continue
-      if ((existing.parent?.id ?? null) === (info.parent?.id ?? null)) continue
-      detach(this.store, existing.block, existing.parent)
+    const rowParent = new Map<string, string | null>()
+    const rowLeft = new Map<string, string | null>()
+    for (const r of incoming.blocks) {
+      const id = idOf(r)
+      if (id === '') continue
+      rowParent.set(id, typeof r.parent === 'string' ? r.parent : null)
+      rowLeft.set(id, typeof r.left === 'string' ? r.left : null)
     }
 
-    // 3) 新父块：children 直接取新树（全部是新对象或已映射的老对象）
-    for (const [id, info] of freshInfo) {
-      if (existingInfo.has(id)) continue
-      const target = mapped.get(id)!
-      target.children.splice(0, target.children.length, ...info.block.children.map((c: Block) => mapped.get(c.id)!))
-    }
-
-    // 4) 老父块：只补缺的孩子，按新树里的兄弟序插到最近的前兄弟之后
-    for (const [id, info] of freshInfo) {
-      if (!existingInfo.has(id)) continue
-      const target = mapped.get(id)!
-      const kids = info.block.children.map((c: Block) => mapped.get(c.id)!)
-      for (let i = 0; i < kids.length; i++) {
-        const kid = kids[i]!
-        if (target.children.includes(kid)) continue
-        insertOrdered(target.children, kid, kids, i)
-      }
-    }
-
-    // 5) 顶层按新树顺序排；本地多出来的根（同一次会话里新建、还没落到行缓存）保留在末尾
-    const roots = fresh.blocks.map((b) => mapped.get(b.id)!)
-    for (const r of roots) if (!this.store.blocks.includes(r)) this.store.blocks.push(r)
-    const extra = this.store.blocks.filter((b) => !roots.includes(b))
-    this.store.blocks.splice(0, this.store.blocks.length, ...roots, ...extra)
+    // 1) 最终对象：已装的用老对象（内容以内存为准）
+    const obj = new Map<string, Block>()
+    for (const [id, info] of frag) obj.set(id, this.store.loadedObject(id) ?? info.block)
 
     /**
-     * 已加载集合以**模型里实际存在的对象**为准，不以行缓存为准：
-     * 同一会话里新建、还没落盘成行的块也在内存里，`find` 找得到就必须算已加载。
-     * 行缓存只决定「下次装载能重建谁」，不反向否定内存里的对象。
+     * 2) 这块最终挂在谁下面：片段内的父子关系比行里的 `parent` 更完整（祖先行也可能在窗里）；
+     * 片段根的父还没装载时，它暂时是顶层根（`null`）——今天同一条兜底。
      */
-    const present = new Set<string>()
-    walkForest(
-      this.store.blocks,
-      (b) => {
-        present.add(b.id)
-      },
-      { includeDeleted: true },
-    )
-    this.ids = present
-    this.store.setWorkset(this.store.blocks, this.ids)
+    const finalParent = new Map<string, string | null>()
+    for (const [id, info] of frag) {
+      if (info.parent !== null) {
+        finalParent.set(id, info.parent)
+        continue
+      }
+      const pid = rowParent.get(id) ?? null
+      finalParent.set(id, pid !== null && this.store.loadedObject(pid) !== undefined ? pid : null)
+    }
+
+    // 3) 换位置：已装块的目标父与当前父不同（先当根装进来、后来父也装进来）⇒ 先摘
+    const moved = new Set<string>()
+    for (const [id] of frag) {
+      const current = this.store.parentIdInTree(id)
+      if (current === undefined) continue
+      if (current === (finalParent.get(id) ?? null)) continue
+      this.store.detachFromTree(id, current)
+      moved.add(id)
+    }
+
+    // 4) 片段内的父子：新块直接取片段的孩子；已装父块只补缺（新孩子接在末尾）
+    for (const [id, info] of frag) {
+      const target = obj.get(id)!
+      const kids = info.block.children.map((c) => obj.get(c.id)!)
+      if (target === info.block) {
+        target.children.splice(0, target.children.length, ...kids)
+        continue
+      }
+      if (kids.length === 0) continue
+      const have = new Set(target.children.map((c) => c.id))
+      for (const kid of kids) if (!have.has(kid.id)) target.children.push(kid)
+    }
+
+    // 5) 落位：被摘下来的 ＋ 还没在树上的片段根，按 `left` 定位
+    const groups = new Map<string | null, { id: string; left: string | null }[]>()
+    for (const [id, info] of frag) {
+      // 父也在片段里 ⇒ 4) 已经把它的 children 摆好了，这里再挂一次就是重复
+      if (info.parent !== null) continue
+      const unplaced = this.store.parentIdInTree(id) === undefined
+      if (!unplaced && !moved.has(id)) continue
+      const pid = finalParent.get(id) ?? null
+      const slot = groups.get(pid)
+      const entry = { id, left: rowLeft.get(id) ?? null }
+      if (slot) slot.push(entry)
+      else groups.set(pid, [entry])
+    }
+    /** 索引要接的：新块里的「顶层新块」＋ 换过位置的块 */
+    const entries: { block: Block; parent: string | null }[] = []
+    const freshSet = new Set(fresh)
+    for (const [pid, slot] of groups) {
+      const holder = pid === null ? null : this.store.loadedObject(pid)
+      const list = holder ? holder.children : this.store.blocks
+      const anchor = slot[0]!.left
+      const at = anchor === null ? -1 : list.findIndex((b) => b.id === anchor)
+      const blocks = slot.map((s) => obj.get(s.id)!)
+      if (at >= 0) list.splice(at + 1, 0, ...blocks)
+      else list.unshift(...blocks)
+    }
+    for (const [id] of frag) {
+      const pid = finalParent.get(id) ?? null
+      if (this.store.isIndexed(id)) {
+        if (moved.has(id)) entries.push({ block: obj.get(id)!, parent: pid })
+        continue
+      }
+      // 父也是新块 ⇒ 由父那条子树一次收进去，不重复走
+      if (pid !== null && freshSet.has(pid)) continue
+      entries.push({ block: obj.get(id)!, parent: pid })
+    }
+
+    // 6) 已加载集合与索引：**增量**（不作废索引，也不通知订阅者）
+    this.store.adoptLoaded(fresh)
+    this.store.indexLoaded(entries)
   }
+
 }
 
 /** 同组行（props／aliases／lists）按 block 整组替换：新读面给的是这块的当前全集 */
@@ -254,29 +313,6 @@ function mergeGrouped(current: readonly Row[], incoming: readonly Row[]): Row[] 
   const touched = new Set<string>()
   for (const r of incoming) touched.add(blockIdOf(r))
   return [...current.filter((r) => !touched.has(blockIdOf(r))), ...incoming]
-}
-
-/** 从旧位置摘下来（根或父的 children）；找不到就什么都不做 */
-function detach(store: BlockStore, block: Block, parent: Block | null): void {
-  if (parent) {
-    const at = parent.children.indexOf(block)
-    if (at >= 0) parent.children.splice(at, 1)
-    return
-  }
-  const at = store.blocks.indexOf(block)
-  if (at >= 0) store.blocks.splice(at, 1)
-}
-
-/** 插到最近的前兄弟之后；没有可用的前兄弟就落在最前 */
-function insertOrdered(list: Block[], block: Block, siblings: readonly Block[], index: number): void {
-  for (let i = index - 1; i >= 0; i--) {
-    const at = list.indexOf(siblings[i]!)
-    if (at >= 0) {
-      list.splice(at + 1, 0, block)
-      return
-    }
-  }
-  list.unshift(block)
 }
 
 /* ------------------------------------------------------------ 装载闭包 */

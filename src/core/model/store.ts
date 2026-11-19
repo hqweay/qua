@@ -18,7 +18,7 @@ import { UndoStack, type DeviceUndoStep, type UndoKind } from './undo.ts'
 import type { Block } from './model.ts'
 import { DELETED_AT_PROP, isDeleted } from './model.ts'
 import type { Sel } from './selection.ts'
-import { applyOps as patchIndex, blockIdByAlias, lookupBlock, rebuild, type Index } from '../infra/index-port.ts'
+import { applyOps as patchIndex, blockIdByAlias, indexInsertedSubtrees, lookupBlock, rebuild, type Index } from '../infra/index-port.ts'
 import { normalizeAlias } from '../identity/alias.ts'
 import { applyOps } from '../kb/diff.ts'
 import type { UndoCapture } from '../kb/scoped.ts'
@@ -249,6 +249,10 @@ export class BlockStore {
    * 不通知订阅者：装载是**读**，不是一次编辑。把新载入的页画出来是装载方的事；
    * 这里通知只会让其它视图白重画一遍（还可能把它们的选区/折叠打断）。
    */
+  /**
+   * ⚠️ **整份换**（O(已装)）：生产装载路径已改走 `adoptLoaded` 的增量一格；
+   * 这一格留给「把工作集整个换掉」的形状（测试夹具、将来换库）。
+   */
   setWorkset(roots: Block[], ids: ReadonlySet<string>): void {
     this.blocks.splice(0, this.blocks.length, ...roots)
     const previous = this.workset.loaded
@@ -258,6 +262,64 @@ export class BlockStore {
     this.worksetProbe.merges++
     this.worksetProbe.loaded = ids.size
     this.discardIndex()
+  }
+
+  /* ------------------------------------------------------------ 装载的增量路径 */
+
+  /**
+   * **装载也走增量**（与编辑同一条索引路径）：把新装进来的块并入已加载集合，
+   * 并按 op 修补索引——**不作废索引**。
+   *
+   * 为什么不能继续用 `setWorkset`：它整份换 `loaded`（O(已装)）再 `discardIndex`（下次
+   * 访问整份 `rebuild`，也是 O(已装））。分窗装载一个万级块的单篇时，每窗一次 O(已装)
+   * 就是 O(N²)：实测 10 万块分 50 窗要 31 秒，而一次装完只要 0.39 秒。
+   */
+  adoptLoaded(ids: Iterable<string>): void {
+    if (this.workset.loaded === null) this.workset.loaded = new Set()
+    const loaded = this.workset.loaded
+    for (const id of ids) {
+      if (loaded.has(id)) continue
+      loaded.add(id)
+      this.touch(id)
+    }
+    this.worksetProbe.merges++
+    this.worksetProbe.loaded = loaded.size
+  }
+
+  /**
+   * 装载路径的索引修补：`roots` 是这一批**挂进树里的片段根**（父可能已装载或为顶层）。
+   *
+   * 走 `patchIndex` 与编辑同一条路（`indexSubtree` 会把整棵新片段收进去），所以
+   * 「装载出来的索引」与「整份重建」逐字节一致——`tests/index-port.test.ts` 的等式
+   * 已经钉住这条；装载只是换了个调用方。
+   */
+  indexLoaded(entries: readonly { block: Block; parent: string | null }[]): void {
+    indexInsertedSubtrees(this.index, entries, this.blocks)
+  }
+
+  /** 已装载块的对象（含软删块）；没装载 ⇒ `undefined`。装载路径用它保留对象身份 */
+  loadedObject(id: string): Block | undefined {
+    return this.index.all.get(id)
+  }
+
+  /** 这块在索引里吗（装载路径据此判断「新」与「换位置」） */
+  isIndexed(id: string): boolean {
+    return this.index.all.has(id)
+  }
+
+  /** 这块在树上此刻的父 id（`null` = 顶层；`undefined` = 索引里没有它） */
+  parentIdInTree(id: string): string | null | undefined {
+    return this.index.parentOfAll.get(id)
+  }
+
+  /** 从当前位置（父的 children 或森林顶层）摘下来；找不到就什么都不做 */
+  detachFromTree(id: string, parentId: string | null): void {
+    const block = this.index.all.get(id)
+    if (!block) return
+    const holder = parentId === null ? this.blocks : (this.index.all.get(parentId)?.children ?? null)
+    if (!holder) return
+    const at = holder.indexOf(block)
+    if (at >= 0) holder.splice(at, 1)
   }
 
   /**

@@ -44,6 +44,27 @@ export function renumberLevel(order: RankMap, children: readonly Block[]): void 
 }
 
 /**
+ * **一批新块正好排在层尾**时按顺序记 rank（返回是否走得通）。
+ *
+ * 为什么需要这条快路：整层重编号是 O(层长)，而「往末尾追加一批」是装载与「在文末回车」
+ * 最常见的形状——批量装载一个万级块的单篇时，每窗都整层重编号就是 O(N²)。
+ * 判据是**结构**（这一批恰好是 `children` 的连续后缀），不是数量：不可靠的猜测会静默错位，
+ * 而这里只在结构成立时才走，否则交回整层重编号。
+ */
+export function assignTailRanks(order: RankMap, children: readonly Block[], ids: ReadonlySet<string>): boolean {
+  const n = ids.size
+  if (n === 0) return false
+  const start = children.length - n
+  if (start < 0) return false
+  for (let i = start; i < children.length; i++) if (!ids.has(children[i]!.id)) return false
+  const prev = start > 0 ? order.get(children[start - 1]!.id) : undefined
+  if (start > 0 && prev === undefined) return false
+  const base = prev === undefined ? ORDER_STEP : prev + ORDER_STEP
+  for (let i = 0; i < n; i++) order.set(children[start + i]!.id, base + i * ORDER_STEP)
+  return true
+}
+
+/**
  * 给一棵子树的**子孙**记 rank（根除外）：根的 rank 取决于它父级的邻居，
  * 由 `applyOps` 的批量 flush 统一放。每一层按 `ctx.index` 记（含软删兄弟）。
  */
