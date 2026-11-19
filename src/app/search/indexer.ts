@@ -10,8 +10,9 @@ import type { FtsCommitPlan, FtsCommitSource } from '../../core/storage/fts-port
 import type { FtsSource } from '../../core/search/sources.ts'
 import { META_KEYS } from '../../core/identity/library.ts'
 import type { TokenizedText } from '../../core/search/tokenizer.ts'
-import { addDependentIndex, buildFtsWrites, ftsSourceTexts, ftsTargets } from '../../core/search/rows.ts'
+import { addDependentIndex, buildFtsWrites, choiceIdsOf, ftsSourceTexts, ftsTargets } from '../../core/search/rows.ts'
 import { ALIASES_PROP } from '../../core/model/model.ts'
+import { CHOICES_PROP } from '../../core/props/choices.ts'
 import { ftsRowKey, parseFtsRowKey } from '../../core/search/sources.ts'
 
 /** `pending`／`building` 时查询降级扫描；只有 `ready` 才相信索引 */
@@ -212,14 +213,22 @@ export class SearchIndexer implements FtsCommitSource {
      * 工作集内已并入的依赖方会被同一集合去重。
      */
     if (this.dependentsOf && this.loadBlocks) {
-      const depTargets: string[] = []
+      const depTargets = new Set<string>()
       for (const op of ops) {
-        if (op.e === 'block' && op.op === 'exist' && op.state === 'purged') depTargets.push(op.id)
-        else if (op.e === 'prop' && op.name === ALIASES_PROP) depTargets.push(op.block)
+        if (op.e === 'block' && op.op === 'exist' && op.state === 'purged') depTargets.add(op.id)
+        else if (op.e === 'prop' && op.name === ALIASES_PROP) depTargets.add(op.block)
+        /**
+         * 选项改名／删档：受牵连的是**取值块**（值存记录 id），不在工作集里的那些
+         * 也要重铺。选项记录不是块，只能按「定义块的全部选项 id」一个个对值——
+         * 一次定义编辑最多这么多条，比把值列扫一遍便宜。
+         */
+        else if (op.e === 'prop' && op.name === CHOICES_PROP) {
+          for (const id of choiceIdsOf(ws, new Set([op.block]))) depTargets.add(id)
+        }
       }
-      if (depTargets.length > 0) {
+      if (depTargets.size > 0) {
         try {
-          const results = await Promise.all(depTargets.map((id) => this.dependentsOf!(id)))
+          const results = await Promise.all([...depTargets].map((id) => this.dependentsOf!(id)))
           const loadIds = new Set<string>()
           for (const d of results) for (const id of [...d.content, ...d.tag, ...d.prop]) loadIds.add(id)
           if (loadIds.size > 0) await this.loadBlocks([...loadIds])

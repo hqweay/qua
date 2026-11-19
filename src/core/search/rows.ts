@@ -24,6 +24,7 @@
  */
 import { ALIASES_PROP, aliasesOf, isDeleted, isPropDefBlock, type Block } from '../model/model.ts'
 import { propKindOf } from '../props/props.ts'
+import { allChoicesOf, CHOICES_PROP } from '../props/choices.ts'
 import { displayTextOf } from '../identity/alias.ts'
 import { plainText } from '../model/runs.ts'
 import { walkForest } from '../model/walk.ts'
@@ -113,6 +114,54 @@ function dependentsOf(ws: StoredWorkspace, id: string): IdDependents {
   return dep
 }
 
+/**
+ * 这些字段定义**当前全部选项 id**（含墓碑——删掉的选项仍显示旧名，行里的词同理）。
+ *
+ * 选项是记录、不是块：没有一条「指向它的关系边」可查，能查的只有取值块存下来的 id。
+ * 分开导出，是因为工作集模式下要拿这份 id 去问全库依赖方（同样按 id 对值）。
+ */
+export function choiceIdsOf(ws: StoredWorkspace, defIds: ReadonlySet<string>): Set<string> {
+  if (defIds.size === 0) return new Set()
+  const ids = new Set<string>()
+  const probe = probeOf(ws.blocks, defIds)
+  for (const defId of defIds) {
+    const def = probe.get(defId)
+    if (!def) continue
+    for (const c of allChoicesOf(def)) ids.add(c.id)
+  }
+  return ids
+}
+
+/**
+ * 「取了这些定义块某个选项的块」——**一次森林遍历**收齐，不按选项 id 各走一遍。
+ *
+ * 选项改名不产生「选项块」的正文 op（记录不在森林里），所以扩散只能从定义块的
+ * `_choices` op 发起：值侧存的就是记录 id，值没变、名字变了，取值块的行必须重铺。
+ */
+function choiceTakersOf(ws: StoredWorkspace, choiceIds: ReadonlySet<string>): string[] {
+  if (choiceIds.size === 0) return []
+  const out: string[] = []
+  walkForest(ws.blocks, (b) => {
+    const props = b.props
+    if (!props) return
+    for (const name of Object.keys(props)) {
+      if (name.startsWith('_')) continue
+      if (propPointsAtAny(props[name], choiceIds)) {
+        out.push(b.id)
+        return
+      }
+    }
+  })
+  return out
+}
+
+/** 这一格值指向 `ids` 里的任意一个吗（标量或数组项） */
+function propPointsAtAny(value: unknown, ids: ReadonlySet<string>): boolean {
+  if (typeof value === 'string') return ids.has(value)
+  if (Array.isArray(value)) return value.some((x) => typeof x === 'string' && ids.has(x))
+  return false
+}
+
 /** 把依赖方的行按来源重铺（改名／存在性变化共用这一条） */
 /** 把依赖方的行按来源重铺（改名／存在性变化共用这一条）；indexer 的 SQL 依赖方合并也用它 */
 export function addDependentIndex(targets: FtsTargets, dep: IdDependents): void {
@@ -153,6 +202,8 @@ function probeWithParent(
  *   · 改地址 → 这个块的别名行；被它牵连的是「行里住着它的现算名」的三类块
  *     （标签成员／引用源／属性值指向它的块）；
  *   · 改字段定义下选项块的正文 ⇒ 所有取该选项的块的 prop 行；
+ *   · 改定义块的 `_choices`（选项改名／删档）⇒ 同样重铺取值块的 prop 行
+ *     （记录不是块，没有「选项块正文 op」，只能从定义块这一侧扩散）；
  *   · 目标被软删／恢复／清除 ⇒ 引用它的块的 link／tag 行与属性值指向它的块的 prop 行
  *     （可解析性变了，现算名从行里消失／回来）。
  *
@@ -166,6 +217,8 @@ export function ftsTargets(ws: StoredWorkspace, ops: readonly Op[]): FtsTargets 
   const remove: Map<FtsSource, Set<string>> = new Map()
   const structural = new Set<string>()
   const contentChanged = new Set<string>()
+  /** 选项集动过的定义块（记录改名／删档／重排都在这一格里） */
+  const choicesChanged = new Set<string>()
 
   for (const op of ops) {
     if (op.e !== 'block') continue
@@ -203,8 +256,17 @@ export function ftsTargets(ws: StoredWorkspace, ops: readonly Op[]): FtsTargets 
       addIn(index, 'tag', op.block)
       continue
     }
+    if (op.name === CHOICES_PROP) {
+      choicesChanged.add(op.block)
+      continue
+    }
     if (op.name.startsWith('_')) continue
     addIn(index, 'prop', op.block)
+  }
+
+  // 选项记录的改名／删档：名字住在**取值块**的 prop 行里（值存 id，记录不在森林里）
+  if (choicesChanged.size > 0) {
+    for (const id of choiceTakersOf(ws, choiceIdsOf(ws, choicesChanged))) addIn(index, 'prop', id)
   }
 
   for (const id of structural) for (const s of FTS_SOURCES) addIn(index, s, id)
@@ -405,6 +467,17 @@ export function propertySearchTextOf(
       return typeof value === 'string' && value.trim() !== '' ? value : null
     case 'select': {
       if (typeof value !== 'string' || value === '') return null
+      /**
+       * 选项的现名住在**定义块的 `_choices`** 里（选项是记录，不是块）——
+       * 值侧存的是记录 id，按块去找永远找不到。墓碑也要读得出名字：
+       * 值指着已删选项的块仍然显示旧名，索引同理。
+       */
+      const record = def ? allChoicesOf(def).find((c) => c.id === value) : undefined
+      if (record) {
+        const name = record.label.trim()
+        return name === '' ? null : name
+      }
+      // 遗留形状：选项曾是定义块的子块（值指向那个块的 id），老库里仍有这种块
       const choice = find(value)
       if (!choice || isDeleted(choice)) return null
       const name = plainText(choice.content).trim()

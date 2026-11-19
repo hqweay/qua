@@ -25,6 +25,7 @@ import { BlockStore } from '../../src/core/model/store.ts'
 import { MemoryKb } from '../../src/core/kb/memory.ts'
 import { mkTagBlock } from '../../src/core/identity/tags.ts'
 import { mkPropDef } from '../../src/core/props/props.ts'
+import { allChoicesOf, newChoiceId, patchChoice, setChoices } from '../../src/core/props/choices.ts'
 import { META_KEYS } from '../../src/core/identity/library.ts'
 import { ftsSourceTexts } from '../../src/core/search/rows.ts'
 import type { StoredWorkspace } from '../../src/core/storage/db-rows.ts'
@@ -60,10 +61,18 @@ const refRun = (to: string, label: string, flavor?: '#') => ({
 })
 const linkRun = (v: string, url: string) => ({ id: uuidv7Hex(), t: 'link' as const, v, url })
 
-/** 定义块 ＋ 它的唯一选项（选项＝定义块的直接子块） */
-function choiceFixture(name: string): { def: Block; choice: Block } {
+/** 定义块 ＋ 它的选项记录（当前形状：选项住在 `_choices` 里，是记录不是块） */
+function choiceFixture(label: string): { def: Block; choiceId: string } {
+  const def = mkPropDef('状态', 'select')
+  const choiceId = newChoiceId()
+  setChoices(def, [{ id: choiceId, label }])
+  return { def, choiceId }
+}
+
+/** 遗留形状：选项还是定义块的直接子块（老库里的存量数据） */
+function legacyChoiceFixture(label: string): { def: Block; choice: Block } {
   const def = mkBlock('', { props: { _kind: 'select' } })
-  const choice = mkBlock(name)
+  const choice = mkBlock(label)
   def.children = [choice]
   return { def, choice }
 }
@@ -160,7 +169,7 @@ test('tag：行内 #名 的提及也进 tag 行（不写 _tags）；改名跟着
 
 test('prop：写字符串值与选项值 ⇒ 可搜；清值 ⇒ 不可搜（选项值索引选项名，不是 id）', async () => {
   const h = harness()
-  const { def, choice } = choiceFixture('进行中')
+  const { def, choiceId } = choiceFixture('进行中')
   const textDef = mkPropDef('备注', 'text')
   const taker = mkBlock('带字段的一行')
   h.store.blocks.push(def, textDef, taker)
@@ -169,13 +178,23 @@ test('prop：写字符串值与选项值 ⇒ 可搜；清值 ⇒ 不可搜（选
   await h.commit(h.kb.tx((tx) => tx.setProp(taker.id, textDef.id, '红薯与咖啡')).ops)
   assert.ok(hitsOf(h.db, '红薯').includes(`${taker.id}|prop`), '文本值可搜')
 
-  // 选项值：存的是选项块 id，可搜的是选项名
-  await h.commit(h.kb.tx((tx) => tx.setProp(taker.id, def.id, choice.id)).ops)
+  // 选项值：存的是选项记录 id，可搜的是选项名
+  await h.commit(h.kb.tx((tx) => tx.setProp(taker.id, def.id, choiceId)).ops)
   assert.ok(hitsOf(h.db, '进行').includes(`${taker.id}|prop`), '选项值按选项名可搜')
-  assert.ok(!hitsOf(h.db, '进行').some((x) => x.startsWith(`${choice.id}|`)), '选项块自己的正文行不因此出现')
+  assert.ok(!hitsOf(h.db, '进行').some((x) => x.startsWith(`${choiceId}|`)), '选项记录 id 自己不成行')
 
   await h.commit(h.kb.tx((tx) => tx.clearProp(taker.id, def.id)).ops)
   assert.ok(!hitsOf(h.db, '进行').includes(`${taker.id}|prop`), '清值 ⇒ 属性行摘除')
+})
+
+test('prop：遗留形状（选项是定义块的子块）仍按子块正文可搜', async () => {
+  const h = harness()
+  const { def, choice } = legacyChoiceFixture('旧形状选项')
+  const taker = mkBlock('老库里的取值块')
+  h.store.blocks.push(def, choice, taker)
+
+  await h.commit(h.kb.tx((tx) => tx.setProp(taker.id, def.id, choice.id)).ops)
+  assert.ok(hitsOf(h.db, '旧形状').includes(`${taker.id}|prop`), '老形状照旧读得出名字')
 })
 
 test('prop：按定义的 kind 投影（ref 取目标名、number 转串、date／text 原串、checkbox 不产词）', async () => {
@@ -287,19 +306,52 @@ test('扩散：改标签名 ⇒ 全部成员块的标签行重铺（面大、低
 
 test('扩散：改选项名 ⇒ 所有取该值的块重铺属性行', async () => {
   const h = harness()
-  const { def, choice } = choiceFixture('进行中')
+  const { def, choiceId } = choiceFixture('进行中')
   const t1 = mkBlock('任务一')
   const t2 = mkBlock('任务二')
   h.store.blocks.push(def, t1, t2)
   await h.commit(
-    h.kb.tx((tx) => { tx.setProp(t1.id, def.id, choice.id); tx.setProp(t2.id, def.id, choice.id) }).ops,
+    h.kb.tx((tx) => { tx.setProp(t1.id, def.id, choiceId); tx.setProp(t2.id, def.id, choiceId) }).ops,
   )
   assert.ok(hitsOf(h.db, '进行').includes(`${t1.id}|prop`))
 
-  await h.commit(h.kb.tx((tx) => tx.patch(choice.id, (b) => { b.content = [{ t: 'text', v: '已完成' }] })).ops)
+  await h.commit(
+    h.kb.tx((tx) =>
+      tx.patch(def.id, (b) => setChoices(b, patchChoice(allChoicesOf(b), choiceId, (c) => ({ ...c, label: '已完成' })))),
+    ).ops,
+  )
   assert.ok(hitsOf(h.db, '已完成').includes(`${t1.id}|prop`), '取值块一跟着新名')
   assert.ok(hitsOf(h.db, '已完成').includes(`${t2.id}|prop`), '取值块二跟着新名')
   assert.ok(!hitsOf(h.db, '进行').includes(`${t1.id}|prop`), '旧选项名不再经取值块命中')
+})
+
+test('扩散：删选项（立墓碑）⇒ 取值块仍按旧名可搜', async () => {
+  const h = harness()
+  const { def, choiceId } = choiceFixture('搁置')
+  const taker = mkBlock('任务三')
+  h.store.blocks.push(def, taker)
+  await h.commit(h.kb.tx((tx) => tx.setProp(taker.id, def.id, choiceId)).ops)
+  assert.ok(hitsOf(h.db, '搁置').includes(`${taker.id}|prop`))
+
+  await h.commit(
+    h.kb.tx((tx) =>
+      tx.patch(def.id, (b) => setChoices(b, patchChoice(allChoicesOf(b), choiceId, (c) => ({ ...c, deleted: true as const })))),
+    ).ops,
+  )
+  assert.ok(hitsOf(h.db, '搁置').includes(`${taker.id}|prop`), '墓碑仍读得出名字（值与显示同口径）')
+
+  // 恢复：撤掉墓碑后仍可搜（名字一直在）
+  await h.commit(
+    h.kb.tx((tx) =>
+      tx.patch(def.id, (b) =>
+        setChoices(b, patchChoice(allChoicesOf(b), choiceId, (c) => {
+          const { deleted: _drop, ...rest } = c
+          return rest
+        })),
+      ),
+    ).ops,
+  )
+  assert.ok(hitsOf(h.db, '搁置').includes(`${taker.id}|prop`), '恢复后仍可搜')
 })
 
 test('扩散：改目标名 ⇒ 引用块的 link 行换成新名（引用显示名是现算的，索引同理）', async () => {
@@ -347,10 +399,10 @@ test('重建：覆盖全部来源、收尾 ready（库里与内存一致）', as
   const member = mkBlock('成员的一行')
   const target = mkBlock('', { props: { [ALIASES_PROP]: ['虎鲸'] } })
   const refBlock = mkBlock([refRun(target.id, '虎鲸'), linkRun('官网', 'https://qua.example/home')])
-  const { def, choice } = choiceFixture('进行中')
+  const { def, choiceId } = choiceFixture('进行中')
   const taker = mkBlock('带字段的一行')
   member.props = { _tags: [tag.id] }
-  taker.props = { [def.id]: choice.id }
+  taker.props = { [def.id]: choiceId }
   const store = new BlockStore([tag, member, target, refBlock, def, taker])
 
   const indexer = new SearchIndexer(undefined, tokenizeManyWith(tokenize))
