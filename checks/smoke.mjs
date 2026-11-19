@@ -31897,6 +31897,111 @@ await check(
   },
 )
 
+/**
+ * **跨表面拖拽之后，正文要当场跟上**（真机的拖源在正文、落点在右槽窗口）。
+ *
+ * 两条历史坑都在这一条手势里：
+ *   ① 落点在另一台编辑器（scope:'roots' 的门）曾把外部源静默拒掉——提示照说、松手没反应；
+ *   ② 移动成功之后，**聚焦着的那一行**正是被搬走的那一行：锚点保留支曾把旧行原样换回，
+ *     旧行的 `data-depth` 还是旧层级——模型里已是子块、正文里还停在兄弟位。
+ * 前提是真点进 B 的行（inputSession 锚到它）；载荷用 32 位十六进制 id（drop 期形状校验）。
+ */
+await check('T335 跨表面拖拽跟变：聚焦行拖进右槽窗口当子块，正文行 depth/rev 当场跟上', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+  await page.evaluate(() => window.__qua.quiet(true))
+
+  const ids = await page.evaluate(() => {
+    const at = Date.now()
+    const mk = (ch, v) => ({ id: ch.repeat(32), content: [{ t: 'text', v }], children: [], created: at, modified: at })
+    const a = mk('a', 'T335甲')
+    const b = mk('b', 'T335乙')
+    const hostId = window.__qua.pages()[0]?.id
+    let ok = false
+    window.__qua.forceForest((forest) => {
+      const walk = (list) => {
+        for (const x of list) {
+          if (x.id === hostId) return x
+          const hit = walk(x.children ?? [])
+          if (hit) return hit
+        }
+        return null
+      }
+      const host = walk(forest)
+      if (host) {
+        host.children.push(a, b)
+        ok = true
+      }
+    })
+    return ok ? { a: a.id, b: b.id } : null
+  })
+  assert(ids, '前置：第一页要找得到宿主块')
+  await page.waitForTimeout(400)
+  assert(
+    (await page.locator(`#editor .blk[data-block-id="${ids.b}"]`).count()) === 1,
+    '前置：正文里要画得出 B 的行',
+  )
+
+  // 真点进 B 的行正文：inputSession 锚到 B（这是旧行换回那条坑的前提）
+  await page.locator(`#editor .blk[data-block-id="${ids.b}"] .tx`).first().click()
+  await page.waitForTimeout(150)
+
+  /** 合成 DnD：载荷只认块 id（`BLOCK_MIME`）；同一份 DataTransfer 走完 start→over→drop→end */
+  const drag = (o) =>
+    page.evaluate(({ srcSel, dstSel, x, y }) => {
+      const src = document.querySelector(srcSel)
+      const dst = document.querySelector(dstSel)
+      if (!src || !dst) return { missing: { src: !src, dst: !dst } }
+      const box = dst.getBoundingClientRect()
+      const cx = x ?? box.left + box.width / 2
+      const cy = y ?? box.top + box.height / 2
+      const dt = new DataTransfer()
+      const ev = (type) => new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: cx, clientY: cy })
+      src.dispatchEvent(ev('dragstart'))
+      dst.dispatchEvent(ev('dragover'))
+      dst.dispatchEvent(ev('drop'))
+      src.dispatchEvent(ev('dragend'))
+      return { ok: true }
+    }, o)
+
+  // ① A 的块标 → 右槽根（钉成窗口卡）
+  const pin = await drag({ srcSel: `#editor [data-drag-for="${ids.a}"]`, dstSel: '#dock-right' })
+  assert(pin?.ok === true, `钉 A 进右槽：${JSON.stringify(pin)}`)
+  await page.waitForTimeout(350)
+  assert(
+    (await page.locator(`#dock-right .dock-card[data-window="1"] .blk[data-block-id="${ids.a}"]`).count()) === 1,
+    '前置：右槽应出现 A 的窗口卡',
+  )
+
+  // ② B 的块标（正文）→ 窗口里 A 的行中点（inside＝当子块）
+  const drop2 = await drag({
+    srcSel: `#editor [data-drag-for="${ids.b}"]`,
+    dstSel: `#dock-right .dock-card[data-window="1"] .dock-window-editor .blk[data-block-id="${ids.a}"]`,
+  })
+  assert(drop2?.ok === true, `B 拖进窗口里 A 的行：${JSON.stringify(drop2)}`)
+  await page.waitForTimeout(500)
+
+  const got = await page.evaluate((ids) => {
+    const ed = window.__qua.__editor
+    const a = ed.store.find(ids.a)
+    const row = document.querySelector(`#editor .blk[data-block-id="${ids.b}"]`)
+    return {
+      childOfA: (a?.children ?? []).some((c) => c.id === ids.b),
+      inWindow: Boolean(document.querySelector(`#dock-right .dock-card[data-window="1"] .blk[data-block-id="${ids.b}"]`)),
+      depth: row?.dataset.depth ?? '',
+      rev: row?.dataset.rev ?? '',
+      storeRev: String(ed.store.revision),
+    }
+  }, ids)
+  assert(got.childOfA === true, `模型里 B 应已是 A 的子块：${JSON.stringify(got)}`)
+  assert(got.inWindow === true, `右槽窗口里应看得到 B：${JSON.stringify(got)}`)
+  assert(got.depth === '2', `正文行应跟到新层级（旧行不许带着旧 depth 换回）：${JSON.stringify(got)}`)
+  assert(got.rev === got.storeRev, `正文行应是新画的（rev 盖到当前修订）：${JSON.stringify(got)}`)
+
+  await ctx.close()
+  return `B 入 A（depth ${got.depth}、rev ${got.rev}/${got.storeRev}）：窗口与正文两处都跟上`
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

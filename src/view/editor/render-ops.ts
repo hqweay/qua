@@ -244,25 +244,26 @@ export class RenderOps {
    *
    * 三种「不保留」（旧行的样子已经过期，硬保留只会把界面和模型继续分叉）：
    *   · 锚点块不在新装载里（被删/移出结果集）⇒ 不保留；输入 owner 是本编辑器的话回源；
-   *   · 锚点块的 **parent 变了**（这次变化把它自己搬走了）⇒ 旧行的 `data-depth`/导轨是错的；
+   *   · **锚点行自己被这次变化搬走了**⇒ 旧行的 `data-depth`/导轨还是旧位置的
+   *     （判据见 `anchorRowUnmoved`：唯一带「旧位置」的是上次渲染的祖先链表）；
    *   · 旧行不在 DOM 里（窗口化把它收走了等）⇒ 没有可保留的东西。
    */
-  renderAllPreservingAnchor(anchor: { id: string; parentId: string | null } | null): void {
-    if (!anchor) {
+  renderAllPreservingAnchor(anchorId: string | null): void {
+    if (!anchorId) {
       this.renderAll()
       return
     }
-    const loc = locate(this.ed.doc, anchor.id)
+    const loc = locate(this.ed.doc, anchorId)
     if (!loc) {
-      if (inputSession.editor === this.ed) this.ed.events.focusSource?.(anchor.id)
+      if (inputSession.editor === this.ed) this.ed.events.focusSource?.(anchorId)
       this.renderAll()
       return
     }
-    if ((loc.parent?.id ?? null) !== anchor.parentId) {
+    if (!this.anchorRowUnmoved(anchorId)) {
       this.renderAll()
       return
     }
-    const oldEl = this.ed.blockEl(anchor.id)
+    const oldEl = this.ed.blockEl(anchorId)
     if (!oldEl) {
       this.renderAll()
       return
@@ -273,13 +274,13 @@ export class RenderOps {
     const active = document.activeElement
     const focusInside = active !== null && oldEl.contains(active)
     // 身体（里层编辑器/表格）挂在行上：重画期间既不能摘、也不能先挂一份新的
-    this.ed.embeds.pin(anchor.id)
+    this.ed.embeds.pin(anchorId)
     try {
       this.renderAll()
-      const fresh = this.ed.blockEl(anchor.id)
+      const fresh = this.ed.blockEl(anchorId)
       if (fresh && fresh !== oldEl) {
         fresh.replaceWith(oldEl)
-        this.mounted.add(anchor.id)
+        this.mounted.add(anchorId)
         if (focusInside) (active as HTMLElement).focus({ preventScroll: true })
       }
     } finally {
@@ -287,6 +288,29 @@ export class RenderOps {
     }
     // 旧行是原样换回的：光标标记与块选区漆层按换回后的 DOM 重打一遍
     this.repaintOverlays()
+  }
+
+  /**
+   * 锚点行自上次渲染以来**位置没变**才可保留旧行。
+   *
+   * 两份链都取**同一条投影**（`ancestorsByBlockId(rows)`，扁平行的栈算链）：
+   * 一份是上次渲染算好的表（`this.ancestors`），一份是现在的模型——
+   * 不直接从 `locate` 往上走，是为了躲开上下文行（trail／展开根）那种
+   * 「装载顺序 ≠ 树序」的表面在两份投影之间的口径差。
+   *
+   * ⚠️ 为什么不能比「锚点的 parent」：`reloadStructural` 在**写入之后**才解析锚点，
+   *    两边都来自同一棵新树，比出来永远相等——那道门从没拦住过（真踩过：
+   *    把聚焦着的行拖进侧槽窗口，旧行带着旧 depth 换回，正文停在旧层级）。
+   *
+   * 表里没这行（增量 renderBlock 只换单行、不重建表之后又没整页重画过——理论上
+   * 不该发生）⇒ 保守不保留：新画的行是对的，焦点丢一拍，下一击自愈。
+   */
+  private anchorRowUnmoved(id: string): boolean {
+    const rendered = this.ancestors.get(id)
+    if (!rendered) return false
+    const now = ancestorsByBlockId(this.ed.rows()).get(id)
+    if (!now) return false
+    return rendered.length === now.length && rendered.every((x, i) => x === now[i])
   }
 
   renderAll(): void {

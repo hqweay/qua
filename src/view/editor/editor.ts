@@ -958,14 +958,18 @@ export class BlockEditor {
   }
 
   /**
-   * **输入锚点所在的行**（本编辑器名下的那颗 `.blk`），连同它旧的父块。
+   * **输入锚点所在的行**（本编辑器名下的那颗 `.blk`）的 id。
    *
    * 锚点来自输入会话（浮层/里层编辑器的锚点都可能嵌在本容器里）；从锚点向上找
    * 最近的行时，**只认「岛根与本编辑器相同」的那一颗**：露面行的身体是另一台编辑器
    * （另一个岛），里层的源行不属于本编辑器——保留它不会保住外层的宿主行。
    * 锚点解析不出行（锚点就是容器自己等）⇒ 退回光标所在的行。
+   *
+   * ⚠️ 只交 id，不交 parent：解析发生在**写入之后**，从模型拿到的 parent 必然是
+   *    新位置——拿它判「锚点行自己被搬走了」永远判不出来（「旧位置」的唯一持有者
+   *    是渲染层的上次渲染表，见 `renderAllPreservingAnchor`）。
    */
-  private resolveAnchorRow(): { id: string; parentId: string | null } | null {
+  private resolveAnchorRow(): string | null {
     const anchor = inputSession.anchorEl
     let el: HTMLElement | null = null
     if (anchor && this.container.contains(anchor)) {
@@ -982,9 +986,7 @@ export class BlockEditor {
     if (!el) el = this.sel?.aBlock ? this.blockEl(this.sel.aBlock) : null
     const id = el?.dataset.blockId
     if (!id) return null
-    const loc = locate(this.doc, id)
-    if (!loc) return null
-    return { id, parentId: loc.parent?.id ?? null }
+    return locate(this.doc, id) ? id : null
   }
 
 
