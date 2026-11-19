@@ -17,9 +17,10 @@
  * 祖先的 `_aliases`，而祖先不是第二条子树（他们的兄弟子树不装）。
  */
 import { FEED_INITIAL, journalId, todayISO, type Block } from '../../core/index.ts'
-import type { LibraryCatalog, LibraryDocRows, RawLibraryRows } from '../../core/storage/library-reads.ts'
+import type { LibraryCatalog, LibraryDocRows } from '../../core/storage/library-reads.ts'
 import type { LibraryClient } from '../../core/storage/library-client.ts'
 import type { Workset } from '../../core/storage/workset.ts'
+import { pendingOf, readFirstWindows, withAncestors } from './doc-windows.ts'
 
 export interface WorksetBootDeps {
   client: LibraryClient
@@ -39,6 +40,11 @@ export type WorksetBootResult =
       mode: 'feed' | 'page'
       /** 「今天」在不在库里、是不是软删（物化判据；写不在这里做） */
       today: { exists: boolean; deleted: boolean }
+      /**
+       * **首窗之后还没读完的 Doc**（`{ root, 游标 }`）：巨大页启动时先给首屏，
+       * 余下的由装配层在首帧后接着装（`finishDocWindows`）。小 Doc 这里是空数组。
+       */
+      pending: { id: string; after: string }[]
       counts: {
         docReads: number
         docBlocks: number
@@ -50,17 +56,6 @@ export type WorksetBootResult =
     }
   | { status: 'no-library' }
   | { status: 'error'; error: string }
-
-/** doc 的祖先块行并进行缓存要用的那一份行（导航装载也用它） */
-export function withAncestors(doc: LibraryDocRows): RawLibraryRows {
-  return {
-    blocks: [...doc.rows.blocks, ...doc.ancestors],
-    props: doc.rows.props,
-    aliases: doc.rows.aliases,
-    lists: doc.rows.lists,
-    meta: {},
-  }
-}
 
 export async function loadWorksetBoot(deps: WorksetBootDeps): Promise<WorksetBootResult> {
   const c = await deps.client.catalog()
@@ -87,14 +82,50 @@ export async function loadWorksetBoot(deps: WorksetBootDeps): Promise<WorksetBoo
   let mode: 'feed' | 'page' = rootIds === feedIds ? 'feed' : 'page'
   let docReads = 0
 
-  /** 装一次 doc；失败按分型返回，不把失败当「空 Doc」 */
-  const loadOnce = async (ids: readonly string[]): Promise<{ status: 'ok'; roots: Block[]; doc: LibraryDocRows } | { status: 'no-library' } | { status: 'error'; error: string }> => {
+  /**
+   * 装一次 doc；失败按分型返回，不把失败当「空 Doc」。
+   *
+   * **先走窗口读**（与导航同一个装载器）：首窗落地即可渲染，余下的游标交回装配层，
+   * 首帧后再续装——active 恰好是一篇巨大页时启动不再停一秒。小 Doc（一窗读完）
+   * 与整棵读逐字相同；窗口读不可用／没有派生路径 ⇒ 整批退回 `doc`。
+   */
+  const loadOnce = async (
+    ids: readonly string[],
+  ): Promise<
+    | { status: 'ok'; roots: Block[]; doc: LibraryDocRows; pending: { id: string; after: string }[] }
+    | { status: 'no-library' }
+    | { status: 'error'; error: string }
+  > => {
+    const windows = await readFirstWindows(deps.client, ids)
+    if (windows) {
+      docReads += ids.length
+      const roots: Block[] = []
+      const merged: LibraryDocRows = {
+        rows: { blocks: [], props: [], aliases: [], lists: [], meta: {} },
+        ancestors: [],
+        rootIds: [...ids],
+      }
+      for (const w of windows) {
+        roots.push(...deps.workset.loadDoc(withAncestors(w), w.rootIds))
+        merged.rows.blocks.push(...w.rows.blocks)
+        merged.rows.props.push(...w.rows.props)
+        merged.rows.aliases.push(...w.rows.aliases)
+        merged.rows.lists.push(...w.rows.lists)
+        merged.ancestors.push(...w.ancestors)
+      }
+      return { status: 'ok', roots, doc: merged, pending: pendingOf(windows) }
+    }
     const r = await deps.client.doc([...ids])
     docReads++
     if (r.status !== 'ok') {
       return r.status === 'no-library' ? { status: 'no-library' } : { status: 'error', error: `doc: ${describe(r)}` }
     }
-    return { status: 'ok', roots: deps.workset.loadDoc(withAncestors(r.value), r.value.rootIds), doc: r.value }
+    return {
+      status: 'ok',
+      roots: deps.workset.loadDoc(withAncestors(r.value), r.value.rootIds),
+      doc: r.value,
+      pending: [],
+    }
   }
 
   const first = await loadOnce(rootIds)
@@ -110,11 +141,13 @@ export async function loadWorksetBoot(deps: WorksetBootDeps): Promise<WorksetBoo
 
   let doc = first.doc
   let roots = first.roots
+  let pending = first.pending
   if (mode === 'page' && roots.length === 0) {
     const fallback = await loadOnce(feedIds)
     if (fallback.status !== 'ok') return fallback
     doc = fallback.doc
     roots = fallback.roots
+    pending = fallback.pending
     rootIds = feedIds
     mode = 'feed'
   }
@@ -126,8 +159,10 @@ export async function loadWorksetBoot(deps: WorksetBootDeps): Promise<WorksetBoo
     rootIds: doc.rootIds,
     mode,
     today: { exists: todayJournal !== undefined, deleted: todayJournal?.deleted != null },
+    pending,
     counts: {
       docReads,
+      // 首窗装进来的块数（巨大页的余下部分在 `pending` 里，首帧后才装）
       docBlocks: doc.rows.blocks.length,
       docRows: doc.rows.blocks.length + doc.rows.props.length + doc.rows.aliases.length + doc.rows.lists.length,
       catalogRows:

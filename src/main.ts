@@ -94,13 +94,13 @@ import {
 import type { DeviceState } from './core/storage/device.ts'
 import { WORKSPACE_VERSION } from './core/infra/workspace.ts'
 import { createLibraryClient, type LibraryClient, type LibraryReadBridge } from './core/storage/library-client.ts'
-import type { LibraryDocWindow, RawLibraryRows } from './core/storage/library-reads.ts'
 import { createMemoryLibraryClient } from './core/storage/memory-client.ts'
 import { Workset, worksetClosureIds } from './core/storage/workset.ts'
 import { indexReadsOf, indexWritesOf, type IndexReads } from './core/storage/index-rows.ts'
 import { UnloadedAliasError } from './core/kb/unsupported.ts'
 import type { RelationEdge, RelationKind } from './core/relations/relations.ts'
-import { loadWorksetBoot, withAncestors, type WorksetBootResult } from './app/boot/workset-boot.ts'
+import { loadWorksetBoot, type WorksetBootResult } from './app/boot/workset-boot.ts'
+import { finishDocWindows, pendingOf, readFirstWindows, withAncestors } from './app/boot/doc-windows.ts'
 import { rebuildDerivedTables } from './app/boot/derived-rebuild.ts'
 import { ensureDerivedLoaded } from './app/boot/derived-load.ts'
 import { loadCandidateWindow as loadCandidateWindowOf } from './app/boot/query-load.ts'
@@ -122,9 +122,6 @@ const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) 
  *     与夹具命令，所以它们跑的那份构建要带 flag。
  */
 const DEV_SURFACE = __QUA_DEV_SURFACE__
-
-/** **巨大 Doc 护栏**（块数）：超过只提示不拦——「打开很慢」要让用户有预期 */
-const HUGE_DOC_BLOCKS = 100_000
 
 /** 页名：**只读投影**（中间没有页标题，页名就是那个块的正文） */
 const stateMenuBtn = $('state-menu-btn')
@@ -454,11 +451,9 @@ bootState.notice = bootNotice
 // 开发者日志（英文，不走 msg 字典）：排查「为什么是只读态」时这是唯一的第一手线索
 if (bootState.readOnly) console.warn('[boot] read-only prototype state:', boot.status)
 
-// **巨大 Doc 护栏**（313 D8：护栏按 Doc 不按库大小）：子树超过护栏只提示不拦——
-// 打开是用户的决定，应用把代价说清楚；只读/分页是懒子树那一层的事
-if (worksetBoot && worksetBoot.counts.docBlocks > HUGE_DOC_BLOCKS) {
-  bootState.notice = t('ui.boot.hugeDoc', { count: String(worksetBoot.counts.docBlocks) })
-}
+// **巨大页**：首窗之后还有余下（`pending` 非空）⇒ 内容会在首帧后继续长出来。
+// 这句提示在解释「为什么下面是空的、呆会儿又有」——冻结的那一档已经没有了
+if (worksetBoot && worksetBoot.pending.length > 0) bootState.notice = t('ui.boot.largeDoc')
 
 /** 槽快捷卡指到的块 id（设备状态里那几个）：它们不在任何 Doc 里，但首帧要显示名字 */
 function dockShortcutIds(device: DeviceState): string[] {
@@ -472,17 +467,8 @@ function dockShortcutIds(device: DeviceState): string[] {
   return out
 }
 
-/**
- * **一窗多少块**：`doc` 读面按派生路径切窗口。
- *
- * 100k 块的 Doc 拆成 50 窗：合成语料上每窗读取 ≈3ms、投影 ≈4ms（整棵一次性读是
- * 530ms ＋ 投影 390ms，用户看到的是「点开一页，停一秒」）。首窗落地就交给视图，
- * 余下窗口一窗一窗读——**每个 `await` 天然让出主线程**，不需要额外 yield；
- * 装完再投影一次（`loadDoc` 本来就是 O(已装行)）。
- */
-const DOC_WINDOW = 2000
-
 const pendingDocs = new Map<string, Promise<void>>()
+
 /**
  * **按 id 装一批块进工作集**（导航装载的唯一咽喉）。
  *
@@ -491,9 +477,8 @@ const pendingDocs = new Map<string, Promise<void>>()
  * 并发装载只发一次 IPC；装载进来的根钉住（它马上要成为某个视图的当前对象）。
  * 整库模式下所有块都在内存里，直接 `then()`。
  *
- * **巨大 Doc 不再一次读完**：先取所有 root 的首窗就交（`then`），剩下的窗口接着
- * 读完再投影一次并重画一次。小 Doc（≤ 一窗）与整棵读逐字相同——`next` 为 null 时
- * 这里只有一次读、一次投影。
+ * **巨大 Doc 不再一次读完**：首窗落地就交（`then`），余下的窗口在首帧后接着装，
+ * 装完投影一次并重画一次（窗口与投影口径见 `app/boot/doc-windows.ts`）。
  */
 function ensureDocsLoaded(ids: readonly string[], then: () => void): void {
   if (!libraryClient || !workset) {
@@ -524,21 +509,15 @@ function ensureDocsLoaded(ids: readonly string[], then: () => void): void {
 async function loadDocs(ids: readonly string[], onFirst: () => void): Promise<void> {
   const client = libraryClient!
   const ws = workset!
-  const readWindow = client.docWindow?.bind(client)
-  if (readWindow) {
-    const first = await Promise.all(ids.map((id) => readWindow(id, null, DOC_WINDOW)))
-    if (first.every((r) => r.status === 'ok')) {
-      const windows: LibraryDocWindow[] = []
-      for (const r of first) {
-        if (r.status !== 'ok') continue
-        ws.loadDoc(withAncestors(r.value), r.value.rootIds)
-        ws.pin(r.value.rootIds)
-        windows.push(r.value)
-      }
-      onFirst()
-      await loadRest(client, ws, windows)
-      return
+  const windows = await readFirstWindows(client, ids)
+  if (windows) {
+    for (const w of windows) {
+      ws.loadDoc(withAncestors(w), w.rootIds)
+      ws.pin(w.rootIds)
     }
+    onFirst()
+    if (await finishDocWindows(client, ws, pendingOf(windows))) repaintAfterGrow()
+    return
   }
   const r = await client.doc(ids)
   if (r.status === 'ok') {
@@ -551,45 +530,14 @@ async function loadDocs(ids: readonly string[], onFirst: () => void): Promise<vo
 }
 
 /**
- * 余下的窗口：每个 root 一窗一窗读到游标为 null，读完**一次投影**（`loadDoc`），
- * 再重画一次活动编辑器——新装进来的子块必须出现在已经画好的树里。
+ * 背景补装完的那一次重画：新装进来的子块必须出现在已经画好的树里。
  *
- * 重画让过输入法组合期（`deferWhileComposing`）：用户正在这一行打字时换 DOM 会把
+ * 让过输入法组合期（`deferWhileComposing`）：用户正在这一行打字时换 DOM 会把
  * 预编辑串弄坏；那种情况下内容在下一次重画时出现。
  */
-async function loadRest(
-  client: NonNullable<typeof libraryClient>,
-  ws: NonNullable<typeof workset>,
-  firstWindows: readonly LibraryDocWindow[],
-): Promise<void> {
-  const readWindow = client.docWindow!.bind(client)
-  let grew = false
-  for (const w of firstWindows) {
-    if (w.next === null) continue
-    const rootId = w.rootIds[0]
-    if (!rootId) continue
-    const acc: RawLibraryRows = { blocks: [], props: [], aliases: [], lists: [], meta: {} }
-    let after: string | null = w.next
-    while (after !== null) {
-      const r = await readWindow(rootId, after, DOC_WINDOW)
-      if (r.status !== 'ok') {
-        console.warn('[workset] doc window failed:', r.status === 'error' ? r.error : r.status)
-        break
-      }
-      const rows = withAncestors(r.value)
-      acc.blocks.push(...rows.blocks)
-      acc.props.push(...rows.props)
-      acc.aliases.push(...rows.aliases)
-      acc.lists.push(...rows.lists)
-      after = r.value.next
-    }
-    if (acc.blocks.length === 0) continue
-    ws.loadDoc(acc, [rootId])
-    ws.pin([rootId])
-    grew = true
-  }
-  if (!grew) return
-  if (typeof ed !== 'undefined' && ed && !ed.deferWhileComposing()) ed.reloadFromStore()
+function repaintAfterGrow(): void {
+  if (typeof ed === 'undefined' || !ed || ed.deferWhileComposing()) return
+  ed.reloadFromStore()
 }
 
 /**
@@ -2071,6 +2019,18 @@ ed = new BlockEditor({
   write: editorRun(run, () => mainEd),
 })
 mainEd = ed
+/**
+ * **启动时首窗之后还没读完的 Doc**：首帧已经画完才把它们续上。
+ *
+ * 启动路径与导航共用同一套窗口（`app/boot/doc-windows.ts`）：active 恰好是一篇
+ * 巨大页时，首窗落地即可交互，余下的在后台长出来——启动不再停在「读完整篇」上。
+ */
+if (worksetBoot && worksetBoot.pending.length > 0 && libraryClient && workset) {
+  const bootPending = worksetBoot.pending
+  void (async () => {
+    if (await finishDocWindows(libraryClient, workset, bootPending)) repaintAfterGrow()
+  })()
+}
 /**
  * **这一屏的筛选**（顶栏那颗漏斗）：同一份判定/面板，喂给**大纲的行遍历**。
  * 装在主编辑器上，只此一家——里层编辑器（查询结果／挂载区／镜像）不吃这一层。

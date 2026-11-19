@@ -16,7 +16,7 @@ import { join } from 'node:path'
 import { openLibraryDb, applyRowWrites, type Db, type RowWrite } from '../electron/library/sqlite.ts'
 import { readDocRows, readDocWindow } from '../electron/library/reads.ts'
 import type { RawLibraryRows } from '../src/core/storage/db-rows.ts'
-import { withAncestors } from '../src/app/boot/workset-boot.ts'
+import { DOC_WINDOW, finishDocWindows, pendingOf, readFirstWindows, withAncestors } from '../src/app/boot/doc-windows.ts'
 import { BlockStore } from '../src/core/model/store.ts'
 import { Workset } from '../src/core/storage/workset.ts'
 import { createMemoryLibraryClient } from '../src/core/storage/memory-client.ts'
@@ -141,6 +141,37 @@ test('用窗口装进工作集 == 整棵装进去（形状与兄弟序一致）'
   if (acc.blocks.length > 0) win.loadDoc(acc, ['root'])
 
   assert.deepEqual(shapeOf(winStore), shapeOf(wholeStore), '两棵树的形状相同')
+})
+
+test('启动/导航共用的窗口装载：首窗 ＋ pendingOf ＋ finishDocWindows == 整棵（跨窗的大 Doc）', async () => {
+  /** 比一窗多一点：2100 块 ⇒ 首窗 2000 ＋ 余下 100，正好走到 `pending` 那一支 */
+  const bigTree = (): Block => {
+    const root = { ...mkBlock('大页'), id: 'big-root', children: [] as Block[] }
+    for (let i = 0; i < 2100; i++) root.children.push({ ...mkBlock(`第${i}块`), id: `big-${i}`, children: [] })
+    return root
+  }
+  // 读面建在一棵树上；两个工作集各自从行重建（对象互不共享）
+  const source = new BlockStore([bigTree()])
+  const client = createMemoryLibraryClient({ ws: () => ({ blocks: source.blocks, activeId: '', savedAt: 1 }), store: source })
+
+  const whole = await client.doc(['big-root'])
+  assert.equal(whole.status, 'ok')
+  if (whole.status !== 'ok') return
+  const wholeStore = new BlockStore([])
+  new Workset(wholeStore).loadDoc(withAncestors(whole.value), whole.value.rootIds)
+
+  const store = new BlockStore([])
+  const workset = new Workset(store)
+  const windows = await readFirstWindows(client, ['big-root'])
+  assert.ok(windows, '内存读面提供窗口读')
+  assert.equal(windows.length, 1)
+  assert.equal(windows[0]!.rows.blocks.length, DOC_WINDOW, '首窗装满')
+  for (const w of windows) workset.loadDoc(withAncestors(w), w.rootIds)
+  const pending = pendingOf(windows)
+  assert.equal(pending.length, 1, '还有余下的窗口')
+
+  assert.equal(await finishDocWindows(client, workset, pending), true, '续装长过')
+  assert.deepEqual(shapeOf(store), shapeOf(wholeStore))
 })
 
 /** 一片森林的形状：先序 id ＋ 每个块的子块 id 列表（顺序也算） */
