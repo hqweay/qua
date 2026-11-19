@@ -15,6 +15,17 @@
  *
  * 用法：node checks/probe-dnd-cross-reload.mjs
  * ⚠️ 诊断探针，不进 gate。
+ *
+ * 跑之前的三条实测坑（2026-11-20，跳过就会把探针读数误读成 bug 状态）：
+ *   ① 先 `pnpm build:test`——Electron 探针没有 DEV_URL 时加载 `dist/index.html`，
+ *     陈旧构建会把**已修掉的旧 bug**复现出来（首轮归因差点被它带偏）；`window.__qua`
+ *     只在 VITE_QUA_TEST=1 的构建里。
+ *   ② Playwright 的拖拽**不聚焦** ⇒ inputSession 锚不上那一行 ⇒ 锚点保留支根本
+ *     不触发（测什么都绿）。要复现「聚焦行被搬走」族，必须先真点进目标行的 `.tx`
+ *     再起拖（场景②前的 click 就是干这个的）。
+ *   ③ 下面的运行时包装器（reload/render 打点）**别让它抛错**：异常沿 notify 冒进
+ *     事务 ⇒ 写入回滚，模型「没生效」是探针自己造成的（signature：通知账只有
+ *     reload 一条、没有 src 条目）。
  */
 import { _electron } from 'playwright-core'
 import { mkdirSync, rmSync } from 'node:fs'
