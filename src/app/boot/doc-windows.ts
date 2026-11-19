@@ -9,8 +9,10 @@
  *   · **首窗即全部**：`next === null` 的 Doc 与整棵读逐字相同（一次读、一次投影、不重画）；
  *   · **降级不是另一种语义**：实现没有这条读面、或某个 root 没有派生路径 ⇒ 调用方
  *     整批退回 `doc` 整棵读；
- *   · **余下的窗口读完只投影一次**（`loadDoc` 本来就是 O(已装行)），不按窗口反复重投影
- *     ——那会变成 O(N²)。
+ *   · **余下的窗口逐窗投影**：装载走增量路径（按 `left` 挂接、索引只进新子树），
+ *     每窗 `loadDoc` 是 O(本窗)，逐窗装不会越装越慢；换来的是主线程不被一次整篇的
+ *     大投影占住（每窗几毫秒，中间隔着 `await` 让出），装载中途也读得到已装的部分
+ *     （⌘K、点引用都不必等整篇装完）。
  */
 import type { LibraryClient } from '../../core/storage/library-client.ts'
 import type { LibraryDocRows, LibraryDocWindow } from '../../core/storage/library-reads.ts'
@@ -62,7 +64,10 @@ export function pendingOf(windows: readonly LibraryDocWindow[]): { id: string; a
 }
 
 /**
- * 把余下的窗口读完，**一次投影**。返回「有没有长过」（调用方据此决定重画一次）。
+ * 把余下的窗口**逐窗投影**：读回一窗就 `loadDoc` 一窗，不攒批——攒批会把整篇
+ * 压成一次大投影（主线程一帧长停顿；装载中途也查不到已装的部分）。窗口是
+ * DFS 前缀，块的父亲总在同一窗或更早的窗里，逐窗挂接与攒批同解（等式测试钉住）。
+ * 返回「有没有长过」（调用方据此在装完后重画一次）。
  *
  * 中途失败就停在那一条上：已装的部分是对的（先序前缀），只是不全——与整棵读失败
  * 相比不多不少，都是「这次没装完」。下一次打开会重新走窗口。
@@ -76,23 +81,19 @@ export async function finishDocWindows(
   if (!read || pending.length === 0) return false
   let grew = false
   for (const job of pending) {
-    const acc: RawLibraryRows = { blocks: [], props: [], aliases: [], lists: [], meta: {} }
     let after: string | null = job.after
+    let loaded = false
     while (after !== null) {
       const r = await read(job.id, after, DOC_WINDOW)
       if (r.status !== 'ok') {
         console.warn('[workset] doc window failed:', r.status === 'error' ? r.error : r.status)
         break
       }
-      const rows = withAncestors(r.value)
-      acc.blocks.push(...rows.blocks)
-      acc.props.push(...rows.props)
-      acc.aliases.push(...rows.aliases)
-      acc.lists.push(...rows.lists)
+      workset.loadDoc(withAncestors(r.value), [job.id])
+      loaded = true
       after = r.value.next
     }
-    if (acc.blocks.length === 0) continue
-    workset.loadDoc(acc, [job.id])
+    if (!loaded) continue
     workset.pin([job.id])
     grew = true
   }

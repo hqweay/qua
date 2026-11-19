@@ -174,6 +174,11 @@ test('启动/导航共用的窗口装载：首窗 ＋ pendingOf ＋ finishDocWin
 
   assert.equal(await finishDocWindows(client, workset, pending), true, '续装长过')
   assert.deepEqual(shapeOf(store), shapeOf(wholeStore))
+  assert.equal(
+    fingerprint(store.index),
+    fingerprint(wholeStore.index),
+    '逐窗续装载出的索引与整棵装载逐条一致',
+  )
 })
 
 test('启动：active 是跨窗大页 ⇒ 首窗就返回、余下交 pending，续装后装齐', async () => {
