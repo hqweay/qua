@@ -434,6 +434,31 @@ function linkPredicate(alias: string): string {
 }
 
 /**
+ * `{text}` 的**行本地谓词**：text run 的投影里包含这一串（与 matcher 的
+ * `plainText(content).includes(needle)` 同解：只取 `t:'text'` 的 run，按序拼）。
+ * 两条形态（含某串／有正文）共用这一份，避免「候选 SQL」与「分页 SQL」各写一遍。
+ */
+function textPredicateOf(
+  alias: string,
+  plan: { needle: string; nonempty?: boolean },
+): { sql: string; params: (string | number)[] } {
+  if (plan.nonempty === true) {
+    return {
+      sql: `exists (select 1 from json_each(${alias}.content) j
+        where json_extract(j.value,'$.t') = 'text' and trim(json_extract(j.value,'$.v')) <> '')`,
+      params: [],
+    }
+  }
+  return {
+    sql: `exists (select 1 from (
+        select group_concat(json_extract(j.value,'$.v'), '') as txt
+        from json_each(${alias}.content) j where json_extract(j.value,'$.t') = 'text'
+      ) where instr(txt, ?) > 0)`,
+    params: [plan.needle],
+  }
+}
+
+/**
  * **能下推进页查询的部分**：返回「必要条件谓词」＋「剩下的计划」＋「谓词要不要 Block 表」。
  *
  * 判据是单调的：`all` 的每个子条件都是整体成立的必要条件 ⇒ 把子条件里能写成
@@ -446,6 +471,11 @@ function linkPredicate(alias: string): string {
  *   `all` 里出现 `{not: …}` 就是这个形状（`{tag:X}` 且不是某一块）。
  *
  * `any` 的析取项不是必要条件；方向原子／`near` 的集合是递归闭包，写不成行本地谓词。
+ *
+ * **下推只收「内容谓词」**（`text`／`mark`／`link`）：它们的计划形态本来就要扫一遍正文，
+ * 下推只可能赢。`prop`／`tagged`／`aliased` 这类**索引驱动**的计划不收——计划形态的成本
+ * 跟结果集大小走，下推按「扫到凑够一页」计价，集约小下推越亏（1M 实测：带标签的块只占
+ * 0.1% 时 5ms → 280ms/页）。这一档要能按基数选路才有意义，不是把谓词写进去就行。
  */
 function pushdownOf(plan: CandidatePlan): {
   preds: { sql: string; params: (string | number)[] }[]
@@ -454,6 +484,14 @@ function pushdownOf(plan: CandidatePlan): {
 } {
   if (plan.k === 'mark') return { preds: [markPredicate('b', plan.marks)], rest: null, needsBlock: true }
   if (plan.k === 'link') return { preds: [{ sql: linkPredicate('b'), params: [] }], rest: null, needsBlock: true }
+  /**
+   * `text` 也下推：它的谓词本来就是**单块内部**的投影比较。计划形态要为「所有命中」
+   * 扫一遍全库才出第一页；下推后沿 path 序扫、凑够一页就停——常见串从 1.7s/页降到
+   * 亚毫秒，**没有命中的串仍是整库扫**（那一档不变，见决策档的代价表）。
+   */
+  if (plan.k === 'text') {
+    return { preds: [textPredicateOf('b', plan)], rest: null, needsBlock: true }
+  }
   if (plan.k === 'notIn') {
     // 不精确的子计划不能减（与 `candidatePlanSql` 同一条守卫）——那就整份退回去走 `in (plan)`
     if (!planIsExact(plan.plan, true)) return { preds: [], rest: plan, needsBlock: false }
@@ -606,24 +644,10 @@ export function candidatePlanSql(
         `select distinct b.parent as id from ${B} b where b.parent is not null and ${visible('b')}`,
         [],
       )
-    case 'text':
-      return plan.nonempty === true
-        ? wrap(
-            `select b.id as id from ${B} b where ${visible('b')} and exists (
-              select 1 from json_each(b.content) j
-              where json_extract(j.value,'$.t') = 'text' and trim(json_extract(j.value,'$.v')) <> ''
-            )`,
-            [],
-          )
-        : wrap(
-            `select b.id as id from ${B} b where ${visible('b')} and exists (
-              select 1 from (
-                select group_concat(json_extract(j.value,'$.v'), '') as txt
-                from json_each(b.content) j where json_extract(j.value,'$.t') = 'text'
-              ) where instr(txt, ?) > 0
-            )`,
-            [plan.needle],
-          )
+    case 'text': {
+      const p = textPredicateOf('b', plan)
+      return wrap(`select b.id as id from ${B} b where ${visible('b')} and ${p.sql}`, p.params)
+    }
     case 'mark': {
       const p = markPredicate('b', plan.marks)
       return wrap(`select b.id as id from ${B} b where ${visible('b')} and ${p.sql}`, p.params)
