@@ -150,6 +150,12 @@ export function paintHits(
   key: string,
   bgVar = '--ui-hit-bg',
 ): Range[] {
+  // 空命中不查 DOM：调用方（备注画笔等）可能在「这一帧没有命中」时也走到这里，
+  // 一次全容器 querySelectorAll 不该由空集付
+  if (blocks.size === 0) {
+    clearHits(key)
+    return []
+  }
   const ranges: Range[] = []
   const screen = txById(host)
   for (const [blockId, spans] of blocks) {

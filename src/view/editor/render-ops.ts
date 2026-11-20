@@ -1068,8 +1068,20 @@ export class RenderOps {
    * 会被 `readRuns` 当成内容，还会挪光标），底色淡一档（`--ui-anno-bg`）。
    */
   private paintAnnoMarks(): void {
-    const blocks = new Map<string, AnnoHitSpan[]>()
     const idx = this.ed.store.index
+    /**
+     * **全库没有区间锚 ⇒ 不扫 doc、不查 DOM**。备注是少数派功能，绝大多数文档
+     * 一个 anno 都没有；从前每次写都走整棵树＋一次全容器 `querySelectorAll`，
+     * 等于给「没用到备注」的用户每帧付两笔 O(n)。
+     */
+    if (idx.annos.size === 0) {
+      if (this.annoSpans.size > 0) {
+        this.annoSpans = new Map()
+        clearHits(this.annoKey)
+      }
+      return
+    }
+    const blocks = new Map<string, AnnoHitSpan[]>()
     walkForest(this.ed.doc.roots, (b) => {
       if (!b.annos || b.annos.length === 0) return
       const live = new Set<string>()
