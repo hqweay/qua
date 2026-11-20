@@ -554,6 +554,8 @@ export class BlockEditor {
     blockElCalls: 0,
     /** 行表全容器扫描次数（暖起来之后每键应为 0） */
     rowElScans: 0,
+    /** 行表 miss 后的定向回退次数（只该在窗口外/里层岛行上出现） */
+    blockElFallbacks: 0,
     /** `change` 回调总耗时/次数（装配层每次编辑通知都记一笔，诊断用） */
     changeCalls: 0,
     changeMs: 0,
@@ -1246,7 +1248,25 @@ export class BlockEditor {
     const hit = this.rowEls.get(id)
     if (hit && hit.isConnected) return hit
     if (hit) this.rowEls.delete(id)
-    return null
+    /**
+     * 表里没有 ≠ 这一块一定没有行：它可能在**里层编辑岛**里（查询结果／露面身体），
+     * 那台编辑器自己维护行表；但旧口径允许外层编辑器按 id 找到「这一屏唯一的一行」。
+     * 保留这次定向回退（只扫容器，不建表、不缓存岛行），热路径仍是 O(1)；
+     * 窗口外的块也会走到这里，返回 null 还是「不在这一屏」。
+     */
+    return this.queryBlockEl(id)
+  }
+
+  /** 旧口径的定向查询：先找自己岛里的行，找不到退回第一个（含里层岛）。 */
+  private queryBlockEl(id: string): HTMLElement | null {
+    this.perfProbe.blockElFallbacks++
+    const all = this.container.querySelectorAll<HTMLElement>(`.blk[data-block-id="${id}"]`)
+    if (all.length <= 1) return all[0] ?? null
+    const own = this.container.closest<HTMLElement>(`[${EDIT_ISLAND_ATTR}]`)
+    for (const el of all) {
+      if (el.closest(`[${EDIT_ISLAND_ATTR}]`) === own) return el
+    }
+    return all[0] ?? null
   }
 
   /** 一次全容器扫描建行表（只在表为空时走；扫描口径与 `blockEl` 的岛判据同一份） */
