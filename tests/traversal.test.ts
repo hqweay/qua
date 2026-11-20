@@ -122,6 +122,28 @@ test('折叠只改 hidden，不改「走不走得到」', () => {
   assert.equal(rows.length, flatten(doc).length)
 })
 
+test('childless 接受谓词：与集合同一趟，且命中的子树真的不进', () => {
+  const forest = fixture()
+  const idsOf = (childless: ReadonlySet<string> | ((b: Block) => boolean)): string[] => {
+    const out: string[] = []
+    walkForest(forest, (b) => out.push(b.id), { childless })
+    return out
+  }
+  assert.deepEqual(idsOf(new Set(['a1'])), idsOf((b) => b.id === 'a1'), '集合与谓词同一份结果')
+  assert.deepEqual(idsOf((b) => b.id === 'a1'), ['a', 'a1', 'a2', 'a21', 'b', 'b1', 't1'], 'a11 的子树不进，兄弟 a2 照走')
+})
+
+test('visibleRows：无身体宿主时行数＝flatten（同一趟）；有身体宿主时子树让位', () => {
+  const doc: Doc = { roots: fixture(), folded: {} }
+  // 优化后的不变量：没有身体宿主时，visibleRows 走到的节点就是 flatten 的全集，
+  // 调用方不再单独摊平一遍求活块数
+  assert.equal(visibleRows(doc).length, flatten(doc).length)
+
+  const rows = visibleRows(doc, { bodyHosts: (b) => b.id === 'a1' })
+  assert.deepEqual(ids(rows.map((r) => r.block)), ['a', 'a1', 'a2', 'a21', 'b', 'b1', 't1'])
+  assert.equal(rows.find((r) => r.block.id === 'a1')?.hasChildren, false, '身体宿主的子块让位')
+})
+
 test('整片森林口径：嵌在子树里的标签／journal 也走得到', () => {
   const forest = fixture()
   assert.deepEqual(ids(allTags(forest)), ['t1'], '标签不只在顶层')

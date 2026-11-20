@@ -169,13 +169,21 @@ export class RowProjection {
     ) {
       return c.rows
     }
-    // 活块数的口径是 `flatten(doc)`（含折叠隐藏、不含软删）；只在缓存未命中时走一遍
-    this.liveBlocks = flatten(doc).length
-    const rows = visibleRows(doc, {
+    /**
+     * 活块数的口径是 `flatten(doc)`（含折叠隐藏、不含软删）。
+     *
+     * 没有身体宿主时，`visibleRows` 走到的节点就是 `flatten` 的全集 ⇒ 直接用它
+     * 这一趟的输出长度，不再单独摊平一遍。有身体宿主时，身体子树被跳过
+     * （children 由视图宿主渲染，不在正文行里）⇒ 仍需 `flatten` 补上那一段；
+     * 这条分支只属于容器视图，低频。
+     */
+    const all = visibleRows(doc, {
       // 只有这一屏真会画身体的编辑器才让子块行让位（没有 viewBody 回调的
       // 里层编辑器——挂载区／镜像／查询结果——子块仍照常画）
       ...(withBody ? { bodyHosts: hasChildrenViewBody } : {}),
-    }).filter((r) => !r.hidden)
+    })
+    this.liveBlocks = withBody ? flatten(doc).length : all.length
+    const rows = all.filter((r) => !r.hidden)
     this.rawCache = {
       doc,
       roots: doc.roots,

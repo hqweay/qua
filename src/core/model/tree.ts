@@ -112,11 +112,17 @@ export interface VisibleRow {
 export function visibleRows(doc: Doc, opts: { bodyHosts?: (b: Block) => boolean } = {}): VisibleRow[] {
   treeProbe.visibleRowsCalls++
   const out: VisibleRow[] = []
-  const childless = new Set<string>()
-  if (doc.viewRootId) childless.add(doc.viewRootId)
-  for (const b of flatten(doc)) {
-    if (opts.bodyHosts?.(b)) childless.add(b.id)
-  }
+  /**
+   * 判据**随节点现算**，不再先 `flatten(doc)` 建集合：那次预扫是整棵树的第一遍，
+   * 而下面 `walkForest` 本来就会走到每一个节点。谓词同时供 `walkForest` 决定
+   * 「不进这棵子树」与这里算 `hasChildren`。
+   */
+  const viewRootId = doc.viewRootId
+  const bodyHosts = opts.bodyHosts
+  const isChildless =
+    bodyHosts !== undefined || viewRootId !== undefined
+      ? (b: Block): boolean => b.id === viewRootId || bodyHosts?.(b) === true
+      : undefined
   walkForest(
     doc.roots,
     (b, ctx) => {
@@ -124,10 +130,10 @@ export function visibleRows(doc: Doc, opts: { bodyHosts?: (b: Block) => boolean 
         block: b,
         depth: ctx.path.length - 1,
         hidden: ctx.hidden,
-        hasChildren: hasLiveChildren(b) && !childless.has(b.id),
+        hasChildren: hasLiveChildren(b) && isChildless?.(b) !== true,
       })
     },
-    { folded: foldStateOf(doc), ...(childless.size > 0 ? { childless } : {}) },
+    { folded: foldStateOf(doc), ...(isChildless ? { childless: isChildless } : {}) },
   )
   return out
 }

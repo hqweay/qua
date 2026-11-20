@@ -50,8 +50,11 @@ export interface WalkOpts {
    *
    * 唯一的消费者是「非大纲视图」的装载：children 由视图宿主渲染，正文只画根行。
    * 与 `folded` 分开是因为语义相反 —— 折叠是「用户收起来了」，这里是「别处正在展开」。
+   *
+   * 可以是集合（调用方已经知道全部）或**谓词**（判据要随节点现算，例如
+   * 「这一行画不画身体」由行内容决定）——后者省掉调用方先摊平一遍建集合。
    */
-  childless?: ReadonlySet<string>
+  childless?: ReadonlySet<string> | ((b: Block) => boolean)
 }
 
 /**
@@ -67,7 +70,8 @@ export function walkForest(roots: readonly Block[], visit: (b: Block, ctx: WalkC
       path.push(b)
       const stop = visit(b, { parent, index: i, path, hidden }) === false
       // `childless` 的块：这一层到此为止（它的子树由别处渲染）；命中即收工时**连子树都不进**
-      const descend = !stop && !childless?.has(b.id) && step(b.children, b, hidden || folded?.[b.id] === true)
+      const skip = typeof childless === 'function' ? childless(b) : childless?.has(b.id) === true
+      const descend = !stop && !skip && step(b.children, b, hidden || folded?.[b.id] === true)
       if (stop || descend) {
         path.pop()
         return true
