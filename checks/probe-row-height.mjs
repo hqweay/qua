@@ -49,7 +49,6 @@ const LONG = '这是一条很长很长的正文，用来测试折行之后这一
 const setup = async () => {
   return page.evaluate((longText) => {
     const ed = window.__qua.__editor
-    const ws = window.__qua.snapshot()
     // 找一个有正文的块，把它正文改成长文本，后面再堆一批短块
     const list = window.__qua.blocks()
     const host = list.find((b) => b.text.length > 0) ?? list[0]
