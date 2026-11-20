@@ -1901,10 +1901,8 @@ const app: App = {
   /* ---- 自动化（命令块）：core runner 管事务与原子性；这里收尾记账／重画／提示 ---- */
   ...automationCommands({
     kb,
-    // 适配 `txRun` 的形状（它的第二参是 source）：runner 只要「一笔事务 ＋ undo 捕获」
-    tx: (fn, opts) => txRun(fn, undefined, opts),
-    recordUndo: (undo) => blocks.record(undo, ed.sel, 'other', Date.now()),
-    sel: () => ed.sel,
+    // 装配层 runTx：op 进落盘队列、撤销记账（一次运行＝一步撤销）、按 changes 重画
+    tx: (fn) => runTx(fn),
     repaintBlocks: (ids) => {
       for (const id of ids) repaintBlock(id)
     },

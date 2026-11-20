@@ -22,6 +22,7 @@ import {
   flatten,
   hasChildrenViewBody,
   hasQueryBody,
+  isAutomationBlock,
   locate,
   runAtCell,
   blockSpanPlan,
@@ -435,6 +436,11 @@ export interface ViewEvents {
    */
   viewBody?: (block: Block, into: HTMLElement) => (() => void) | void
   /**
+   * **正文里自动化块的身体**（三段式定义体）。与 `viewBody` 同一条分工与同一条
+   * 生命周期纪律（返回卸载函数，换 DOM 前必须释放）。
+   */
+  automationBody?: (block: Block, into: HTMLElement) => (() => void) | void
+  /**
    * **块下属性区**：值文本、排布与「点值开属性面板」都在装配层。
    *
    * `view` 只负责「这一行有这一格」与高度；这里不返回卸载函数（行里没有订阅）。
@@ -578,7 +584,7 @@ export class BlockEditor {
     revisions: () => this.store,
     filter: () => this.rowFilter?.() ?? null,
     caret: () => this.caretBlock(),
-    withBody: () => this.events.viewBody !== undefined,
+    withBody: () => this.events.viewBody !== undefined || this.events.automationBody !== undefined,
     probe: this.perfProbe,
   })
 
@@ -2558,7 +2564,7 @@ export class BlockEditor {
    */
   private bodyFoldable(b: Block): boolean {
     return (
-      (Boolean(this.events.viewBody) && (hasQueryBody(b) || hasChildrenViewBody(b))) ||
+      (Boolean(this.events.viewBody || this.events.automationBody) && (hasQueryBody(b) || hasChildrenViewBody(b) || isAutomationBlock(b))) ||
       (Boolean(this.events.embedBody) && rowHasEmbedViewBody(b, (id) => this.store.find(id)))
     )
   }

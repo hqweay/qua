@@ -3190,3 +3190,146 @@
   font: inherit;
   font-size: var(--ui-fs-xs);
 }
+
+/* ---------------------------------------------------------- 自动化块的身体
+   三段式（当／如果／就）＋运行：与行内查询体同一张脸（纸面上的一块面板——
+   底色抬一层、结构线收边），让「这一块的定义」与它的名字分成两层。
+   ⚠️ 整组限定 `.blk-auto` 前缀：宿主的 button 规则不会漏进来。 */
+.blk-auto {
+  padding: var(--ui-gap-2) var(--ui-gap-3);
+  background: var(--ui-surface-sunken);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-2);
+}
+.blk-auto-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  justify-content: flex-end;
+}
+.blk-auto-toggle {
+  font: inherit;
+  font-size: var(--ui-fs-xs);
+  padding: 0 var(--ui-gap-3);
+  border-radius: var(--ui-radius-pill);
+  border: 1px solid var(--ui-border-subtle);
+  background: var(--ui-surface);
+  color: var(--ui-text-secondary);
+  cursor: pointer;
+}
+.blk-auto-toggle[data-on='1'] {
+  background: var(--ui-accent-soft);
+  border-color: transparent;
+  color: var(--ui-accent);
+}
+.blk-auto-run {
+  font: inherit;
+  font-size: var(--ui-fs-xs);
+  padding: 0 var(--ui-gap-3);
+  border-radius: var(--ui-radius-pill);
+  border: 1px solid var(--ui-border-subtle);
+  background: var(--ui-surface);
+  color: var(--ui-text-secondary);
+  cursor: pointer;
+}
+.blk-auto-run[data-enabled='1'] {
+  color: var(--ui-accent);
+  border-color: var(--ui-accent);
+}
+.blk-auto-broken {
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-tertiary);
+}
+.blk-auto-sec {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ui-gap-2);
+  min-width: 0;
+}
+.blk-auto-sec-label {
+  flex: 0 0 auto;
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-tertiary);
+}
+.blk-auto-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-gap-1);
+  min-width: 0;
+}
+.blk-auto-chip {
+  font: inherit;
+  font-size: var(--ui-fs-xs);
+  padding: 0 var(--ui-gap-2);
+  border-radius: var(--ui-radius-pill);
+  border: 1px solid var(--ui-border-subtle);
+  background: var(--ui-surface);
+  color: var(--ui-text-secondary);
+  max-width: 100%;
+  /* 单行省略走原语：chip 上另挂 `ui-ellipsis`（组件侧），这里不再抄一份几何 */
+}
+button.blk-auto-chip {
+  cursor: pointer;
+}
+.blk-auto-chip.is-event {
+  color: var(--ui-text-tertiary);
+  border-style: dashed;
+}
+.blk-auto-chip.is-muted {
+  color: var(--ui-text-tertiary);
+  background: transparent;
+  border-style: dashed;
+}
+.blk-auto-chip.is-empty {
+  color: var(--ui-text-tertiary);
+  border-style: dashed;
+}
+.blk-auto-step {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--ui-gap-1);
+  min-width: 0;
+  padding-inline-start: var(--ui-gap-2);
+}
+.blk-auto-step-cmd {
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-secondary);
+}
+.blk-auto-step-del {
+  font: inherit;
+  font-size: var(--ui-fs-xs);
+  border: none;
+  background: transparent;
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+  padding: 0 var(--ui-gap-1);
+}
+.blk-auto-add {
+  align-self: flex-start;
+  font: inherit;
+  font-size: var(--ui-fs-xs);
+  border: none;
+  background: transparent;
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+  padding: 0;
+}
+.blk-auto-inline {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+}
+.blk-auto-inline input {
+  font: inherit;
+  font-size: var(--ui-fs-xs);
+  padding: 0 var(--ui-gap-2);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface);
+  color: var(--ui-text-secondary);
+  min-width: 0;
+}

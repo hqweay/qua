@@ -407,7 +407,7 @@ export class RenderOps {
   private renderedWithEvents = false
   private eventsPresent(): boolean {
     const ev = this.ed.events
-    return Boolean(ev && (ev.viewBody || ev.embedBody || ev.propsLine || ev.assetView))
+    return Boolean(ev && (ev.viewBody || ev.automationBody || ev.embedBody || ev.propsLine || ev.assetView))
   }
 
   /**
@@ -1028,9 +1028,10 @@ export class RenderOps {
          * 「哪一行画」由 `block-dom` 的 `rowHasInlineViewBody` 判（按源分派，
          * 段根同此——聚焦后身体仍贴着自己那一行，不再让位段尾宿主）。
          */
-        ...(this.ed.events.viewBody
+        ...(this.ed.events.viewBody || this.ed.events.automationBody
           ? {
               viewBody: (b: Block, into: HTMLElement) => this.ed.embeds.attachViewBody(b, into),
+              automationBody: (b: Block, into: HTMLElement) => this.ed.embeds.attachAutomationBody(b, into),
             }
           : {}),
         // 块下属性行：值文本与点击都在装配层；`view` 只给位置与定高
@@ -1206,7 +1207,9 @@ export class RenderOps {
       visibleRowHeight(
       r.block,
       this.extraHeads(r),
-      (Boolean(this.ed.events.viewBody) && rowHasInlineViewBody(r) && !isFolded(this.ed.doc, r.block.id)) ||
+      (Boolean(this.ed.events.viewBody || this.ed.events.automationBody) &&
+        rowHasInlineViewBody(r) &&
+        !isFolded(this.ed.doc, r.block.id)) ||
         (Boolean(this.ed.events.embedBody) &&
           rowHasEmbedViewBody(r.block, (id) => this.ed.store.find(id)) &&
           !isFolded(this.ed.doc, r.block.id)),

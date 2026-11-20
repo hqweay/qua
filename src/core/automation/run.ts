@@ -21,7 +21,6 @@ import { ensureTagInTx, type TagLookup } from '../kb/ensure-tag.ts'
 import { formatOf, propKindOf, valuesOk } from '../props/props.ts'
 import { removeRunById, refRunsOf, textRuns, type Run } from '../model/runs.ts'
 import type { KbClient, Tx } from '../kb/types.ts'
-import type { UndoCapture } from '../kb/scoped.ts'
 import type { AutomationDef, AutomationStep } from './automation.ts'
 
 /** 手动链可用的命令 → 原语（**闭集**：加一步先在这里立一条，递归天然进不来） */
@@ -78,7 +77,11 @@ export function manualRunGuards(
 /** 自动化 runner 需要的读面（窄口：`tx` 之外只给按 id 找块与字段定义清单） */
 export interface AutomationKb
   extends Pick<KbClient, 'get' | 'matchesSpec' | 'propDefs' | 'findTag' | 'resolveAlias' | 'roots'> {
-  tx<R>(fn: (tx: Tx) => R, opts?: { directEdit?: boolean }): { result: R; undo: UndoCapture }
+  /**
+   * 事务入口：runner 把**全部步骤**包在这一笔里（真原子）。撤销捕获不经过这里——
+   * 入口（装配层）拿到 undo 自己记账；runner 只关心「失败整批回滚」。
+   */
+  tx<R>(fn: (tx: Tx) => R): { result: R }
 }
 
 /** 步骤里显式指到别的块时，那一块必须活着（缺省目标在 guards 里已查过） */
@@ -152,17 +155,17 @@ export function runAutomationSteps(
   targetId: string,
   def: AutomationDef,
   opts: { now?: number; lookup?: TagLookup } = {},
-): { undo: UndoCapture; stepsRun: number } | null {
+): { stepsRun: number } | null {
   const nowMs = opts.now ?? Date.now()
   const ctx = { targetId, nowMs }
   let stepsRun = 0
-  const run = kb.tx((tx) => {
+  kb.tx((tx) => {
     for (const step of def.steps) {
       runStepInTx(kb, tx, step, targetId, ctx, opts.lookup)
       stepsRun++
     }
   })
-  return { undo: run.undo, stepsRun }
+  return { stepsRun }
 }
 
 /** 一个步骤在共享事务内的分派（闭集查表；不认识的 cmd 直接抛——声明层没有它） */

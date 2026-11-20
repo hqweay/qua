@@ -32,6 +32,7 @@ import { t } from '../../core/infra/msg.ts'
 import { takenWhere } from '../../app/commands-impl.ts'
 import { openChoicePicker } from '../../app/choice-picker.ts'
 import { renderPropsLine } from '../../ui/block-ui/props-line.ts'
+import { createAutomationBody } from '../../ui/automation/automation-body.ts'
 import { type Registry, type MenuRequest } from '../../core/commands/index.ts'
 import { Layers, type Row } from '../../ui/overlay/layers.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
@@ -93,6 +94,53 @@ function viewEvents(
   const viewBodies = createRowBodyCache((block, into) => {
     const vh = getPanels().mountBlockView(block, into, active, 'inline')
     return { root: vh.root, dispose: () => { vh.dispose(); vh.root.remove() } }
+  })
+  /**
+   * **自动化身体的目标选择**（运行按钮的落点）：手动链目标必须**显式点出来**——
+   * 块身体上没有「当前块」语义（人正看着的是规则，不是目标），猜一个就会跑错地方。
+   */
+  const pickRunTarget = (automationId: string): void => {
+    const rows: Row[] = [...kb.pages(), ...kb.tags()].map((b) => ({
+      id: b.id,
+      label: blockLabel(b, kbGet),
+      group: 'pick/run-target',
+      icon: 'lucide:zap',
+    }))
+    layers.openMenu({
+      rows,
+      title: t('ui.automation.runPickTitle'),
+      anchor: null,
+      searchable: true,
+      focusSearch: true,
+      emptyText: t('ui.automation.runPickEmpty'),
+      onPick: (row) => {
+        void getRegistry().invoke('core.automation/run', { automationId, blockId: row.id }, 'ui')
+      },
+    })
+  }
+  /**
+   * **自动化身体的实例缓存**（与查询体同一条判据）：定义编辑是**多次小写**，
+   * 行重画（外来编辑/撤销）不能把它重建一次——输入焦点与展开的行内输入框都要活下来。
+   */
+  const automationBodies = createRowBodyCache((block, into) => {
+    const body = createAutomationBody({
+      blockId: block.id,
+      getBlock: () => kb.get(block.id),
+      kb,
+      subscribe: (fn) => blocks.subscribe(fn),
+      openMenu: (rows, onPick, title) => {
+        layers.openMenu({ rows, title, onPick, anchor: null, searchable: false, focusSearch: false })
+      },
+      onRun: () => pickRunTarget(block.id),
+      onToggle: (on) => {
+        void getRegistry().invoke('core.automation/toggle-enabled', { automationId: block.id, on }, 'ui')
+      },
+      writeDef: (def) => {
+        void getRegistry().invoke('core.automation/set-def', { automationId: block.id, def }, 'ui')
+      },
+    })
+    into.appendChild(body.root)
+    return { root: body.root, dispose: () => body.dispose() }
   })
   /**
    * **露面身体的实例缓存**（与查询体同一条判据）：镜像的岛编辑器里住着这份装载
@@ -247,6 +295,8 @@ function viewEvents(
     ...(inlineViewBodies
       ? {
           viewBody: (block: Block, into: HTMLElement) => viewBodies(block, into),
+          /** **自动化块的三段式身体**：与查询体同一扇门（只给「块的真实位置」），同一缓存纪律 */
+          automationBody: (block: Block, into: HTMLElement) => automationBodies(block, into),
         }
       : {}),
     /**

@@ -27,6 +27,7 @@ import {
   hasQueryBody,
   identityTags,
   inlineTagIdsOf,
+  isAutomationBlock,
   isJournal,
   isEmbedBlock,
   isPropDefBlock,
@@ -114,7 +115,7 @@ export const PROP_LINE_H = 20
  * 而那一层（挂载区／镜像／查询结果／单元格）在构造上没有 `viewBody` 回调。
  */
 export function rowHasInlineViewBody(r: VisibleRow): boolean {
-  return hasQueryBody(r.block) || hasChildrenViewBody(r.block)
+  return hasQueryBody(r.block) || hasChildrenViewBody(r.block) || isAutomationBlock(r.block)
 }
 
 /**
@@ -495,6 +496,12 @@ export function makeBlockEl(
      */
     viewBody?: (b: Block, into: HTMLElement) => void
     /**
+     * **正文里自动化块的身体**（三段式：当／如果／就）。与 `viewBody` 同一条分工
+     * （`view` 不 import `ui`、装配层给画法、行内体是另一个编辑宿主）；
+     * 「哪一行画」同走 `rowHasInlineViewBody`（自动化块是身体的一种源）。
+     */
+    automationBody?: (b: Block, into: HTMLElement) => void
+    /**
      * **块下属性行**：有值、且没画在块标后的属性（派生见 `belowFieldsFor`）。
      *
      * `view` 只交代「这一行有这一格」并把它算进高度；值文本与点击（开属性面板）
@@ -526,11 +533,11 @@ export function makeBlockEl(
    * 查询结果列表里的命中行也是查询块，但那一层画的是**结果行**，不是它自己的位置；
    * 给它一个折叠三角就是死控件。
    */
-  const bodyFoldable = Boolean(opts.viewBody) && (hasQueryBody(b) || hasChildrenViewBody(b))
+  const bodyFoldable =
+    Boolean(opts.viewBody || opts.automationBody) && (hasQueryBody(b) || hasChildrenViewBody(b) || isAutomationBlock(b))
   const embedBodyFoldable = Boolean(opts.embedBody) && embedKind === 'view'
   const foldable = r.hasChildren || bodyFoldable || embedBodyFoldable
-  /** 这一行下面是否要画**行内**的身体（按源分派：有结果身体就画，段根同此） */
-  const inlineBody = Boolean(opts.viewBody) && rowHasInlineViewBody(r)
+  const inlineBody = Boolean(opts.viewBody || opts.automationBody) && rowHasInlineViewBody(r)
   /**
    * gutter 上那个**关闭态开关**：只认 `_use: 'closure'` 的字段（＋合法 `_check`）。
    *
@@ -1166,7 +1173,9 @@ export function makeBlockEl(
      */
     if (folded) body.dataset.folded = '1'
     el.appendChild(body)
-    opts.viewBody?.(b, body)
+    // 按源分派：自动化块画三段式定义体，其余（查询／children 源）画视图宿主
+    if (isAutomationBlock(b)) opts.automationBody?.(b, body)
+    else opts.viewBody?.(b, body)
   }
   return el
 }

@@ -23,6 +23,12 @@ export const AUTOMATION_HANDLERS: Record<string, Handler> = {
     if (automationId === '') return false
     return app.toggleAutomation(automationId, a.on === undefined ? undefined : a.on === true)
   },
+  'core.automation/set-def': (a, app) => {
+    const automationId = S(a.automationId)
+    const def = a.def
+    if (automationId === '' || !def || typeof def !== 'object') return false
+    return app.setAutomationDef(automationId, def as import('../../core/automation/automation.ts').AutomationDef)
+  },
   'core.tree/insert-child': (a, app) => {
     const parentId = S(a.parentId)
     if (parentId === '') return false

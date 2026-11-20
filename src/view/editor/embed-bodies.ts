@@ -50,6 +50,13 @@ export class EmbedBodies {
     if (dispose) this.disposers.set(b.id, dispose)
   }
 
+  /** makeBlockEl 的 `automationBody` 钩子（自动化块的三段式定义体；生命周期同上） */
+  attachAutomationBody(b: Block, into: HTMLElement): void {
+    if (b.id === this.pinned) return
+    const dispose = this.ed.events.automationBody?.(b, into)
+    if (dispose) this.disposers.set(b.id, dispose)
+  }
+
   /** 摘掉某一行的身体（换 DOM 之前做） */
   disposeRow(id: string): void {
     const d = this.disposers.get(id)

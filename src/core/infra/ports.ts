@@ -18,6 +18,7 @@ import type { BlockEditor } from '../../view/editor/editor.ts'
 import type { ColorAxis, CtxKeys } from '../index.ts'
 import type { UndoKind } from '../model/undo.ts'
 import type { QueryNode, QuerySpec, SortKey } from '../query/query.ts'
+import type { AutomationDef } from '../automation/automation.ts'
 import type { Cardinality, ChoiceScope, UiPosition } from '../props/props.ts'
 import type { RefDomain } from '../props/ref-domain.ts'
 import type { SecLayout } from '../query/feed.ts'
@@ -853,6 +854,8 @@ export interface App {
   runAutomation(automationId: string, targetId?: string): boolean
   /** 启停一条自动化（`on` 缺省＝翻转） */
   toggleAutomation(automationId: string, on?: boolean): boolean
+  /** 整份定义写回（块身体的编辑面落点；一次编辑＝一笔事务＝一步撤销） */
+  setAutomationDef(automationId: string, def: AutomationDef): boolean
   /** id 绑定的插块（自动化步骤可用的那两条机器形状；`core.editor/insert-block` 绑光标） */
   treeInsertChild(parentId: string, text: string): string
   /** id 绑定的移动（身份约束与 runner 同一份） */

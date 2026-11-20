@@ -1,16 +1,25 @@
 /**
- * 自动化域的命令实现：创建（物化顶层）、手动运行（真原子）、启停开关。
+ * 自动化域的命令实现：创建（物化顶层）、手动运行（真原子）、启停与定义写回。
  *
  * 分工：core 的 runner（`core/automation/run.ts`）只认事务与定义；
- * 这一层负责「当前块是谁」（手动链目标）、撤销记账、重画与 toast——
+ * 这一层负责「当前块是谁」（手动链目标）、重画与 toast——
  * 与属性/视图命令同一条分工（core 判据，app 收尾）。
+ *
+ * ⚠️ runner 的每一笔写都走**装配层的事务入口**（`tx`）：那是 op 进落盘队列、
+ *    撤销记账、按 changes 重画的唯一通道——绕过它（裸 `kb.tx`）的写内存里看得见、
+ *    盘上没有，重开就丢。
  */
-import { isAutomationBlock, mkBlock, type Block } from '../../core/index.ts'
+import { isAutomationBlock, mkBlock, isAutomationDef, type Block } from '../../core/index.ts'
 import { textRuns } from '../../core/model/runs.ts'
-import type { Sel } from '../../core/model/selection.ts'
-import type { UndoCapture } from '../../core/kb/scoped.ts'
+import type { Op } from '../../core/kb/types.ts'
 import type { Tx as KbTx } from '../../core/kb/types.ts'
-import { automationName, mkAutomationBlock, readAutomation } from '../../core/automation/automation.ts'
+import {
+  automationName,
+  canonicalAutomation,
+  mkAutomationBlock,
+  readAutomation,
+  type AutomationDef,
+} from '../../core/automation/automation.ts'
 import { manualRunGuards, moveIdentityConstraint, runAutomationSteps, type AutomationKb } from '../../core/automation/run.ts'
 import { t } from '../../core/infra/msg.ts'
 
@@ -21,16 +30,12 @@ export function freshAutomationDef(): { enabled: false; triggers: ['manual']; st
 
 export interface AutomationDeps {
   /** 读门面（`automations`／`get`／`matchesSpec` 都是 guards 要的窄口） */
-  kb: AutomationKb & { automations(): readonly Block[] }
+  kb: Omit<AutomationKb, 'tx'> & { automations(): readonly Block[] }
   /**
-   * 事务入口：core runner 在这里开**一笔**事务包住全部步骤（真原子）。
-   * 装配层给的适配器（`txRun`）：op 进落盘队列、undo 捕获交回。
+   * 事务入口（装配层 runTx）：core runner 在这里开**一笔**事务包住全部步骤（真原子）；
+   * op 进落盘队列、撤销记账（一次运行＝一步撤销）、按 changes 重画都由它收。
    */
-  tx: <R>(fn: (tx: KbTx) => R, opts?: { directEdit?: boolean }) => { result: R; undo: UndoCapture }
-  /** 撤销记账（一次手动运行 ＝ 一步撤销） */
-  recordUndo: (undo: UndoCapture) => void
-  /** 活动选区（撤销条目要「当时在哪」） */
-  sel: () => Sel | null
+  tx: <R>(fn: (tx: KbTx) => R) => { ops: readonly Op[]; result: R }
   /** 重画一批块所在的行（目标块的样子变了） */
   repaintBlocks: (ids: readonly string[]) => void
   /** 新建后跳到那一块（作者的下一站就是写定义） */
@@ -39,6 +44,17 @@ export interface AutomationDeps {
 }
 
 export function automationCommands(d: AutomationDeps) {
+  /** runner 的窄口：读面转发读门面，事务走装配层入口（op／撤销都不漏） */
+  const runnerKb: AutomationKb = {
+    get: (id) => d.kb.get(id),
+    matchesSpec: (spec, block, opts) => d.kb.matchesSpec(spec, block, opts),
+    propDefs: () => d.kb.propDefs(),
+    findTag: (name) => d.kb.findTag(name),
+    resolveAlias: (name) => d.kb.resolveAlias(name),
+    roots: () => d.kb.roots(),
+    tx: (fn) => d.tx(fn),
+  }
+
   /**
    * 建一条自动化（**身份块物化顶层**，与属性定义块同一条落点口径——位置对身份
    * 不承载信息，树操作会把住在子树里的身份块当货物搬走）。
@@ -72,9 +88,8 @@ export function automationCommands(d: AutomationDeps) {
       return false
     }
     try {
-      const r = runAutomationSteps(d.kb, target, def, { lookup: d.kb })
+      const r = runAutomationSteps(runnerKb, target, def, { lookup: d.kb })
       if (!r) return false
-      d.recordUndo(r.undo)
       d.repaintBlocks([target])
       d.toast(t('ui.automation.ran', { name: automationName(block), count: r.stepsRun }), 'ok')
       return true
@@ -103,6 +118,18 @@ export function automationCommands(d: AutomationDeps) {
     })
     if (changed) d.repaintBlocks([automationId])
     return changed
+  }
+
+  /** 整份定义写回（块身体的编辑面落点；canonical 由调用方给，这里只收合法形状） */
+  const setAutomationDef = (automationId: string, def: AutomationDef): boolean => {
+    if (!d.kb.get(automationId) || !isAutomationDef(def)) return false
+    d.tx((tx) => {
+      tx.patch(automationId, (b) => {
+        b.props = { ...(b.props ?? {}), _automation: canonicalAutomation(def) }
+      })
+    })
+    d.repaintBlocks([automationId])
+    return true
   }
 
   /**
@@ -141,6 +168,7 @@ export function automationCommands(d: AutomationDeps) {
     createAutomation,
     runAutomation,
     toggleAutomation,
+    setAutomationDef,
     treeInsertChild,
     treeMove,
   }
