@@ -3423,12 +3423,14 @@ button.blk-auto-chip {
   font-size: var(--ui-fs-xs);
   color: var(--ui-text-tertiary);
 }
-/* 条件 chip 上的警告记号：只上色图标（warn token），解释悬停里给（界面少字） */
-.blk-auto-warn-ico {
+/* 条件 chip 的**档位记号**：几何吃 data-severity 契约的变量（原语层定三档），
+   图标垂直对齐文字中线，解释悬停里给（界面少字） */
+.blk-auto-sev-ico {
   display: inline-flex;
+  vertical-align: middle;
   margin-inline-end: var(--ui-gap-1);
-  color: var(--ui-warn);
+  color: var(--ui-sev-ink);
 }
-.blk-auto-chip.is-warn {
-  border-color: var(--ui-warn-border);
+.blk-auto-chip[data-severity='warn'] {
+  border-color: var(--ui-sev-border);
 }

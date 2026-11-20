@@ -337,11 +337,11 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
         // 错配提示走记号＋悬停（界面少字）：内容依赖的条件在「新建子块」触发下
         // 出生即不命中——警告色图标点出哪一枚 chip 有这个 caveat，解释悬停里给
         if (hasFresh && warns[i] === true) {
-          c.classList.add('is-warn')
+          c.dataset.severity = 'warn'
           c.dataset.tip = t('ui.automation.freshContentHint')
           const ico = document.createElement('span')
-          ico.className = 'blk-auto-warn-ico'
-          renderIcon(ico, 'lucide:alert-triangle', 'circle-help')
+          ico.className = 'blk-auto-sev-ico'
+          renderIcon(ico, 'lucide:alert-triangle', 'circle-help', 'sm')
           c.prepend(ico)
         }
         line.appendChild(c)

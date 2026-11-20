@@ -176,3 +176,27 @@
     transition: none;
   }
 }
+
+/* ------------------------------------------------ 提示档位（data-severity） */
+
+/*
+  **三档语义、一份变量契约**：info（说明，不催你做什么）／warn（会生效但不合预期）／
+  danger（后果性——会失去东西）。消费方在任意容器上标 `data-severity`，内部用两个
+  变量取色；档位的颜色只有这一份，组件不再各写各的（那是 severity inflation：
+  把「不生效」也染红，红就不再意味着危险）。
+
+  ⚠️ 这条原语给的是**状态契约**（档位 → 变量），不是几何：芯片、横幅、确认框
+     各自画自己的形，吃同一组变量。加档位先问「它是不是又一种『会失去东西』」。
+*/
+[data-severity='info'] {
+  --ui-sev-ink: var(--ui-text-tertiary);
+  --ui-sev-border: var(--ui-border-subtle);
+}
+[data-severity='warn'] {
+  --ui-sev-ink: var(--ui-warn);
+  --ui-sev-border: var(--ui-warn-border);
+}
+[data-severity='danger'] {
+  --ui-sev-ink: var(--ui-danger);
+  --ui-sev-border: var(--ui-danger-border);
+}
