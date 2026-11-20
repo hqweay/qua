@@ -555,6 +555,9 @@ export class BlockEditor {
     changeMs: 0,
     /** 其中 `renderDocks()` 占的毫秒数（回答「每键是不是还在重排侧槽」） */
     docksMs: 0,
+    /** 滚动换窗回调（含换窗后的 scrollTop 还原/焦点还原）的总耗时 */
+    scrollSyncCalls: 0,
+    scrollSyncMs: 0,
   }
 
   /**
@@ -592,6 +595,22 @@ export class BlockEditor {
 
   /** 与行投影同一代的行索引（`blockId → VisibleRow`）：`ctxKeys`／`belowOf` 每键都要查 */
   private rowIndex: Map<string, VisibleRow> | null = null
+  /** 与行投影同一代的行位置（`blockId → 行下标`）：虚拟化的落点/换窗判据用 */
+  private rowPos: Map<string, number> | null = null
+  /** 上面那张表对应的是哪一份行数组（筛选会换数组，索引必须跟着换） */
+  private rowPosFor: readonly VisibleRow[] | null = null
+
+  /** 这一块在**当前可见行**里的下标（不在这一屏/没有行 ⇒ undefined） */
+  rowPosition(id: string): number | undefined {
+    return this.rowPos?.get(id)
+  }
+
+  /** 让行位置表对上这一份行数组（O(N)，只在数组换代时走） */
+  private ensureRowPos(rows: VisibleRow[]): void {
+    if (this.rowPosFor === rows) return
+    this.rowPos = new Map(rows.map((r, i) => [r.block.id, i]))
+    this.rowPosFor = rows
+  }
   sel: Sel | null = null
   virtualize = false
   radius = 12
@@ -1308,6 +1327,9 @@ export class BlockEditor {
 
   private syncWindowOnScroll(): void {
     if (!this.virtualize || this.layout !== 'column') return
+    const t0 = performance.now()
+    this.perfProbe.scrollSyncCalls++
+    try {
     /**
      * ⚠️ **组合期不换窗**：换窗会重挂承载行的元素，输入法的组合锚点跟着丢
      *    （`checks/probe-ime-attrib.mjs` 的场景 4 量过）。滚到的地方先留占位，
@@ -1331,6 +1353,9 @@ export class BlockEditor {
       this.restoreSel()
       // `restoreSel` 可能把光标滚进视口；用户正在滚，保持他原来的位置
       this.blankArea.scrollTop = scrollTop
+    }
+    } finally {
+      this.perfProbe.scrollSyncMs += performance.now() - t0
     }
   }
 
@@ -1417,6 +1442,7 @@ export class BlockEditor {
       rows,
     }
     this.rowIndex = new Map(rows.map((r) => [r.block.id, r]))
+    this.ensureRowPos(rows)
     return rows
   }
 
@@ -1441,15 +1467,38 @@ export class BlockEditor {
      * 否则刚敲出来的空块（不带任何被筛的页/标签）会在下一帧凭空消失，
      * 而光标还在里面——编辑面不能被它自己的镜头藏掉。
      */
-    const force = new Set<string>()
     const caret = this.caretBlock()
+    /**
+     * 筛选结果也**按代复用**：判据（filter）与光标链不变、模型没动过时，
+     * 同一份 `all` 的筛选结果不会变。滚动/换窗会反复问 `rows()`，没有这一格
+     * 就退化成每次 O(可见行)（高度索引也就永远建在同一份新数组上）。
+     * ⚠️ 内容改动会推 `revision`：筛选可以读正文/标签，所以它必须参与失效。
+     */
+    const cached = this.filteredRowsCache
+    if (cached && cached.all === all && cached.filter === filter && cached.caret === caret && cached.rev === this.store.revision) {
+      this.ensureRowPos(cached.rows)
+      return cached.rows
+    }
+    const force = new Set<string>()
     if (caret !== null) {
       const chain = pathTo(this.doc, caret)
       if (chain) for (const b of chain) force.add(b.id)
       else force.add(caret)
     }
-    return filterVisibleRows(all, (r, path) => filter(r.block, path), force)
+    const rows = filterVisibleRows(all, (r, path) => filter(r.block, path), force)
+    this.filteredRowsCache = { all, filter, caret, rev: this.store.revision, rows }
+    this.ensureRowPos(rows)
+    return rows
   }
+
+  /** 与行投影同一代的筛选结果缓存（见 `rows()` 的注释） */
+  private filteredRowsCache: {
+    all: VisibleRow[]
+    filter: (block: Block, path: readonly Block[]) => RowVerdict
+    caret: string | null
+    rev: number
+    rows: VisibleRow[]
+  } | null = null
 
 
   /**

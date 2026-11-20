@@ -86,6 +86,30 @@ async function seed(n) {
   return Date.now() - t0
 }
 
+/**
+ * 等后台离屏测量**停下来**再测键入/滚动：否则滚动墙钟里混着空闲批次的 DOM 构建，
+ * 读数会把「后台一次性成本」误读成「换窗成本」。顺便记录它花了多久/多少行。
+ */
+async function waitOffscreenSettled() {
+  const t0 = Date.now()
+  let last = -1
+  let stable = 0
+  for (;;) {
+    const p = await page.evaluate(() => window.__qua.perf())
+    const n = p.render.offscreenBatches
+    if (n === last) stable++
+    else {
+      stable = 0
+      last = n
+    }
+    // 稳定窗给 3s：空闲回调可能被首帧/布局挤到几百毫秒才发一批，3×200ms 会误判「已停」
+    if (stable >= 15 || Date.now() - t0 > 30000) {
+      return { ms: Date.now() - t0, batches: n, rows: p.render.offscreenRows }
+    }
+    await sleep(200)
+  }
+}
+
 async function firstEditableId() {
   return page.evaluate(() => {
     // 优先挑一个普通子行（depth=1），避免把页头的特殊分支当输入面
@@ -187,8 +211,12 @@ async function scrollStep(top) {
     const host = document.getElementById('scroll')
     const t0 = performance.now()
     host.scrollTop = y
-    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
-    return performance.now() - t0
+    const t1 = performance.now()
+    await new Promise((r) => requestAnimationFrame(r))
+    const t2 = performance.now()
+    await new Promise((r) => requestAnimationFrame(r))
+    const t3 = performance.now()
+    return { total: t3 - t0, assign: t1 - t0, raf1: t2 - t1, raf2: t3 - t2 }
   }, top)
 }
 
@@ -199,9 +227,16 @@ async function measureScroll(total) {
   })
   await sleep(400)
   const walls = []
+  const assignMs = []
+  const raf1Ms = []
+  const raf2Ms = []
   const winCalls = []
   const winRows = []
   const winMs = []
+  const builds = []
+  const fallbacks = []
+  const syncCalls = []
+  const syncMs = []
   const steps = 8
   for (let i = 1; i <= steps; i++) {
     const top = Math.floor((total * 0.7 * i) / steps)
@@ -209,19 +244,36 @@ async function measureScroll(total) {
     const wall = await scrollStep(top)
     await sleep(120)
     const after = await page.evaluate(() => window.__qua.perf())
-    walls.push(wall)
+    walls.push(wall.total)
+    assignMs.push(wall.assign)
+    raf1Ms.push(wall.raf1)
+    raf2Ms.push(wall.raf2)
     winCalls.push(after.render.applyWindowCalls - before.render.applyWindowCalls)
     winRows.push(after.render.applyWindowRows - before.render.applyWindowRows)
     winMs.push(after.render.applyWindowMs - before.render.applyWindowMs)
+    builds.push(after.render.heightIndexBuilds - before.render.heightIndexBuilds)
+    fallbacks.push(after.render.topRowFallbacks - before.render.topRowFallbacks)
+    syncCalls.push(after.editor.scrollSyncCalls - before.editor.scrollSyncCalls)
+    syncMs.push(after.editor.scrollSyncMs - before.editor.scrollSyncMs)
   }
   return {
     steps,
+    stepWalls: walls.map((n) => Number(n.toFixed(1))),
+    stepSplit: {
+      assignP95: pct(assignMs, 95),
+      raf1P95: pct(raf1Ms, 95),
+      raf2P95: pct(raf2Ms, 95),
+    },
     scrollWallMs: { p50: pct(walls, 50), p95: pct(walls, 95) },
     applyWindow: {
       calls: winCalls.reduce((a, b) => a + b, 0),
       rowsProcessed: winRows.reduce((a, b) => a + b, 0),
       msPerCallP95: pct(winMs.filter((n) => n > 0), 95),
       msTotal: Number(winMs.reduce((a, b) => a + b, 0).toFixed(2)),
+      heightIndexBuilds: builds.reduce((a, b) => a + b, 0),
+      topRowFallbacks: fallbacks.reduce((a, b) => a + b, 0),
+      scrollSyncCalls: syncCalls.reduce((a, b) => a + b, 0),
+      scrollSyncMsTotal: Number(syncMs.reduce((a, b) => a + b, 0).toFixed(2)),
     },
   }
 }
@@ -229,7 +281,10 @@ async function measureScroll(total) {
 const reports = []
 try {
   for (const n of SIZES) {
+    // 每个规模从零计：离屏批次/处理行数只统计这一份文档
+    await page.evaluate(() => window.__qua.perfReset())
     const loadMs = await seed(n)
+    const offscreen = await waitOffscreenSettled()
     const total = await page.evaluate(() => window.__qua.__editor.rows().length)
     const dom = await page.evaluate(() => window.__qua.snapshot().domBlocks)
     const id = await firstEditableId()
@@ -240,6 +295,7 @@ try {
       renderedRows: total,
       domBlocks: dom,
       seedAndReloadMs: loadMs,
+      offscreenSettle: offscreen,
       typing: {
         samples: typing.samples.length,
         p50Ms: pct(typing.samples, 50),

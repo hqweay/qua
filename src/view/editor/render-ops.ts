@@ -39,6 +39,7 @@ import { type GroupHead } from '../../core/model/model.ts'
 import { plainText } from '../../core/model/runs.ts'
 import { renderIcon } from '../icons.ts'
 import { HeightCache } from './height-cache.ts'
+import { RowHeightIndex } from './height-index.ts'
 import { t } from '../../core/infra/msg.ts'
 import { assetViewOf, markAssetMissing } from '../asset-views.ts'
 import { LINE_H, fillBlockText, makeBlockEl, makeRefBadgeEl, rowHasEmbedViewBody, rowHasInlineViewBody, visibleRowHeight } from './block-dom.ts'
@@ -112,6 +113,12 @@ export class RenderOps {
     applyWindowRows: 0,
     topRowCalls: 0,
     topRowRows: 0,
+    /** 离屏实测的批次数/行数（后台一次性成本，诊断用） */
+    offscreenBatches: 0,
+    offscreenRows: 0,
+    /** 行高前缀索引重建次数 / `topRowId` 落进占位区的次数 */
+    heightIndexBuilds: 0,
+    topRowFallbacks: 0,
   }
 
   /**
@@ -141,8 +148,48 @@ export class RenderOps {
    */
   readonly heights = new HeightCache()
 
+  /**
+   * **行高前缀索引**：与可见行同一代。换窗时头/尾占位与落点都查它，
+   * 不再把全量行 `slice().reduce()` 一遍（见 `./height-index.ts`）。
+   *
+   * 失效：`rows` 数组换代（结构/折叠/筛选）或 `propsRevision` 变（块下行行数是估算
+   * 的输入）。内容改动不改估算口径——窗口内那一行的实测回填走点更新。
+   */
+  private heightIndex: {
+    rows: readonly VisibleRow[]
+    /** 行 id → 行下标（Fenwick 点更新与锚点定位用） */
+    pos: Map<string, number>
+    propsRev: number
+    index: RowHeightIndex
+  } | null = null
+
+  private ensureHeightIndex(): NonNullable<RenderOps['heightIndex']> {
+    const rows = this.ed.rows()
+    const propsRev = this.ed.store.propsRevision
+    const c = this.heightIndex
+    if (c !== null && c.rows === rows && c.propsRev === propsRev) return c
+    /**
+     * ⚠️ 建表是 **O(N) 一次性**（估算需要每行的块下行行数 ⇒ 整批 `belowOf`），
+     *    但从此**不在换窗路径上**：滚动只做前缀和查询与窗口内实测的点更新。
+     */
+    const below = this.belowOf(rows.map((r) => r.block))
+    const values = rows.map((r) => this.rowHeight(r, below))
+    this.probe.heightIndexBuilds++
+    const entry = {
+      rows,
+      pos: new Map(rows.map((r, i) => [r.block.id, i])),
+      propsRev,
+      index: new RowHeightIndex(values),
+    }
+    this.heightIndex = entry
+    return entry
+  }
+
   /** 记下这一行的实测高（`applyWindow` 挂完整窗之后量一次） */
   measureRows(ids: Iterable<string>): void {
+    const hi = this.heightIndex
+    // 索引必须对得上**此刻**的行数组：换过代就先不动它（下一次 ensure 会重建并读到实测表）
+    const live = hi !== null && hi.rows === this.ed.rows() ? hi : null
     for (const id of ids) {
       const el = this.ed.blockEl(id)
       if (!el) continue
@@ -153,12 +200,16 @@ export class RenderOps {
        */
       const h = el.getBoundingClientRect().height
       this.heights.set(id, h)
+      const i = live?.pos.get(id)
+      if (live && i !== undefined) live.index.set(i, h)
     }
   }
 
-  /** 宽度变了（或前提变了）⇒ 作废实测高；理由见 `HeightCache.invalidate` */
+  /** 宽度变了（或前提变了）⇒ 作废实测高与前缀索引；理由见 `HeightCache.invalidate` */
   invalidateHeights(width?: number): void {
     this.heights.invalidate(width)
+    this.heightIndex = null
+    this.measureQueueFor = null
   }
 
   /**
@@ -184,12 +235,30 @@ export class RenderOps {
 
   private offscreenQueued = false
 
+  /**
+   * 离屏测量的**待量队列**：行集合换代时建一次（O(N)），之后每批只取游标处的一段。
+   * 旧写法每批都 `rows.filter(!measured)`——100k 行 × 1563 批就是 O(N²) 的空闲开销。
+   */
+  private measureQueue: VisibleRow[] = []
+  private measureCursor = 0
+  private measureQueueFor: readonly VisibleRow[] | null = null
+
   /** 一次空闲批次：把「还没量过」的行挂到离屏容器里量一遍，直到量完 */
   private measureOffscreenBatch(): void {
     if (!this.ed.virtualize || this.ed.layout !== 'column') return
     const rows = this.ed.rows()
-    const pending = rows.filter((r) => !this.heights.has(r.block.id))
-    if (pending.length === 0) return
+    if (this.measureQueueFor !== rows) {
+      /**
+       * ⚠️ **预量有上限**：全量预量要替每一行建一次离屏 DOM，十万行量级实测
+       * ~16ms/64 行（总共 25s 量级），与「滚动成本只跟窗口有关」直接冲突。
+       * 超过上限的文档按「滚到哪量到哪」：窗口内的实测照常回填，前缀索引里的
+       * 总高是估算——这是保留的已知误差，不再用后台 CPU 换。
+       */
+      this.measureQueue = rows.filter((r) => !this.heights.has(r.block.id)).slice(0, this.offscreenMaxRows)
+      this.measureCursor = 0
+      this.measureQueueFor = rows
+    }
+    if (this.measureCursor >= this.measureQueue.length) return
     const width = this.ed.blankArea.clientWidth
     if (width <= 0) return
     const host = document.createElement('div')
@@ -217,7 +286,10 @@ export class RenderOps {
     sec.className = 'sec'
     sec.dataset.sec = ''
     host.appendChild(sec)
-    const batch = pending.slice(0, this.idleBatch)
+    const batch = this.measureQueue.slice(this.measureCursor, this.measureCursor + this.idleBatch)
+    this.measureCursor += batch.length
+    this.probe.offscreenBatches++
+    this.probe.offscreenRows += batch.length
     // 与在线渲染同一条批级路径：扫库一次、单块判据一次
     const batchBlocks = batch.map((r) => r.block)
     const derive = this.deriveOf()
@@ -242,9 +314,14 @@ export class RenderOps {
       this.makePlaceholderFor = savedHook
     }
     document.body.appendChild(host)
+    const hi = this.heightIndex
+    const live = hi !== null && hi.rows === rows ? hi : null
     for (const { id, el } of made) {
       const h = el.getBoundingClientRect().height
       this.heights.set(id, h)
+      // 实测值点更新进前缀索引（O(log N)），占位随即可用前缀和重写
+      const i = live?.pos.get(id)
+      if (live && i !== undefined) live.index.set(i, h)
     }
     host.remove()
     /**
@@ -252,27 +329,26 @@ export class RenderOps {
      * 只改样式高度，不重挂 DOM（不闪、不动滚动位）。
      */
     this.refreshPlaceholderHeights()
-    if (pending.length > batch.length) this.scheduleOffscreenMeasure()
+    if (this.measureCursor < this.measureQueue.length) this.scheduleOffscreenMeasure()
   }
 
-  /** 按当前（可能刚更新过的）行高表重写头尾占位的高度 */
+  /** 按当前（可能刚更新过的）前缀索引重写头尾占位的高度 */
   private refreshPlaceholderHeights(): void {
     const rows = this.ed.rows()
     if (rows.length === 0) return
-    const below = this.belowOf(rows.map((r) => r.block))
-    const rowH = (r: VisibleRow): number => this.rowHeight(r, below)
+    const heights = this.ensureHeightIndex()
     const head = this.ed.container.querySelector<HTMLElement>('.ph[data-ph="head"]')
     const tail = this.ed.container.querySelector<HTMLElement>('.ph[data-ph="tail"]')
-    if (head && this.winFrom > 0) {
-      head.style.height = `${rows.slice(0, this.winFrom).reduce((n, r) => n + rowH(r), 0)}px`
-    }
+    if (head && this.winFrom > 0) head.style.height = `${heights.index.prefix(this.winFrom)}px`
     if (tail && this.winTo < rows.length) {
-      tail.style.height = `${rows.slice(this.winTo).reduce((n, r) => n + rowH(r), 0)}px`
+      tail.style.height = `${heights.index.total - heights.index.prefix(this.winTo)}px`
     }
   }
 
   /** 一次空闲批次量多少行（`requestIdleCallback` 的单次预算内量得完的量级） */
   private idleBatch = 64
+  /** 每份文档最多预量多少行（超过就按「滚到哪量到哪」，见 `measureOffscreenBatch`） */
+  private readonly offscreenMaxRows = 2000
 
   /** 这一行的高度不再可信（DOM 被换掉）：只删这一格，不动其余 */
   forgetHeight(id: string): void {
@@ -1113,8 +1189,9 @@ export class RenderOps {
 
   /** 这一行是不是已经贴着窗口边（虚拟化的滚动联动据此决定换不换窗） */
   needsRecenter(blockId: string, slack: number): boolean {
-    const i = this.ed.rows().findIndex((r) => r.block.id === blockId)
-    if (i < 0) return false
+    // 行下标查表（O(1)）：滚动事件里每次都问，`rows().findIndex` 是 O(全量行)
+    const i = this.ed.rowPosition(blockId)
+    if (i === undefined) return false
     return i < this.winFrom + slack || i >= this.winTo - slack
   }
 
@@ -1127,11 +1204,19 @@ export class RenderOps {
   topRowId(): string | null {
     const rows = this.ed.rows()
     this.probe.topRowCalls++
-    this.probe.topRowRows += rows.length
     if (rows.length === 0) return null
     const area = this.ed.blankArea
     const box = area.getBoundingClientRect()
-    for (const r of rows) {
+    /**
+     * 只扫**已挂载的窗口**：窗口外的行没有 DOM，`blockEl` 对每一行都是一次
+     * 全容器选择器查询——旧写法在滚动事件里对全量行做这件事，是滚动路径上的 O(N)。
+     * 非虚拟化时 `winFrom/winTo` 覆盖全量，行为与原来一致。
+     */
+    const from = Math.max(0, Math.min(this.winFrom, rows.length))
+    const to = Math.max(from, Math.min(this.winTo, rows.length))
+    this.probe.topRowRows += to - from
+    for (let i = from; i < to; i++) {
+      const r = rows[i]!
       const el = this.ed.blockEl(r.block.id)
       if (!el) continue
       const rect = el.getBoundingClientRect()
@@ -1141,14 +1226,11 @@ export class RenderOps {
        */
       if (rect.bottom > box.top && rect.top < box.bottom) return r.block.id
     }
+    // 视口落进占位区：按同一份前缀索引反查行下标（O(log N)），不再从上往下累加
+    this.probe.topRowFallbacks++
     const y = box.top - this.ed.container.getBoundingClientRect().top
-    const below = this.belowOf(rows.map((r) => r.block))
-    let acc = 0
-    for (const r of rows) {
-      acc += this.rowHeight(r, below)
-      if (acc > y) return r.block.id
-    }
-    return rows[rows.length - 1]?.block.id ?? null
+    const heights = this.ensureHeightIndex()
+    return rows[heights.index.find(y)]?.block.id ?? rows[rows.length - 1]?.block.id ?? null
   }
 
   /** 窗口化挂载：只挂「光标所在行 ± radius」（**以可见行计**，折叠的子树本来就不在窗口里） */
@@ -1163,12 +1245,14 @@ export class RenderOps {
     const t0 = performance.now()
     const rows = this.ed.rows()
     this.probe.applyWindowCalls++
-    this.probe.applyWindowRows += rows.length
     const cid = centerId ?? this.ed.sel?.aBlock ?? rows[0]?.block.id
-    let ci = rows.findIndex((r) => r.block.id === cid)
-    if (ci < 0) ci = 0
+    // 行下标走行位置表（O(1)），不再每次换窗把可见行扫一遍找中心
+    let ci = cid !== undefined ? (this.ed.rowPosition(cid) ?? 0) : 0
+    if (ci < 0 || ci >= rows.length) ci = 0
     const from = Math.max(0, ci - this.ed.radius)
     const to = Math.min(rows.length, ci + this.ed.radius + 1)
+    // 这一笔真正处理的行数：窗口切片（头/尾只是 O(log N) 前缀查询，不按行算）
+    this.probe.applyWindowRows += to - from
     this.ed.embeds.disposeAll()
     this.ed.container.textContent = ''
     this.mounted.clear()
@@ -1184,21 +1268,24 @@ export class RenderOps {
      * 与**露面块里的投影**（源的结果视图）。两者高度都来自 `VIEW_BODY_H` ——
      * 少算一处，带这种行的文档滚动条就系统性偏小。
      */
-    const below = this.belowOf(rows.map((r) => r.block))
-    const rowH = (r: VisibleRow): number => this.rowHeight(r, below)
+    /**
+     * 头/尾占位的高度来自**前缀索引**：建表是一次性的（见 `ensureHeightIndex`），
+     * 换窗本身只付 O(log N) 的前缀查询——不再对全量行 `slice().reduce()`。
+     */
+    const heights = this.ensureHeightIndex()
+    const headH = heights.index.prefix(from)
+    const tailH = heights.index.total - heights.index.prefix(to)
     /** 换窗判据要读「现在窗口盖住哪一段」 */
     this.winFrom = from
     this.winTo = to
     let headEl: HTMLElement | null = null
     let tailEl: HTMLElement | null = null
     if (from > 0) {
-      const headH = rows.slice(0, from).reduce((n, r) => n + rowH(r), 0)
       headEl = this.placeholder(from, 'head', headH)
       this.ed.container.appendChild(headEl)
     }
     this.renderRows(rows.slice(from, to), to >= rows.length)
     if (to < rows.length) {
-      const tailH = rows.slice(to).reduce((n, r) => n + rowH(r), 0)
       tailEl = this.placeholder(rows.length - to, 'tail', tailH)
       this.ed.container.appendChild(tailEl)
     }
@@ -1216,8 +1303,9 @@ export class RenderOps {
      *    重算很便宜——只是把已经算过的和重写一遍，不碰 DOM 结构。
      */
     if (headEl || tailEl) {
-      if (headEl) headEl.style.height = `${rows.slice(0, from).reduce((n, r) => n + rowH(r), 0)}px`
-      if (tailEl) tailEl.style.height = `${rows.slice(to).reduce((n, r) => n + rowH(r), 0)}px`
+      // 窗口内的实测已经回填进索引（`measureRows` 的点更新），这里只重查前缀
+      if (headEl) headEl.style.height = `${heights.index.prefix(from)}px`
+      if (tailEl) tailEl.style.height = `${heights.index.total - heights.index.prefix(to)}px`
     }
     /**
      * **窗口外的行排队离屏量**：量完 `rowHeight` 就有真值，占位随之变准
