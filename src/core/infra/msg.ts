@@ -636,6 +636,7 @@ export const MSG = {
   'ui.automation.secIf': '如果',
   'ui.automation.secThen': '就',
   'ui.automation.trigger.manual': '手动运行',
+  'ui.automation.trigger.or': '或',
   'ui.automation.addTrigger': '＋ 触发',
   'ui.automation.addTriggerTitle': '什么时候跑（满足任一即可）',
   'ui.automation.removeTrigger': '去掉这个触发',

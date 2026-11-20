@@ -2517,6 +2517,58 @@
   border-color: transparent;
 }
 /*
+  **实例的字段手柄**：占原来就有的图标槽，不另加一格。
+  静止显示目标的脸（身份）；指到胶囊上换成 chevron（动作；点击开 102 字段卡）。
+  换手而不是并排：一行里每多一枚实例就多 10px，正文会被读成一串工具条。
+  ⚠️ 点击语义在 `data-ref-fields` 上；label 仍走 `data-ref-to` 的导航。
+*/
+.atom-handle {
+  position: relative;
+  inline-size: var(--ui-icon-sm);
+  block-size: var(--ui-icon-sm);
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+.atom-handle-face,
+.atom-handle-caret {
+  position: absolute;
+  inset: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 120ms ease;
+}
+.atom-handle-caret {
+  opacity: 0;
+  color: var(--ui-text-tertiary);
+}
+.atom-obj:hover .atom-handle {
+  opacity: 1;
+}
+.atom-obj:hover .atom-handle-face {
+  opacity: 0;
+}
+.atom-obj:hover .atom-handle-caret {
+  opacity: 1;
+  color: var(--ui-text-secondary);
+}
+/*
+  **实例的状态标记**：closure 字段的当前选项图标，占同一个图标槽。
+  它是「此刻是什么状态」而不是一枚固定方框；点它翻完成/取消，⌥ 打开状态菜单。
+  有状态时不再叠标签的脸（C1）：一个胶囊只留一个控件。
+*/
+.atom .atom-ico.atom-closure {
+  opacity: 1;
+  cursor: pointer;
+  color: var(--ui-text-tertiary);
+}
+.atom .atom-ico.atom-closure:hover {
+  color: var(--ui-text-secondary);
+}
+.atom .atom-ico.atom-closure[data-closure-state='closed'] {
+  color: var(--ui-ok);
+}
+/*
   **页引用**：`[[名]]` 指向普通块。结构线款——无底无胶囊，`[[ ]]` 装饰 ＋ 一条低强度
   下划线说「这是链接」，悬停把线加重。**排版度量与正文同一套**（display:inline、字号
   行高继承、零边距）：它是正文里最轻的替身，任何独立的盒几何（inline-flex 居中、
@@ -2584,6 +2636,7 @@
 .tag-chip {
   display: inline-flex;
   align-items: center;
+  gap: var(--ui-gap-2);
   padding: 0 5px;
   border-radius: var(--ui-radius-sm);
   /* chip 染各染各的标签色：soft 底＋solid 字，渲染层把 token 引用写进行上的局部槽；
@@ -2603,6 +2656,28 @@
   opacity: 1;
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+/*
+  **块标签 chip 的字段三角**：0-cell 的行尾 chrome，不占正文 ⇒ 常驻。
+  chip 本体仍走 109 打开标签类；三角是内部独立命中区，开宿主块在这枚标签下的字段卡。
+  只有标签声明了字段时才生成（没有 body 就没有披露）。
+*/
+.tag-chip-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: var(--ui-icon-sm);
+  block-size: var(--ui-icon-sm);
+  flex: 0 0 auto;
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+}
+.tag-chip-caret .ico {
+  inline-size: 1em;
+  block-size: 1em;
+}
+.tag-chip:hover .tag-chip-caret {
+  color: var(--ui-text-secondary);
 }
 /* 多标签（≥2）时 chips 可拖拽重排：抓手指向可拖，拖动中压暗（落点预览由 DOM 实时搬位） */
 .blk-tags .tag-chip[draggable='true'] {
@@ -3332,4 +3407,28 @@ button.blk-auto-chip {
   background: var(--ui-surface);
   color: var(--ui-text-secondary);
   min-width: 0;
+}
+
+/* 自动化身体的行容器：段标签在左，chips 行在右**纵向堆**——
+   多行（多步骤／换行的长条件）不再水平挤成一排。 */
+.blk-auto-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-1);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+/* 多触发的连接词：muted 文本，不是 chip（与条件树 chip 的「或」同族） */
+.blk-auto-or {
+  font-size: var(--ui-fs-xs);
+  color: var(--ui-text-tertiary);
+}
+/* 条件 chip 上的警告记号：只上色图标（warn token），解释悬停里给（界面少字） */
+.blk-auto-warn-ico {
+  display: inline-flex;
+  margin-inline-end: var(--ui-gap-1);
+  color: var(--ui-warn);
+}
+.blk-auto-chip.is-warn {
+  border-color: var(--ui-warn-border);
 }

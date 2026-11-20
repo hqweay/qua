@@ -18,6 +18,8 @@ import {
   isPropDefBlock,
   propKindOf,
   propLabel,
+  queryNodeOfTree,
+  treeOfSpec,
   type AutomationDef,
   type AutomationStep,
   type AutomationTrigger,
@@ -27,6 +29,7 @@ import {
 import { DECL_BY_NAME } from '../../core/commands/decls.ts'
 import { STEP_COMMANDS } from '../../core/automation/run.ts'
 import { mentionsContentAtoms } from '../../core/automation/automation.ts'
+import { renderIcon } from '../../view/icons.ts'
 import { canonicalAutomation, readAutomation } from '../../core/automation/automation.ts'
 import { displayNameOf } from '../../core/identity/alias.ts'
 import type { QuerySpec } from '../../core/query/query.ts'
@@ -128,7 +131,11 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
     label.className = 'blk-auto-sec-label'
     label.textContent = title
     sec.appendChild(label)
-    for (const r of rows) sec.appendChild(r)
+    // 行容器纵向堆：多行（多步骤／长条件换行）不与标签水平挤成一排
+    const body = document.createElement('div')
+    body.className = 'blk-auto-rows'
+    for (const r of rows) body.appendChild(r)
+    sec.appendChild(body)
     return sec
   }
 
@@ -172,8 +179,17 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
       // 手动运行的 UI 之家是头部「运行…」按钮：当段只列自动触发器，没有就说一句
       line.appendChild(chip(t('ui.automation.noAutoTrigger'), 'is-muted'))
     }
+    // 多触发是 OR：连接词显形（muted 文本，不是 chip）——与条件树 chip 的「或」同族
+    let first = true
     def.triggers.forEach((tr, i) => {
       if (tr === 'manual') return
+      if (!first) {
+        const or = document.createElement('span')
+        or.className = 'blk-auto-or'
+        or.textContent = t('ui.automation.trigger.or')
+        line.appendChild(or)
+      }
+      first = false
       // 点已有的触发器 ⇒ 改／删它（菜单在装配层）
       line.appendChild(chip(triggerText(tr), 'is-event', () => openTriggerMenu(def, i)))
     })
@@ -314,19 +330,37 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
       // 无条件也可点：点开同一台条件树（加了条件就不再是「对所有目标」）
       line.appendChild(chip(t('ui.automation.noCond'), 'is-muted', () => deps.editWhen()))
     } else {
-      for (const text of condChips(def.when)) line.appendChild(chip(text, 'is-cond', () => deps.editWhen()))
+      const warns = condWarnOf(def.when)
+      const hasFresh = def.triggers.some((tr) => tr !== 'manual' && tr.kind === 'child.added')
+      condChips(def.when).forEach((text, i) => {
+        const c = chip(text, 'is-cond', () => deps.editWhen())
+        // 错配提示走记号＋悬停（界面少字）：内容依赖的条件在「新建子块」触发下
+        // 出生即不命中——警告色图标点出哪一枚 chip 有这个 caveat，解释悬停里给
+        if (hasFresh && warns[i] === true) {
+          c.classList.add('is-warn')
+          c.dataset.tip = t('ui.automation.freshContentHint')
+          const ico = document.createElement('span')
+          ico.className = 'blk-auto-warn-ico'
+          renderIcon(ico, 'lucide:alert-triangle', 'circle-help')
+          c.prepend(ico)
+        }
+        line.appendChild(c)
+      })
     }
     line.appendChild(chip(t('ui.automation.editCond'), 'is-edit', () => deps.editWhen()))
     rows.push(line)
-    // 错配提示（配置时点破，不静默）：「新建子块」触发时目标多半还没有正文，
-    // 内容类条件在那一刻不命中——它们仍作用于手动/批量
-    if (def.when !== undefined && mentionsContentAtoms(def.when) && def.triggers.some((tr) => tr !== 'manual' && tr.kind === 'child.added')) {
-      const hintLine = document.createElement('div')
-      hintLine.className = 'blk-auto-chips'
-      hintLine.appendChild(chip(t('ui.automation.freshContentHint'), 'is-muted'))
-      rows.push(hintLine)
-    }
     return rows
+  }
+
+  /**
+   * 每一枚条件 chip 要不要带警告（与 condChips 的拆分同一顺序）：
+   * 顶层未挂修饰 ⇒ 逐项判；整棵树一条 ⇒ 按整体判。{up} 子树说的是祖先，豁免。
+   */
+  const condWarnOf = (when: NonNullable<QuerySpec['where']>): boolean[] => {
+    const draft = treeOfSpec({ where: when })
+    if (!draft) return [mentionsContentAtoms(when)]
+    if (draft.root.dir !== undefined || draft.root.not) return [mentionsContentAtoms(when)]
+    return draft.root.items.map((item) => mentionsContentAtoms(queryNodeOfTree(item) ?? when))
   }
 
   const condChips = (when: NonNullable<QuerySpec['where']>): string[] => {

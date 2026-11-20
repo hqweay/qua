@@ -103,6 +103,8 @@
   --ui-anno-bg-hot: color-mix(in srgb, var(--ui-accent) 20%, transparent);
   --ui-danger: var(--c-danger);
   --ui-warn: var(--c-warn);
+  /* 警告记号的弱描边：同一条混合纪律（组件不写 color-mix，只引用这里） */
+  --ui-warn-border: color-mix(in srgb, var(--ui-warn) 45%, transparent);
   --ui-ok: var(--c-ok);
   --ui-code-bg: var(--c-code);
   /* 行内颜色：主题只填这一层；正文与色板只引用它，不碰 --c-* */
