@@ -40,9 +40,6 @@ import {
   toggleChildrenCollapsed,
   toggleCollapsed,
   unfoldBlock,
-  filterVisibleRows,
-  pathTo,
-  visibleRows,
   dropRefused,
   type RowVerdict,
   writeBlockContent,
@@ -75,6 +72,7 @@ import {
 import { resolveRef } from '../../core/relations/ref.ts'
 import type { RelationEdge } from '../../core/relations/relations.ts'
 import { inputSession } from './input-session.ts'
+import { RowProjection } from './row-projection.ts'
 import {
   clearMarks as clearRunsMarks,
   isEmptyContent,
@@ -561,55 +559,24 @@ export class BlockEditor {
   }
 
   /**
-   * **当前装载的活块数**（`flatten(doc).length` 的口径）。
+   * **可见行投影**（缓存/行索引/行位置/活块数）住 `./row-projection.ts`。
    *
-   * 角标、诊断快照、按键上下文的 `blockCount` 每次按键都要这个数；跟着行投影
-   * 一起在**缓存未命中**时重算一次，读侧 O(1)。内容改动不改变这个数，所以
-   * 它不随 `revision` 变——只随行投影的前提（结构/装载形状）变。
+   * 失效键与四个轴的判据见那里的模块注释；这里只持有并转发。
+   * 抽成协作对象不是因为行数，而是因为「缝」：消费方只有渲染路径与上下文键，
+   * 生命周期跟着装载的 Doc，且整块是 DOM-free 的——抽出来能直接单测。
    */
-  docBlockCount = 0
+  readonly rowsProjection = new RowProjection({
+    doc: () => this.doc,
+    revisions: () => this.store,
+    filter: () => this.rowFilter?.() ?? null,
+    caret: () => this.caretBlock(),
+    withBody: () => this.events.viewBody !== undefined,
+    probe: this.perfProbe,
+  })
 
-  /**
-   * **可见行投影缓存**。
-   *
-   * 可见行只由五样东西决定：装载的那份 `Doc`（roots）、折叠态（`doc.folded`
-   * 每次写都换新对象）、聚焦位（`focusRootId`/`focusRootOpen`，同步时可原地改）、
-   * 非大纲宿主的 `viewRootId`、以及**树的形状**（`store.structureRevision`）。
-   * 内容与属性写入只推 `store.revision`，不推 `structureRevision` ⇒ 键入不会
-   * 让行集合失效。
-   *
-   * ⚠️ 缓存的是**数组本体**：调用方只读（`find`／`filter`／遍历），不要原地排序/增删。
-   * ⚠️ 行里的 `block` 是活引用：正文改了不需要重算行，读 `.content` 自然是新值。
-   */
-  private rowsCache: {
-    doc: Doc
-    roots: Doc['roots']
-    folded: Doc['folded']
-    focusRootId: string | undefined
-    focusRootOpen: boolean | undefined
-    viewRootId: string | undefined
-    structureRev: number
-    withBody: boolean
-    rows: VisibleRow[]
-  } | null = null
-
-  /** 与行投影同一代的行索引（`blockId → VisibleRow`）：`ctxKeys`／`belowOf` 每键都要查 */
-  private rowIndex: Map<string, VisibleRow> | null = null
-  /** 与行投影同一代的行位置（`blockId → 行下标`）：虚拟化的落点/换窗判据用 */
-  private rowPos: Map<string, number> | null = null
-  /** 上面那张表对应的是哪一份行数组（筛选会换数组，索引必须跟着换） */
-  private rowPosFor: readonly VisibleRow[] | null = null
-
-  /** 这一块在**当前可见行**里的下标（不在这一屏/没有行 ⇒ undefined） */
-  rowPosition(id: string): number | undefined {
-    return this.rowPos?.get(id)
-  }
-
-  /** 让行位置表对上这一份行数组（O(N)，只在数组换代时走） */
-  private ensureRowPos(rows: VisibleRow[]): void {
-    if (this.rowPosFor === rows) return
-    this.rowPos = new Map(rows.map((r, i) => [r.block.id, i]))
-    this.rowPosFor = rows
+  /** 当前装载的活块数（转发；诊断快照与上下文键读） */
+  get docBlockCount(): number {
+    return this.rowsProjection.blockCount
   }
   sel: Sel | null = null
   virtualize = false
@@ -1402,103 +1369,26 @@ export class BlockEditor {
 
   /** 全部可见行（**不筛**）：筛选的候选与计数读它（筛过的那份会让候选自己消失） */
   rowsAll(): VisibleRow[] {
-    this.perfProbe.rowsAllCalls++
-    return this.rawRows()
-  }
-
-  private rawRows(): VisibleRow[] {
-    const doc = this.doc
-    const withBody = this.events.viewBody !== undefined
-    const c = this.rowsCache
-    if (
-      c !== null &&
-      c.doc === doc &&
-      c.roots === doc.roots &&
-      c.folded === doc.folded &&
-      c.focusRootId === doc.focusRootId &&
-      c.focusRootOpen === doc.focusRootOpen &&
-      c.viewRootId === doc.viewRootId &&
-      c.structureRev === this.store.structureRevision &&
-      c.withBody === withBody
-    ) {
-      return c.rows
-    }
-    // 活块数的口径是 `flatten(doc)`（含折叠隐藏、不含软删）；只在缓存未命中时走一遍
-    this.docBlockCount = flatten(doc).length
-    const rows = visibleRows(doc, {
-      // 只有这一屏真会画身体的编辑器才让子块行让位（没有 viewBody 回调的
-      // 里层编辑器——挂载区／镜像／查询结果——子块仍照常画）
-      ...(this.events.viewBody ? { bodyHosts: hasChildrenViewBody } : {}),
-    }).filter((r) => !r.hidden)
-    this.rowsCache = {
-      doc,
-      roots: doc.roots,
-      folded: doc.folded,
-      focusRootId: doc.focusRootId,
-      focusRootOpen: doc.focusRootOpen,
-      viewRootId: doc.viewRootId,
-      structureRev: this.store.structureRevision,
-      withBody,
-      rows,
-    }
-    this.rowIndex = new Map(rows.map((r) => [r.block.id, r]))
-    this.ensureRowPos(rows)
-    return rows
+    return this.rowsProjection.rowsAll()
   }
 
   /**
-   * 这一块此刻的**可见行**（按 id 查，命中行索引就 O(1)）。
-   * 单行重画每键都要这一行；走 `rows().find` 在有筛选时还要现过滤一遍。
+   * 这一块此刻的**可见行**（命中行索引 O(1)）。
+   * 单行重画每键都要这一行；投影缓存与失效键见 `./row-projection.ts`。
    */
   rowOf(id: string): VisibleRow | undefined {
-    const hit = this.rowIndex?.get(id)
-    if (hit) return hit
-    return this.rows().find((r) => r.block.id === id)
+    return this.rowsProjection.rowOf(id)
   }
 
-  /** 可见行（**折叠的子树在这里被排除**；有筛选时只留命中行与它们的上下文） */
+  /** 可见行（折叠的子树已排除；有筛选时只留命中行与它们的上下文） */
   rows(): VisibleRow[] {
-    this.perfProbe.rowsCalls++
-    const all = this.rawRows()
-    const filter = this.rowFilter?.()
-    if (!filter) return all
-    /**
-     * **正在编辑的那一块永远算命中**（连同它的祖先链）。
-     * 否则刚敲出来的空块（不带任何被筛的页/标签）会在下一帧凭空消失，
-     * 而光标还在里面——编辑面不能被它自己的镜头藏掉。
-     */
-    const caret = this.caretBlock()
-    /**
-     * 筛选结果也**按代复用**：判据（filter）与光标链不变、模型没动过时，
-     * 同一份 `all` 的筛选结果不会变。滚动/换窗会反复问 `rows()`，没有这一格
-     * 就退化成每次 O(可见行)（高度索引也就永远建在同一份新数组上）。
-     * ⚠️ 内容改动会推 `revision`：筛选可以读正文/标签，所以它必须参与失效。
-     */
-    const cached = this.filteredRowsCache
-    if (cached && cached.all === all && cached.filter === filter && cached.caret === caret && cached.rev === this.store.revision) {
-      this.ensureRowPos(cached.rows)
-      return cached.rows
-    }
-    const force = new Set<string>()
-    if (caret !== null) {
-      const chain = pathTo(this.doc, caret)
-      if (chain) for (const b of chain) force.add(b.id)
-      else force.add(caret)
-    }
-    const rows = filterVisibleRows(all, (r, path) => filter(r.block, path), force)
-    this.filteredRowsCache = { all, filter, caret, rev: this.store.revision, rows }
-    this.ensureRowPos(rows)
-    return rows
+    return this.rowsProjection.rows()
   }
 
-  /** 与行投影同一代的筛选结果缓存（见 `rows()` 的注释） */
-  private filteredRowsCache: {
-    all: VisibleRow[]
-    filter: (block: Block, path: readonly Block[]) => RowVerdict
-    caret: string | null
-    rev: number
-    rows: VisibleRow[]
-  } | null = null
+  /** 这一块在**当前可见行**里的下标（不在这一屏/没有行 ⇒ undefined） */
+  rowPosition(id: string): number | undefined {
+    return this.rowsProjection.rowPosition(id)
+  }
 
 
   /**
@@ -3539,7 +3429,7 @@ export class BlockEditor {
      * 行索引命中时就地拿 depth；未命中（折叠隐藏／缓存还没建）才退回 `locate`，
      * 保证「在不在这一屏」的口径不变。
      */
-    const row = id ? this.rowIndex?.get(id) : undefined
+    const row = id ? this.rowOf(id) : undefined
     let b = row?.block
     let isDocRoot = row !== undefined && row.depth === 0
     if (!b && id) {
