@@ -55,6 +55,8 @@ import {
   droppedFrom,
   freezeResult,
   frozenStale,
+  specKeyOf,
+  contextKey,
   readViewSet,
   mkBlock,
   setValue,
@@ -1116,8 +1118,30 @@ export class ViewHost {
     this.cursor = null
     this.streamDone = false
     this.candidatesLoaded = new Set()
-    void this.fillPages()
     const before = this.frozen?.hits ?? []
+    const sorted = (spec.sort?.length ?? 0) > 0
+    if (sorted && this.deps.loadCandidateWindow && before.length > 0) {
+      /**
+       * 带排序的查询不在中途画（排序是对全集做的，逐页画会让已出行来回跳）。
+       * 但 `domain()` 此刻是刚清空的空集，拿它冻结得到的 0 条不是答案、只是流水线
+       * 起点——直接画出来就是整屏空白，而且 `onPage` 为排序提前返回不会纠正它；
+       * 装载一旦抛错 `catch` 也不碰 `frozen`，空白就一直留到重开。
+       *
+       * 留住上一答案的命中，只把三个键换成新 spec 的：屏幕停在旧行不是空白；
+       * `frozenStale` 因键已更新而变假，期间别处打字不会再起一轮装载；而条件若
+       * 真又变了（键对不上）仍会进这里、重 kick 候选流。排序的新序由 `fillPages`
+       * 到底时按完整求值域重算并一次画出；装载失败则停在旧行、只报一句实话。
+       */
+      this.frozen = {
+        specKey: specKeyOf(spec),
+        viewKey: this.viewKey,
+        contextKey: contextKey(ctx),
+        hits: before,
+      }
+      void this.fillPages()
+      return
+    }
+    void this.fillPages()
     this.frozen = freezeResult(spec, this.deps.kb, ctx, this.viewKey, this.domain())
     const dropped = droppedFrom(before, this.frozen.hits)
     if (dropped.length > 0 && before.length > 0) {
