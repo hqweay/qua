@@ -18,7 +18,8 @@ import {
   canonicalNode,
   cardLayoutOf,
   childDisplayProps,
-  childPropsFollowsRefs,
+  childPropsFollowOverride,
+  childPropsForRefs,
   choicesOf,
   childrenRecords,
   displayNameOf,
@@ -668,9 +669,24 @@ function showChildPropsPicker(blockId: string): void {
   const parent = kb.get(blockId)
   if (!parent) return
   const current = new Set(childDisplayProps(parent))
+  const FOR_REFS_ROW = 'childprop-for-refs'
   const FOLLOW_ROW = 'childprop-follow'
   // 浮层开着时块会被改写：每次都从库里重读，别拿打开那一刻的快照当现状
-  const follows = () => childPropsFollowsRefs(kb.get(blockId) ?? parent)
+  const block = () => kb.get(blockId) ?? parent
+  const sourceOn = () => childPropsForRefs(block())
+  const refTarget = () => {
+    const targetId = passThroughRefTarget(block())
+    return targetId ? (kb.get(targetId) ?? null) : null
+  }
+  const followState = () => {
+    const override = childPropsFollowOverride(block())
+    if (override === undefined) {
+      return t('menu.state.followSource', {
+        on: childPropsForRefs(refTarget()) ? t('ui.automation.on') : t('ui.automation.off'),
+      })
+    }
+    return override ? t('menu.state.forceOn') : t('menu.state.forceOff')
+  }
   const rows = () => {
     const all = [
       ...kb.propDefs().map((d) => ({ id: d.id, label: propLabel(d) || blockLabel(d, kbGet) })),
@@ -682,20 +698,31 @@ function showChildPropsPicker(blockId: string): void {
       label: it.label,
       keyHint: current.has(it.id) ? '✓' : undefined,
     }))
-    // 标签块的声明作用于全体成员，它自己不是「一跳」；非传递型引用块上这一格没有效果
-    // （开关读的是「子块的父块」那一跳，不是目标、也不是块自己的声明）⇒ 只在真有这一跳时给。
-    if (hasList(parent, 'tag') || passThroughRefTarget(parent) === null) return propRows
-    return [
+    /**
+     * 头两行是**策略链**，不是 `_childProps` 的成员：
+     *   · 源块级默认：任何块都可能被引用，配一次管所有引用（对未来引用也生效）；
+     *   · 引用级覆盖：只在真有「这一跳」时出现（正文只有一枚引用、没有可见文字），
+     *     缺省＝跟随源块，点一下先给出与源块相反的显式值。
+     */
+    const head = [
       {
+        id: FOR_REFS_ROW,
+        label: t('menu.label.childPropsForRefs'),
+        keyHint: sourceOn() ? t('ui.automation.on') : t('ui.automation.off'),
+        hint: t('menu.hint.childPropsForRefs'),
+        icon: 'lucide:link-2',
+      },
+    ]
+    if (passThroughRefTarget(block()) !== null) {
+      head.push({
         id: FOLLOW_ROW,
-        label: t('menu.label.childPropsFollow', {
-          on: follows() ? t('ui.automation.on') : t('ui.automation.off'),
-        }),
+        label: t('menu.label.childPropsFollow'),
+        keyHint: followState(),
         hint: t('menu.hint.childPropsFollow'),
         icon: 'lucide:corner-down-right',
-      },
-      ...propRows,
-    ]
+      })
+    }
+    return [...head, ...propRows]
   }
   layers.openMenu({
     rows: rows(),
@@ -707,8 +734,25 @@ function showChildPropsPicker(blockId: string): void {
     keepOpen: true,
     onPick: (row) => {
       const id = String(row.id)
+      if (id === FOR_REFS_ROW) {
+        void getRegistry().invoke(
+          'core.props/set-child-props-for-refs',
+          { blockId, on: !sourceOn() },
+          'menu',
+          uiCtx(),
+        )
+        layers.setRows(rows())
+        return
+      }
       if (id === FOLLOW_ROW) {
-        void getRegistry().invoke('core.props/set-child-props-follow', { blockId, on: !follows() }, 'menu', uiCtx())
+        const targetOn = childPropsForRefs(refTarget())
+        const cur = childPropsFollowOverride(block())
+        // 三态循环：跟随源块 → 与源块相反 → 与源块相同 → 跟随源块
+        const mode =
+          cur === undefined ? (targetOn ? 'off' : 'on')
+          : cur === targetOn ? 'follow'
+          : targetOn ? 'on' : 'off'
+        void getRegistry().invoke('core.props/set-child-props-follow', { blockId, mode }, 'menu', uiCtx())
         layers.setRows(rows())
         return
       }

@@ -26397,7 +26397,7 @@ await check(
      * `_childProps` 照常生效；开回默认＝删格（不是落一个 true）。
      * 传递目标那一跳的判据在单测（`props-line.test.ts`）里，这里钉命令与落盘。
      */
-    await page.evaluate((h) => window.__qua.invoke('core.props/set-child-props-follow', { blockId: h, on: false }), fx.host)
+    await page.evaluate((h) => window.__qua.invoke('core.props/set-child-props-follow', { blockId: h, mode: 'off' }), fx.host)
     await page.waitForTimeout(400)
     const followOff = await page.evaluate(({ host, child }) => {
       const el = document.querySelector(`.blk[data-block-id="${child}"]`)?.querySelector(':scope > .blk-props-line')
@@ -26408,7 +26408,7 @@ await check(
     }, { host: fx.host, child: fx.childId })
     assert(followOff.stored === false, `关掉继承应落盘 false：${JSON.stringify(followOff)}`)
     assert(followOff.ownLine.includes('创建于'), `关掉目标继承后自己的声明仍应显示：${JSON.stringify(followOff)}`)
-    await page.evaluate((h) => window.__qua.invoke('core.props/set-child-props-follow', { blockId: h, on: true }), fx.host)
+    await page.evaluate((h) => window.__qua.invoke('core.props/set-child-props-follow', { blockId: h, mode: 'follow' }), fx.host)
     await page.waitForTimeout(200)
     const followOn = await page.evaluate((h) => window.__qua.__editor.store.find(h)?.props?._childPropsFollow, fx.host)
     assert(followOn === undefined, '开回默认应删格（不落 true）')
@@ -32477,6 +32477,104 @@ await check('T340 浮层里开菜单：旧浮层关闭、新菜单在最上且�
 
   await ctx.close()
   return `浮层→菜单：旧浮层关闭、沿传递型引用展开行在最上并落 false`
+})
+/**
+ * T341｜**源块级默认**：在目标页关一次，指向它的所有传递型引用都不再继承；
+ * 个别引用仍可「强制开」。这是 O(1) 那一端——不逐个引用关。
+ */
+await check('T341 引用继承的源级默认：目标页关 ⇒ 所有引用停；引用块可强制开', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  const fx = await page.evaluate(() => {
+    const q = window.__qua
+    const ed = q.__editor
+    const inv = (name, args) => q.invoke(name, args)
+    const pageId = ed.rows()[0].block.id
+    inv('core.tree/insert-child', { parentId: pageId, text: 'T341TGT' })
+    inv('core.tree/insert-child', { parentId: pageId, text: 'T341REF' })
+    const textOf = (b) => (b.content ?? []).map((r) => (r.t === 'text' ? r.v : '')).join('')
+    const kids = ed.store.find(pageId)?.children ?? []
+    const tgt = kids.find((b) => textOf(b) === 'T341TGT')
+    const ref = kids.find((b) => textOf(b) === 'T341REF')
+    if (!tgt || !ref) throw new Error('前置：目标/引用块没建出来')
+    inv('core.props/set-child-props', { blockId: tgt.id, propId: 'core/created', on: true })
+    ed.write((tx) =>
+      tx.patch(ref.id, (b) => {
+        b.content = [{ id: 't341-ref', t: 'ref', to: tgt.id }]
+      }),
+    )
+    inv('core.tree/insert-child', { parentId: ref.id, text: 'T341CHILD' })
+    const child = (ed.store.find(ref.id)?.children ?? []).find((b) => textOf(b) === 'T341CHILD')
+    if (!child) throw new Error('前置：引用子块没建出来')
+    ed.renderAll()
+    return { tgt: tgt.id, ref: ref.id, child: child.id }
+  })
+  await page.waitForTimeout(500)
+
+  const lineOf = (id) =>
+    page.evaluate(
+      (c) => document.querySelector(`.blk[data-block-id="${c}"]`)?.querySelector(':scope > .blk-props-line')?.textContent ?? null,
+      id,
+    )
+  const before = await lineOf(fx.child)
+  assert(String(before).includes('创建于'), `前置：引用子块应继承目标声明：${JSON.stringify(before)}`)
+
+  // 在目标块上关「引用我的块继承显示」——源级一次配置
+  await page.evaluate((t) => window.__qua.invoke('core.props/child-props-menu', { blockId: t }), fx.tgt)
+  await page.waitForSelector('.layer-item[data-id="childprop-for-refs"]', { timeout: 3000 })
+  const srcState = await page.evaluate(
+    () => document.querySelector('.layer-item[data-id="childprop-for-refs"] .layer-key')?.textContent,
+  )
+  assert(srcState === '开', `源块行右侧应显示「开」：${JSON.stringify(srcState)}`)
+  const srcPt = await page.evaluate(() => {
+    const r = document.querySelector('.layer-item[data-id="childprop-for-refs"]').getBoundingClientRect()
+    return { x: r.left + 60, y: r.top + r.height / 2 }
+  })
+  await page.mouse.click(srcPt.x, srcPt.y)
+  await page.waitForTimeout(700)
+  const afterSource = await page.evaluate(
+    ({ t, c }) => ({
+      flag: window.__qua.__editor.store.find(t)?.props?._childPropsForRefs,
+      line:
+        document.querySelector(`.blk[data-block-id="${c}"]`)?.querySelector(':scope > .blk-props-line')?.textContent ??
+        null,
+    }),
+    { t: fx.tgt, c: fx.child },
+  )
+  assert(afterSource.flag === false, `源块关应落盘 false：${JSON.stringify(afterSource)}`)
+  assert(afterSource.line === null, `源块关后引用子块的继承行应消失：${JSON.stringify(afterSource)}`)
+
+  // 引用块自己的例外：跟随源块（关）→ 点一下强制开 ⇒ 子块行回来
+  await page.evaluate((r) => window.__qua.invoke('core.props/child-props-menu', { blockId: r }), fx.ref)
+  await page.waitForSelector('.layer-item[data-id="childprop-follow"]', { timeout: 3000 })
+  const followState = await page.evaluate(
+    () => document.querySelector('.layer-item[data-id="childprop-follow"] .layer-key')?.textContent,
+  )
+  assert(followState === '跟随：关', `引用行右侧应显示「跟随：关」：${JSON.stringify(followState)}`)
+  const followPt = await page.evaluate(() => {
+    const r = document.querySelector('.layer-item[data-id="childprop-follow"]').getBoundingClientRect()
+    return { x: r.left + 60, y: r.top + r.height / 2 }
+  })
+  await page.mouse.click(followPt.x, followPt.y)
+  await page.waitForTimeout(700)
+  const afterForce = await page.evaluate(
+    ({ r, c }) => ({
+      flag: window.__qua.__editor.store.find(r)?.props?._childPropsFollow,
+      state: document.querySelector('.layer-item[data-id="childprop-follow"] .layer-key')?.textContent,
+      line:
+        document.querySelector(`.blk[data-block-id="${c}"]`)?.querySelector(':scope > .blk-props-line')?.textContent ??
+        null,
+    }),
+    { r: fx.ref, c: fx.child },
+  )
+  assert(afterForce.flag === true, `强制开应落盘 true：${JSON.stringify(afterForce)}`)
+  assert(afterForce.state === '强制开', `引用行右侧应显示「强制开」：${JSON.stringify(afterForce)}`)
+  assert(String(afterForce.line).includes('创建于'), `强制开后子块继承行应回来：${JSON.stringify(afterForce)}`)
+
+  await ctx.close()
+  return `源块关 ⇒ 引用子块停；引用块强制开 ⇒ 回来；O(1) 配置在源块`
 })
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length

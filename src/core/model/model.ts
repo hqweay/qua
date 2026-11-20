@@ -303,11 +303,16 @@ export type SystemPropId =
    */
   | '_childProps'
   /**
-   * **引用块是否沿传递目标继承显示声明**（见 `childPropsFollowsRefs`）：
-   * 正文只有一枚引用只说明「这是一跳」；这一跳是转写（继承目标的 `_childProps`）
-   * 还是纯指针（子块是本地笔记、不继承），由这一格显式说。缺省 true；只有 `false` 落盘。
+   * **引用块沿传递目标展开的覆盖**（见 `childPropsFollowsRef`）：缺省＝跟随源块策略；
+   * true／false ＝这一跳强制开／关。缺省不落盘。
    */
   | '_childPropsFollow'
+  /**
+   * **源块级默认**（见 `childPropsForRefs`）：指向本块的引用是否继承本块（及其标签）
+   * 的显示声明。缺省 true；只有 `false` 落盘。与引用块的覆盖组成一条策略链：
+   * 引用级覆盖 > 源块级默认 > true。
+   */
+  | '_childPropsForRefs'
   // 字段定义的**编辑位置**（见 `core/props.ts` 的 `uiPositionOf`）
   | '_uiPosition'
   /**

@@ -151,8 +151,15 @@ export const PROPS_HANDLERS: Record<string, Handler> = {
   },
   'core.props/set-child-props-follow': (a, app) => {
     const blockId = S(a.blockId)
+    const mode = a.mode
+    if (!blockId || (mode !== 'follow' && mode !== 'on' && mode !== 'off')) return false
+    app.setChildPropsFollow(blockId, mode)
+    return true
+  },
+  'core.props/set-child-props-for-refs': (a, app) => {
+    const blockId = S(a.blockId)
     if (!blockId) return false
-    app.setChildPropsFollow(blockId, a.on === true)
+    app.setChildPropsForRefs(blockId, a.on === true)
     return true
   },
   'core.props/child-props-menu': (a, app) => {

@@ -1338,28 +1338,52 @@ export const CHILD_PROPS_PROP = '_childProps'
 /** 引用块是否沿传递目标继承显示声明；缺省 true，写 `true` 等于删格（与 `_defaultShowPaths` 同一条落盘口径） */
 export const CHILD_PROPS_FOLLOW_PROP = '_childPropsFollow'
 
+/** 源块级默认：指向本块的引用是否继承这份显示声明；缺省 true，只有 `false` 落盘 */
+export const CHILD_PROPS_FOR_REFS_PROP = '_childPropsForRefs'
+
 /** `_childProps` 的形状判据（读路径与落盘校验共用同一份）：非空字符串数组（同 `_ownProps` 形状） */
 export function isChildPropsValue(v: unknown): boolean {
   return Array.isArray(v) && v.every((x) => typeof x === 'string' && x !== '')
 }
 
-/** `_childPropsFollow` 的形状判据：只有 `false` 一个合法值（开回默认＝删格） */
+/** `_childPropsFollow` 的形状判据：三态里的两个显式值（缺省＝跟随源块，不落盘） */
 export function isChildPropsFollowValue(v: unknown): boolean {
+  return typeof v === 'boolean'
+}
+
+/** `_childPropsForRefs` 的形状判据：只有 `false` 一个合法值（开回默认＝删格） */
+export function isChildPropsForRefsValue(v: unknown): boolean {
   return v === false
 }
 
 /**
- * 引用块是否沿传递目标继承显示声明（`_childProps` 解析链的那一跳）。
+ * **源块级默认**：指向本块的引用是否继承本块（及其标签）的显示声明。
  *
- * **判据在引用块的正文形状之外**：正文只有一枚引用只说明「这是一跳」，不说明这一跳
- * 要不像转写一样继承目标的声明。同一个形状有两种真实用法——转写（子块是目标的子块）
- * 与纯指针（子块是挂在这条链接下的本地笔记）；后者要能显式说「别继承」。
- *
- * 缺省 true：保持当前行为（引用页的子块沿用页的显示声明）；只有显式 `false` 才停。
- * 停的是**目标那一跳**，不是自己的声明：本块自己的 `_childProps` 与标签声明照常生效。
+ * 这是 O(1) 的那一端：一个页被很多地方引用时，声明「我的子块显示」通常也希望对
+ * 这些引用生效；不希望对所有引用生效时，在源块上关一次，比逐个引用关便宜一个数量级。
+ * 缺省 true；只有显式 `false` 落盘。
  */
-export function childPropsFollowsRefs(block: Block | null | undefined): boolean {
-  return block ? prop(block, CHILD_PROPS_FOLLOW_PROP) !== false : true
+export function childPropsForRefs(block: Block | null | undefined): boolean {
+  return block ? prop(block, CHILD_PROPS_FOR_REFS_PROP) !== false : true
+}
+
+/** 引用块的**显式覆盖**：`undefined`＝跟随源块策略；`true/false`＝这一跳强制。 */
+export function childPropsFollowOverride(ref: Block | null | undefined): boolean | undefined {
+  const v = ref ? prop<unknown>(ref, CHILD_PROPS_FOLLOW_PROP) : undefined
+  return typeof v === 'boolean' ? v : undefined
+}
+
+/**
+ * 这一跳实际透不透：**引用级覆盖 > 源块级默认 > true**。
+ *
+ * 两级不是两份真相：源块给默认（管所有引用），引用块给例外（只管这一跳）。
+ * 只在一端做开关，另一端必然 O(n)——所以判据必须是一条链，而不是两个独立布尔。
+ */
+export function childPropsFollowsRef(
+  ref: Block | null | undefined,
+  target: Block | null | undefined,
+): boolean {
+  return childPropsFollowOverride(ref) ?? childPropsForRefs(target)
 }
 
 /** 父块声明给直接子块显示的属性（去重保序；悬空 id 原样保留，行构造时按「无定义」兜底） */
@@ -1449,10 +1473,13 @@ export function childDisplayPropsResolved(
       if (!out.includes(propId)) out.push(propId)
     }
   }
-  const target = childPropsFollowsRefs(parent) ? passThroughRefTarget(parent) : null
-  if (target) {
-    for (const propId of childDisplayPropsResolved(lookup.blocks.get(target) ?? null, lookup, nextSeen)) {
-      if (!out.includes(propId)) out.push(propId)
+  const targetId = passThroughRefTarget(parent)
+  if (targetId) {
+    const target = lookup.blocks.get(targetId)
+    if (target && childPropsFollowsRef(parent, target)) {
+      for (const propId of childDisplayPropsResolved(target, lookup, nextSeen)) {
+        if (!out.includes(propId)) out.push(propId)
+      }
     }
   }
   return out

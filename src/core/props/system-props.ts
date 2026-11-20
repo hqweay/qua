@@ -47,6 +47,7 @@ import {
   CARDINALITY_PROP,
   CHECK_PROP,
   CHILD_PROPS_FOLLOW_PROP,
+  CHILD_PROPS_FOR_REFS_PROP,
   CHILD_PROPS_PROP,
   CHOICES_PROP,
   CHOICE_SCOPE_PROP,
@@ -61,6 +62,7 @@ import {
   isCardinalityValue,
   isCheckValue,
   isChildPropsFollowValue,
+  isChildPropsForRefsValue,
   isChildPropsValue,
   isChoicesValue,
   isDefaultValue,
@@ -123,6 +125,7 @@ export const SYSTEM_PROP_CHECKS: Readonly<Record<string, (value: unknown) => boo
   [OWN_PROPS_PROP]: isOwnPropSlots,
   [CHILD_PROPS_PROP]: isChildPropsValue,
   [CHILD_PROPS_FOLLOW_PROP]: isChildPropsFollowValue,
+  [CHILD_PROPS_FOR_REFS_PROP]: isChildPropsForRefsValue,
   [UI_POSITION_PROP]: isUiPositionValue,
   // `ref` 定义的候选标签（旧形状：读侧当标签档认；新写入走后一条）
   [REF_TAGS_PROP]: isRefTagIds,

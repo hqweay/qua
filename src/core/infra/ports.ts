@@ -195,6 +195,9 @@ export interface MenuRequest {
   trigger?: HTMLElement
 }
 
+/** 引用这一跳的覆盖：跟随源块 / 强制开 / 强制关 */
+export type ChildPropsFollowMode = 'follow' | 'on' | 'off'
+
 /** 命令处理器拿到的「受管门面」 */
 export interface App {
   ed: BlockEditor
@@ -471,10 +474,15 @@ export interface App {
    */
   setChildProps(blockId: string, propId: string, on: boolean): void
   /**
-   * 写引用块的**显示继承**开关（`_childPropsFollow`）：`off` ＝ 只用自己的声明＋
-   * 标签声明，不再沿传递目标递归；`on` ＝ 缺省态（删格）。
+   * 写引用块这一跳的**覆盖**（`_childPropsFollow`）：`follow` ＝跟随源块（删格），
+   * `on`／`off` ＝这一跳强制继承／强制停止。
    */
-  setChildPropsFollow(blockId: string, on: boolean): void
+  setChildPropsFollow(blockId: string, mode: ChildPropsFollowMode): void
+  /**
+   * 写源块级默认（`_childPropsForRefs`）：`off` ＝所有指向本块的引用都不再继承
+   * 这份显示声明（引用块仍可逐跳覆盖）；`on` ＝ 缺省态（删格）。
+   */
+  setChildPropsForRefs(blockId: string, on: boolean): void
   /**
    * **打开子块行内属性的选择器**（`core.props/child-props-menu` 的落点）。
    * 多选清单：引擎两项＋全部属性定义；勾选态来自父块的 `_childProps`。

@@ -13,6 +13,7 @@ import type { Block } from '../src/core/index.ts'
 import {
   belowFieldsFor,
   CHILD_PROPS_FOLLOW_PROP,
+  CHILD_PROPS_FOR_REFS_PROP,
   CHILD_PROPS_PROP,
   constrainBelowFields,
   ENGINE_CREATED,
@@ -280,6 +281,40 @@ test('传递型引用：正文只有一枚引用的块，其子块沿目标解�
   assert.ok(rowsOff.includes(ENGINE_MODIFIED), '自己的声明照常生效')
   assert.ok(rowsOff.includes(defMood.id), '标签声明照常生效')
   assert.ok(!rowsOff.includes(ENGINE_CREATED), '目标声明被开关挡住')
+})
+
+test('传递型引用的策略链：源块默认管全部引用，引用块可逐跳覆盖', () => {
+  const targetOn = blk('src-on', '目标', { [CHILD_PROPS_PROP]: [ENGINE_CREATED] })
+  const targetOff = blk('src-off', '目标', {
+    [CHILD_PROPS_PROP]: [ENGINE_CREATED],
+    [CHILD_PROPS_FOR_REFS_PROP]: false,
+  })
+  const passTo = (id: string, target: Block, props?: Record<string, unknown>): Block => {
+    const b = blk(id, '', props)
+    b.content = [{ id: `ref-${id}`, t: 'ref', to: target.id }]
+    return b
+  }
+  const has = (target: Block, ref: Block): boolean => {
+    const child = blk(`kid-${ref.id}`, '子')
+    return fieldRowsWithParent(child, [target, ref, child], ref).some((r) => r.propId === ENGINE_CREATED)
+  }
+
+  // 源块开（缺省）＋未覆盖 ⇒ 继承（现状不变）
+  assert.equal(has(targetOn, passTo('r1', targetOn)), true)
+  // 源块开＋这一跳强制关 ⇒ 不继承
+  assert.equal(has(targetOn, passTo('r2', targetOn, { [CHILD_PROPS_FOLLOW_PROP]: false })), false)
+  // 源块关＋未覆盖 ⇒ 不继承（源级一次配置管所有引用）
+  assert.equal(has(targetOff, passTo('r3', targetOff)), false)
+  // 源块关＋这一跳强制开 ⇒ 继承（个别例外）
+  assert.equal(has(targetOff, passTo('r4', targetOff, { [CHILD_PROPS_FOLLOW_PROP]: true })), true)
+
+  // 链式引用逐跳求值：每一跳都用自己的「源块默认 / 站点覆盖」
+  const midToOff = passTo('mid-open', targetOff, { [CHILD_PROPS_FOLLOW_PROP]: true })
+  assert.equal(has(targetOff, midToOff), true, '中间跳强制开 ⇒ 越过源块的关')
+  const refToMid = passTo('ref-mid', midToOff)
+  const child = blk('kid-chain', '子')
+  const chainRows = fieldRowsWithParent(child, [targetOff, midToOff, refToMid, child], refToMid).map((r) => r.propId)
+  assert.ok(chainRows.includes(ENGINE_CREATED), '链上每一跳各自求值：R→M 默认跟随，M→T 强制开')
 })
 
 test('childPropsLookupOf：复用外部 byId 表（index.blocks）与自建 walk 的结果一致', () => {

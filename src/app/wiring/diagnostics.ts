@@ -9,7 +9,9 @@ import {
   allTags,
   buildAdjacency,
   childDisplayProps,
-  childPropsFollowsRefs,
+  childPropsFollowOverride,
+  childPropsFollowsRef,
+  childPropsForRefs,
   passThroughRefTarget,
   resolveTagIds,
   tagsById,
@@ -595,7 +597,10 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
         depth += 1
         const own = childDisplayProps(cur)
         const passTarget = passThroughRefTarget(cur)
-        const follow = childPropsFollowsRefs(cur)
+        const target = passTarget ? kb.get(passTarget) : undefined
+        const override = childPropsFollowOverride(cur)
+        const sourcePolicy = childPropsForRefs(target)
+        const follow = childPropsFollowsRef(cur, target)
         parentChain.push({
           at: depth,
           id: cur.id.slice(-6),
@@ -606,8 +611,19 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
               .slice(0, 20) || 'empty',
           ownDecl: own,
           viaPassThrough: passTarget !== null && follow,
-          // 有目标但开关关着：链在这里人为停住，不是「没有下一环」——诊断分得清
-          ...(passTarget !== null && !follow ? { stoppedAt: 'childPropsFollowOff' } : {}),
+          // 这一跳的策略来源：站点覆盖 > 源块默认 > true。停住时也分得清是谁停的
+          ...(passTarget !== null
+            ? {
+                refPolicy: {
+                  override: override === undefined ? 'follow-source' : override,
+                  source: sourcePolicy,
+                  effective: follow,
+                },
+              }
+            : {}),
+          ...(passTarget !== null && !follow
+            ? { stoppedAt: override === false ? 'childPropsFollowOff' : 'childPropsForRefsOff' }
+            : {}),
         })
         for (const p of own) if (!resolved.includes(p)) resolved.push(p)
         for (const t of resolveTagIds(cur, tagsById(forest))) {
@@ -615,7 +631,7 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
           if (tagDecl.length) parentChain.push({ at: depth, viaTag: displayNameOf(t), ownDecl: tagDecl })
           for (const p of tagDecl) if (!resolved.includes(p)) resolved.push(p)
         }
-        cur = passTarget && follow ? kb.get(passTarget) : null
+        cur = passTarget && follow ? (target ?? null) : null
       }
       return {
         block: blockId.slice(-6),

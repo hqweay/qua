@@ -13,6 +13,7 @@ import {
   isRefDomainValue,
   type RefDomain,
   CHILD_PROPS_FOLLOW_PROP,
+  CHILD_PROPS_FOR_REFS_PROP,
   CHILD_PROPS_PROP,
   UI_POSITION_PROP,
   USE_PROP,
@@ -28,8 +29,10 @@ import {
   isCurrentPropKind,
   isRefViewValue,
   parseCheckSpec,
+  passThroughRefTarget,
   useOf,
   valueListOf,
+  walkForest,
   clearKeepsField,
   clearValue,
   declareField,
@@ -58,7 +61,7 @@ import {
 import { t } from '../../core/infra/msg.ts'
 import { AliasClaimError } from '../../core/kb/unsupported.ts'
 import { deferAliasGate } from '../../core/kb/alias-gate.ts'
-import type { App, PropCreateMode, PropTarget } from '../../core/infra/ports.ts'
+import type { App, ChildPropsFollowMode, PropCreateMode, PropTarget } from '../../core/infra/ports.ts'
 import type { PropsDeps } from './types.ts'
 
 /** 文本格式的显示名（`ui.props.format.*` 的一张小表；缺省按纯文本） */
@@ -112,6 +115,7 @@ export function propsCommands(
   | 'setUiPosition'
   | 'setChildProps'
   | 'setChildPropsFollow'
+  | 'setChildPropsForRefs'
   | 'deleteChoice'
   | 'restoreChoice'
   | 'setPropFormat'
@@ -214,6 +218,36 @@ export function propsCommands(
       ? [...membersOf(parent.id, d.kb.roots())].flatMap((mid) => d.kb.get(mid)?.children.map((c) => c.id) ?? [])
       : parent.children.map((c) => c.id)
     d.repaintBlocks([parent.id, ...affected])
+  }
+
+  /**
+   * 源块策略变了：显示变在**所有沿传递型引用继承它的子块行**上。
+   * 那些行可能不在源块子树里（引用可以出现在任何地方）⇒ 按模型父链找一遍受影响的子块。
+   * 这是低频配置写，O(N) 扫描可接受；不整库重画（大库会闪）。
+   * 判据取**语法可达**（父链上有传递型引用指向源块），比实际策略宽一点——多画不漏画。
+   */
+  const repaintRefChildren = (sourceId: string): void => {
+    const memo = new Map<string, boolean>()
+    const visiting = new Set<string>()
+    const reaches = (b: Block): boolean => {
+      if (b.id === sourceId) return true
+      const cached = memo.get(b.id)
+      if (cached !== undefined) return cached
+      if (visiting.has(b.id)) return false
+      visiting.add(b.id)
+      const targetId = passThroughRefTarget(b)
+      const target = targetId ? d.kb.get(targetId) : undefined
+      const hit = target ? reaches(target) : false
+      visiting.delete(b.id)
+      memo.set(b.id, hit)
+      return hit
+    }
+    const affected: string[] = []
+    walkForest(d.kb.roots(), (b) => {
+      const parent = d.kb.parentOf(b.id)
+      if (parent && reaches(parent)) affected.push(b.id)
+    })
+    d.repaintBlocks([sourceId, ...affected])
   }
 
   return {
@@ -613,19 +647,30 @@ export function propsCommands(
     },
 
     /**
-     * 写引用块的**显示继承**开关（`_childPropsFollow`）：`on` ＝ 恢复继承（删格），
-     * `off` ＝ 只用自己的声明＋标签声明，不再沿传递目标递归。
+     * 写引用块这一跳的**覆盖**（`_childPropsFollow`）：`follow` ＝ 跟随源块（删格），
+     * `on`／`off` ＝ 这一跳强制继承／强制停止。
      *
      * 只对当前是传递型引用的块有可见效果；非引用块写了也只是记下意图（正文以后
-     * 变成纯引用时生效），不做「现在不是就拒写」——那会让先写配置再改正文的路径失败。
+     * 变成纯引用时生效），不做「现在不是就拒写」——界面只在真有这一跳时露出这一行。
      */
-    setChildPropsFollow: (blockId, on: boolean) => {
+    setChildPropsFollow: (blockId, mode: ChildPropsFollowMode) => {
       const parent = find(blockId)
       if (!parent) return
-      d.run((tx) =>
-        tx.patch(blockId, (b) => patchProp(b, CHILD_PROPS_FOLLOW_PROP, on ? undefined : false)),
-      )
+      const next = mode === 'follow' ? undefined : mode === 'on'
+      d.run((tx) => tx.patch(blockId, (b) => patchProp(b, CHILD_PROPS_FOLLOW_PROP, next)))
       repaintChildRows(parent)
+    },
+
+    /**
+     * 写源块级默认（`_childPropsForRefs`）：`on` ＝ 恢复继承（删格），
+     * `off` ＝ 所有指向本块的引用都不再继承这份显示声明（引用块仍可逐跳覆盖）。
+     */
+    setChildPropsForRefs: (blockId, on: boolean) => {
+      if (!find(blockId)) return
+      d.run((tx) =>
+        tx.patch(blockId, (b) => patchProp(b, CHILD_PROPS_FOR_REFS_PROP, on ? undefined : false)),
+      )
+      repaintRefChildren(blockId)
     },
 
     /**

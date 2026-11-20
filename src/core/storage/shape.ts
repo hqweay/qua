@@ -20,6 +20,7 @@ import { isJournalDate } from '../identity/journal.ts'
 import { TAGS_PROP, isTagRefList } from '../identity/tags.ts'
 import {
   CHILD_PROPS_FOLLOW_PROP,
+  CHILD_PROPS_FOR_REFS_PROP,
   CHILD_PROPS_PROP,
   CHOICES_PROP,
   FIELD_DEFS_PROP,
@@ -27,6 +28,7 @@ import {
   OWN_PROPS_PROP,
   UI_POSITION_PROP,
   isChildPropsFollowValue,
+  isChildPropsForRefsValue,
   isChildPropsValue,
   isChoicesValue,
   isFieldDefRefs,
@@ -291,6 +293,8 @@ function isBlock(x: unknown): x is Block {
   if (childProps !== undefined && !isChildPropsValue(childProps)) return false
   const childPropsFollow = b.props[CHILD_PROPS_FOLLOW_PROP]
   if (childPropsFollow !== undefined && !isChildPropsFollowValue(childPropsFollow)) return false
+  const childPropsForRefs = b.props[CHILD_PROPS_FOR_REFS_PROP]
+  if (childPropsForRefs !== undefined && !isChildPropsForRefsValue(childPropsForRefs)) return false
   const uiPosition = b.props[UI_POSITION_PROP]
   if (uiPosition !== undefined && !isUiPositionValue(uiPosition)) return false
   // 不变量：在列表里 ⇒ 至少有一个名字（不能出现在页/标签列表里却没有任何地址）。
