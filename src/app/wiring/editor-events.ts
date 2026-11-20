@@ -18,6 +18,7 @@ import {
   choiceDisplayLabel,
   choicesFor,
   embedBodyOf,
+  iconOf,
   isDeleted,
   openAxisOf,
   readEmbed,
@@ -34,6 +35,7 @@ import { openChoicePicker } from '../../app/choice-picker.ts'
 import { renderPropsLine } from '../../ui/block-ui/props-line.ts'
 import { createAutomationBody } from '../../ui/automation/automation-body.ts'
 import { runTargetRows } from '../../app/retrieval/run-target-rows.ts'
+import { readAutomation } from '../../core/automation/automation.ts'
 import { type Registry, type MenuRequest } from '../../core/commands/index.ts'
 import { Layers, type Row } from '../../ui/overlay/layers.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
@@ -97,24 +99,72 @@ function viewEvents(
     return { root: vh.root, dispose: () => { vh.dispose(); vh.root.remove() } }
   })
   /**
-   * **自动化身体的目标选择**（运行按钮的落点）：手动链目标必须**显式点出来**——
-   * 块身体上没有「当前块」语义（人正看着的是规则，不是目标），猜一个就会跑错地方。
-   * 候选是**任意块**（自动化作用于块，旗舰用例的目标是一块任务，不是页）：
-   * 空词列页/标签（可浏览的默认集），打字全库搜（名字 → 正文，同「关联到…」一族）。
+   * **自动化身体的运行选择器**（运行按钮的落点）：打开的就是**「如果」的命中集**——
+   * 有条件 ⇒ 第一行「全部运行 · N」（补收存量），下面列每一块命中（单跑其中一块）；
+   * 没条件 ⇒ 每块都算数，全库可搜（同「关联到…」一族），没有「全部」（那是全库）。
+   * 单跑与批跑从两颗按钮统一成一个面：规则的候选从来就是条件的命中。
    */
   const pickRunTarget = (automationId: string): void => {
-    const rows = runTargetRows({ kb, automationId })
+    const block = kb.get(automationId)
+    const def = block ? readAutomation(block) : null
+    const runOne = (blockId: string): void => {
+      void getRegistry().invoke('core.automation/run', { automationId, blockId }, 'ui')
+    }
+    if (def?.when === undefined) {
+      const rows = runTargetRows({ kb, automationId })
+      layers.openMenu({
+        rows: rows(''),
+        title: t('ui.automation.runPickTitle'),
+        anchor: null,
+        searchable: true,
+        focusSearch: true,
+        placeholder: t('ui.automation.runPickPlaceholder'),
+        emptyText: t('ui.automation.runPickEmpty'),
+        onQuery: (q) => layers.setRows(rows(q)),
+        onPick: (row) => runOne(row.id),
+      })
+      return
+    }
+    const hits = kb.query({ where: def.when }, { excludeIds: [automationId] })
+    const rows: Row[] = []
+    if (hits.length > 0) {
+      rows.push({
+        id: 'run/all',
+        label: t('ui.automation.runAllRow', { count: hits.length }),
+        hint: t('ui.automation.runAllRowHint'),
+        icon: 'lucide:zap',
+        group: 'pick/0-all',
+      })
+    }
+    for (const hit of hits) {
+      const b = kb.get(hit.blockId)
+      if (!b) continue
+      const trail = kb
+        .pathOf(hit.blockId)
+        .slice(0, -1)
+        .map((x) => blockLabel(x, kbGet))
+        .filter((x) => x !== '')
+      rows.push({
+        id: hit.blockId,
+        label: blockLabel(b, kbGet),
+        hint: trail.length > 0 ? trail.join(' › ') : '',
+        icon: iconOf(b) ?? '',
+        group: 'pick/1-match',
+      })
+    }
     layers.openMenu({
-      rows: rows(''),
+      rows,
       title: t('ui.automation.runPickTitle'),
       anchor: null,
-      searchable: true,
-      focusSearch: true,
-      placeholder: t('ui.automation.runPickPlaceholder'),
-      emptyText: t('ui.automation.runPickEmpty'),
-      onQuery: (q) => layers.setRows(rows(q)),
+      searchable: false,
+      focusSearch: false,
+      emptyText: t('ui.automation.runPickNoMatch'),
       onPick: (row) => {
-        void getRegistry().invoke('core.automation/run', { automationId, blockId: row.id }, 'ui')
+        if (row.id === 'run/all') {
+          void getRegistry().invoke('core.automation/run-batch', { automationId }, 'ui')
+          return
+        }
+        runOne(row.id)
       },
     })
   }
@@ -132,9 +182,6 @@ function viewEvents(
         layers.openMenu({ rows, title, onPick, anchor: null, searchable: false, focusSearch: false })
       },
       onRun: () => pickRunTarget(block.id),
-      onRunAll: () => {
-        void getRegistry().invoke('core.automation/run-batch', { automationId: block.id }, 'ui')
-      },
       onToggle: (on) => {
         void getRegistry().invoke('core.automation/toggle-enabled', { automationId: block.id, on }, 'ui')
       },

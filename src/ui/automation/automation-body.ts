@@ -50,10 +50,11 @@ export interface AutomationBodyDeps {
   subscribe(fn: (source?: unknown, ids?: readonly string[]) => void): () => void
   /** 打开一个选择菜单（行由组件造；浮层归装配层） */
   openMenu(rows: Row[], onPick: (row: Row) => void, title: string): void
-  /** 运行（目标选择也在装配层——手动链目标必须显式点出来，块身体上没有「当前块」语义） */
+  /**
+   * 运行（目标选择也在装配层）：打开的选择器**就是「如果」的命中集**——
+   * 有条件列命中块（外加「全部运行」一行），没条件才是全库可搜（每块都算数）。
+   */
   onRun(): void
-  /** 批量运行（补收存量）：对满足「如果」的每一块各跑一遍；装配层负责 guards 与汇总 */
-  onRunAll(): void
   onToggle(on: boolean): void
   /** 整份定义写回（canonical 之后的；装配层负责事务、撤销与重画） */
   writeDef(def: AutomationDef): void
@@ -100,17 +101,6 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
     run.title = t('ui.automation.runHint')
     run.addEventListener('click', () => deps.onRun())
     head.append(toggle, run)
-    // 「全部运行」只在有条件时出现：批量靠「如果」圈目标，无条件就是全库（宁可不列）
-    if (def?.when !== undefined) {
-      const runAll = document.createElement('button')
-      runAll.type = 'button'
-      runAll.className = 'blk-auto-run'
-      if (enabled) runAll.dataset.enabled = '1'
-      runAll.textContent = t('ui.automation.runAll')
-      runAll.title = t('ui.automation.runAllHint')
-      runAll.addEventListener('click', () => deps.onRunAll())
-      head.appendChild(runAll)
-    }
     root.appendChild(head)
 
     // 坏形状：一句话指到定义（修复面＝打开那一块改 `_automation`；不静默消失）
@@ -176,8 +166,11 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
     const rows: HTMLElement[] = []
     const line = document.createElement('div')
     line.className = 'blk-auto-chips'
-    // 手动触发是出生自带的默认档：v1 不给删除（规则至少要有一条触发器）
-    line.appendChild(chip(triggerText('manual'), 'is-manual'))
+    const hasAuto = def.triggers.some((tr) => tr !== 'manual')
+    if (!hasAuto) {
+      // 手动运行的 UI 之家是头部「运行…」按钮：当段只列自动触发器，没有就说一句
+      line.appendChild(chip(t('ui.automation.noAutoTrigger'), 'is-muted'))
+    }
     def.triggers.forEach((tr, i) => {
       if (tr === 'manual') return
       // 点已有的触发器 ⇒ 改／删它（菜单在装配层）
@@ -314,6 +307,8 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
     const rows: HTMLElement[] = []
     const line = document.createElement('div')
     line.className = 'blk-auto-chips'
+    // 主语显式化：条件说的是「目标块」——手动时是你选的那块，批量时是每一块，事件时是变化的块
+    line.appendChild(chip(t('ui.automation.condSubject'), 'is-subject'))
     if (def.when === undefined) {
       // 无条件也可点：点开同一台条件树（加了条件就不再是「对所有目标」）
       line.appendChild(chip(t('ui.automation.noCond'), 'is-muted', () => deps.editWhen()))

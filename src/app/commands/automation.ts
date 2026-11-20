@@ -57,6 +57,7 @@ export function automationCommands(d: AutomationDeps) {
     findTag: (name) => d.kb.findTag(name),
     resolveAlias: (name) => d.kb.resolveAlias(name),
     roots: () => d.kb.roots(),
+    pathOf: (id) => d.kb.pathOf(id),
     tx: (fn) => d.tx(fn),
   }
 
