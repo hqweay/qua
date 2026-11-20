@@ -16,27 +16,30 @@ import {
   constrainBelowFields,
   depthOf,
   displayRowPropIds,
-  flatten,
   foldStateOf,
   gutterFieldsFor,
-  gutterFieldsOf,
   hasLiveChildren,
+  hasSingleLiveBlock,
   isFolded,
   journalDateLabel,
   locate,
   noteSourceCellsOf,
+  parentsByBlockId,
   refSourcesOf,
+  rowDeriveOf,
   walkForest,
   type Block,
   type BelowFields,
   type GutterField,
   type NoteSourceCell,
+  type RowDerive,
   type ShellCol,
   type VisibleRow,
 } from '../../core/index.ts'
 import { type GroupHead } from '../../core/model/model.ts'
 import { plainText } from '../../core/model/runs.ts'
 import { renderIcon } from '../icons.ts'
+import { HeightCache } from './height-cache.ts'
 import { t } from '../../core/infra/msg.ts'
 import { assetViewOf, markAssetMissing } from '../asset-views.ts'
 import { LINE_H, fillBlockText, makeBlockEl, makeRefBadgeEl, rowHasEmbedViewBody, rowHasInlineViewBody, visibleRowHeight } from './block-dom.ts'
@@ -59,6 +62,191 @@ export class RenderOps {
 
   /** 这一屏已挂载的块 id（宿主 getter 转发给装配层的诊断与徽标） */
   mounted = new Set<string>()
+
+  /**
+   * 渲染探针（诊断用，不是产品状态）。
+   *
+   * `rows` 是**这一笔处理了多少行**（不是挂了多少 DOM）：虚拟化之后 DOM 只有窗口那几十个，
+   * 但 `applyWindow` 仍要对全量行算占位高度——这两个数分开记，才能看出「虚拟化只省了
+   * DOM、没省行投影」。只有测试面读它（`window.__qua.perf`）。
+   */
+  readonly probe = {
+    renderAllCalls: 0,
+    renderAllRows: 0,
+    renderBlockCalls: 0,
+    renderRowsCalls: 0,
+    renderRowsRendered: 0,
+    applyWindowCalls: 0,
+    applyWindowMs: 0,
+    applyWindowRows: 0,
+    topRowCalls: 0,
+    topRowRows: 0,
+  }
+
+  /**
+   * **实测行高**：`blockId → 量到的高度`（只给「挂载过」的行记账）。
+   *
+   * 为什么必须有这一格：`visibleRowHeight` 是**纯估**（`LINE_H` ＋ 头 ＋ 属性行数），
+   * 而正文 `.tx` 是 `pre-wrap` 且无 clamp ⇒ 长正文折行会把这一行撑高，估高对不上。
+   * 实测（`checks/probe-row-height.mjs`）：一条折行块真高 107px、估 30px；文档总高
+   * 虚拟化开 1709 vs 全挂载 1993。**短块估高偏 2px 恰好抵掉长块亏空**，所以总量上
+   * 看不出来，只在「少数长块」时局部塌陷——滚到那一段落点才偏。
+   *
+   * 判据：**量到过就用实测**，没量过才退回估算。窗口外的行挂不到 DOM（量不到），
+   * 所以估仍然是主路径；这张表只负责「滚过一次之后，回去的那一段高度是对的」。
+   * 与既有登记（查询体／露面体估高偏小）同一条方向：按「已量过的实例」回填占位。
+   *
+   * ⚠️ **宽度变了必须作废**：折行数随可用宽度变，同一块在 1440 与 800 宽下高度不同。
+   *    `invalidateHeights(width)` 由内容区宽度变化调（见 `editor.ts` 的 `bindWidthChange`）。
+   *
+   * ⚠️ **行被重画时也要作废那一格**：`renderBlock` 换掉整行 DOM 之后，表里那个数是
+   *    「换之前」的。不删的话，改了正文（比如打长了一行）再滚走，占位用的还是旧高。
+   */
+  /**
+   * **实测行高表**（判据与理由见 `./height-cache.ts` 的模块注释）。
+   *
+   * 这里只负责「什么时候量、量完怎么用」，表本身的存/查/作废判据在那个模块里——
+   * 它是纯的，单测直接钉它（`tests/height-cache.test.ts`），不用起浏览器。
+   */
+  readonly heights = new HeightCache()
+
+  /** 记下这一行的实测高（`applyWindow` 挂完整窗之后量一次） */
+  measureRows(ids: Iterable<string>): void {
+    for (const id of ids) {
+      const el = this.ed.blockEl(id)
+      if (!el) continue
+      /**
+       * ⚠️ 只认**已挂载且未折叠**的行：`display:none` 的子树量出来是 0，
+       *    记进去会把那一段的占位直接压成零高（`HeightCache.set` 自己也挡了这一条，
+       *    这里再挡一次是因为「挂载了但量不到」的路径不止折叠一种）。
+       */
+      const h = el.getBoundingClientRect().height
+      this.heights.set(id, h)
+    }
+  }
+
+  /** 宽度变了（或前提变了）⇒ 作废实测高；理由见 `HeightCache.invalidate` */
+  invalidateHeights(width?: number): void {
+    this.heights.invalidate(width)
+  }
+
+  /**
+   * **窗口外的行**：空闲时离屏量一遍，让「第一次打开」的总高就是对的。
+   *
+   * 为什么必须有这一步：`applyWindow` 只能量窗口内那几行，窗口外 33 行的占位仍按估算
+   * ——一条折行块就亏 77px，几十条就是几百 px 的总高偏差（实测 284px）。用户不动手
+   * 就永远看不到准的滚动条，而「滚动条长度可信」正是虚拟化档要买的东西之一。
+   *
+   * 做法：把行按 `LINE_H` 高的盒子挂进一个**离屏容器**（同一套 CSS、同一宽度），
+   * 量完立刻拆掉。不碰真容器，所以不闪、不动滚动位、不影响焦点。
+   * 分批（每批 `idleBatch` 行）＋ `requestIdleCallback`：万行文档不该在首帧后卡住。
+   */
+  private scheduleOffscreenMeasure(): void {
+    if (typeof requestIdleCallback === 'undefined') return
+    if (this.offscreenQueued) return
+    this.offscreenQueued = true
+    requestIdleCallback(() => {
+      this.offscreenQueued = false
+      this.measureOffscreenBatch()
+    })
+  }
+
+  private offscreenQueued = false
+
+  /** 一次空闲批次：把「还没量过」的行挂到离屏容器里量一遍，直到量完 */
+  private measureOffscreenBatch(): void {
+    if (!this.ed.virtualize || this.ed.layout !== 'column') return
+    const rows = this.ed.rows()
+    const pending = rows.filter((r) => !this.heights.has(r.block.id))
+    if (pending.length === 0) return
+    const width = this.ed.blankArea.clientWidth
+    if (width <= 0) return
+    const host = document.createElement('div')
+    /**
+     * ⚠️ **必须同时带上 id 与类名**：行高的来源不只是 `.blk` 自己的 CSS——
+     *    `#editor[data-layout='column'] .sec:has(> .blk[...journal])` 这类规则按
+     *    **父链**选，缺了 `#editor` 与 `.sec`，日记段就量少了段间留白
+     *    （实测：46 行累加 1296 vs 真 1376，差 80px 全是段间距）。
+     */
+    host.id = this.ed.container.id
+    host.className = this.ed.container.className
+    for (const attr of this.ed.container.attributes) {
+      if (attr.name.startsWith('data-') && attr.name !== 'data-caret') host.setAttribute(attr.name, attr.value)
+    }
+    /**
+     * ⚠️ 必须是**同一宽度**：折行数由可用宽度决定，换个宽度量出来的高就是错的。
+     *    同时要 `position:absolute` ＋ 不可见，否则它会挤动真文档。
+     */
+    host.style.cssText = `position:absolute;left:-99999px;top:0;width:${width}px;visibility:hidden;pointer-events:none;`
+    /**
+     * 行必须包进 `.sec`：段是**几何的一层**（段间留白住在它上面），
+     * 直接挂成 `#editor` 的子节点会丢掉那部分高度。
+     */
+    const sec = document.createElement('div')
+    sec.className = 'sec'
+    sec.dataset.sec = ''
+    host.appendChild(sec)
+    const batch = pending.slice(0, this.idleBatch)
+    // 与在线渲染同一条批级路径：扫库一次、单块判据一次
+    const batchBlocks = batch.map((r) => r.block)
+    const derive = rowDeriveOf(this.ed.store.blocks, this.ed.store.index.blocks)
+    const gutters = gutterFieldsFor(batchBlocks, this.ed.store.blocks, derive)
+    const below = this.belowOf(batchBlocks, derive)
+    const single = hasSingleLiveBlock(this.ed.doc)
+    const made: { id: string; el: HTMLElement }[] = []
+    /**
+     * ⚠️ **必须绕开 `makePlaceholderFor`**：那是同构重装给 `rebuildWith` 用的钩子，
+     *    一旦有值，`makeBlockEl` 会返回一个**空占位节点**而不是真行——量出来是 0。
+     *    离屏测量要的是真行。
+     */
+    const savedHook = this.makePlaceholderFor
+    this.makePlaceholderFor = null
+    try {
+      for (const r of batch) {
+        const el = this.makeBlockEl(r, gutters.get(r.block.id), below.get(r.block.id), single)
+        sec.appendChild(el)
+        made.push({ id: r.block.id, el })
+      }
+    } finally {
+      this.makePlaceholderFor = savedHook
+    }
+    document.body.appendChild(host)
+    for (const { id, el } of made) {
+      const h = el.getBoundingClientRect().height
+      this.heights.set(id, h)
+    }
+    host.remove()
+    /**
+     * 量完要**回写占位**：头尾那两个 `.ph` 的高度是按旧表算的，不回写就还是旧数。
+     * 只改样式高度，不重挂 DOM（不闪、不动滚动位）。
+     */
+    this.refreshPlaceholderHeights()
+    if (pending.length > batch.length) this.scheduleOffscreenMeasure()
+  }
+
+  /** 按当前（可能刚更新过的）行高表重写头尾占位的高度 */
+  private refreshPlaceholderHeights(): void {
+    const rows = this.ed.rows()
+    if (rows.length === 0) return
+    const below = this.belowOf(rows.map((r) => r.block))
+    const rowH = (r: VisibleRow): number => this.rowHeight(r, below)
+    const head = this.ed.container.querySelector<HTMLElement>('.ph[data-ph="head"]')
+    const tail = this.ed.container.querySelector<HTMLElement>('.ph[data-ph="tail"]')
+    if (head && this.winFrom > 0) {
+      head.style.height = `${rows.slice(0, this.winFrom).reduce((n, r) => n + rowH(r), 0)}px`
+    }
+    if (tail && this.winTo < rows.length) {
+      tail.style.height = `${rows.slice(this.winTo).reduce((n, r) => n + rowH(r), 0)}px`
+    }
+  }
+
+  /** 一次空闲批次量多少行（`requestIdleCallback` 的单次预算内量得完的量级） */
+  private idleBatch = 64
+
+  /** 这一行的高度不再可信（DOM 被换掉）：只删这一格，不动其余 */
+  forgetHeight(id: string): void {
+    this.heights.forget(id)
+  }
 
   /**
    * 给**光标所在行**打 `data-caret="1"`。
@@ -319,6 +507,7 @@ export class RenderOps {
      *    守卫放在这里才覆盖得住 `loadPage`／`reloadFromStore`／各命令路径。
      */
     if (this.ed.deferWhileComposing()) return
+    this.probe.renderAllCalls++
     // 别的视图写进来（本实例的写入口已作废过）；重排之后重算一张表
     this.ed.fieldTableCache = null
     this.ed.embeds.disposeAll()
@@ -345,6 +534,7 @@ export class RenderOps {
       return
     }
     const all = this.ed.rows()
+    this.probe.renderAllRows += all.length
     this.winFrom = 0
     this.winTo = all.length
     this.renderRows(all)
@@ -505,18 +695,39 @@ export class RenderOps {
    * 而那种偏差不报错，只在滚到底部时露出来。大纲有块标，归 gutter 的属性由
    * gutter 画，所以这里**不** `includeGutter`（并进块下行会画两遍）。
    */
-  private belowOf(blocks: readonly Block[]): Map<string, BelowFields> {
+  private belowOf(blocks: readonly Block[], derive?: RowDerive): Map<string, BelowFields> {
     const allowed = displayRowPropIds(this.ed.doc.displayProps)
-    const below = belowFieldsFor(blocks, this.ed.store.blocks, (id) => this.parentOfRow(id), this.ed.store.index.blocks, {
-      ...(allowed !== undefined ? { wanted: allowed } : {}),
-    })
+    /**
+     * 父块查询：批里超过一块时**一次 walk 建表**，行级查表；单块仍走 `locate`
+     * （单块场景建整张表反而更贵，且 `locate` 命中即收工）。
+     * 旧写法是每块一次 `locate`——`applyWindow` 拿**全量行**问这一格时是 O(N²)，
+     * 虚拟化换一次窗就付一次。
+     */
+    const parents = blocks.length > 1 ? parentsByBlockId(this.ed.doc) : null
+    const parentOf = parents
+      ? (id: string) => parents.get(id) ?? null
+      : (id: string) => this.parentOfRow(id)
+    const below = belowFieldsFor(
+      blocks,
+      this.ed.store.blocks,
+      parentOf,
+      this.ed.store.index.blocks,
+      { ...(allowed !== undefined ? { wanted: allowed } : {}) },
+      derive,
+    )
     return constrainBelowFields(below, allowed)
   }
 
   private renderRows(rows: readonly VisibleRow[], tailComplete = true): void {
+    this.probe.renderRowsCalls++
+    this.probe.renderRowsRendered += rows.length
     const blocks = rows.map((r) => r.block)
-    const gutters = gutterFieldsFor(blocks, this.ed.store.blocks)
-    const below = this.belowOf(blocks)
+    // 一批只扫一次库：gutter 与块下行共用同一份定义/标签/选项表
+    const derive = rowDeriveOf(this.ed.store.blocks, this.ed.store.index.blocks)
+    const gutters = gutterFieldsFor(blocks, this.ed.store.blocks, derive)
+    const below = this.belowOf(blocks, derive)
+    // 「这一屏只有一块」是整批的事实：在循环外算一次，别每行走一遍树
+    const single = hasSingleLiveBlock(this.ed.doc)
     let sec: HTMLElement | null = null
     /** 给上一段收尾：追加那个空槽（只给有段根的行段） */
     const closeSec = (): void => {
@@ -565,7 +776,7 @@ export class RenderOps {
         sec.dataset.sec = r.depth === 0 ? r.block.id : ''
         this.ed.container.appendChild(sec)
       }
-      sec.appendChild(this.makeBlockEl(r, gutters.get(r.block.id), below.get(r.block.id)))
+      sec.appendChild(this.makeBlockEl(r, gutters.get(r.block.id), below.get(r.block.id), single))
     }
     // 哨兵组头（`beforeRootId: ''`）：折叠组排在最后时，后面没有行可锚 ⇒ 落在文档末尾
     for (const head of groupHeads) if (head.beforeRootId === '') this.ed.container.appendChild(this.makeGroupHead(head))
@@ -574,12 +785,20 @@ export class RenderOps {
     if (this.ed.layout !== 'column') {
       for (const col of this.ed.shells) if (col.beforeRootId === null) this.ed.container.appendChild(this.makeShellSec(col))
     }
+    // ⚠️ 实测高**不在这里记**：虚拟化路径必走 `applyWindow`（它在挂完头尾占位后量一次，
+    //    那才是「整窗都在 DOM 里」的时刻）；非虚拟路径根本不用占位。在这里再量一遍
+    //    等于每窗两次强制布局。
   }
 
   renderBlock(id: string): void {
-    const loc = locate(this.ed.doc, id)
+    this.probe.renderBlockCalls++
+    /**
+     * 找块用 **store 的索引**（O(1)），不用 `locate(doc, id)`（全树 DFS）。
+     * 行能不能写由 `blockEl` 守：没有 DOM 行就没有可换的东西。
+     */
+    const block = this.ed.store.find(id)
     const el = this.ed.blockEl(id)
-    if (!loc || !el) return
+    if (!block || !el) return
     /**
      * ⚠️ **组合期不重画这一行**（见 `deferWhileComposing`）。这一条比 `renderAll` 更容易踩到：
      *    属性写入（`writeProps` → `repaintBlock`）、改名传播（`renderRefSources`）、
@@ -588,19 +807,28 @@ export class RenderOps {
      */
     if (this.ed.deferWhileComposing()) return
     const row = this.ed.rows().find((r) => r.block.id === id) ?? {
-      block: loc.block,
+      block,
       depth: depthOf(this.ed.doc, id),
       hidden: false,
-      hasChildren: hasLiveChildren(loc.block),
+      hasChildren: hasLiveChildren(block),
     }
+    // 单行重画也是「一批」：gutter 与块下行共用一份扫库结果
+    const derive = rowDeriveOf(this.ed.store.blocks, this.ed.store.index.blocks)
     this.ed.embeds.disposeRow(id)
     el.replaceWith(
       this.makeBlockEl(
         row,
-        gutterFieldsOf(row.block, this.ed.store.blocks),
-        this.belowOf([row.block]).get(row.block.id),
+        gutterFieldsFor([row.block], this.ed.store.blocks, derive).get(row.block.id),
+        this.belowOf([row.block], derive).get(row.block.id),
+        hasSingleLiveBlock(this.ed.doc),
       ),
     )
+    /**
+     * 这一行的 DOM 刚被换掉：表里那个实测高是**换之前**的（改长／改短都算），
+     * 现在量一次；量不到（不在窗口里）就删掉，退回估算。
+     */
+    this.forgetHeight(id)
+    if (this.ed.virtualize) this.measureRows([id])
     this.repaintOverlays()
   }
 
@@ -612,6 +840,8 @@ export class RenderOps {
     r: VisibleRow,
     gutter: readonly GutterField[] | undefined,
     below: BelowFields | undefined,
+    /** 「这一屏只有这一块」——**批级事实，由调用方算一次**（逐行 `flatten()` 会退化成 O(N²)） */
+    single: boolean,
   ): HTMLElement {
     // 同构重装：这一行有保留的旧行 ⇒ 直接用占位（rebuildWith 随后整棵换回）
     const placeholder = this.makePlaceholderFor?.(r)
@@ -633,7 +863,7 @@ export class RenderOps {
        */
       (tx) => fillBlockText(tx, r.block, find, this.ed.events.assetView ?? assetViewOf, this.ed.events.onAssetError ?? markAssetMissing),
       {
-        single: flatten(this.ed.doc).length === 1,
+        single,
         ancestors: this.ancestors.get(r.block.id) ?? [],
         folded: foldStateOf(this.ed.doc),
         gutter,
@@ -822,7 +1052,13 @@ export class RenderOps {
       if (!this.ed.events.propsLine || !this.ed.events.propsRows || !data) return 0
       return this.ed.events.propsRows(id, data)
     }
-    return visibleRowHeight(
+    /**
+     * **量到过就用实测**（见 `height-cache.ts`）：折行正文让估高系统性偏小，
+     * 而这一行挂载过就说明它的真实高已知——没有理由再猜。
+     * 实测值是**整行高**（头／属性行／折行都已包含），所以直接返回，不再叠加。
+     */
+    return this.heights.heightOf(r.block.id, () =>
+      visibleRowHeight(
       r.block,
       this.extraHeads(r),
       (Boolean(this.ed.events.viewBody) && rowHasInlineViewBody(r) && !isFolded(this.ed.doc, r.block.id)) ||
@@ -831,6 +1067,7 @@ export class RenderOps {
           !isFolded(this.ed.doc, r.block.id)),
       // 行数由装配层给（密度档 ＋ 单块展开）；没有这一格 ⇒ 不画属性区
       propsRows(r.block.id, below?.get(r.block.id)),
+      ),
     )
   }
 
@@ -849,6 +1086,8 @@ export class RenderOps {
    */
   topRowId(): string | null {
     const rows = this.ed.rows()
+    this.probe.topRowCalls++
+    this.probe.topRowRows += rows.length
     if (rows.length === 0) return null
     const area = this.ed.blankArea
     const box = area.getBoundingClientRect()
@@ -881,7 +1120,10 @@ export class RenderOps {
      *    那一下就把输入法的组合锚点摘掉了。
      */
     if (this.ed.deferWhileComposing()) return
+    const t0 = performance.now()
     const rows = this.ed.rows()
+    this.probe.applyWindowCalls++
+    this.probe.applyWindowRows += rows.length
     const cid = centerId ?? this.ed.sel?.aBlock ?? rows[0]?.block.id
     let ci = rows.findIndex((r) => r.block.id === cid)
     if (ci < 0) ci = 0
@@ -907,17 +1149,44 @@ export class RenderOps {
     /** 换窗判据要读「现在窗口盖住哪一段」 */
     this.winFrom = from
     this.winTo = to
+    let headEl: HTMLElement | null = null
+    let tailEl: HTMLElement | null = null
     if (from > 0) {
       const headH = rows.slice(0, from).reduce((n, r) => n + rowH(r), 0)
-      this.ed.container.appendChild(this.placeholder(from, 'head', headH))
+      headEl = this.placeholder(from, 'head', headH)
+      this.ed.container.appendChild(headEl)
     }
     this.renderRows(rows.slice(from, to), to >= rows.length)
     if (to < rows.length) {
       const tailH = rows.slice(to).reduce((n, r) => n + rowH(r), 0)
-      this.ed.container.appendChild(this.placeholder(rows.length - to, 'tail', tailH))
+      tailEl = this.placeholder(rows.length - to, 'tail', tailH)
+      this.ed.container.appendChild(tailEl)
     }
+    /**
+     * **挂完立刻记实测高**：这一窗的行现在都在 DOM 里，量得到真高。
+     * 下一次换窗时它们落到占位区，`rowHeight` 就会读到实测值而不是估算
+     * （见 `height-cache.ts`）。
+     */
+    this.measureRows(this.mounted)
+    /**
+     * ⚠️ **首窗的占位必须在这一步之后重算**：占位是在 `renderRows` 之前算的，
+     *    那时这一窗的行还没量过 ⇒ 头尾占位用的是纯估算。不补这一步，
+     *    「第一次打开长文档」看到的仍是偏小的总高，得滚一次才自愈
+     *    （探针第一次复验就是这么被骗过去的：修了却读数不变）。
+     *    重算很便宜——只是把已经算过的和重写一遍，不碰 DOM 结构。
+     */
+    if (headEl || tailEl) {
+      if (headEl) headEl.style.height = `${rows.slice(0, from).reduce((n, r) => n + rowH(r), 0)}px`
+      if (tailEl) tailEl.style.height = `${rows.slice(to).reduce((n, r) => n + rowH(r), 0)}px`
+    }
+    /**
+     * **窗口外的行排队离屏量**：量完 `rowHeight` 就有真值，占位随之变准
+     * （见 `scheduleOffscreenMeasure`）。这里只排队，不阻塞这一帧。
+     */
+    this.scheduleOffscreenMeasure()
     this.repaintOverlays()
     this.ed.events.mounted?.()
+    this.probe.applyWindowMs += performance.now() - t0
   }
 
   /** 这一行除正文外还占几条「整行头」（面包屑／别名头／来源说明的高度由 block-dom 统一算） */

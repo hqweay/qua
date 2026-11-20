@@ -753,9 +753,11 @@ export class BlockEditor {
     this.container.setAttribute('spellcheck', 'false')
     const offEvents = this.bind()
     const offScroll = this.bindScrollSync()
+    const offResize = this.bindWidthChange()
     this.unbind = () => {
       offEvents()
       offScroll()
+      offResize()
     }
     this.annoHover = new AnnoHover({
       container: this.container,
@@ -1221,6 +1223,37 @@ export class BlockEditor {
     }
     this.blankArea.addEventListener('scroll', onScroll, { passive: true })
     return () => this.blankArea.removeEventListener('scroll', onScroll)
+  }
+
+  /**
+   * **可用宽度变了 ⇒ 实测行高作废**。
+   *
+   * 为什么只有宽度算数：正文是 `pre-wrap`，一条长块折成几行由**宽度**决定；
+   * 而高度方向的变化（窗口拉高只是露出更多行）不改任何一行的折行位置。
+   * 拿宽度做判据，竖直拉伸就不会白抖一次占位。
+   *
+   * ⚠️ 判据必须是**内容区宽度**（`clientWidth`），不是 `window.innerWidth`：
+   *    槽开合、右槽拖宽都会改正文可用宽度，而窗口尺寸一点没变——那正是最容易漏的一种。
+   *    `ResizeObserver` 比 `window.resize` 覆盖得全（槽宽变化不发 resize 事件）。
+   */
+  private bindWidthChange(): () => void {
+    if (typeof ResizeObserver === 'undefined') return () => {}
+    let last = this.blankArea.clientWidth
+    const ro = new ResizeObserver(() => {
+      const w = this.blankArea.clientWidth
+      if (w === last) return
+      last = w
+      // 只在虚拟化档有意义：关档时每行都在 DOM 里，没有占位要用这些数
+      if (!this.virtualize) return
+      this.render.invalidateHeights(w)
+      /**
+       * 作废之后要重排一次：头尾占位是按旧宽度算的，现在要按新宽度重算。
+       * 用 `applyWindow` 而不是 `renderAll`——后者会重装整屏（丢选区与滚动位）。
+       */
+      this.applyWindow(this.sel?.aBlock)
+    })
+    ro.observe(this.blankArea)
+    return () => ro.disconnect()
   }
 
   private syncWindowOnScroll(): void {
@@ -2882,6 +2915,11 @@ export class BlockEditor {
   setVirtualize(on: boolean, radius = this.radius): void {
     this.virtualize = on
     this.radius = radius
+    /**
+     * 换档时作废实测高：关档期间不记账（全挂载不用占位），表里留着的是**上一次开档时**
+     * 那个宽度下的数——不一定是现在的宽度。作废后第一窗重新量一遍，代价是一次布局读。
+     */
+    this.render.invalidateHeights()
     this.renderAll()
     this.events.change?.('load')
   }
@@ -3172,6 +3210,13 @@ export class BlockEditor {
      */
     const sameRoots = this.doc.roots.length === doc.roots.length && this.doc.roots.every((b, i) => b.id === doc.roots[i]!.id)
     this.doc = doc
+    /**
+     * **换装载单位 ⇒ 实测高整表作废**：同一块 id 在另一份 `Doc` 里可能带着不同的
+     * 头（面包屑／别名／来源说明）与不同的可用宽度，旧高度没有参考价值。
+     * 只在根集合真的变了时清——`reloadPage` 换同一批根（比如刷新一次查询）时
+     * 行还是那几行，清了会让占位白抖一次。
+     */
+    if (!sameRoots) this.render.invalidateHeights()
     // 换视图 ＝ 换了一份装载单位：上一行那个编辑期在这里结束，不能带到新页上
     this.editBase = null
     this.bsel.blockSel = null
