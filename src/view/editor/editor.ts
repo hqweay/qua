@@ -542,6 +542,12 @@ export class BlockEditor {
     keyTrace: [],
     traced: true,
   }
+  /**
+   * 行投影的调用计数（诊断探针）：`rowsCalls` 是调用次数，真正走没走
+   * `visibleRows` 看 `treeProbe.visibleRowsCalls`（将来加缓存时两者会分开）。
+   * 只有测试面读它（`window.__qua.perf`），产品逻辑不读。
+   */
+  readonly perfProbe = { rowsCalls: 0, rowsAllCalls: 0 }
   sel: Sel | null = null
   virtualize = false
   radius = 12
@@ -1327,6 +1333,7 @@ export class BlockEditor {
 
   /** 全部可见行（**不筛**）：筛选的候选与计数读它（筛过的那份会让候选自己消失） */
   rowsAll(): VisibleRow[] {
+    this.perfProbe.rowsAllCalls++
     return this.rawRows()
   }
 
@@ -1340,6 +1347,7 @@ export class BlockEditor {
 
   /** 可见行（**折叠的子树在这里被排除**；有筛选时只留命中行与它们的上下文） */
   rows(): VisibleRow[] {
+    this.perfProbe.rowsCalls++
     const all = this.rawRows()
     const filter = this.rowFilter?.()
     if (!filter) return all
@@ -1418,7 +1426,8 @@ export class BlockEditor {
   /** 读回块内容（DOM → run 序列；原子按 `data-atom-id` 原样带回）。委托 `view/dom-text` */
   readRunsOf(id: string): InlineRun[] {
     const tx = this.txEl(id)
-    const b = locate(this.doc, id)?.block
+    // 索引查表（O(1)）；这在每一笔输入里被调用一次
+    const b = this.store.find(id)
     if (!tx || !b) return b ? b.content : []
     return readRuns(tx, b.content)
   }
@@ -2183,15 +2192,20 @@ export class BlockEditor {
    *    否则同一串字会出现两套行为，而用户不知道刚才发生了哪一套。
    */
   syncFromDom(id: string, reRender: boolean): void {
-    const loc = locate(this.doc, id)
-    if (!loc) return
+    /**
+     * 找块用 **store 的索引**（O(1)）：键入路径上每多一次 `locate(doc, id)`
+     * 就是一次全树 DFS，而 store 里已经有增量维护的 byId 表。
+     * 原来的 `!loc` 守卫仍由「找不到块」承担；DOM 行存在与否由调用方的事件源保证。
+     */
+    const block = this.store.find(id)
+    if (!block) return
     // 这一块的第一笔输入 ＝ 一次编辑期的开始（此刻模型里还是改名前那个值）
-    if (this.editBase?.id !== id) this.beginEdit(loc.block)
+    if (this.editBase?.id !== id) this.beginEdit(block)
     const next = this.readRunsOf(id)
-    if (sameRuns(next, loc.block.content)) return
+    if (sameRuns(next, block.content)) return
     // 这一块真的落过字 ⇒ 到边界时记一次「块被改过」（时刻只在边界写，见 `stampEdited`）
     this.edited.add(id)
-    const prevLen = plainLen(loc.block.content)
+    const prevLen = plainLen(block.content)
     const kind = plainLen(next) < prevLen ? 'delete' : 'insert'
     const at = Date.now()
     /**
@@ -2215,7 +2229,7 @@ export class BlockEditor {
     this.finishUndoEntry(kind, at)
     if (reRender) {
       this.renderBlock(id)
-      if (caret !== null) this.placeCaret(id, Math.min(caret, plainLen(loc.block.content)))
+      if (caret !== null) this.placeCaret(id, Math.min(caret, plainLen(block.content)))
       // **改名传播**：这一块可能是别处引用的目标 ⇒ 引用它的那些块也要重画（显示名现算）。
       // 改动只影响「指向它的 run 所在的块」，不是全视图重渲染。
       this.renderRefSources(id)
@@ -2233,21 +2247,25 @@ export class BlockEditor {
    * 为什么需要显式做：引用显示的是**目标当前的名字**（`core/ref.ts`），是派生的；
    * 目标改名后，`atom`/`block` 本身一个字节都没变 ⇒ 没有任何「数据变了」的信号能触发重渲染。
    *
-   * 两条来源，因为两种归属的存法不同：
-   *   · 引用 —— 在原子表里（`edgeSourceIds`）；
-   *   · 标签 —— 在**块自己的 `_tags`** 里：改名后 chip 上显示的 `#旧名` 同样是过期的字，
-   *     所以带这个标签的块也要重画（这是一次本视图内的扫描，不是全库索引）。
+   * **反查走关系索引的入向表**（`relationsTo`），不扫整篇 doc。索引由事务出口按 op
+   * 增量维护，「谁指向我」本来就有现成答案——逐块扫 run 的写法让每次输入都遍历
+   * 全部块（块越多越像「每键全树」），而它要的只是这几条入边。
+   *
+   * 只认三种会**在正文里显示目标名字**的边：正文引用（`inline`）、行内标签露面
+   * （`tagMention`）、`_tags` 归属（`tag`）。属性值与嵌入的显示名由各自的身体负责，
+   * 不在这行正文里——多画一遍只是白换 DOM。
    *
    * ⚠️ 只重画**本视图内**的块：别的页里也有指向它的引用，但那些 DOM 不在 `doc` 里，
    *    由它们自己所在的视图在装载/刷新时解析（共享 store 只保证数据一致，不替别人画 DOM）。
    */
   renderRefSources(id: string): void {
-    for (const b of flatten(this.doc)) {
-      if (b.id === id) continue
-      // 引用它的 run（含行内标签露面）⇒ 显示名现算；带着这个标签 ⇒ chip 上的字过期
-      if (refRunsOf(b.content).some((r) => r.to === id) || tagIdsOf(b).includes(id)) {
-        if (this.blockEl(b.id)) this.renderBlock(b.id)
-      }
+    const sources = new Set<string>()
+    for (const e of relationsTo(this.store.index, id)) {
+      if (e.kind === 'inline' || e.kind === 'tagMention' || e.kind === 'tag') sources.add(e.from)
+    }
+    for (const sourceId of sources) {
+      if (sourceId === id) continue
+      if (this.blockEl(sourceId)) this.renderBlock(sourceId)
     }
     /**
      * **引用关系变了 ⇒ 目标块行尾的引用数徽标也要跟着变**。
@@ -2551,7 +2569,8 @@ export class BlockEditor {
     const ranges = selToTextRanges(this.doc, s)
     const out = new Set<string>()
     for (const r of ranges) {
-      const b = locate(this.doc, r.blockId)?.block
+      // 索引查表：这一段在每次按键的 `ctxKeys` 里都会过一遍
+      const b = this.store.find(r.blockId)
       if (!b) continue
       for (const m of marksInRange(b.content, r.start, r.end)) out.add(m)
     }

@@ -35,10 +35,47 @@ import {
   valueOf,
   type Cardinality,
   type CheckSpec,
+  type ChildPropsLookup,
   type ChoiceLookup,
   type PropKind,
   type PropUse,
 } from './props.ts'
+
+/**
+ * **一批行派生共用的扫库结果**（定义块、标签块、父块声明查找、select 选项表）。
+ *
+ * 为什么需要它：`fieldRows`／`gutterFieldsOf`／`gutterFieldsFor`／`belowFieldsFor`
+ * 各自都从 `forest` 扫一遍定义块与标签块。单行重画同时要 gutter 与块下行时，
+ * 同一次扫库被做了四遍——块越多，这笔固定成本越像「每键全库」。把这一份结果
+ * 显式传给它们，扫库就退化成每批一次。
+ *
+ * ⚠️ **只在一次渲染批里共用**，不跨事务缓存：内容改动也会推进 `store.revision`，
+ *    拿它当缓存键等于每键都失效。真正的跨事务缓存要等「属性/结构/可见性各自
+ *    的修订号」都补齐（目前只有结构、属性两个），这里不做半套。
+ */
+export interface RowDerive {
+  defs: Map<string, Block>
+  tags: Map<string, Block>
+  /** 父块声明查找（`_childProps`）；给了 `blocksById` 才能建，省掉一次全库 walk */
+  lookup?: ChildPropsLookup
+  /** `select` 选项表的惰性缓存（gutter 与块下行共用一份） */
+  look?: ChoiceLookup
+}
+
+/**
+ * 建一份 `RowDerive`。
+ *
+ * `blocksById` 传 **store 的 byId 表**（`store.index.blocks`，活引用、增量维护）：
+ * 传了就不再自己走一遍森林建 id 表。
+ */
+export function rowDeriveOf(forest: readonly Block[], blocksById?: ReadonlyMap<string, Block>): RowDerive {
+  const derive: RowDerive = {
+    defs: new Map(allPropDefs(forest).map((d) => [d.id, d])),
+    tags: tagsById(forest),
+  }
+  if (blocksById) derive.lookup = { tags: derive.tags, blocks: blocksById }
+  return derive
+}
 /** 属性面板的一行（派生，不落库） */
 export interface FieldRow {
   propId: string
@@ -96,15 +133,16 @@ export interface FieldRow {
  *    因此多标签声明同一属性时行序不会随标签集合抖动（只随标签顺序变）。
  * ⚠️ 块属性排在标签属性之后：顺序由写入路径决定（先声明后显示），性质上两类现在都可能「待填」。
  */
-export function fieldRows(block: Block, forest: readonly Block[]): FieldRow[] {
-  const defs = new Map(allPropDefs(forest).map((d) => [d.id, d]))
-  const tags = tagsById(forest)
+export function fieldRows(block: Block, forest: readonly Block[], derive?: RowDerive): FieldRow[] {
+  const defs = derive?.defs ?? new Map(allPropDefs(forest).map((d) => [d.id, d]))
+  const tags = derive?.tags ?? tagsById(forest)
   const rows = new Map<string, FieldRow>()
   let order = 0
 
   /** 同一份行派生里补 `select` 的几格：值控件的选项与当前值名字都从这里来 */
   let look: ChoiceLookup | undefined
-  const lazyLook = (): ChoiceLookup => (look ??= choiceLookupOf(forest))
+  const lazyLook = (): ChoiceLookup =>
+    derive ? (derive.look ??= choiceLookupOf(forest)) : (look ??= choiceLookupOf(forest))
 
   for (const tag of resolveTagIds(block, tags)) {
     for (const propId of declaredFieldIds(tag)) {
@@ -276,12 +314,14 @@ export function belowFieldsFor(
   parentOf?: (id: string) => Block | null | undefined,
   blocksById?: ReadonlyMap<string, Block>,
   scope: BelowFieldsScope = {},
+  derive?: RowDerive,
 ): Map<string, BelowFields> {
-  const defs = new Map(allPropDefs(forest).map((d) => [d.id, d]))
-  const tags = tagsById(forest)
-  const lookup = childPropsLookupOf(forest, blocksById)
+  const defs = derive?.defs ?? new Map(allPropDefs(forest).map((d) => [d.id, d]))
+  const tags = derive?.tags ?? tagsById(forest)
+  const lookup = derive?.lookup ?? childPropsLookupOf(forest, blocksById)
   let look: ChoiceLookup | undefined
-  const lazyLook = (): ChoiceLookup => (look ??= choiceLookupOf(forest))
+  const lazyLook = (): ChoiceLookup =>
+    derive ? (derive.look ??= choiceLookupOf(forest)) : (look ??= choiceLookupOf(forest))
   const out = new Map<string, BelowFields>()
 
   for (const block of blocks) {
@@ -488,11 +528,11 @@ export function closureTargetField(fields: readonly GutterField[]): GutterField 
  *    `_uiPosition` 只决定快捷入口在哪，不排除另一个编辑面。两面读同一份、写同一条命令、
  *    写完两边都重画，所以不会出现「一边改了、另一边没跟上」。
  */
-export function gutterFieldsOf(block: Block, forest: readonly Block[]): GutterField[] {
+export function gutterFieldsOf(block: Block, forest: readonly Block[], derive?: RowDerive): GutterField[] {
   // 口径必须与批量的 `gutterFieldsFor` 一致：它吃的是同一份 `fieldRows`（声明 ∪ 自有、同 id 一行），
   // 只是「扫库」在行级重复做了一遍 —— 所以单块用它、整屏用批量。
   const out: GutterField[] = []
-  for (const row of fieldRows(block, forest)) {
+  for (const row of fieldRows(block, forest, derive)) {
     if (!row.def) continue
     if (uiPositionOf(row.def) !== 'block-left') continue
     out.push(
@@ -523,10 +563,11 @@ export function gutterFieldsOf(block: Block, forest: readonly Block[]): GutterFi
 export function gutterFieldsFor(
   blocks: readonly Block[],
   forest: readonly Block[],
+  derive?: RowDerive,
 ): Map<string, GutterField[]> {
-  // 定义块与标签块各扫**一次**：行级只查表
-  const defs = new Map(allPropDefs(forest).map((d) => [d.id, d]))
-  const tagById = tagsById(forest)
+  // 定义块与标签块各扫**一次**：行级只查表（同一批里给了 `RowDerive` 就复用）
+  const defs = derive?.defs ?? new Map(allPropDefs(forest).map((d) => [d.id, d]))
+  const tagById = derive?.tags ?? tagsById(forest)
 
   const out = new Map<string, GutterField[]>()
   for (const block of blocks) {

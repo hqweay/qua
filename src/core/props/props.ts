@@ -1524,6 +1524,7 @@ export {
   fieldRowsWithParent,
   gutterFieldsFor,
   gutterFieldsOf,
+  rowDeriveOf,
 } from './rows.ts'
 export type {
   BelowFields,
@@ -1531,6 +1532,7 @@ export type {
   FieldRow,
   GutterField,
   PropsLineDensity,
+  RowDerive,
 } from './rows.ts'
 import type { FieldRow } from './rows.ts'
 

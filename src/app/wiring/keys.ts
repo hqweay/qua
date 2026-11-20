@@ -8,7 +8,7 @@
  */
 import { BINDINGS, keyLabel } from '../../core/infra/bindings.ts'
 import { installKeydown, type DispatchEnv, type KeyTrace } from '../../core/infra/dispatch.ts'
-import { findInForest, flatten, hasList, isJournal, prop, type Block, type CtxKeys } from '../../core/index.ts'
+import { ensureIndexLists, hasList, isJournal, prop, type Block, type CtxKeys } from '../../core/index.ts'
 import type { BlockEditor } from '../../view/editor/editor.ts'
 import type { Registry } from '../../core/commands/index.ts'
 import type { Workspace } from '../../core/infra/workspace.ts'
@@ -44,7 +44,12 @@ export function setupKeys(deps: KeysDeps) {
     const ed = deps.getEd()
     const ws = deps.getWs()
     const focusId = ed.sel?.aBlock ?? ed.caretBlock()
-    const focusBlock = focusId ? findInForest(ws.blocks, focusId) : undefined
+    /**
+     * 找块走**索引表**（O(1)）：这一行在每次按键的派发里都要算一次上下文键，
+     * 而 `findInForest(ws.blocks, …)` 是一次全库 DFS。`index.blocks` 与
+     * `walkForest` 同一条可见性口径（软删退场）。
+     */
+    const focusBlock = focusId ? ed.store.index.blocks.get(focusId) : undefined
     const ctx: CtxKeys = {
       ...ed.ctxKeys(),
       blockSelection: ed.bsel.hasBlockSelection(),
@@ -53,7 +58,8 @@ export function setupKeys(deps: KeysDeps) {
       drawerOpen: deps.layers.drawerOpen(),
       popoverOpen: deps.layers.popoverOpen(),
       // ⚠️ 「页数」只数 `page` 列表（journal 也是一块，但它不是页 —— ）
-      pageCount: flatten({ roots: ws.blocks }).filter((b) => hasList(b, 'page')).length,
+      // 读派生列表而不是每次展平整库：表在索引里，只在结构/身份变化时失效。
+      pageCount: ensureIndexLists(ed.store.index, ws.blocks).pages.length,
       pageTitleEmpty: deps.pageTitle(deps.activeBlock()).trim() === '',
       // 块菜单里的露面开关（只看**当前聚焦块**；顺序无语义，只有「在不在」）
       blockHasPageRole: hasList(focusBlock, 'page'),

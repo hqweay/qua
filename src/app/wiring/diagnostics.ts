@@ -38,6 +38,7 @@ import {
   tagIdsOf,
   tagMemberIds,
   closureOf,
+  treeProbe,
   type Block,
   type CtxKeys,
 } from '../../core/index.ts'
@@ -816,6 +817,38 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
      * 绝不能把它塞回 op 形状里（那会让「op 记什么」有两个答案）。
      */
     lastOps: () => getLastOps(),
+    /**
+     * **性能基线读数**（诊断探针用）：树读路径、行投影、窗口化、store 的计数器。
+     *
+     * 计数自进程启动累计；探针在动作前后各读一次再相减。这里只做快照，
+     * 不在产品路径上读这些数。
+     */
+    perf: () => ({
+      tree: { ...treeProbe },
+      editor: { ...mainEd.perfProbe },
+      render: { ...mainEd.render.probe },
+      store: { ...mainEd.store.probe },
+      revision: mainEd.store.revision,
+      flattenStacks: [...treeProbe.flattenStacks],
+    }),
+    /** 记录接下来 N 次 `flatten` 的调用栈（诊断探针用来定「这 28 遍是谁走的」） */
+    perfCaptureFlatten: (n = 20) => {
+      treeProbe.flattenStacks.length = 0
+      treeProbe.captureFlatten = n
+    },
+    /** 清零上面那组计数器（探针在每个测量段开始时调） */
+    perfReset: () => {
+      treeProbe.flattenCalls = 0
+      treeProbe.visibleRowsCalls = 0
+      treeProbe.locateCalls = 0
+      treeProbe.pathToCalls = 0
+      treeProbe.captureFlatten = 0
+      treeProbe.flattenStacks.length = 0
+      for (const k of Object.keys(mainEd.perfProbe) as (keyof typeof mainEd.perfProbe)[]) mainEd.perfProbe[k] = 0
+      for (const k of Object.keys(mainEd.render.probe) as (keyof typeof mainEd.render.probe)[]) mainEd.render.probe[k] = 0
+      mainEd.store.probe.rebuildCount = 0
+      mainEd.store.probe.notifyCount = 0
+    },
     /**
      * 自检用：把最近一次事务的 op 位置**派生**成下标（`prev` 现在排在兄弟列表第几位）。
      *

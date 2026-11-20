@@ -138,11 +138,21 @@ function refreshSelectionBar(): void {
     selColorAxis = null
     return
   }
-  const ctx = uiCtx()
-  const rows = rowsFromBindings(resolveBindings('selection', ctx), keyHints())
+  /**
+   * ⚠️ **先量选区、再算上下文**：`uiCtx()` 是整条 when 键空间（含整库展平、格式
+   * 与块数），而选区塌了／没有矩形时气泡根本不会开。把它放在 `uiCtx()` 前面，
+   * 光标每动一次（每一次按键都会发 selectionchange）就不必付那份代价。
+   */
   const rect = getEd().selectionRect()
   // 气泡开着时不要被「菜单打开」这类状态误关：选区还在就该在
-  if (rows.length === 0 || !rect) {
+  if (!rect) {
+    layers.closeSelectionBar()
+    selColorAxis = null
+    return
+  }
+  const ctx = uiCtx()
+  const rows = rowsFromBindings(resolveBindings('selection', ctx), keyHints())
+  if (rows.length === 0) {
     layers.closeSelectionBar()
     selColorAxis = null
     return

@@ -33,7 +33,27 @@ import { walkForest } from './walk.ts'
 import { cloneMountEntries, MOUNTS_PROP } from '../views/mount.ts'
 import { isEmbedBlock } from '../views/embed.ts'
 import { splitPropsForEnter } from '../props/props.ts'
+
+/**
+ * **树读路径的计数器**（诊断探针用，不是产品状态）。
+ *
+ * 为什么放在唯一入口上：`flatten`／`visibleRows`／`locate` 被十几条读路径共享，
+ * 只看某一个调用点推断「一次输入走了几遍树」会漏掉别的调用方。计数放在这里，
+ * 探针才能回答「这一笔总共走了几遍」。
+ * 只有测试面读它（`window.__qua.perf`），产品逻辑不读。
+ */
+export const treeProbe = {
+  flattenCalls: 0,
+  visibleRowsCalls: 0,
+  locateCalls: 0,
+  pathToCalls: 0,
+  /** > 0 时记录接下来的 N 次 `flatten` 调用栈（诊断探针；产品路径恒为 0） */
+  captureFlatten: 0,
+  flattenStacks: [] as string[],
+}
+
 export function locate(doc: Doc, id: string): Located | null {
+  treeProbe.locateCalls++
   let found: Located | null = null
   walkForest(doc.roots, (b, ctx) => {
     if (b.id !== id) return
@@ -49,6 +69,11 @@ export function siblingsOf(doc: Doc, parent: Block | null): Block[] {
 
 /** 文档序（深度优先，**含折叠隐藏的块**） */
 export function flatten(doc: Doc): Block[] {
+  treeProbe.flattenCalls++
+  if (treeProbe.captureFlatten > 0) {
+    treeProbe.captureFlatten--
+    treeProbe.flattenStacks.push((new Error().stack ?? '').split('\n').slice(1, 7).join('\n'))
+  }
   const out: Block[] = []
   walkForest(doc.roots, (b) => {
     out.push(b)
@@ -85,6 +110,7 @@ export interface VisibleRow {
  *    不画身体的编辑器（挂载区／镜像／查询结果自己）给了它，子块就哪儿都不画了。
  */
 export function visibleRows(doc: Doc, opts: { bodyHosts?: (b: Block) => boolean } = {}): VisibleRow[] {
+  treeProbe.visibleRowsCalls++
   const out: VisibleRow[] = []
   const childless = new Set<string>()
   if (doc.viewRootId) childless.add(doc.viewRootId)
@@ -201,7 +227,46 @@ export function filterVisibleRows<R extends VisibleRow>(
 
 /** 从根到该块（含自身）的路径；`doc` 只是一个装载窗口，按它的 roots 走 */
 export function pathTo(doc: Doc, id: string): Block[] | null {
+  treeProbe.pathToCalls++
   return findPath(doc.roots, id)
+}
+
+/**
+ * 每个块的**模型父块**（`null` ＝ 顶层）。
+ *
+ * 用途：块下行的 `_childProps` 显示声明要问「这一行的父块是谁」。渲染层手里的
+ * `VisibleRow` 只有 depth、没有 parent 指针，过去的写法是逐块 `locate(doc, id)`——
+ * 一批 N 行就是 N 次全树 DFS（虚拟化换窗一次批 N 全量行时退化成 O(N²)）。
+ * 一次 walk 建表，行级只查表。
+ */
+export function parentsByBlockId(doc: Doc): Map<string, Block | null> {
+  const out = new Map<string, Block | null>()
+  walkForest(doc.roots, (b, ctx) => {
+    out.set(b.id, ctx.parent)
+  })
+  return out
+}
+
+/**
+ * **这一屏是不是只有一块**（`flatten(doc).length === 1` 的 O(度) 判据）。
+ *
+ * 为什么不能直接用 `flatten().length`：它被单行渲染路径每画一行问一次，
+ * 整页渲染就退化成 O(N²)。这里只回答「会不会超过一块」，看到第二个活块
+ * 或第一个活根的第一个活孩子就能收工。
+ *
+ * 与 `flatten` 同一条口径：软删的块与「软删块下面的子树」都不算
+ * （`walkForest` 跳过整棵软删子树），所以判据是「一个活根且没有活孩子」。
+ */
+export function hasSingleLiveBlock(doc: Doc): boolean {
+  let liveRoots = 0
+  for (const root of doc.roots) {
+    if (isDeleted(root)) continue
+    if (++liveRoots > 1) return false
+    for (const child of root.children) {
+      if (!isDeleted(child)) return false
+    }
+  }
+  return liveRoots === 1
 }
 
 /**
