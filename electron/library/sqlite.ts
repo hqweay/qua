@@ -938,6 +938,26 @@ function argsOf(w: RowWrite): (string | number | null)[] {
  * 盘上少了一行而模型里还有它 —— 静默忽略会让「这次改动没落盘」变成一个不报错的洞，
  * 要等到重开之后才发现字没了。
  */
+/**
+ * **语句缓存**：SQL 文本是有限形状（行写按表/列组合、relink 两条、派生计划三种），
+ * 每次 `prepare` 都要重新解析。批量导入 100k 块约几十万次 prepare；
+ * 按 DB 对象缓存，关库/换库时随 WeakMap 一起回收。
+ */
+const stmtCache = new WeakMap<Db, Map<string, ReturnType<Db['prepare']>>>()
+function stmtOf(db: Db, sql: string): ReturnType<Db['prepare']> {
+  let m = stmtCache.get(db)
+  if (!m) {
+    m = new Map()
+    stmtCache.set(db, m)
+  }
+  let s = m.get(sql)
+  if (!s) {
+    s = db.prepare(sql)
+    m.set(sql, s)
+  }
+  return s
+}
+
 function runWrite(db: Db, w: RowWrite): number {
   /**
    * `relink` 是两条语句 ⇒ 分开执行（`prepare().run()` 一次只吃一条）。
@@ -949,11 +969,11 @@ function runWrite(db: Db, w: RowWrite): number {
     const left = (w.values?.left ?? null) as string | null
     const [fixOld, fixNew] = relinkSql(w.table)
     // fixOld 用 ?1 重复引用同一个 id：一次绑定
-    let n = Number(db.prepare(fixOld).run(id).changes)
-    n += Number(db.prepare(fixNew).run(id, parent, left, id).changes)
+    let n = Number(stmtOf(db, fixOld).run(id).changes)
+    n += Number(stmtOf(db, fixNew).run(id, parent, left, id).changes)
     return n
   }
-  const r = db.prepare(sqlOf(w)).run(...argsOf(w))
+  const r = stmtOf(db, sqlOf(w)).run(...argsOf(w))
   const n = Number(r.changes)
   if (w.op === 'update' && n === 0) {
     throw new Error(`row write: update matched no row in ${w.table} (${JSON.stringify(w.key)})`)
@@ -1007,7 +1027,7 @@ export function applyRowWrites(
 export function applyDerivedPlans(db: Db, plans: readonly DerivedPlan[]): number {
   let changed = 0
   for (const plan of plans) {
-    const r = db.prepare(DERIVED_PLAN_SQL[plan.p]).run(...derivedPlanParams(plan))
+    const r = stmtOf(db, DERIVED_PLAN_SQL[plan.p]).run(...derivedPlanParams(plan))
     changed += Number(r.changes)
   }
   return changed
