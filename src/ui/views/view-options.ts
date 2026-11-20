@@ -356,43 +356,54 @@ export class ViewOptionsPanel {
     const body = this.section(t('ui.view.opt.display'), t('ui.view.opt.defaultHint'))
     const whitelist = display
     const custom = whitelist !== undefined
-    // 三态：「跟随默认」＝缺省（rich 默认/计算列）；「编辑默认」＝声明层；
-    // 「自定义」＝白名单覆写（空选＝只标题）
+    // 两态是**视图层**的选择：不覆写（按记录自己的声明）／本视图白名单。
+    // 「编辑子块显示声明」是**块层**的动作，不是第三种状态——见下面的独立按钮。
     const seg = document.createElement('div')
     seg.className = 'vopt-seg'
     const editing = custom || this.displayEditing
-    const followBtn = this.segBtn(t('ui.view.opt.followDefault'), !editing, () => {
+    const followBtn = this.segBtn(t('ui.view.opt.followDecl'), !editing, () => {
       this.displayEditing = false
       if (custom) {
         this.deps.invoke('core.view/set-display', { owner: this.deps.owner, viewId: this.deps.viewId(), props: null })
       }
       this.refresh()
     })
-    followBtn.dataset.tip = t('ui.view.opt.followDefaultHint')
+    followBtn.dataset.tip = t('ui.view.opt.followDeclHint')
     seg.append(followBtn)
-    // 「编辑默认」只在声明真正生效的组合给：children 源（声明喂的是直接子块）的大纲与卡片。
-    // 表格的缺省是计算列、query 命中的声明各在各的父块——这些组合里调它等于没按
-    const declarationApplies = source.kind === 'children' && (view === null || view.kind === 'cards')
-    const owner = this.deps.owner
-    if (declarationApplies && this.deps.openChildProps && owner.kind === 'block') {
-      const blockId = owner.blockId
-      const editBtn = this.segBtn(t('ui.view.opt.editDefault'), false, () => {
-        this.deps.openChildProps?.(blockId)
-      })
-      editBtn.dataset.tip = t('ui.view.opt.editDefaultHint')
-      seg.append(editBtn)
-    }
-    const customBtn = this.segBtn(t('ui.view.opt.custom'), custom, () => {
-      // 进入编辑态**不写盘**：勾选清单按当前生效显示预选，首次勾选才落白名单——
-      // 「点开看看」不该让显示跳变（配置写一条撤销，但没动过的配置不该产生撤销）
+    // 进入自定义**不写盘**：勾选清单按当前生效显示预选，首次勾选才落白名单——
+    // 「点开看看」不该让显示跳变（配置写一条撤销，但没动过的配置不该产生撤销）。
+    // 选中态跟 `editing` 走：意图已选，即使还没写第一格，也不能两个都不亮。
+    const customBtn = this.segBtn(t('ui.view.opt.customView'), editing, () => {
       if (!editing) {
         this.displayEditing = true
         this.render()
       }
     })
-    customBtn.dataset.tip = t('ui.view.opt.customHint')
+    customBtn.dataset.tip = t('ui.view.opt.customViewHint')
     seg.append(customBtn)
     body.append(seg)
+
+    /**
+     * **块层动作，不是视图模式**：它打开当前块的 `_childProps` 选择器，写的是块声明，
+     * 影响它的所有子块（以及沿引用继承的地方），与这张视图的白名单无关。
+     *
+     * 只在声明真正生效的组合给：children 源的大纲与卡片。表格缺省是计算列、
+     * query 命中的声明各在各的父块——这些组合里调它等于没按。
+     * 本视图进入自定义（含预览编辑态）时**不摆**：白名单会覆盖记录层声明，
+     * 在这里改块声明看不到效果；块菜单的「子块行内属性…」仍是它的家。
+     */
+    const declarationApplies = source.kind === 'children' && (view === null || view.kind === 'cards')
+    const owner = this.deps.owner
+    if (declarationApplies && this.deps.openChildProps && owner.kind === 'block' && !editing) {
+      const blockId = owner.blockId
+      const editBtn = document.createElement('button')
+      editBtn.type = 'button'
+      editBtn.className = 'ui-btn vopt-decl'
+      editBtn.textContent = t('ui.view.opt.editDecl')
+      editBtn.dataset.tip = t('ui.view.opt.editDeclHint')
+      editBtn.addEventListener('click', () => this.deps.openChildProps?.(blockId))
+      body.append(editBtn)
+    }
 
     if (!editing) return
     // 勾选清单：基线＝白名单（已在自定义态）或当前生效显示（编辑态预选）；

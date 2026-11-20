@@ -490,6 +490,10 @@ select.qt-value {
   display: flex;
   gap: var(--ui-gap-1);
 }
+/* 块层动作（编辑子块显示声明）不是分段里的第三种状态：靠左、不拉伸 */
+.vopt-decl {
+  align-self: flex-start;
+}
 .vopt-props {
   display: flex;
   flex-direction: column;

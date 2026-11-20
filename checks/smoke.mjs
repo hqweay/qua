@@ -32404,12 +32404,12 @@ await check('T339 划选经过引用：显示名随原生选区一起选中，�
 /**
  * T340｜**浮层里再开菜单**：新面替换旧面，不叠在下面（点得到、落得下）。
  *
- * 修前：视图选项是 `.popover`（z=70），「编辑默认」开的子块属性选择器是 `.layer`（z=60）
+ * 修前：视图选项是 `.popover`（z=70），「编辑子块显示声明」开的属性选择器是 `.layer`（z=60）
  * ⇒ 新菜单被旧浮层盖住，看起来灰着、按了没反馈。判据是两条：旧面必须关掉；
  * 展开行必须是 `elementFromPoint` 的命中物，并且真按一下能落盘。
  * 前置用**真的传递型引用块**当视图 owner：这一行只在「正文只有一枚引用」的块上有面。
  */
-await check('T340 浮层里开菜单：旧浮层关闭、新菜单在最上且可点（编辑默认 → 沿传递型引用展开）', async () => {
+await check('T340 浮层里开菜单：旧浮层关闭、新菜单在最上且可点（编辑子块显示声明 → 沿传递型引用展开）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
@@ -32440,9 +32440,9 @@ await check('T340 浮层里开菜单：旧浮层关闭、新菜单在最上且�
   })
   await page.waitForSelector('.popover .vopt-seg', { timeout: 3000 })
 
-  // 「编辑默认」是第二颗分段按钮（第一颗＝跟随默认，第三颗＝自定义）
+  // 块层动作不是分段按钮：`.vopt-decl` 是独立按钮（分段只有两态）
   const editAt = await page.evaluate(() => {
-    const b = document.querySelectorAll('.popover .vopt-seg-btn')[1]
+    const b = document.querySelector('.popover .vopt-decl')
     const r = b.getBoundingClientRect()
     return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
   })
