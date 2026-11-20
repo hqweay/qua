@@ -101,10 +101,14 @@ export class InsertOps {
        *   · 「待办」（闭合态）⇒ 原地落值（但已有关闭态值时不覆盖，见上）。
        */
       if (!closure) {
+        this.ed.abortUndoEntry()
         this.ed.placeCaret(loc.block.id, 0)
         return loc.block.id
       }
-      if (closureOf(loc.block, this.ed.fieldTable()) !== undefined) return null
+      if (closureOf(loc.block, this.ed.fieldTable()) !== undefined) {
+        this.ed.abortUndoEntry()
+        return null
+      }
       // 只落一个属性值、不动结构 ⇒ 一笔事务里正好 1 条 `prop.set`（定义块缺了就同批补上）。
       // 自有槽同批登记：这一栏「在」不能只靠值撑着（见 toggleClosure 的注释）
       this.ed.write((tx) => {
@@ -140,7 +144,10 @@ export class InsertOps {
      * 事务里什么都没写 ⇒ 没有任何 op。
      */
     const site = insertSiteOf(loc, { blank: false })
-    if (!site || site.kind === 'replace') return null
+    if (!site || site.kind === 'replace') {
+      this.ed.abortUndoEntry()
+      return null
+    }
     const at = site.kind === 'first-child' ? { parentId: site.parentId, index: 0 } : site
     const ok = this.ed.write((tx) => {
       // 新块自带关闭态值 ⇒ 定义块得同批在（与切换关闭态同一条判据）
@@ -148,7 +155,10 @@ export class InsertOps {
       tx.insert(b, at.parentId, at.index)
       return true
     })
-    if (!ok) return null
+    if (!ok) {
+      this.ed.abortUndoEntry()
+      return null
+    }
     this.ed.structTail({ id: b.id, off: 0 })
     return b.id
   }
@@ -170,18 +180,25 @@ export class InsertOps {
     this.ed.beginUndoEntry()
     const blank = isBlankPlaceholder(loc.block)
     if (blank) {
+      this.ed.abortUndoEntry()
       this.ed.placeCaret(loc.block.id, 0)
       return loc.block.id
     }
     const site = insertSiteOf(loc, { blank: false, dir: 'before' })
-    if (!site || site.kind !== 'before' && site.kind !== 'first-child') return null
+    if (!site || site.kind !== 'before' && site.kind !== 'first-child') {
+      this.ed.abortUndoEntry()
+      return null
+    }
     const at = site.kind === 'first-child' ? { parentId: site.parentId, index: 0 } : site
     const b = mkBlock('')
     const ok = this.ed.write((tx) => {
       tx.insert(b, at.parentId, at.index)
       return true
     })
-    if (!ok) return null
+    if (!ok) {
+      this.ed.abortUndoEntry()
+      return null
+    }
     this.ed.structTail({ id: b.id, off: 0 })
     return b.id
   }
@@ -251,20 +268,29 @@ export class InsertOps {
         tx.insert(empty, parentId, loc.index + 1)
         return true
       })
-      if (!ok) return null
+      if (!ok) {
+        this.ed.abortUndoEntry()
+        return null
+      }
       this.ed.structTail({ id: empty.id, off: 0 }, [loc.block.id, empty.id])
       return loc.block.id
     }
 
     const site = insertSiteOf(loc, { blank: false })
-    if (!site || site.kind === 'replace') return null
+    if (!site || site.kind === 'replace') {
+      this.ed.abortUndoEntry()
+      return null
+    }
     const at = site.kind === 'first-child' ? { parentId: site.parentId, index: 0 } : { parentId: site.parentId, index: site.index }
     const ok = this.ed.write((tx) => {
       tx.insert(query, at.parentId, at.index)
       tx.insert(empty, at.parentId, at.index + 1)
       return true
     })
-    if (!ok) return null
+    if (!ok) {
+      this.ed.abortUndoEntry()
+      return null
+    }
     this.ed.structTail({ id: empty.id, off: 0 }, [query.id, empty.id])
     return query.id
   }
@@ -297,20 +323,29 @@ export class InsertOps {
         })
         return true
       })
-      if (!ok) return null
+      if (!ok) {
+        this.ed.abortUndoEntry()
+        return null
+      }
       this.ed.structTail(null, [loc.block.id])
       return loc.block.id
     }
 
     const site = insertSiteOf(loc, { blank: false })
-    if (!site || site.kind === 'replace') return null
+    if (!site || site.kind === 'replace') {
+      this.ed.abortUndoEntry()
+      return null
+    }
     const at = site.kind === 'first-child' ? { parentId: site.parentId, index: 0 } : { parentId: site.parentId, index: site.index }
     const view = mkBlock('', ownerProps ? { props: ownerProps } : {})
     const ok = this.ed.write((tx) => {
       tx.insert(view, at.parentId, at.index)
       return true
     })
-    if (!ok) return null
+    if (!ok) {
+      this.ed.abortUndoEntry()
+      return null
+    }
     this.ed.structTail({ id: view.id, off: 0 }, [view.id])
     return view.id
   }
@@ -374,7 +409,10 @@ export class InsertOps {
     // 两个块共用一笔（用户按的是一次「插入」）；落点与 `insertNear` 同一条规则：
     // section 根没有兄弟位，插成它的首两个子块
     const site = insertSiteOf(loc, { blank: false })
-    if (!site || site.kind === 'replace') return null
+    if (!site || site.kind === 'replace') {
+      this.ed.abortUndoEntry()
+      return null
+    }
     const at = site.kind === 'first-child' ? { parentId: site.parentId, index: 0 } : site
     const ok = this.ed.write((tx) => {
       prepare?.(tx, loc)
@@ -382,7 +420,10 @@ export class InsertOps {
       tx.insert(empty, at.parentId, at.index + 1)
       return true
     })
-    if (!ok) return null
+    if (!ok) {
+      this.ed.abortUndoEntry()
+      return null
+    }
     this.ed.structTail({ id: empty.id, off: 0 })
     return widget.id
   }

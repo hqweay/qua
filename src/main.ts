@@ -1481,14 +1481,14 @@ const app: App = {
 
   /**
    * **一步撤销**（命令分组 API 的历史语义）：组内所有写入共用一个撤销条目。
-   * 原子性归 `Tx`；这里只分组历史。嵌套由 `BlockEditor.begin/finishUndoEntry` 的深度挡。
+   * 原子性归 `Tx`；这里只分组历史。分组内的嵌套由 `beginUndoGroup` 显式授权。
    */
   runGroup: <T>(fn: () => T, kind: UndoKind = 'other'): T => {
-    ed.beginUndoEntry()
+    ed.beginUndoGroup()
     try {
       return fn()
     } finally {
-      ed.finishUndoEntry(kind)
+      ed.endUndoGroup(kind)
     }
   },
 

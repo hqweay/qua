@@ -69,6 +69,20 @@ test('合并窗口：连续两笔打字是一步；撤销回到第一笔之前�
   assert.equal(plainText(a.content), '一二')
 })
 
+test('空捕获不清 redo：零写动作不切断重做，真写才切断', () => {
+  const { a, store, kb } = fixture()
+  edit(kb, store, 'insert', (tx) => tx.patch(a.id, (x) => writeBlockContent(x, textRuns('一'))))
+  store.undo('me', null)
+  assert.equal(store.undoStack.redoDepth(), 1)
+
+  // 拒绝/空操作也走 finish（捕获为 null）：不能把用户刚撤销的那一步永久作废
+  assert.equal(store.record(null, null, 'other', Date.now()), false)
+  assert.equal(store.undoStack.redoDepth(), 1, '空捕获保留 redo')
+
+  edit(kb, store, 'other', (tx) => tx.patch(a.id, (x) => writeBlockContent(x, textRuns('二'))))
+  assert.equal(store.undoStack.redoDepth(), 0, '真落条目才切断 redo')
+})
+
 test('插入：撤销是 purge（块真的不在树上了），重做用同一个 id 复活', () => {
   const { a, store, kb } = fixture()
   const fresh = mkBlock('新块')

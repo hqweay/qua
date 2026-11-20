@@ -47,7 +47,10 @@ export class StructOps {
     this.ed.commitEdit(id)
     this.ed.beginUndoEntry()
     const loc = locate(this.ed.doc, id)
-    if (!loc) return
+    if (!loc) {
+      this.ed.abortUndoEntry()
+      return
+    }
     /**
      * **同块选区 + Enter = 先删选区，再在选区起点拆**（只做无角色的普通内容块；
      * 跨块选区与页名等身份块仍走原行为）。删除与拆分在**同一笔**里落。
@@ -59,7 +62,10 @@ export class StructOps {
         : null
 
     const out = this.ed.write((tx) => this.splitTx(tx, id, offset, cut))
-    if (!out) return
+    if (!out) {
+      this.ed.abortUndoEntry()
+      return
+    }
     this.ed.structTail(out.caret ?? null)
   }
 
@@ -167,7 +173,10 @@ export class StructOps {
       return
     }
     const plan = mergeIntoPrevPlan(this.ed.doc, id)
-    if (!plan) return
+    if (!plan) {
+      this.ed.abortUndoEntry()
+      return
+    }
     /**
      * 内容拼接在 core 层完成（`joinRuns`：边界两侧同形段合并、原子原样排队）。
      * 被并块的字现在排在前一块内容的**末尾** ⇒ 光标落在粘接点 `plan.at`。
@@ -485,7 +494,10 @@ export class StructOps {
      *    （实测踩到：用它查，恢复永远返回 false）。所以用 `trashOf` 的那一份清单。
      */
     const inTrash = trashOf(this.ed.store.blocks).some((b) => b.id === id)
-    if (!inTrash) return false
+    if (!inTrash) {
+      this.ed.abortUndoEntry()
+      return false
+    }
     this.ed.write((tx) => {
       tx.restore(id)
     })
@@ -550,6 +562,7 @@ export class StructOps {
     const after = flatten(this.ed.doc)
     // 关 fill 的实例删空了段（页签删最后一页）：没有落点可给，视图层会回落激活页
     if (after.length > 0) this.ed.structTail({ id: after[Math.min(idx, after.length - 1)]!.id, off: 0 })
+    else this.ed.abortUndoEntry()
     return true
   }
 

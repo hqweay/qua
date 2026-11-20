@@ -9975,6 +9975,44 @@ await check(
 )
 
 await check(
+  'T337 点空白复用末尾空块不留下未收口的撤销条目：随后键入的 ⌘Z 仍只撤这一笔',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    // 前置：挑一个可写叶子写成非空；随后两次点空白——第一次新建空块，第二次走
+    // 「复用末尾空块」（模型不动、撤销不记）。复用支曾经漏了 finish ⇒ entryDepth
+    // 永久留在 1，之后每一次 begin/finish 都只在 1↔2 之间往返，⌘Z 停在旧条目上。
+    const leaf = await pickLeaf(page)
+    assert(leaf, '第一页里应有可编辑的内容块')
+    const target = leaf.id
+    await page.evaluate((id) => window.__qua.__editor.insert.setText(id, 'ABC'), target)
+    await page.waitForTimeout(120)
+
+    await page.evaluate(() => window.__qua.__editor.clickEmptyArea(99999))
+    await page.evaluate(() => window.__qua.__editor.clickEmptyArea(99999))
+    await page.waitForTimeout(120)
+
+    // 在目标块开头键入一个字，⌘Z 必须只撤这个字
+    await page.evaluate((id) => window.__qua.focusBlock(id, 0), target)
+    await page.waitForTimeout(80)
+    await page.keyboard.type('X')
+    await page.waitForTimeout(150)
+    const typed = await page.evaluate((id) => window.__qua.blocks().find((b) => b.id === id)?.text, target)
+    assert(typed === 'XABC', `前置：键入应落在块首：${typed}`)
+
+    await page.keyboard.press(kbd('mod+z'))
+    await page.waitForTimeout(250)
+    const undone = await page.evaluate((id) => window.__qua.blocks().find((b) => b.id === id)?.text, target)
+    assert(undone === 'ABC', `⌘Z 应只撤刚键入的那个字（而不是复用支留下的旧动作）：${undone}`)
+
+    await ctx.close()
+    return `clickEmptyArea 复用空块后，键入 X 仍可一步撤销回 ABC`
+  },
+)
+
+await check(
   'T85 插分割线走同一笔事务：空块原地改类型＝时刻 upsert ＋ 1 条 prop.set；有内容＝同一笔 2 条 insert；各自一次撤销复原',
   async () => {
     const { ctx, page } = await freshPage(browser, base)

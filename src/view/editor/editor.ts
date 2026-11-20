@@ -686,6 +686,13 @@ export class BlockEditor {
    * 而后者自己也会 `begin/finish`。只有最外层真正开袋／落条目；内层并入外层。
    */
   private entryDepth = 0
+  /**
+   * **命令分组深度**（`runGroup` 开的嵌套）。它是 `entryDepth` 的授权来源：
+   * 只有分组内层的 begin 才是合法的嵌套；分组外的 depth > 0 一律是「上一笔出口漏了
+   * finish」——那是实现 bug，必须在下一次动作开始前收口，否则深度永久留下，
+   * 此后所有编辑都记不进撤销栈（⌘Z 看着还能用，只是停在旧条目上）。
+   */
+  private entryGroupDepth = 0
   /** 工作集装载咽喉（装配层注入；省略 ＝ 整库模式）。触发链落点按名字复用未装载目标用 */
   readonly ensureLoaded: ViewOpts['ensureLoaded']
   /** 入向关系全库批查（装配层注入；省略 ＝ 整库模式） */
@@ -849,13 +856,56 @@ export class BlockEditor {
    * **开始一个撤销条目**：清空捕获袋，并记下这一笔之前的选区。
    *
    * 之后的每次 `write` 都会把事务出口的捕获并进来 —— 不再有「取整片森林快照」这一步。
+   *
+   * ⚠️ **分组外出现未收口的上一笔** ⇒ 先把它收掉再开新的。这是实现 bug 的自愈：
+   *    某个出口漏了 `finish` 时，若继续把深度留在 1，之后所有 begin/finish 都只
+   *    在 1↔2 之间往返，`undo.record` 永远不再被调用。自愈会把它当作一条独立
+   *    `other` 条目落下（写过的内容仍可撤销），并留一条开发期警告；正常路径不该看到它。
    */
   beginUndoEntry(): void {
+    if (this.entryDepth > 0 && this.entryGroupDepth === 0) {
+      console.warn('[editor] previous undo entry was not finished; closing it before the next action')
+      while (this.entryDepth > 0) this.finishUndoEntry('other')
+    }
     this.entryDepth++
     // 内层并入外层：只有最外层能重置捕获袋（否则复合命令会把外层的 before 冲掉）
     if (this.entryDepth > 1) return
     this.entryCap = null
     this.entrySel = this.sel
+  }
+
+  /**
+   * **开一个命令分组**：组内所有动作共用一个撤销条目（`runGroup` 用）。
+   *
+   * 与裸 `beginUndoEntry` 的区别只有一位：分组内的嵌套 begin 是合法的。
+   * 非分组路径若开始嵌套，说明上一笔漏了 finish —— 见 `beginUndoEntry` 的自愈。
+   */
+  beginUndoGroup(): void {
+    // 先按**顶层动作**开袋：若上一笔漏了 finish，这里必须先自愈；
+    // 反过来先加分组深度会让自愈条件（groupDepth === 0）恒假，泄漏被带进新分组。
+    this.beginUndoEntry()
+    this.entryGroupDepth++
+  }
+
+  /** 收一个命令分组；最后一步落入组条目（与 `finishUndoEntry` 同语义） */
+  endUndoGroup(kind: UndoKind): void {
+    if (this.entryGroupDepth > 0) this.entryGroupDepth--
+    this.finishUndoEntry(kind)
+  }
+
+  /**
+   * **放弃当前动作的撤销条目**：只退一层深度，不落条目。
+   *
+   * 用于「校验失败 / 零写」的出口：这些路径不该留下一条空条目，更不该让深度挂着。
+   * 与 `finishUndoEntry` 的分工：finish 是「动作成功，收下捕获」；abort 是「动作没发生」。
+   * 嵌套内层的 abort 只退一层（与外层共用捕获袋），到 0 时丢弃捕获。
+   */
+  abortUndoEntry(): void {
+    if (this.entryDepth === 0) return
+    this.entryDepth--
+    if (this.entryDepth > 0) return
+    this.entryCap = null
+    this.entrySel = null
   }
 
   /**
@@ -1911,7 +1961,13 @@ export class BlockEditor {
   tx(kind: UndoKind, fn: () => void, rerender: 'all' | 'block' | 'none' = 'all'): void {
     this.beginUndoEntry()
     const caret = this.sel
-    fn()
+    try {
+      fn()
+    } catch (e) {
+      // 写抛错 ⇒ 这一次动作没有发生：丢弃捕获并退深度，别把 ⌘Z 永久留在半开状态
+      this.abortUndoEntry()
+      throw e
+    }
     this.finishUndoEntry(kind)
     if (rerender === 'all') this.renderAll()
     else if (rerender === 'block' && caret) this.renderBlock(caret.aBlock)
@@ -2130,13 +2186,17 @@ export class BlockEditor {
       })
     } catch (e) {
       // 名字被一个未装载的块占着 ⇒ 不新建（否则地址空间出现第二个同名身份）；留成纯文本
+      this.abortUndoEntry()
       if (e instanceof AliasClaimError) {
         console.warn(`[editor] tag "${e.aliasName}" exists on an unloaded block; left as text`)
         return false
       }
       throw e
     }
-    if (!ok) return false
+    if (!ok) {
+      this.abortUndoEntry()
+      return false
+    }
     this.finishUndoEntry('other', Date.now())
     if (locate(this.doc, blockId)) this.renderBlock(blockId)
     this.emitChange('text', [blockId])
@@ -2829,7 +2889,10 @@ export class BlockEditor {
       mode = 'repointed'
       return true
     }, undefined, { directEdit: true })
-    if (!ok) return 'none'
+    if (!ok) {
+      this.abortUndoEntry()
+      return 'none'
+    }
     this.finishUndoEntry('other', Date.now())
     this.renderAll()
     this.emitChange('struct')
@@ -3038,6 +3101,9 @@ export class BlockEditor {
     if (!emptyTail) {
       this.write((tx) => tx.insert(child, root.id, root.children.length))
       this.finishUndoEntry('structural', Date.now())
+    } else {
+      // 复用末尾空块：模型不动、撤销不记（与 `insertBlockAfter` 的空块支同一条口径）
+      this.abortUndoEntry()
     }
     this.renderAll()
     this.placeCaret(child.id, 0)

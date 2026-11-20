@@ -81,6 +81,10 @@ export class UndoStack {
    * `after` 用最后一次（重做要回到停手那一刻）；`sel` 也保留第一次。
    *
    * `standalone` ＝ 这一条是原子动作（粘贴等）：它两边都不参与合并（见 `UndoEntry.standalone`）。
+   *
+   * ⚠️ **空捕获不清 redo**：`capture === null` 说明这次动作没有写过模型（零 op 的
+   *    拒绝/空操作）。清 redo 会让一次「什么都没做」把用户刚撤销的那一步永久作废；
+   *    只有真的落了一条新条目（或合并一条）才该切断 redo。
    */
   record(
     capture: UndoCapture | null,
@@ -89,6 +93,7 @@ export class UndoStack {
     at: number,
     opts: { standalone?: boolean } = {},
   ): boolean {
+    if (capture === null) return false
     const last = this.past[this.past.length - 1]
     const mergeable =
       opts.standalone !== true &&
@@ -98,7 +103,6 @@ export class UndoStack {
       (kind === 'insert' || kind === 'delete' || kind === 'mark') &&
       at - last.at <= this.mergeWindowMs
     this.future = []
-    if (capture === null) return false
     if (mergeable && last) {
       last.before = mergeStates(last.before, capture.before, 'first')
       last.after = mergeStates(last.after, capture.after, 'last')
