@@ -12,6 +12,7 @@ import assert from 'node:assert/strict'
 import type { Block } from '../src/core/index.ts'
 import {
   belowFieldsFor,
+  CHILD_PROPS_FOLLOW_PROP,
   CHILD_PROPS_PROP,
   constrainBelowFields,
   ENGINE_CREATED,
@@ -254,6 +255,31 @@ test('传递型引用：正文只有一枚引用的块，其子块沿目标解�
   mid.content = [...textRuns('正文'), { id: 'r5', t: 'ref', to: 'tag-c' }]
   const viaBroken = (belowFieldsFor([child], forest, (id) => (id === 'c1' ? mid : null)).get('c1')?.rows ?? []).map((r) => r.propId)
   assert.deepEqual(viaBroken, [], '链上有一环带正文 ⇒ 断')
+
+  /**
+   * 显式关掉继承（`_childPropsFollow: false`）：目标那一跳停住，但**本块自己的声明
+   * 与标签声明照常**——开关管的是「目标透不透」，不是「这块有没有声明」。
+   */
+  const defMood = mkPropDef('心情', 'text', {}, 'def-follow')
+  const localTag = blk('tag-local', 'Local', {
+    _aliases: ['Local'],
+    _lists: ['tag'],
+    [CHILD_PROPS_PROP]: [defMood.id],
+  })
+  const off = blk('pass-off', '', {
+    [CHILD_PROPS_PROP]: [ENGINE_MODIFIED],
+    [CHILD_PROPS_FOLLOW_PROP]: false,
+    _tags: ['tag-local'],
+  })
+  off.content = [{ id: 'r6', t: 'ref', to: 'tag-life' }]
+  const record = blk('c-off', '记录')
+  const offForest = [...forest, localTag, off, record, defMood]
+  // 面板口径（`fieldRowsWithParent`）把声明行原样列出，不要求值已填——这才看得到
+  // 「标签声明还在、目标声明没了」两者的差别
+  const rowsOff = fieldRowsWithParent(record, offForest, off).map((r) => r.propId)
+  assert.ok(rowsOff.includes(ENGINE_MODIFIED), '自己的声明照常生效')
+  assert.ok(rowsOff.includes(defMood.id), '标签声明照常生效')
+  assert.ok(!rowsOff.includes(ENGINE_CREATED), '目标声明被开关挡住')
 })
 
 test('childPropsLookupOf：复用外部 byId 表（index.blocks）与自建 walk 的结果一致', () => {

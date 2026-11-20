@@ -9,6 +9,7 @@ import {
   allTags,
   buildAdjacency,
   childDisplayProps,
+  childPropsFollowsRefs,
   passThroughRefTarget,
   resolveTagIds,
   tagsById,
@@ -593,6 +594,8 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
         seen.add(cur.id)
         depth += 1
         const own = childDisplayProps(cur)
+        const passTarget = passThroughRefTarget(cur)
+        const follow = childPropsFollowsRefs(cur)
         parentChain.push({
           at: depth,
           id: cur.id.slice(-6),
@@ -602,7 +605,9 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
               .join('')
               .slice(0, 20) || 'empty',
           ownDecl: own,
-          viaPassThrough: passThroughRefTarget(cur) !== null,
+          viaPassThrough: passTarget !== null && follow,
+          // 有目标但开关关着：链在这里人为停住，不是「没有下一环」——诊断分得清
+          ...(passTarget !== null && !follow ? { stoppedAt: 'childPropsFollowOff' } : {}),
         })
         for (const p of own) if (!resolved.includes(p)) resolved.push(p)
         for (const t of resolveTagIds(cur, tagsById(forest))) {
@@ -610,8 +615,7 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
           if (tagDecl.length) parentChain.push({ at: depth, viaTag: displayNameOf(t), ownDecl: tagDecl })
           for (const p of tagDecl) if (!resolved.includes(p)) resolved.push(p)
         }
-        const target = passThroughRefTarget(cur)
-        cur = target ? kb.get(target) : null
+        cur = passTarget && follow ? kb.get(passTarget) : null
       }
       return {
         block: blockId.slice(-6),

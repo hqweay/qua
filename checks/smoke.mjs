@@ -26392,6 +26392,27 @@ await check(
       assert(!grandHas, '孙块不该显示（只直接子块）')
     }
 
+    /**
+     * **显示继承开关的接线**：关掉「沿传递引用继承」只停目标那一跳，本块自己的
+     * `_childProps` 照常生效；开回默认＝删格（不是落一个 true）。
+     * 传递目标那一跳的判据在单测（`props-line.test.ts`）里，这里钉命令与落盘。
+     */
+    await page.evaluate((h) => window.__qua.invoke('core.props/set-child-props-follow', { blockId: h, on: false }), fx.host)
+    await page.waitForTimeout(400)
+    const followOff = await page.evaluate(({ host, child }) => {
+      const el = document.querySelector(`.blk[data-block-id="${child}"]`)?.querySelector(':scope > .blk-props-line')
+      return {
+        stored: window.__qua.__editor.store.find(host)?.props?._childPropsFollow,
+        ownLine: el?.textContent ?? '',
+      }
+    }, { host: fx.host, child: fx.childId })
+    assert(followOff.stored === false, `关掉继承应落盘 false：${JSON.stringify(followOff)}`)
+    assert(followOff.ownLine.includes('创建于'), `关掉目标继承后自己的声明仍应显示：${JSON.stringify(followOff)}`)
+    await page.evaluate((h) => window.__qua.invoke('core.props/set-child-props-follow', { blockId: h, on: true }), fx.host)
+    await page.waitForTimeout(200)
+    const followOn = await page.evaluate((h) => window.__qua.__editor.store.find(h)?.props?._childPropsFollow, fx.host)
+    assert(followOn === undefined, '开回默认应删格（不落 true）')
+
     // 撤掉声明 ⇒ 直接子块的行消失（现算，零残留）
     await page.evaluate((h) => window.__qua.invoke('core.props/set-child-props', { blockId: h, propId: 'core/created', on: false }), fx.host)
     await page.waitForTimeout(400)

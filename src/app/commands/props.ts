@@ -12,6 +12,7 @@ import {
   REF_VIEW_PROP,
   isRefDomainValue,
   type RefDomain,
+  CHILD_PROPS_FOLLOW_PROP,
   CHILD_PROPS_PROP,
   UI_POSITION_PROP,
   USE_PROP,
@@ -110,6 +111,7 @@ export function propsCommands(
   | 'setChoiceCardinality'
   | 'setUiPosition'
   | 'setChildProps'
+  | 'setChildPropsFollow'
   | 'deleteChoice'
   | 'restoreChoice'
   | 'setPropFormat'
@@ -200,6 +202,18 @@ export function propsCommands(
       d.toast(t('ui.props.newRefTargetDone', { name: title }), 'ok')
     }
     return made.id
+  }
+
+  /**
+   * 声明写在父块，显示变在**子块的行**——写回调只重画父块，受影响的行在这里列出来：
+   * 普通块 ⇒ 它的孩子；**标签块** ⇒ 全体成员的孩子（解析链含标签声明，成员的子块都显示）。
+   * 两种写口（逐格声明／是否沿引用继承）共用这一份，免得一处改了另一处漏重画。
+   */
+  const repaintChildRows = (parent: Block): void => {
+    const affected = hasList(parent, 'tag')
+      ? [...membersOf(parent.id, d.kb.roots())].flatMap((mid) => d.kb.get(mid)?.children.map((c) => c.id) ?? [])
+      : parent.children.map((c) => c.id)
+    d.repaintBlocks([parent.id, ...affected])
   }
 
   return {
@@ -595,12 +609,23 @@ export function propsCommands(
           patchProp(b, CHILD_PROPS_PROP, next.length > 0 ? next : undefined)
         }),
       )
-      // 声明写在父块，显示变在**子块的行**——写回调只重画父块，受影响的行在这里列出来：
-      // 普通块 ⇒ 它的孩子；**标签块** ⇒ 全体成员的孩子（解析链含标签声明，成员的子块都显示）
-      const affected = hasList(parent, 'tag')
-        ? [...membersOf(blockId, d.kb.roots())].flatMap((mid) => d.kb.get(mid)?.children.map((c) => c.id) ?? [])
-        : parent.children.map((c) => c.id)
-      d.repaintBlocks([blockId, ...affected])
+      repaintChildRows(parent)
+    },
+
+    /**
+     * 写引用块的**显示继承**开关（`_childPropsFollow`）：`on` ＝ 恢复继承（删格），
+     * `off` ＝ 只用自己的声明＋标签声明，不再沿传递目标递归。
+     *
+     * 只对当前是传递型引用的块有可见效果；非引用块写了也只是记下意图（正文以后
+     * 变成纯引用时生效），不做「现在不是就拒写」——那会让先写配置再改正文的路径失败。
+     */
+    setChildPropsFollow: (blockId, on: boolean) => {
+      const parent = find(blockId)
+      if (!parent) return
+      d.run((tx) =>
+        tx.patch(blockId, (b) => patchProp(b, CHILD_PROPS_FOLLOW_PROP, on ? undefined : false)),
+      )
+      repaintChildRows(parent)
     },
 
     /**

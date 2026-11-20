@@ -302,6 +302,12 @@ export type SystemPropId =
    * 值不落子块、显示凭位置（在声明块直接之下）。
    */
   | '_childProps'
+  /**
+   * **引用块是否沿传递目标继承显示声明**（见 `childPropsFollowsRefs`）：
+   * 正文只有一枚引用只说明「这是一跳」；这一跳是转写（继承目标的 `_childProps`）
+   * 还是纯指针（子块是本地笔记、不继承），由这一格显式说。缺省 true；只有 `false` 落盘。
+   */
+  | '_childPropsFollow'
   // 字段定义的**编辑位置**（见 `core/props.ts` 的 `uiPositionOf`）
   | '_uiPosition'
   /**

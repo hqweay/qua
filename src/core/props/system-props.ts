@@ -46,6 +46,7 @@ import { isJournalDate } from '../identity/journal.ts'
 import {
   CARDINALITY_PROP,
   CHECK_PROP,
+  CHILD_PROPS_FOLLOW_PROP,
   CHILD_PROPS_PROP,
   CHOICES_PROP,
   CHOICE_SCOPE_PROP,
@@ -59,6 +60,7 @@ import {
   USE_PROP,
   isCardinalityValue,
   isCheckValue,
+  isChildPropsFollowValue,
   isChildPropsValue,
   isChoicesValue,
   isDefaultValue,
@@ -120,6 +122,7 @@ export const SYSTEM_PROP_CHECKS: Readonly<Record<string, (value: unknown) => boo
   [CARDINALITY_PROP]: isCardinalityValue,
   [OWN_PROPS_PROP]: isOwnPropSlots,
   [CHILD_PROPS_PROP]: isChildPropsValue,
+  [CHILD_PROPS_FOLLOW_PROP]: isChildPropsFollowValue,
   [UI_POSITION_PROP]: isUiPositionValue,
   // `ref` 定义的候选标签（旧形状：读侧当标签档认；新写入走后一条）
   [REF_TAGS_PROP]: isRefTagIds,

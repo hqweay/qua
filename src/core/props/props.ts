@@ -1335,9 +1335,31 @@ export function ownPropIds(block: Block): string[] {
  */
 export const CHILD_PROPS_PROP = '_childProps'
 
+/** 引用块是否沿传递目标继承显示声明；缺省 true，写 `true` 等于删格（与 `_defaultShowPaths` 同一条落盘口径） */
+export const CHILD_PROPS_FOLLOW_PROP = '_childPropsFollow'
+
 /** `_childProps` 的形状判据（读路径与落盘校验共用同一份）：非空字符串数组（同 `_ownProps` 形状） */
 export function isChildPropsValue(v: unknown): boolean {
   return Array.isArray(v) && v.every((x) => typeof x === 'string' && x !== '')
+}
+
+/** `_childPropsFollow` 的形状判据：只有 `false` 一个合法值（开回默认＝删格） */
+export function isChildPropsFollowValue(v: unknown): boolean {
+  return v === false
+}
+
+/**
+ * 引用块是否沿传递目标继承显示声明（`_childProps` 解析链的那一跳）。
+ *
+ * **判据在引用块的正文形状之外**：正文只有一枚引用只说明「这是一跳」，不说明这一跳
+ * 要不像转写一样继承目标的声明。同一个形状有两种真实用法——转写（子块是目标的子块）
+ * 与纯指针（子块是挂在这条链接下的本地笔记）；后者要能显式说「别继承」。
+ *
+ * 缺省 true：保持当前行为（引用页的子块沿用页的显示声明）；只有显式 `false` 才停。
+ * 停的是**目标那一跳**，不是自己的声明：本块自己的 `_childProps` 与标签声明照常生效。
+ */
+export function childPropsFollowsRefs(block: Block | null | undefined): boolean {
+  return block ? prop(block, CHILD_PROPS_FOLLOW_PROP) !== false : true
 }
 
 /** 父块声明给直接子块显示的属性（去重保序；悬空 id 原样保留，行构造时按「无定义」兜底） */
@@ -1427,7 +1449,7 @@ export function childDisplayPropsResolved(
       if (!out.includes(propId)) out.push(propId)
     }
   }
-  const target = passThroughRefTarget(parent)
+  const target = childPropsFollowsRefs(parent) ? passThroughRefTarget(parent) : null
   if (target) {
     for (const propId of childDisplayPropsResolved(lookup.blocks.get(target) ?? null, lookup, nextSeen)) {
       if (!out.includes(propId)) out.push(propId)

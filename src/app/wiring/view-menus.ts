@@ -18,6 +18,7 @@ import {
   canonicalNode,
   cardLayoutOf,
   childDisplayProps,
+  childPropsFollowsRefs,
   choicesOf,
   childrenRecords,
   displayNameOf,
@@ -666,17 +667,33 @@ function showChildPropsPicker(blockId: string): void {
   const parent = kb.get(blockId)
   if (!parent) return
   const current = new Set(childDisplayProps(parent))
+  const FOLLOW_ROW = 'childprop-follow'
+  // 浮层开着时块会被改写：每次都从库里重读，别拿打开那一刻的快照当现状
+  const follows = () => childPropsFollowsRefs(kb.get(blockId) ?? parent)
   const rows = () => {
     const all = [
       ...kb.propDefs().map((d) => ({ id: d.id, label: propLabel(d) || blockLabel(d, kbGet) })),
       ...enginePropDefs().map((d) => ({ id: d.id, label: propLabel(d) })),
     ]
     all.sort((x, y) => x.label.localeCompare(y.label, 'zh'))
-    return all.map((it) => ({
+    const propRows = all.map((it) => ({
       id: `childprop/${it.id}`,
       label: it.label,
       keyHint: current.has(it.id) ? '✓' : undefined,
     }))
+    // 标签块的声明作用于全体成员，它自己不是「一跳」；开关在那种上下文里没有对象
+    if (hasList(parent, 'tag')) return propRows
+    return [
+      {
+        id: FOLLOW_ROW,
+        label: t('menu.label.childPropsFollow', {
+          on: follows() ? t('ui.automation.on') : t('ui.automation.off'),
+        }),
+        hint: t('menu.hint.childPropsFollow'),
+        icon: 'lucide:corner-down-right',
+      },
+      ...propRows,
+    ]
   }
   layers.openMenu({
     rows: rows(),
@@ -687,7 +704,13 @@ function showChildPropsPicker(blockId: string): void {
     focusSearch: true,
     keepOpen: true,
     onPick: (row) => {
-      const propId = String(row.id).slice('childprop/'.length)
+      const id = String(row.id)
+      if (id === FOLLOW_ROW) {
+        void getRegistry().invoke('core.props/set-child-props-follow', { blockId, on: !follows() }, 'menu', uiCtx())
+        layers.setRows(rows())
+        return
+      }
+      const propId = id.slice('childprop/'.length)
       const on = !current.has(propId)
       if (on) current.add(propId)
       else current.delete(propId)
