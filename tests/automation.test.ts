@@ -395,6 +395,7 @@ test('批量运行：没有「如果」就拒跑（没有选择器就是全库�
 /* ------------------------------------------------------------ 事件引擎（执行序④） */
 
 import { createAutomationEngine } from '../src/core/automation/engine.ts'
+import { mentionsContentAtoms } from '../src/core/automation/automation.ts'
 
 function engineFixture(blocks: Block[]): { kb: MemoryKb; engine: ReturnType<typeof createAutomationEngine>; events: { ruleId: string; targetId: string; error: unknown }[] } {
   const { kb } = fixture(blocks)
@@ -544,4 +545,12 @@ test('事件⑤：followRefs——传递型引用的父块沿目标展开（默�
   const fresh = mkBlock('透过引用进来的子块')
   kb.tx((tx) => tx.insert(fresh, passThrough.id, Number.MAX_SAFE_INTEGER))
   assert.equal(hasTag(kb.get(fresh.id)!, aiTag.id), true, '父块是传递型引用 ⇒ 沿目标匹配（followRefs 开）')
+})
+
+test('mentionsContentAtoms：内容原子才算错配；{up} 子树说的是祖先，不算', () => {
+  assert.equal(mentionsContentAtoms({ text: '呵呵' }), true)
+  assert.equal(mentionsContentAtoms({ all: [{ tag: 't1' }, { text: '呵呵' }] }), true)
+  assert.equal(mentionsContentAtoms({ up: { all: [{ is: 'a' }, { text: '呵呵' }] } }), false, '祖先有正文，出生即可命中')
+  assert.equal(mentionsContentAtoms({ tag: 't1' }), false)
+  assert.equal(mentionsContentAtoms({ not: { text: '呵呵' } }), true, 'not 下语义会翻转——仍提示（措辞用「多半」）')
 })
