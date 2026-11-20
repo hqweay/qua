@@ -245,7 +245,7 @@ function makeClosureMarker(targetId: string, closure: NonNullable<RefView['closu
  *
  * 为什么不是「脸 + 三角」两枚图标：一行里每多一枚实例就多 10px，正文会被读成
  * 一串工具条；这个槽本来就有，换手不增加宽度，也不改变行的排版。
- * 点击开的是 102 那张字段卡，不是新面板；label 仍走 109 打开目标。
+ * 点击开的是实例的字段卡，不是新面板；label 仍是打开目标。
  */
 function makeFieldsHandle(runId: string, icon: string): HTMLElement {
   const el = document.createElement('span')

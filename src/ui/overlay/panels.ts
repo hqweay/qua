@@ -113,7 +113,7 @@ function fmtVal(shortId: (id: string) => string, k: string, v: unknown): string 
  * **字段卡的共用画法**：标题 ＋ 一组 `makeFieldRow` ＋ 一条说明 ＋ 动作行。
  *
  * 实例字段卡与块标签字段卡是同一个东西的两种筛选：
- *   · 实例：`rows()` ＝ 记录的全部字段（102）；
+ *   · 实例：`rows()` ＝ 记录的全部字段；
  *   · 块标签：`rows()` ＝ 宿主块在这一枚标签声明下的字段（chip 的三角）。
  * 渲染与写回只有这一份；两处各自只给 `rows()`、`data-*` 探针与 footer。
  * 值始终写 `target.id`，不写宿主/浮层自己的任何东西。

@@ -318,7 +318,7 @@ export interface EditorBridge {
    */
   onRefCountClick?: (hostId: string, el: HTMLElement, mods: RefClickMods) => void
   /**
-   * **点实例的字段手柄**（脸槽 hover 换手后那一枚 chevron）：打开 102 字段卡。
+   * **点实例的字段手柄**（脸槽 hover 换手后那一枚 chevron）：打开这条记录的字段卡。
    *
    * 与 `onRefClick` 分开：那是「去哪」，这是「就地改这条记录的字段」。
    * ⚠️ 未接 ⇒ 什么都不做，不退化成导航。

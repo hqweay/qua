@@ -235,7 +235,7 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
   const openDrawerFor = (kind: PanelKind): void => panelDrawer(panelDeps, kind)
 
   /**
-   * **实例的字段手柄**：与 `⌥` 点实例开的是**同一张卡**（102），只是不带修饰键。
+   * **实例的字段手柄**：与 `⌥` 点实例开的是**同一张字段卡**，只是不带修饰键。
    * 未找到 run（刚被删/重画）⇒ 什么都不做，不假装成功。
    */
   const handleRefFields = (runId: string, el: HTMLElement): void => {
@@ -302,7 +302,7 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
     } else if (run?.t === 'ref') {
       const isMention = run.flavor === '#'
       const targetBlock = target ? findInForest(deps.getWs().blocks, target) : undefined
-      /** 目标是一条实例记录（带归属）⇒ 它的字段可以在这张卡里就地改（102） */
+      /** 目标是一条实例记录（带归属）⇒ 它的字段可以在这张卡里就地改 */
       const isObj = targetBlock !== undefined && tagIdsOf(targetBlock).length > 0
       if (target) {
         add('atom/open', t('ui.popover.openPage'), 'core.block/focus-block', { blockId: target }, 'lucide:arrow-up-right')
@@ -374,7 +374,7 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
         }
         if (row.id === ATOM_ROW_FIELDS) {
           if (run?.t !== 'ref') return
-          // 记录字段卡：与 ⌥ 点击实例是同一个浮层；值仍写记录块，不写宿主/run（102）
+          // 记录字段卡：与 ⌥ 点击实例是同一个浮层；值仍写记录块，不写宿主/run
           showAtomPopover(run, anchorOf(el))
           return
         }
