@@ -1211,7 +1211,7 @@ export const MSG = {
   'menu.label.insertImage': '插入图片',
   'menu.label.childProps': '子块行内属性…',
   'menu.label.childPropsTag': '子块行内属性（对所有打了此标签的块生效）…',
-  'menu.label.childPropsFollow': '继承引用目标的显示（当前{on}）',
+  'menu.label.childPropsFollow': '沿传递型引用展开（当前{on}）',
   'menu.hint.childPropsFollow': '关掉后只用本块与标签的声明',
   'menu.label.link': '外链',
   'menu.label.fold': '折叠',

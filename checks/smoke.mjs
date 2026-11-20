@@ -32406,22 +32406,37 @@ await check('T339 划选经过引用：显示名随原生选区一起选中，�
  *
  * 修前：视图选项是 `.popover`（z=70），「编辑默认」开的子块属性选择器是 `.layer`（z=60）
  * ⇒ 新菜单被旧浮层盖住，看起来灰着、按了没反馈。判据是两条：旧面必须关掉；
- * 开关行必须是 `elementFromPoint` 的命中物，并且真按一下能落盘。
+ * 展开行必须是 `elementFromPoint` 的命中物，并且真按一下能落盘。
+ * 前置用**真的传递型引用块**当视图 owner：这一行只在「正文只有一枚引用」的块上有面。
  */
-await check('T340 浮层里开菜单：旧浮层关闭、新菜单在最上且可点（编辑默认 → 子块继承开关）', async () => {
+await check('T340 浮层里开菜单：旧浮层关闭、新菜单在最上且可点（编辑默认 → 沿传递型引用展开）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
 
   const host = await page.evaluate(() => {
     const q = window.__qua
-    const b = q.__editor.store.blocks.find(
-      (x) => x.children.length >= 1 && !x.props?._date && !x.props?._query,
+    const ed = q.__editor
+    const inv = (name, args) => q.invoke(name, args)
+    const pageId = ed.rows()[0].block.id
+    // 目标块：带一条显示声明；引用块：正文只有一枚指向它的引用（＝传递型引用）
+    inv('core.tree/insert-child', { parentId: pageId, text: 'T340TGT' })
+    inv('core.tree/insert-child', { parentId: pageId, text: 'T340REF' })
+    const textOf = (b) => (b.content ?? []).map((r) => (r.t === 'text' ? r.v : '')).join('')
+    const kids = ed.store.find(pageId)?.children ?? []
+    const tgt = kids.find((b) => textOf(b) === 'T340TGT')
+    const ref = kids.find((b) => textOf(b) === 'T340REF')
+    if (!tgt || !ref) throw new Error('前置：目标/引用块没建出来')
+    inv('core.props/set-child-props', { blockId: tgt.id, propId: 'core/created', on: true })
+    ed.write((tx) =>
+      tx.patch(ref.id, (b) => {
+        b.content = [{ id: 't340-ref', t: 'ref', to: tgt.id }]
+      }),
     )
-    if (!b) throw new Error('前置：没有带子块的内容块')
-    const r = q.invoke('core.view/options', { owner: { kind: 'block', blockId: b.id } })
+    ed.renderAll()
+    const r = inv('core.view/options', { owner: { kind: 'block', blockId: ref.id } })
     if (!r?.ok) throw new Error('前置：视图选项没打开 ' + JSON.stringify(r))
-    return b.id
+    return ref.id
   })
   await page.waitForSelector('.popover .vopt-seg', { timeout: 3000 })
 
@@ -32454,14 +32469,14 @@ await check('T340 浮层里开菜单：旧浮层关闭、新菜单在最上且�
 
   assert(state.popovers === 0, `开菜单后旧浮层应关掉：${JSON.stringify(state)}`)
   assert(state.layers === 1, `同屏只留一个菜单：${JSON.stringify(state)}`)
-  assert(state.hit === 'childprop-follow', `开关行应在最上、可点：${JSON.stringify(state)}`)
+  assert(state.hit === 'childprop-follow', `展开行应在最上、可点：${JSON.stringify(state)}`)
   await page.mouse.click(state.x, state.y)
   await page.waitForTimeout(250)
   const off = await page.evaluate((h) => window.__qua.__editor.store.find(h)?.props?._childPropsFollow, host)
-  assert(off === false, `点开关应落盘 false：${JSON.stringify({ off, state })}`)
+  assert(off === false, `点展开行应落盘 false：${JSON.stringify({ off, state })}`)
 
   await ctx.close()
-  return `浮层→菜单：旧浮层关闭、开关行在最上并落 false`
+  return `浮层→菜单：旧浮层关闭、沿传递型引用展开行在最上并落 false`
 })
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length

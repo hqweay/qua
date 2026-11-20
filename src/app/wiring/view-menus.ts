@@ -32,6 +32,7 @@ import {
   listTableOf,
   OUTLINE_VIEW,
   PAGE_COLUMN,
+  passThroughRefTarget,
   propKindOf,
   propLabel,
   queryFieldsOf,
@@ -681,8 +682,9 @@ function showChildPropsPicker(blockId: string): void {
       label: it.label,
       keyHint: current.has(it.id) ? '✓' : undefined,
     }))
-    // 标签块的声明作用于全体成员，它自己不是「一跳」；开关在那种上下文里没有对象
-    if (hasList(parent, 'tag')) return propRows
+    // 标签块的声明作用于全体成员，它自己不是「一跳」；非传递型引用块上这一格没有效果
+    // （开关读的是「子块的父块」那一跳，不是目标、也不是块自己的声明）⇒ 只在真有这一跳时给。
+    if (hasList(parent, 'tag') || passThroughRefTarget(parent) === null) return propRows
     return [
       {
         id: FOLLOW_ROW,
