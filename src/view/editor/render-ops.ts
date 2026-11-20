@@ -615,7 +615,8 @@ export class RenderOps {
      */
     if (this.ed.deferWhileComposing()) return
     this.probe.renderAllCalls++
-    // 别的视图写进来（本实例的写入口已作废过）；重排之后重算一张表
+    // 整页重排是「不经事务的装载」的兜底失效：工作集补块不推修订号，
+    // 只靠 structureRevision/propsRevision 会漏掉新装进来的标签/定义块
     this.ed.fieldTableCache = null
     this.ed.embeds.disposeAll()
     /**

@@ -548,6 +548,8 @@ export class BlockEditor {
   readonly perfProbe = {
     rowsCalls: 0,
     rowsAllCalls: 0,
+    /** 字段读取表重建次数（内容键入应为 0；标签声明/定义变更才 +1） */
+    fieldTableBuilds: 0,
     /** `change` 回调总耗时/次数（装配层每次编辑通知都记一笔，诊断用） */
     changeCalls: 0,
     changeMs: 0,
@@ -673,10 +675,21 @@ export class BlockEditor {
   readonly emptyPlaceholder: string | undefined
   /**
    * **字段读取表**（懒建）：判「这块是不是任务」要看标签声明（`closureOf`），
-   * 逐块现建要扫两趟森林。任何一次模型写之后作废，下一次问到时重建一次。
-   * ⚠️ 渲染协作对象（`renderAll`）也作废它：可见性放宽只因协作，口径不变。
+   * 逐块现建要扫两趟森林。
+   *
+   * 失效键与行派生同一套口径：`structureRevision`（标签/定义块的成员与位置变了）、
+   * `propsRevision`（声明/kind/缺省值变了）、**索引对象身份**（索引被丢弃重建）。
+   * **正文写入不失效**——它不改标签声明与定义；从前每次 `write` 都置空，
+   * 等于每键重扫两趟全库（探针只数 flatten/locate，看不见这两趟）。
+   * ⚠️ 渲染协作对象（`renderAll`）仍作废它一次：不经事务的装载（工作集补块）
+   *    不推修订号，整页重排是那类变化的兜底。
    */
-  fieldTableCache: FieldTable | null = null
+  fieldTableCache: {
+    structureRev: number
+    propsRev: number
+    index: unknown
+    table: FieldTable
+  } | null = null
   /** 当前动作的撤销捕获袋：`write` 的每个事务都会把出口捕获并进来（一次动作可能拆成多笔） */
   private entryCap: UndoCapture | null = null
   /** 当前动作开始时的选区（撤销后回到这里） */
@@ -719,9 +732,8 @@ export class BlockEditor {
     this.structuralScope = o.structuralScope ?? 'document'
     this.ensureLoaded = o.ensureLoaded
     this.relationsFor = o.relationsFor
-    // 写入口顺手作废那张派生表：标签声明／定义 kind 变了，下一次 `closureOf` 要重算
+    // 写入口不再无条件作废字段表：正文写入不碰标签声明/定义，缓存键是修订号＋索引身份
     this.write = (fn, source, opts) => {
-      this.fieldTableCache = null
       // 发起写的编辑器就是自己（见 `Run` 的 source 口径）：不注入的话，装配层的
       // 「活动编辑器」兜底会把跨表面的一笔写记到别的编辑器头上，那台就跳过重画，
       // 界面停在拖拽前。
@@ -929,15 +941,28 @@ export class BlockEditor {
   }
 
   /**
-   * 字段读取表（懒建，写后作废）。
+   * 字段读取表（懒建；失效轴见 `fieldTableCache`）。
    *
    * 判「这块是不是任务」要看**标签声明**（`#任务` 用 `declareField` 把这一栏给到成员），
    * 而逐块现建要扫两趟森林 ⇒ 一张表摊到整屏／整条命令上。
    */
   // 协作对象 `InsertOps` 插待办时也要判「是不是已经是任务」；可见性为它放宽
   fieldTable(): FieldTable {
-    this.fieldTableCache ??= fieldTableOf(this.store.blocks)
-    return this.fieldTableCache
+    const store = this.store
+    const index = store.index
+    const c = this.fieldTableCache
+    if (c !== null && c.structureRev === store.structureRevision && c.propsRev === store.propsRevision && c.index === index) {
+      return c.table
+    }
+    const table = fieldTableOf(store.blocks)
+    this.perfProbe.fieldTableBuilds++
+    this.fieldTableCache = {
+      structureRev: store.structureRevision,
+      propsRev: store.propsRevision,
+      index,
+      table,
+    }
+    return table
   }
 
   /**
