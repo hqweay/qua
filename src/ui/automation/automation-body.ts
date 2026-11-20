@@ -26,6 +26,7 @@ import {
 } from '../../core/index.ts'
 import { DECL_BY_NAME } from '../../core/commands/decls.ts'
 import { STEP_COMMANDS } from '../../core/automation/run.ts'
+import { mentionsContentAtoms } from '../../core/automation/automation.ts'
 import { canonicalAutomation, readAutomation } from '../../core/automation/automation.ts'
 import { displayNameOf } from '../../core/identity/alias.ts'
 import type { QuerySpec } from '../../core/query/query.ts'
@@ -317,6 +318,14 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
     }
     line.appendChild(chip(t('ui.automation.editCond'), 'is-edit', () => deps.editWhen()))
     rows.push(line)
+    // 错配提示（配置时点破，不静默）：「新建子块」触发时目标多半还没有正文，
+    // 内容类条件在那一刻不命中——它们仍作用于手动/批量
+    if (def.when !== undefined && mentionsContentAtoms(def.when) && def.triggers.some((tr) => tr !== 'manual' && tr.kind === 'child.added')) {
+      const hintLine = document.createElement('div')
+      hintLine.className = 'blk-auto-chips'
+      hintLine.appendChild(chip(t('ui.automation.freshContentHint'), 'is-muted'))
+      rows.push(hintLine)
+    }
     return rows
   }
 

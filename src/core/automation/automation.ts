@@ -127,6 +127,27 @@ export function hasManualTrigger(def: AutomationDef): boolean {
   return def.triggers.some((tr) => tr === 'manual')
 }
 
+/**
+ * 条件里有没有「内容依赖」的原子（正文／格式／外链／行内引用）——
+ * 「新建子块」触发器的配置提示用：打字新建的块出生时没有正文，
+ * 这类条件在触发那一刻多半不成立（粘贴/模板建的块有正文，所以是提示不是拦截）。
+ *
+ * ⚠️ 只看**目标块自己**的内容原子：套在 `{up}` 里的原子说的是祖先——祖先有正文，
+ *    出生那一刻就能命中，不算错配。`{not}` 下的语义会翻转（「不含XX」对空块恒真），
+ *    提示措辞因此写成「多半」而不是断言。
+ */
+export function mentionsContentAtoms(node: QueryNode): boolean {
+  if ('text' in node || 'mark' in node || 'link' in node || 'ref' in node) return true
+  // {up} 子树说的是祖先——祖先有正文，出生那一刻就能命中，不算错配
+  if ('up' in node) return false
+  if ('down' in node) return mentionsContentAtoms(node.down)
+  if ('near' in node) return mentionsContentAtoms(node.near)
+  if ('not' in node) return mentionsContentAtoms(node.not)
+  if ('all' in node) return node.all.some(mentionsContentAtoms)
+  if ('any' in node) return node.any.some(mentionsContentAtoms)
+  return false
+}
+
 /* ------------------------------------------------------------ canonical */
 
 /**
