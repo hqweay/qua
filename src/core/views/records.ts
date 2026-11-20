@@ -10,9 +10,10 @@
  * 与 `view.ts` 的两条类型引用（`Source`／调用方拿 `ViewRecord`）编译期擦除，
  * 运行时依赖单向（records → view 的列词汇，再 → 各读路径模块）。
  */
-import { isDeleted, liveChildren, type Block, type BlockProps } from '../model/model.ts'
+import { hasList, isDeleted, liveChildren, type Block, type BlockProps } from '../model/model.ts'
 import { displayNameOf } from '../identity/alias.ts'
 import { journalDateInChain } from '../identity/journal.ts'
+import { tagIdsOf } from '../identity/tags.ts'
 import { plainText } from '../model/runs.ts'
 import { t } from '../infra/msg.ts'
 import type { KbClient } from '../kb/types.ts'
@@ -57,12 +58,32 @@ export interface ViewRecord {
   derived?: Readonly<Record<string, unknown>>
 }
 
+/**
+ * 记录行的标签块：**按 `_tags` 里的 id 点查**，不调 `kb.tagsOf`。
+ *
+ * `kb.tagsOf` 每次都会建一张全库标签表（`tagsById`）；表格/卡片是「每行一条记录」，
+ * 按行调用就是 O(行 × 库)。这里只按这一行实际带的几个 id 走读门面的 O(1) 取块，
+ * 成本回到 O(行 × 该行标签数)。顺序仍是用户打的先后，重复 id 只算一次；
+ * 未装载/已删/已摘标签身份的块跳过（与 `tagsOf` 同一条可见性口径）。
+ */
+function rowTagsOf(block: Block, kb: KbClient): Block[] {
+  const out: Block[] = []
+  const seen = new Set<string>()
+  for (const id of tagIdsOf(block)) {
+    if (seen.has(id)) continue
+    seen.add(id)
+    const tag = kb.get(id)
+    if (tag && hasList(tag, 'tag')) out.push(tag)
+  }
+  return out
+}
+
 function recordOf(block: Block, path: readonly Block[], kb: KbClient): ViewRecord {
   return {
     block,
     path,
     title: plainText(block.content),
-    tags: [...kb.tagsOf(block.id)],
+    tags: rowTagsOf(block, kb),
     values: block.props ?? {},
   }
 }
@@ -186,7 +207,7 @@ function keysFromBlocks(blocks: readonly Block[], kb: KbClient, limit: number): 
   const seen = new Set<string>()
   outer: for (const child of blocks) {
     const ids = [...ownFieldIds(child)]
-    for (const tag of kb.tagsOf(child.id)) ids.push(...declaredFieldIds(tag))
+    for (const tag of rowTagsOf(child, kb)) ids.push(...declaredFieldIds(tag))
     for (const id of ids) {
       if (seen.has(id)) continue
       seen.add(id)
