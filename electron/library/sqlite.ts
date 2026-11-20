@@ -906,7 +906,18 @@ function sqlOf(w: RowWrite): string {
  */
 function relinkSql(table: string): [string, string] {
   return [
-    `update ${table} set left = (select left from ${table} where id = ?) where left = ? and id <> ?`,
+    /**
+     * 旧后继：**同一旧父下** `left` 指向我那一行。
+     *
+     * 旧父从「我自己改之前那一行」现读（主键点查），再用 `(parent,left)` 索引找人 ——
+     * 原来的 `where left = ?` 没有索引，每放一个块都要全表扫一遍。
+     * 用 `is` 而不是 `=`：顶层 parent 是 NULL，`= NULL` 永远不成立，会把顶层后继漏掉。
+     * 新块没有旧行 ⇒ 两个子查询都是 NULL，索引空查（不会退化成扫描）。
+     * `?1` 重复引用同一参数，调用处只绑一次。
+     */
+    `update ${table}
+        set left = (select left from ${table} where id = ?1)
+      where parent is (select parent from ${table} where id = ?1) and left = ?1 and id <> ?1`,
     `update ${table} set left = ? where parent is ? and left is ? and id <> ?`,
   ]
 }
@@ -937,7 +948,8 @@ function runWrite(db: Db, w: RowWrite): number {
     const parent = (w.values?.parent ?? null) as string | null
     const left = (w.values?.left ?? null) as string | null
     const [fixOld, fixNew] = relinkSql(w.table)
-    let n = Number(db.prepare(fixOld).run(id, id, id).changes)
+    // fixOld 用 ?1 重复引用同一个 id：一次绑定
+    let n = Number(db.prepare(fixOld).run(id).changes)
     n += Number(db.prepare(fixNew).run(id, parent, left, id).changes)
     return n
   }
