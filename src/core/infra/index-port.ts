@@ -497,8 +497,14 @@ export function applyOps(index: Index, ops: readonly Op[], forest: readonly Bloc
   let journalsDirty = false
   // 边的 `to` 会按 anno 反查表归一化 ⇒ 表的**成员**一变，所有指向 anno 的边都得按最终表重算。
   // 只改 range 的打字不改变成员（hostId 不变），所以这次重算不会落到按键路径上。
-  const annoKeysBefore = new Set(index.annos.keys())
+  //
+  // ⚠️ 快照**按需取**：成员只可能被 `anno` op 或 `block.exist`（删块摘表）改。
+  //    内容/属性批不付这份 O(anno) 的全表快照——打字是最高频的那一档。
+  let annoKeysBefore: Set<string> | null = null
   for (const op of ops) {
+    if (op.e === 'anno' || (op.e === 'block' && op.op === 'exist')) {
+      annoKeysBefore ??= new Set(index.annos.keys())
+    }
     switch (op.e) {
       case 'block':
         if (op.op === 'upsert') {
@@ -566,17 +572,19 @@ export function applyOps(index: Index, ops: readonly Op[], forest: readonly Bloc
   }
   flushOrder(index, orderTouched, forest)
   if (journalsDirty) rebuildJournalMap(index, forest)
-  let annoKeysChanged = annoKeysBefore.size !== index.annos.size
-  if (!annoKeysChanged) {
-    for (const k of annoKeysBefore) {
-      if (!index.annos.has(k)) {
-        annoKeysChanged = true
-        break
+  if (annoKeysBefore !== null) {
+    let annoKeysChanged = annoKeysBefore.size !== index.annos.size
+    if (!annoKeysChanged) {
+      for (const k of annoKeysBefore) {
+        if (!index.annos.has(k)) {
+          annoKeysChanged = true
+          break
+        }
       }
     }
+    // `applyBlockDelete` 也会摘表，同样在这里被捕获；与全量重算用同一份最终表
+    if (annoKeysChanged) refreshAllRelations(index)
   }
-  // `applyBlockDelete` 也会摘表，同样在这里被捕获；与全量重算用同一份最终表
-  if (annoKeysChanged) refreshAllRelations(index)
   return index
 }
 
