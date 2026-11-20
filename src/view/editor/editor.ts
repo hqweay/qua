@@ -3299,7 +3299,12 @@ export class BlockEditor {
      *    推迟到组合结束：调用方（下滚加载）会在下一次滚动时再试。
      */
     if (this.deferWhileComposing()) return
-    this.doc.roots.push(...blocks)
+    /**
+     * ⚠️ **换一份 `doc`**，不要原地 `roots.push`：可见行投影按 `doc`／`roots` 的身份
+     * 缓存（结构修订号只覆盖经事务的结构变化，下滚加载没有事务）。原地追加会让
+     * 「模型多了几天、屏幕还是旧的」——加载循环以为没装满，继续加到上限。
+     */
+    this.doc = { ...this.doc, roots: [...this.doc.roots, ...blocks] }
     this.viewRootIds.push(...blocks.map((b) => b.id))
     const scrollTop = this.blankArea.scrollTop
     const focused = this.container.contains(document.activeElement)

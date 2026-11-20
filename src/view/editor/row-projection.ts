@@ -15,6 +15,8 @@
  *
  * ⚠️ 缓存的是**数组本体**：调用方只读（`find`／`filter`／遍历），不要原地排序/增删。
  * ⚠️ 行里的 `block` 是活引用：正文改了不需要重算行，读 `.content` 自然是新值。
+ * ⚠️ **`doc` / `roots` 按不可变使用**：原地 `roots.push` 不换身份 ⇒ 缓存不失效。
+ *    不经事务的追加（下滚加载）必须换一份 `doc`；经事务的结构变化由 `structureRevision` 覆盖。
  */
 import {
   filterVisibleRows,
