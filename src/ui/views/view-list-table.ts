@@ -63,8 +63,10 @@ export class ViewListTable {
   private expanded = new Set<string>()
   /** 这一屏画着的每一块的投影体（按 blockId 修补，不整表重挂） */
   private readonly bodies = new Map<string, HTMLElement>()
-  /** 形状签名：表头/项的 id 序列 ＋ 展开集。变了才整表重搭 */
+  /** 整片重搭的形状签名：列 ＋ 每行有哪些格（**不含显示排序、不含展开集**） */
   private shape = ''
+  /** 上一次重搭/换格时展开的项：用来只换受影响那一格，而不是拆整表 */
+  private renderedExpanded = new Set<string>()
 
   constructor(deps: ViewListTableDeps) {
     this.deps = deps
@@ -86,8 +88,8 @@ export class ViewListTable {
   /**
    * 重画。
    *
-   * `ids` 是这次动过的块（由 store 的通知给出）：形状没变就只重画碰到的那几格，
-   * 形状变了（增/删表头或项、换排序、展开/收起）才整表重搭。
+   * 形状（列 ＋ 每行的格）变了才整表重搭；显示排序只就地搬已有行节点；
+   * 展开/收起只换那一格。整表重搭是最后手段 —— 它会把正在输入的格摘掉。
    */
   render(ids?: readonly string[]): void {
     const table = listTableOf(this.deps.host().id, this.deps.kb)
@@ -97,20 +99,87 @@ export class ViewListTable {
     for (const r of rows) for (const c of r.cells) if (c) live.add(c.block.id)
     for (const id of [...this.expanded]) if (!live.has(id)) this.expanded.delete(id)
 
-    const shape = JSON.stringify({
-      columns: table.columns.map((c) => c.id),
-      rows: rows.map((r) => r.cells.map((c) => c?.block.id ?? '')),
-      expanded: [...this.expanded],
-    })
+    const shape = this.shapeOf(rows, table.columns)
     this.rows = rows
     this.columns = table.columns
+
     if (shape !== this.shape) {
+      // 列或行成员真的变了：只有这时才整表重搭
       this.shape = shape
       this.buildAll()
       return
     }
+
+    // 展开/收起：只换受影响那一格，别的格（可能在编辑）不动
+    const changed = new Set<string>()
+    for (const id of this.expanded) if (!this.renderedExpanded.has(id)) changed.add(id)
+    for (const id of this.renderedExpanded) if (!this.expanded.has(id)) changed.add(id)
+    if (changed.size > 0) {
+      this.renderedExpanded = new Set(this.expanded)
+      this.refreshExpandedCells(changed)
+    }
+
+    // 显示排序：把已有行节点就地搬成新序；实在对不上才退回整表重搭
+    if (!this.reorderInPlace(rows)) {
+      this.buildAll()
+      return
+    }
+
     if (ids && ids.length > 0) this.patch(ids)
     else this.patchAll()
+  }
+
+  /** 形状：列 id ＋ 每行的格 id 序列（行序无关）——排序与展开都不算形状 */
+  private shapeOf(rows: readonly ListTableRow[], columns: readonly Block[]): string {
+    return JSON.stringify({
+      columns: columns.map((c) => c.id),
+      rows: rows
+        .map((r) => r.cells.map((c) => c?.block.id ?? '').join(','))
+        .sort(),
+    })
+  }
+
+  /** 一行 DOM 的格 id 序列（与 `shapeOf` 里每行的键同口径） */
+  private rowKeyOf(row: HTMLElement): string {
+    return [...row.children]
+      .filter((el): el is HTMLElement => el instanceof HTMLElement && el.classList.contains('lt-cell'))
+      .map((c) => c.dataset.blockId ?? '')
+      .join(',')
+  }
+
+  /**
+   * 显示排序只改行的先后：把已有的 `.lt-row` 按新序 `appendChild` 搬一遍。
+   * 节点不变 ⇒ 正在输入的格、hover、展开的子树都不丢；表头 `makeHead` 仍是第一个孩子
+   * （只在它后面追加行节点，从不碰它）。已经是新序时一个节点都不动。
+   */
+  private reorderInPlace(rows: readonly ListTableRow[]): boolean {
+    if (rows.length === 0) return true
+    const body = [...this.grid.children].filter(
+      (el): el is HTMLElement =>
+        el instanceof HTMLElement && el.classList.contains('lt-row') && !el.classList.contains('lt-row--head'),
+    )
+    const wanted = rows.map((r) => r.cells.map((c) => c?.block.id ?? '').join(','))
+    if (body.length !== wanted.length) return false
+    if (body.every((el, i) => this.rowKeyOf(el) === wanted[i])) return true
+
+    const byKey = new Map<string, HTMLElement[]>()
+    for (const el of body) {
+      const key = this.rowKeyOf(el)
+      const list = byKey.get(key)
+      if (list) list.push(el)
+      else byKey.set(key, [el])
+    }
+    // 先确认新序的每一行都有现成节点，再动手（失败时不留半截 DOM）
+    const need = new Map<string, number>()
+    for (const key of wanted) need.set(key, (need.get(key) ?? 0) + 1)
+    for (const [key, count] of need) if ((byKey.get(key)?.length ?? 0) < count) return false
+
+    wanted.forEach((key, index) => {
+      const el = byKey.get(key)!.shift()!
+      el.dataset.row = String(index)
+      this.grid.appendChild(el)
+    })
+    return true
   }
 
   /* ---------------------------------------------------------- 搭 */
@@ -119,6 +188,7 @@ export class ViewListTable {
     // 整表重搭会把正在编辑的格摘掉：先把这次编辑收尾
     this.deps.cell.commit()
     this.bodies.clear()
+    this.renderedExpanded = new Set(this.expanded)
     this.root.dataset.empty = this.columns.length === 0 ? '1' : '0'
     this.root.style.setProperty(
       '--lt-cols',
@@ -341,6 +411,34 @@ export class ViewListTable {
     for (const id of ids) {
       const body = this.bodies.get(id)
       if (body) this.patchBody(id, body)
+    }
+  }
+
+  /** 找到某个 id 在哪一列的哪一行（展开/收起时按它重建那一格） */
+  private itemOf(id: string): { item: ListTableItem; col: number } | undefined {
+    for (const r of this.rows) {
+      for (let col = 0; col < r.cells.length; col++) {
+        const cell = r.cells[col]
+        if (cell?.block.id === id) return { item: cell, col }
+      }
+    }
+    return undefined
+  }
+
+  /** 展开/收起只换那一格：旧格连同展开区里登记的投影体一起退掉，再用 `makeItemCell` 建新格 */
+  private refreshExpandedCells(ids: ReadonlySet<string>): void {
+    for (const id of ids) {
+      const cells = [...this.grid.querySelectorAll<HTMLElement>('.lt-cell')].filter(
+        (c) => !c.classList.contains('lt-cell--head') && c.dataset.blockId === id,
+      )
+      const found = this.itemOf(id)
+      for (const old of cells) {
+        // 旧格（含展开区）里的投影体已不在 DOM 上，别留给后面的 patch
+        for (const el of [old, ...old.querySelectorAll<HTMLElement>('[data-block-id]')]) {
+          if (el.dataset.blockId) this.bodies.delete(el.dataset.blockId)
+        }
+        if (found) old.replaceWith(this.makeItemCell(found.item, found.col))
+      }
     }
   }
 

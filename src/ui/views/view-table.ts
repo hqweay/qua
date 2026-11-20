@@ -131,7 +131,7 @@ export class ViewTable {
   /** 当前行（已按视图排序） */
   private rows: ViewRecord[] = []
   private rendered = new Map<string, RowEls>()
-  /** 列/行高/虚拟的签名：变了就整表重排，没变就只 patch 行 */
+  /** 列/行高/虚拟/行身份**集合**的签名（**不含显示排序顺序**）：变了就整表重排，没变就只 patch 行/就地搬序 */
   private shape = ''
   private virtual = false
   private rowH = ROW_H.cozy
@@ -229,7 +229,7 @@ export class ViewTable {
     }
   }
 
-  /** 整表重排（首次装、列变了、行集合变了、窗口化形态变了） */
+  /** 整表渲染：列/行成员/窗口形态变了就重排；只有显示排序变了就就地搬节点成新序 */
   render(): void {
     // 整表重排会把正在编辑的格摘掉：先把这次编辑收尾（回调会把那一格重画一遍）
     this.deps.cell.commit()
@@ -242,20 +242,49 @@ export class ViewTable {
     this.rows = this.sorted()
     void host
     this.virtual = this.rows.length >= VIRTUAL_FROM
-    const nextShape = JSON.stringify({
+    const nextShape = this.shapeOf()
+    // 形状没变（只有显示排序变了）⇒ 就地搬节点/重画窗口，不拆整表
+    if (nextShape === this.shape && this.reorderInPlace()) {
+      const sig = this.sortSignature(view)
+      if (sig !== this.sortSig) {
+        this.sortSig = sig
+        this.paintHeadState()
+      }
+      return
+    }
+    this.shape = nextShape
+    this.applyShape()
+    this.buildAll()
+  }
+
+  /**
+   * 形状签名：列集/行高/虚拟/行的身份**集合**（**不含显示排序顺序**）。
+   * 只有列、行成员或窗口形态真变了才整表重排；单纯排序变化走 `reorderInPlace`。
+   */
+  private shapeOf(): string {
+    return JSON.stringify({
       cols: this.cols,
       rowH: this.rowH,
       virtual: this.virtual,
-      // 行的**身份序列**：只有结构/排序变了才需要重排（内容变化走 patch）
-      ids: this.rows.map((r) => r.block.id),
+      ids: this.rows.map((r) => r.block.id).sort(),
     })
-    if (nextShape !== this.shape) {
-      this.shape = nextShape
-      this.applyShape()
-      this.buildAll()
-      return
+  }
+
+  /**
+   * 显示排序只改顺序、不改这一屏的行成员与列：把已有的行节点按新序 `appendChild`
+   * 搬一遍即可（DOM 节点不变 ⇒ 编辑焦点/IME、hover、滚动都不丢），不 `replaceChildren`。
+   * 窗口化时可见行随排序整体换人，就地搬不适用：只重画窗口（不拆表头、不重装整表）。
+   */
+  private reorderInPlace(): boolean {
+    if (this.virtual) {
+      this.renderWindow(true)
+      return true
     }
+    const ids = this.rows.map((r) => r.block.id)
+    if (this.rendered.size !== ids.length || ids.some((id) => !this.rendered.has(id))) return false
+    for (const id of ids) this.body.appendChild(this.rendered.get(id)!.row)
     this.patchAll()
+    return true
   }
 
   /** 只按 blockId 修补动过的那几行（内容/属性变化走这条） */
