@@ -59,7 +59,7 @@ export interface EditorEventsDeps {
   propsLineModeOf: (blockId: string) => { effective: 'summary' | 'list'; covered: boolean }
   refLabelOf: (targetId: string) => string
   repaintBlock: (blockId: string) => void
-  viewMenus: { openEmbedViewMenu(host: Block): void }
+  viewMenus: { openEmbedViewMenu(host: Block): void; openAutomationWhenBuilder(automationId: string): void }
   shortId: (id: string) => string
   getPanels: () => Pick<ReturnType<typeof import('../../app/wiring/panels.ts').setupPanels>, 'mountBlockView' | 'mountEmbedView'>
   getApp: () => import('../../core/infra/ports.ts').App
@@ -139,6 +139,7 @@ function viewEvents(
       writeDef: (def) => {
         void getRegistry().invoke('core.automation/set-def', { automationId: block.id, def }, 'ui')
       },
+      editWhen: () => viewMenus.openAutomationWhenBuilder(block.id),
     })
     into.appendChild(body.root)
     return { root: body.root, dispose: () => body.dispose() }

@@ -54,6 +54,8 @@ export interface AutomationBodyDeps {
   onToggle(on: boolean): void
   /** 整份定义写回（canonical 之后的；装配层负责事务、撤销与重画） */
   writeDef(def: AutomationDef): void
+  /** 打开「如果」的条件编辑弹层（同一台条件树；应用写 `_automation.when`） */
+  editWhen(): void
 }
 
 export interface AutomationBody {
@@ -160,10 +162,12 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
     const line = document.createElement('div')
     line.className = 'blk-auto-chips'
     if (def.when === undefined) {
-      line.appendChild(chip(t('ui.automation.noCond'), 'is-muted'))
+      // 无条件也可点：点开同一台条件树（加了条件就不再是「对所有目标」）
+      line.appendChild(chip(t('ui.automation.noCond'), 'is-muted', () => deps.editWhen()))
     } else {
-      for (const text of condChips(def.when)) line.appendChild(chip(text, 'is-cond'))
+      for (const text of condChips(def.when)) line.appendChild(chip(text, 'is-cond', () => deps.editWhen()))
     }
+    line.appendChild(chip(t('ui.automation.editCond'), 'is-edit', () => deps.editWhen()))
     rows.push(line)
     return rows
   }

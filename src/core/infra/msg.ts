@@ -639,6 +639,7 @@ export const MSG = {
   'ui.automation.trigger.tagOff': '摘掉 {tag}',
   'ui.automation.trigger.childAdded': '新建了子块',
   'ui.automation.noCond': '无条件（对所有目标）',
+  'ui.automation.editCond': '编辑条件…',
   'ui.automation.complexCond': '复合条件',
   'ui.automation.addStep': '＋ 再加一步',
   'ui.automation.addStepTitle': '加哪一步',

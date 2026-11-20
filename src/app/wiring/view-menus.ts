@@ -15,6 +15,7 @@ import { dropIdentity } from '../../app/commands-impl.ts'
 import { Layers, type Row } from '../../ui/overlay/layers.ts'
 import {
   blockLabel,
+  canonicalNode,
   cardLayoutOf,
   childDisplayProps,
   choicesOf,
@@ -54,6 +55,7 @@ import {
   type ViewOwnerRef,
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
+import { readAutomation, type AutomationDef } from '../../core/automation/automation.ts'
 import type { App } from '../../core/infra/ports.ts'
 import type { BlockEditor } from '../../view/editor/editor.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
@@ -750,6 +752,36 @@ function deleteTag(blockId: string): boolean {
   })
   return true
 }
+  /**
+   * **自动化条件（`when`）的编辑弹层**：与查询/切片**同一台**条件树组件，落点不同——
+   * 应用写的是 `_automation.when`（整份定义一次写回，一步撤销）。
+   * 草稿清空 ⇒ `when` 回到「无条件」（`{any:[]}` 是 specOfTree 对空草稿的固定答案）。
+   */
+  function openAutomationWhenBuilder(automationId: string): void {
+    const readWhen = (): QueryNode | undefined => {
+      const block = kb.get(automationId)
+      return block ? readAutomation(block)?.when : undefined
+    }
+    const anchor = getEd().blockEl(automationId)?.getBoundingClientRect() ?? getEd().caretRect()
+    openSpecPopover({
+      owner: { kind: 'block', blockId: automationId },
+      anchor,
+      spec: () => ({ where: readWhen() ?? { any: [] } }),
+      onApply: (spec) => {
+        const block = kb.get(automationId)
+        const def = block ? readAutomation(block) : null
+        if (!def) return
+        // 合成根被清空 ＝ 用户要「无条件」：摘掉 when，不存一个恒假/恒真的空组
+        const empty = JSON.stringify(canonicalNode(spec.where)) === JSON.stringify({ any: [] })
+        const next: AutomationDef = empty
+          ? { enabled: def.enabled, triggers: def.triggers, steps: def.steps }
+          : { ...def, when: spec.where }
+        void getRegistry().invoke('core.automation/set-def', { automationId, def: next }, 'builder')
+        layers.closePopover()
+      },
+    })
+  }
+
   return {
     openEmbedViewMenu,
     openSpecPopover,
@@ -758,6 +790,7 @@ function deleteTag(blockId: string): boolean {
     openViewSlice,
     openDerivedSlice,
     openQueryBuilder,
+    openAutomationWhenBuilder,
     showLinkComposer,
     showChildPropsPicker,
     showTagPicker,
