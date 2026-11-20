@@ -32316,6 +32316,70 @@ await check('T338 划选复制含引用显示名：跨引用投影出目标名�
   await ctx.close()
   return `跨引用复制投影出目标名，纯文字选区零改动`
 })
+
+/**
+ * T339｜**划选经过引用时显示名跟着一起选中**：原子盒 `user-select:none` 让原生选区
+ * 整格跳过它 ⇒ 选中一段话里漏一截。显示名是正文里可读的字，放开 label 那一层即可，
+ * 盒与边缘吸附／块选区契约不动。钉两件事：真实拖选含引用文字；复制载荷仍不带装饰。
+ */
+await check('T339 划选经过引用：显示名随原生选区一起选中，复制载荷仍不带 [[]]', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  await page.waitForTimeout(200)
+
+  // 造一块「文字 + 引用 + 文字」：引用两侧都要有真文本节点，拖选才有稳定起止点
+  const g = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    const host = ed.insert.insertBlockAfter(ed.rows()[0].block.id, '')
+    const target = window.__qua.pages()[0]
+    ed.write((tx) => tx.patch(host, (b) => {
+      b.content = [
+        { id: 't339-a', t: 'text', v: '前缀文字' },
+        { id: 't339-r', t: 'ref', to: target.id, label: '过期快照' },
+        { id: 't339-b', t: 'text', v: '后缀文字' },
+      ]
+    }))
+    ed.renderAll()
+    const txEl = document.querySelector(`.blk[data-block-id="${host}"] .tx`)
+    const nodes = [...txEl.childNodes].filter((n) => n.nodeType === 3)
+    const rectOf = (n, off) => {
+      const r = document.createRange(); r.setStart(n, off); r.setEnd(n, off + 1)
+      const bb = r.getBoundingClientRect()
+      return { x: bb.left + bb.width / 2, y: bb.top + bb.height / 2 }
+    }
+    const label = txEl.querySelector('.atom-label')?.textContent ?? ''
+    return {
+      start: rectOf(nodes[0], 1), end: rectOf(nodes[nodes.length - 1], 2),
+      label, name: label.replace(/^\[\[|\]\]$/g, ''),
+      userSelect: getComputedStyle(txEl.querySelector('.atom-label')).userSelect,
+    }
+  })
+
+  assert(g.userSelect === 'text', `引用显示名应可随原生选区选中：${JSON.stringify(g)}`)
+  // 真实拖选：原生 DOM 选区应把 [[名]] 连两侧文字一起选上
+  await page.mouse.move(g.start.x, g.start.y)
+  await page.mouse.down()
+  await page.mouse.move(g.end.x, g.end.y, { steps: 16 })
+  await page.mouse.up()
+  await page.waitForTimeout(120)
+  const domSel = await page.evaluate(() => window.getSelection().toString())
+  assert(domSel.includes(g.label),
+    `真实拖选应把引用显示名一起选中：选区=${JSON.stringify(domSel)}，期望含 ${JSON.stringify(g.label)}`)
+
+  // 复制载荷仍由模型投影给：名字在、装饰不在
+  const cap = await page.evaluate(() => {
+    window.__cap = []
+    document.addEventListener('copy', (e) => window.__cap.push(e.clipboardData?.getData('text/plain')), false)
+    document.execCommand('copy')
+    return window.__cap
+  })
+  assert(cap.length > 0 && cap.every((t) => t && !t.includes('[[') && t.includes(g.name)),
+    `复制应含目标名且不带 [[ ]]：${JSON.stringify(cap)}`)
+
+  await ctx.close()
+  return `划选经过引用：显示名随原生选区一起选中；复制载荷仍干净`
+})
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

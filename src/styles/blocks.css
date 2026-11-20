@@ -2421,6 +2421,17 @@
   vertical-align: baseline;
   white-space: nowrap;
 }
+
+/*
+ * 行内原子的**显示名是正文里可读的字**：划选跨过一枚引用时，正文两侧有选区底色、
+ * 原子却被整格跳过（盒是 user-select:none）——看起来像选中一段话里漏了一截。
+ * ⇒ 只放开文字节点那一层：原子的盒仍不可选（拖拽把手／边缘吸附／块选区契约不动），
+ *   显示的 `[[名]]`／`#名` 随原生选区一起染色。复制的正文味由模型投影另给（不带装饰），
+ *   与这里看到的装饰字是两件事。
+ */
+.atom .atom-label {
+  user-select: text;
+}
 .atom:hover {
   filter: var(--atom-hover);
 }
