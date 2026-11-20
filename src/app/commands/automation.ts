@@ -9,7 +9,7 @@
  *    撤销记账、按 changes 重画的唯一通道——绕过它（裸 `kb.tx`）的写内存里看得见、
  *    盘上没有，重开就丢。
  */
-import { isAutomationBlock, mkBlock, isAutomationDef, type Block } from '../../core/index.ts'
+import { isAutomationBlock, mkBlock, isAutomationDef, type Block, type QuerySpec } from '../../core/index.ts'
 import { textRuns } from '../../core/model/runs.ts'
 import type { Op } from '../../core/kb/types.ts'
 import type { Tx as KbTx } from '../../core/kb/types.ts'
@@ -20,7 +20,7 @@ import {
   readAutomation,
   type AutomationDef,
 } from '../../core/automation/automation.ts'
-import { manualRunGuards, moveIdentityConstraint, runAutomationSteps, type AutomationKb } from '../../core/automation/run.ts'
+import { batchRunGuards, manualRunGuards, moveIdentityConstraint, runAutomationSteps, type AutomationKb } from '../../core/automation/run.ts'
 import { t } from '../../core/infra/msg.ts'
 
 /** 新建自动化的出生定义：手动触发、**默认停用**（分享来的规则不自觉生效）、空步骤 */
@@ -29,13 +29,18 @@ export function freshAutomationDef(): { enabled: false; triggers: ['manual']; st
 }
 
 export interface AutomationDeps {
-  /** 读门面（`automations`／`get`／`matchesSpec` 都是 guards 要的窄口） */
-  kb: Omit<AutomationKb, 'tx'> & { automations(): readonly Block[] }
+  /** 读门面（`automations`／`get`／`matchesSpec`／`query` 都是 guards 与批量目标要的窄口） */
+  kb: Omit<AutomationKb, 'tx'> & {
+    automations(): readonly Block[]
+    query(spec: QuerySpec, opts?: { excludeIds?: readonly string[] }): readonly { blockId: string }[]
+  }
   /**
    * 事务入口（装配层 runTx）：core runner 在这里开**一笔**事务包住全部步骤（真原子）；
    * op 进落盘队列、撤销记账（一次运行＝一步撤销）、按 changes 重画都由它收。
    */
   tx: <R>(fn: (tx: KbTx) => R) => { ops: readonly Op[]; result: R }
+  /** 批量的撤销分组（整批一步撤销；每块仍是独立事务，失败互不牵连） */
+  runGroup: <T>(fn: () => T) => T
   /** 重画一批块所在的行（目标块的样子变了） */
   repaintBlocks: (ids: readonly string[]) => void
   /** 新建后跳到那一块（作者的下一站就是写定义） */
@@ -120,6 +125,48 @@ export function automationCommands(d: AutomationDeps) {
     return changed
   }
 
+  /**
+   * **批量运行**（补收存量）：对满足「如果」的每一块各跑一遍。每块一笔独立事务
+   * ——失败的跳过、不影响别的（§9.4 场景3 的执行模型）；整批共用一个撤销条目。
+   * 目标集**只**由「如果」圈定：没有条件就是全库，拒跑并说明。
+   */
+  const runAutomationBatch = (automationId: string): { ok: number; failed: number } | null => {
+    const block = d.kb.get(automationId)
+    if (!block || !isAutomationBlock(block)) return null
+    const def = readAutomation(block)
+    const g = batchRunGuards(def)
+    if (!def || !g.ok) {
+      d.toast(t(`ui.automation.blocked.${g.reason ?? 'noManual'}`, { name: automationName(block) }), 'warn')
+      return null
+    }
+    const hits = d.kb.query({ where: def.when! }, { excludeIds: [automationId] })
+    if (hits.length === 0) {
+      d.toast(t('ui.automation.batchEmpty', { name: automationName(block) }), 'info')
+      return { ok: 0, failed: 0 }
+    }
+    let ok = 0
+    let failed = 0
+    d.runGroup(() => {
+      for (const hit of hits) {
+        try {
+          runAutomationSteps(runnerKb, hit.blockId, def, { lookup: d.kb })
+          ok++
+        } catch {
+          // 每块独立失败：跳过，不让一块的错拦住整批
+          failed++
+        }
+      }
+    })
+    d.repaintBlocks(hits.map((h) => h.blockId))
+    d.toast(
+      failed === 0
+        ? t('ui.automation.batchRan', { name: automationName(block), count: ok })
+        : t('ui.automation.batchPartial', { name: automationName(block), ok, failed }),
+      failed === 0 ? 'ok' : 'warn',
+    )
+    return { ok, failed }
+  }
+
   /** 整份定义写回（块身体的编辑面落点；canonical 由调用方给，这里只收合法形状） */
   const setAutomationDef = (automationId: string, def: AutomationDef): boolean => {
     if (!d.kb.get(automationId) || !isAutomationDef(def)) return false
@@ -167,6 +214,7 @@ export function automationCommands(d: AutomationDeps) {
   return {
     createAutomation,
     runAutomation,
+    runAutomationBatch,
     toggleAutomation,
     setAutomationDef,
     treeInsertChild,

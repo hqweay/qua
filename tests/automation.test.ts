@@ -38,6 +38,7 @@ import {
 } from '../src/core/automation/automation.ts'
 import { manualRunGuards, runAutomationSteps, STEP_COMMANDS } from '../src/core/automation/run.ts'
 import { projectManualAutomations } from '../src/core/automation/projection.ts'
+import { automationCommands } from '../src/app/commands/automation.ts'
 
 /* ------------------------------------------------------------ 夹具 */
 
@@ -325,4 +326,68 @@ test('投影：目标不满足条件 ⇒ 灰掉并说明；目标缺位 ⇒ 灰�
   const greyed = projectManualAutomations(kb, target.id)
   assert.equal(greyed[0]?.runnable, false)
   assert.equal(greyed[0]?.reason, 'whenFailed', '条件不满足：灰掉并说明，不是隐藏')
+})
+
+/* ------------------------------------------------------------ 批量运行（补收存量） */
+
+test('批量运行：目标集由「如果」圈定；每块独立失败、互不牵连', () => {
+  // 目标两个：U 在页 Pg 之下（搬到 Pg 是合法落点）；T2 是 Pg 的父（把 T2 搬进 Pg＝进自己子树 ⇒ 这块失败）
+  const pg = mkBlock('目标页')
+  pg.props = { _aliases: ['目标页'], _lists: ['page'] }
+  const u = mkBlock('普通子块')
+  const t2 = mkBlock('T2 容器')
+  t2.children = [pg]
+  const numDef = mkPropDef('数量', 'number')
+  const rule = mkAutomationBlock({
+    name: '批量规则',
+    def: {
+      enabled: true,
+      triggers: ['manual'],
+      when: { any: [{ is: u.id }, { is: t2.id }] },
+      steps: [
+        { cmd: 'core.props/set-value', args: { propId: numDef.id, value: 42 } },
+        { cmd: 'core.tree/move', args: { blockId: { ref: 'target' }, parentId: pg.id } },
+      ],
+    },
+  })
+  const { kb } = fixture([pg, u, t2, numDef, rule])
+
+  const toasts: string[] = []
+  const cmd = automationCommands({
+    kb,
+    tx: (fn) => kb.tx(fn),
+    runGroup: (fn) => fn(),
+    repaintBlocks: () => {},
+    openBlock: () => {},
+    toast: (text) => toasts.push(text),
+  })
+  const r = cmd.runAutomationBatch(rule.id)
+  assert.ok(r)
+  assert.deepEqual(r, { ok: 1, failed: 1 }, 'U 成功；T2 搬进自己的子树 ⇒ 这块独立失败')
+  assert.equal(kb.get(u.id)?.props?.[numDef.id], 42, '成功那块的值落上了')
+  assert.equal(kb.parentOf(u.id)?.id, pg.id, '成功那块搬到了 Pg 下')
+  assert.equal(kb.parentOf(pg.id)?.id, t2.id, '失败那块的结构一个字节没动')
+  assert.ok(toasts.some((x) => x.includes('失败')), '汇总说清几块成功几块失败')
+})
+
+test('批量运行：没有「如果」就拒跑（没有选择器就是全库）', () => {
+  const rule = mkAutomationBlock({
+    name: '无条件规则',
+    def: { enabled: true, triggers: ['manual'], steps: [{ cmd: 'core.tree/insert-child', args: { text: 'x' } }] },
+  })
+  const plain = mkBlock('随便一块')
+  const { kb } = fixture([rule, plain])
+  const toasts: string[] = []
+  const cmd = automationCommands({
+    kb,
+    tx: (fn) => kb.tx(fn),
+    runGroup: (fn) => fn(),
+    repaintBlocks: () => {},
+    openBlock: () => {},
+    toast: (text) => toasts.push(text),
+  })
+  const r = cmd.runAutomationBatch(rule.id)
+  assert.equal(r, null, '无条件 ⇒ 拒跑')
+  assert.equal(kb.children(plain.id).length, 0, '什么都没写')
+  assert.ok(toasts.some((x) => x.includes('条件')), '拒绝说清为什么')
 })

@@ -1903,6 +1903,8 @@ const app: App = {
     kb,
     // 装配层 runTx：op 进落盘队列、撤销记账（一次运行＝一步撤销）、按 changes 重画
     tx: (fn) => runTx(fn),
+    // 批量共用一个撤销条目（每块仍是独立事务，失败互不牵连）
+    runGroup: (fn) => app.runGroup(fn, 'other'),
     repaintBlocks: (ids) => {
       for (const id of ids) repaintBlock(id)
     },

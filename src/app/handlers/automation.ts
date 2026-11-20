@@ -18,6 +18,11 @@ export const AUTOMATION_HANDLERS: Record<string, Handler> = {
     if (automationId === '') return false
     return app.runAutomation(automationId, S(a.blockId) || curBlock(app) || undefined)
   },
+  'core.automation/run-batch': (a, app) => {
+    const automationId = S(a.automationId)
+    if (automationId === '') return false
+    return app.runAutomationBatch(automationId) !== null
+  },
   'core.automation/toggle-enabled': (a, app) => {
     const automationId = S(a.automationId)
     if (automationId === '') return false

@@ -45,6 +45,8 @@ export type AutomationBlockReason =
   | 'noSteps'
   /** `_automation` 读不出合法定义（坏形状）：灰掉并可跳转，不静默消失 */
   | 'broken'
+  /** 批量运行靠「如果」圈目标：没有条件就是全库，宁可拒也不猜 */
+  | 'needWhen'
 
 export interface AutomationGuards {
   ok: boolean
@@ -69,6 +71,20 @@ export function manualRunGuards(
   // 防自改：规则改自己的定义（enabled／steps）没有任何合理读法，还会自我递归
   if (targetId === automationId) return { ok: false, reason: 'selfTarget' }
   if (!whenOk) return { ok: false, reason: 'whenFailed' }
+  return { ok: true }
+}
+
+/**
+ * 批量运行的**准入守卫**（与手动链同一份值域，只是答案不同）：
+ * 批量的目标集由「如果」圈出来——没有条件就不跑（没有选择器就是全库）。
+ * 目标已经按条件查过 ⇒ `whenFailed`／`noTarget` 不在这条路上。
+ */
+export function batchRunGuards(def: AutomationDef | null): AutomationGuards {
+  if (!def) return { ok: false, reason: 'noManual' }
+  if (!def.enabled) return { ok: false, reason: 'disabled' }
+  if (!def.triggers.some((tr) => tr === 'manual')) return { ok: false, reason: 'noManual' }
+  if (def.steps.length === 0) return { ok: false, reason: 'noSteps' }
+  if (def.when === undefined) return { ok: false, reason: 'needWhen' }
   return { ok: true }
 }
 

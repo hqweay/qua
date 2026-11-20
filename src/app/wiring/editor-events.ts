@@ -132,6 +132,9 @@ function viewEvents(
         layers.openMenu({ rows, title, onPick, anchor: null, searchable: false, focusSearch: false })
       },
       onRun: () => pickRunTarget(block.id),
+      onRunAll: () => {
+        void getRegistry().invoke('core.automation/run-batch', { automationId: block.id }, 'ui')
+      },
       onToggle: (on) => {
         void getRegistry().invoke('core.automation/toggle-enabled', { automationId: block.id, on }, 'ui')
       },

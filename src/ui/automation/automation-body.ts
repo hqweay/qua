@@ -51,6 +51,8 @@ export interface AutomationBodyDeps {
   openMenu(rows: Row[], onPick: (row: Row) => void, title: string): void
   /** 运行（目标选择也在装配层——手动链目标必须显式点出来，块身体上没有「当前块」语义） */
   onRun(): void
+  /** 批量运行（补收存量）：对满足「如果」的每一块各跑一遍；装配层负责 guards 与汇总 */
+  onRunAll(): void
   onToggle(on: boolean): void
   /** 整份定义写回（canonical 之后的；装配层负责事务、撤销与重画） */
   writeDef(def: AutomationDef): void
@@ -95,6 +97,17 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
     run.title = t('ui.automation.runHint')
     run.addEventListener('click', () => deps.onRun())
     head.append(toggle, run)
+    // 「全部运行」只在有条件时出现：批量靠「如果」圈目标，无条件就是全库（宁可不列）
+    if (def?.when !== undefined) {
+      const runAll = document.createElement('button')
+      runAll.type = 'button'
+      runAll.className = 'blk-auto-run'
+      if (enabled) runAll.dataset.enabled = '1'
+      runAll.textContent = t('ui.automation.runAll')
+      runAll.title = t('ui.automation.runAllHint')
+      runAll.addEventListener('click', () => deps.onRunAll())
+      head.appendChild(runAll)
+    }
     root.appendChild(head)
 
     // 坏形状：一句话指到定义（修复面＝打开那一块改 `_automation`；不静默消失）

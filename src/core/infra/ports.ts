@@ -852,6 +852,8 @@ export interface App {
   createAutomation(name: string): string
   /** 手动运行一条自动化（`targetId` 缺省＝当前块）；guards 与面板灰态同一份判据 */
   runAutomation(automationId: string, targetId?: string): boolean
+  /** 批量运行：对满足「如果」的每一块各跑一遍（每块独立事务、整批一步撤销） */
+  runAutomationBatch(automationId: string): { ok: number; failed: number } | null
   /** 启停一条自动化（`on` 缺省＝翻转） */
   toggleAutomation(automationId: string, on?: boolean): boolean
   /** 整份定义写回（块身体的编辑面落点；一次编辑＝一笔事务＝一步撤销） */

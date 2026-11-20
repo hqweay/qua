@@ -279,6 +279,8 @@ export const COMMANDS: CommandDecl[] = [
      带着 automationId 调它），面板不再单独列裸命令。 */
   { name: 'core.automation/create', title: t('cmd.automation.create'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.automation'), args: { name: { type: 'string' } }, keywords: ['automation', 'rule', t('menu.kw.automation')] },
   { name: 'core.automation/run', title: t('cmd.automation.run'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.automation'), args: { required: ['automationId'], automationId: { type: 'string', ref: 'block' }, blockId: { type: 'string', ref: 'block' } }, hidden: true },
+  /** 批量运行（补收存量）：目标集由「如果」圈定；每块独立事务、整批一步撤销 */
+  { name: 'core.automation/run-batch', title: t('cmd.automation.runBatch'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.automation'), args: { required: ['automationId'], automationId: { type: 'string', ref: 'block' } }, hidden: true },
   { name: 'core.automation/toggle-enabled', title: t('cmd.automation.toggle'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.automation'), args: { required: ['automationId'], automationId: { type: 'string', ref: 'block' }, on: { type: 'boolean' } }, hidden: true },
   /** 定义写回（块身体的编辑面落点）：整份 canonical 定义一次写入；机器面与身体共用 */
   { name: 'core.automation/set-def', title: t('cmd.automation.setDef'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.automation'), args: { required: ['automationId'], automationId: { type: 'string', ref: 'block' }, def: {} }, hidden: true },
