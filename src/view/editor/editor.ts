@@ -69,7 +69,7 @@ import {
   type UndoKind,
   type VisibleRow,
 } from '../../core/index.ts'
-import { resolveRef } from '../../core/relations/ref.ts'
+import { copyTextOf, resolveRef, type FindBlock } from '../../core/relations/ref.ts'
 import type { RelationEdge } from '../../core/relations/relations.ts'
 import { inputSession } from './input-session.ts'
 import { RowProjection } from './row-projection.ts'
@@ -2776,6 +2776,35 @@ export class BlockEditor {
     return text === '' ? null : { blockId: s.aBlock, start, end, text }
   }
 
+  /**
+   * 划选复制投影：把模型选区读成「贴到外部该出现的字」——引用出现解析目标名。
+   *
+   * 为什么不读 `getSelection().toString()`：`.atom` 是 `user-select:none`，划选跨过
+   * 引用时原生选区把那一格整段吞掉（真机实测 `…括号：。左键…`）。模型选区里原子
+   * 占 1 格，`sliceRuns` 按 plain 偏移切片会把它整枚带出来，`copyTextOf` 读成显示名。
+   *
+   * 返回 null ⇒ 没有有效选区或选区里没有原子：调用方放行原生复制，纯文字零变化。
+   */
+  copySelectionText(): { ids: string[]; text: string } | null {
+    const s = this.sel
+    if (!s) return null
+    const ranges = selToTextRanges(this.doc, s)
+    if (ranges.length === 0) return null
+    const find: FindBlock = (id) => this.store.find(id)
+    const ids: string[] = []
+    const lines: string[] = []
+    let hasAtom = false
+    for (const r of ranges) {
+      const b = this.store.find(r.blockId)
+      if (!b) continue
+      ids.push(r.blockId)
+      const slice = sliceRuns(b.content, r.start, r.end)
+      if (slice.some((run) => run.t !== 'text')) hasAtom = true
+      lines.push(copyTextOf(slice, find))
+    }
+    return hasAtom ? { ids, text: lines.join('\n') } : null
+  }
+
   clearMarksAtSel(): void {
     const s = this.sel
     if (!s) return
@@ -3248,6 +3277,7 @@ export class BlockEditor {
        *    不退回「把图片当文本贴」——那是另一种静默失败。
        */
       onCopy: (ids, text) => this.events.onCopy?.(ids, text),
+      copySelectionText: () => this.copySelectionText(),
       annoHitAt: (x, y) => this.annoHitAt(x, y),
       onAnnoMenu: (hit, rect) => this.events.annoMenu?.(hit, rect),
       onPasteImage: async (file, point) => {

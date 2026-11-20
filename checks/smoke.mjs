@@ -32258,6 +32258,64 @@ await check('T336 跨表面拖拽跟变·反方向：正文反缩进窗口块的
   return `X 出 A：正文 depth ${got.depth}，窗口行已消失、卡还在`
 })
 
+
+/**
+ * T338｜**划选复制的正文味带引用显示名**：`.atom` 是 user-select:none，原生选区把整枚
+ * 原子吞掉（`…括号：。左键…`）；复制该按模型选区投影，引用出现解析目标名。纯文字选区
+ * 不动剪贴板（放行原生），否则等于把所有复制都接管一遍、平白多一份行为面。
+ *
+ * 用合成 copy 事件 + DataTransfer 读回 text/plain：无头 Chrome 的原生 ⌘C 不派发 copy
+ * 事件（实测），合成事件走的是**同一个处理器**，不验键盘派发只验载荷口径。
+ */
+await check('T338 划选复制含引用显示名：跨引用投影出目标名；纯文字选区放行原生零改动', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  const r = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    const host = ed.insert.insertBlockAfter(ed.rows()[0].block.id, '')
+    const pages = window.__qua.pages()
+    const target = pages[0]
+    // 正文：文字 + 引用原子 + 文字（plain 偏移里原子占 1 格）
+    ed.write((tx) => tx.patch(host, (b) => {
+      b.content = [
+        { id: 't-a', t: 'text', v: '左' },
+        { id: 'r-1', t: 'ref', to: target.id, label: '过期快照' },
+        { id: 't-b', t: 'text', v: '右' },
+      ]
+    }))
+    ed.renderAll()
+    // 全选这一行（含原子）
+    ed.setSel({ aBlock: host, aOff: 0, hBlock: host, hOff: 3 })
+    const dt = new DataTransfer()
+    const txEl = document.querySelector(`.blk[data-block-id="${host}"] .tx`)
+    // 原子此刻真的在显示什么（探针读点，与复制口径独立）：data-ref-label 不带 [[ ]]
+    const shown = txEl.querySelector('.atom')?.dataset.refLabel ?? ''
+    txEl.dispatchEvent(new ClipboardEvent('copy', { clipboardData: dt, bubbles: true, cancelable: true }))
+    const withAtom = { plain: dt.getData('text/plain'), shown }
+
+    // 纯文字选区：另造一块，选 0..2，走同一个处理器
+    const pure = ed.insert.insertBlockAfter(host, '纯文字')
+    ed.setSel({ aBlock: pure, aOff: 0, hBlock: pure, hOff: 2 })
+    const dt2 = new DataTransfer()
+    const pureEl = document.querySelector(`.blk[data-block-id="${pure}"] .tx`)
+    pureEl.dispatchEvent(new ClipboardEvent('copy', { clipboardData: dt2, bubbles: true, cancelable: true }))
+    const noAtom = { plain: dt2.getData('text/plain') }
+    return { withAtom, noAtom }
+  })
+
+  // 含原子：贴出「左 + 目标当前显示名 + 右」，既不吞原子、也不读旧快照、更不带 [[ ]]
+  const expected = `左${r.withAtom.shown}右`
+  assert(r.withAtom.shown !== '', `探针应读到原子的显示名：${JSON.stringify(r)}`)
+  assert(r.withAtom.plain === expected,
+    `含原子复制应等于「左 + 目标名 + 右」，得到 ${JSON.stringify(r)}，期望 ${JSON.stringify(expected)}`)
+  // 纯文字：处理器不写 DataTransfer ⇒ 走原生，载荷为空正是「零改动」的证据
+  assert(r.noAtom.plain === '', `纯文字选区应放行原生、不写剪贴板：${JSON.stringify(r)}`)
+
+  await ctx.close()
+  return `跨引用复制投影出目标名，纯文字选区零改动`
+})
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

@@ -217,6 +217,11 @@ export interface EditorBridge {
   /** 复制事件报告「复制了哪几块、那段文本是什么」（给同会话的「粘贴为…」用） */
   onCopy?: (ids: readonly string[], text: string) => void
   /**
+   * 划选复制投影：选区含行内原子时，给出「贴到外部该出现的字」（引用出现解析目标名）。
+   * `null` ＝ 没有有效选区或选区全是文字 ⇒ 调用方放行原生复制，行为零变化。
+   */
+  copySelectionText: () => { ids: string[]; text: string } | null
+  /**
    * 粘贴一份带引用味的载荷（`text/html` 注释里解析出来的）：剪切味＝移动到落点后，
    * 引用味＝落点处插引用原子。返回 `gone` ＝ 剪切味的源块已都不在（已按文本降级）。
    */
@@ -746,15 +751,25 @@ export function bindEditorEvents(br: EditorBridge): () => void {
   })
 
   /**
-   * **复制时报告「这一次复制的是哪一块」**（给「粘贴为…」用）。
+   * **复制的正文味 + 会话账**。
    *
-   * 为什么不是自定义剪贴板 MIME：Chromium 在 `copy` 事件里 `setData` 的自定义类型
-   * **不会出现在读回的剪贴板里**（2026-10-30 实测：`navigator.clipboard.read()` 只有
-   * text/plain + text/html），写了等于没写。而改 `text/plain` 会让外部应用看到 `((id))`。
-   * ⇒ 只在**本次会话**里记一份「块 id + 那段文本」；粘贴为… 读回文本对得上才用，
-   *   对不上（用户在别处复制过）就退回纯文本并说一句实话。
+   * 划选若含行内原子，原生选区会把 `user-select:none` 的原子整格吞掉 ⇒ 用模型投影
+   * 覆盖 `text/plain`（引用出现解析目标名）。纯文字选区不动剪贴板，行为零变化。
+   *
+   * 会话账仍要记：它不是自定义 MIME（Chromium 在 copy 事件里写自定义类型读不回，
+   * 2026-10-30 实测），而是「块 id + 这次贴出去的字」；粘贴为… 读回文本对得上才用，
+   * 对不上（用户在别处复制过）就退回纯文本并说一句实话。块上 ⌘C 的引用味由命令
+   * 路径另写 HTML 载荷，与这里无关。
    */
-  on(c, 'copy', () => {
+  on(c, 'copy', (e: Event) => {
+    const picked = br.copySelectionText()
+    if (picked && (e as ClipboardEvent).clipboardData) {
+      const ce = e as ClipboardEvent
+      ce.clipboardData!.setData('text/plain', picked.text)
+      ce.preventDefault()
+      br.onCopy?.(picked.ids, picked.text)
+      return
+    }
     const sel = document.getSelection()
     const id = br.blockOf(sel?.anchorNode ?? null) ?? br.caretBlock()
     if (!id) return
