@@ -275,16 +275,24 @@ export class StructOps {
      * 同一个目标层），撤销按 prev 恢复时次序整个倒掉（实测 [A,B,C] → [C,B,A]）。
      * ⇒ 实移前先给每块做一次**原位 move**（no-op，位置不变），让捕获里记下的
      *   「改前落点」是真·批前落点；撤销按状态序逐块 prev 恢复，次序自然对。
+     *
+     * ⚠️ **全部装进一笔事务**：原先每块两笔（no-op ＋ 实移），k 块选区就是 2k 笔，
+     * 每笔都走一次 diff／捕获／索引修补／订阅通知。顺序仍是「先全部 no-op，再全部实移」。
      */
-    for (const p of plans) {
-      const cur = locate(snap, p.id)
-      if (cur) this.ed.write((tx) => tx.move(p.id, cur.parent?.id ?? null, cur.index))
-    }
-    for (const p of plans) {
+    try {
       this.ed.write((tx) => {
-        tx.move(p.id, p.parentId, p.index)
-        tx.patch(p.id, (x) => (x.modified = Date.now()))
+        for (const p of plans) {
+          const cur = locate(snap, p.id)
+          if (cur) tx.move(p.id, cur.parent?.id ?? null, cur.index)
+        }
+        for (const p of plans) {
+          tx.move(p.id, p.parentId, p.index)
+          tx.patch(p.id, (x) => (x.modified = Date.now()))
+        }
       })
+    } catch (e) {
+      this.ed.abortUndoEntry()
+      throw e
     }
     // 刚搬进去的那一层必须看得见（与单块缩进同一条纪律）
     if (firstTarget) unfoldBlock(this.ed.doc, firstTarget)
@@ -312,16 +320,21 @@ export class StructOps {
     }
     if (plans.length === 0) return false
     this.ed.beginUndoEntry()
-    // 同 indentMany：实移前先原位 no-op 记下真·改前落点（理由见那边）
-    for (const p of plans) {
-      const cur = locate(snap, p.id)
-      if (cur) this.ed.write((tx) => tx.move(p.id, cur.parent?.id ?? null, cur.index))
-    }
-    for (const p of plans) {
+    // 同 indentMany：实移前先原位 no-op 记下真·改前落点；全部装进一笔事务
+    try {
       this.ed.write((tx) => {
-        tx.move(p.id, p.parentId, p.index)
-        tx.patch(p.id, (x) => (x.modified = Date.now()))
+        for (const p of plans) {
+          const cur = locate(snap, p.id)
+          if (cur) tx.move(p.id, cur.parent?.id ?? null, cur.index)
+        }
+        for (const p of plans) {
+          tx.move(p.id, p.parentId, p.index)
+          tx.patch(p.id, (x) => (x.modified = Date.now()))
+        }
       })
+    } catch (e) {
+      this.ed.abortUndoEntry()
+      throw e
     }
     this.ed.structTail()
     return true
