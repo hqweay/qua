@@ -135,11 +135,17 @@ export const LIBRARY_READS = {
    * 要的是**块对象**。这一批是「库的身份清单」——体量跟身份数走，不跟块数走
    * （1M 块的库通常几千个身份）。装载后 `kb.pages()/tags()/propDefs()/trash()`
    * 这些同步全局读在工作集模式下依然正确。
+   *
+   * ⚠️ **三段 `union` 而不是一个 `or`**：`OR` 会让 SQLite 放弃两条 partial index
+   *    （`deleted`／`kind`），退化成全表扫描＋逐行相关子查询；拆成并集后每段各吃
+   *    自己的索引（`idx_Block_deleted`／`idx_Block_kind`／`idx_BlockList_list`）。
+   *    `union`（不是 `union all`）顺带去掉一块既是页又是标签的重复行。
    */
-  catalogIdentity: `select ${BLOCK_COLUMNS} from ${B} b
-    where b.deleted is not null
-       or b.kind is not null
-       or exists (select 1 from ${L} l where l.block = b.id and l.list in ('page','tag'))`,
+  catalogIdentity: `select ${BLOCK_COLUMNS} from ${B} b where b.deleted is not null
+    union
+    select ${BLOCK_COLUMNS} from ${B} b where b.kind is not null
+    union
+    select ${BLOCK_COLUMNS} from ${B} b join ${L} l on l.block = b.id where l.list in ('page','tag')`,
 
   /**
    * **依赖方查询**（改名／清除的低频路径）：谁引用了这一块——正文引用、标签成员、
