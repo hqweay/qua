@@ -306,7 +306,7 @@ export class RenderOps {
     this.makePlaceholderFor = null
     try {
       for (const r of batch) {
-        const el = this.makeBlockEl(r, gutters.get(r.block.id), below.get(r.block.id), single)
+        const el = this.makeBlockEl(r, gutters.get(r.block.id), below.get(r.block.id), single, false)
         sec.appendChild(el)
         made.push({ id: r.block.id, el })
       }
@@ -958,6 +958,12 @@ export class RenderOps {
     below: BelowFields | undefined,
     /** 「这一屏只有这一块」——**批级事实，由调用方算一次**（逐行 `flatten()` 会退化成 O(N²)） */
     single: boolean,
+    /**
+     * 这一行是不是**真挂进这一屏**：只有真挂载才记 `mounted`。
+     * 离屏预量也用这个函数建行（同一套 CSS/父链），但它挂在文档外的临时容器里——
+     * 记进来的话 `mounted` 会把窗口外的行报成已挂载（虚拟化断言与焦点还原都会读错）。
+     */
+    trackMounted = true,
   ): HTMLElement {
     // 同构重装：这一行有保留的旧行 ⇒ 直接用占位（rebuildWith 随后整棵换回）
     const placeholder = this.makePlaceholderFor?.(r)
@@ -1025,7 +1031,7 @@ export class RenderOps {
           : {}),
       },
     )
-    this.mounted.add(r.block.id)
+    if (trackMounted) this.mounted.add(r.block.id)
     // 行的派生物都是构造期写死的：盖章记下「画这行时的模型修订号」，保留行快路
     // （`holdRows`）据此判断「这行画下之后模型动过没有」——动过就整体退回全量重建。
     el.dataset.rev = String(this.ed.store.revision)
