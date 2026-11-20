@@ -56,7 +56,8 @@ const ZH_COLLATOR = new Intl.Collator('zh-Hans-CN', { numeric: true })
 /**
  * `ref` 的值位：字符串＝默认的全部引用 kind；对象＝可收窄到某几类。
  *
- * `inline` 是正文里的 `[[ ]]`，`property` 是 `kind:'ref'` 的属性值，`embed` 是露面。
+ * `inline` 是正文里的 `[[ ]]` 与行内实例胶囊（`#名` 指向记录的那一枚），
+ * `property` 是 `kind:'ref'` 的属性值，`embed` 是露面。
  * 标签归属**不在**这里：它是分类（`tag`），不是引用。
  */
 export interface RefTarget {
@@ -102,8 +103,10 @@ export type QueryNode =
    *
    * **不限目标**（对象形态缺 `to`）＝「这块引用了别的东西」：存在任一条指定 kind 的
    * 出向引用边。它**不是恒真条件**——「有引用」是有意义的判定；kind 缺省三类全算
-   * （inline／property／embed，与指名时同一口径）。行内标签 `#名` 不算：那是
-   * `tagMention` 边，「分类」的问题由 `{tag}` 原子答，两问不混。
+   * （inline／property／embed，与指名时同一口径）。正文里的 `#名` 按**目标身份**分两半：
+   * 目标是标签类 ⇒ 分类提及（`tagMention` 边），「分类」的问题由 `{tag}` 原子答；
+   * 目标是记录（行内实例胶囊）或普通块 ⇒ 就是引用（`inline` 边），与 `[[ ]]` 同一问。
+   * 判据在 `relations.ts` 的边生成处，与渲染层 `refKindOf` 同一份目标身份读法。
    */
   | { ref: string | RefTarget }
   /**

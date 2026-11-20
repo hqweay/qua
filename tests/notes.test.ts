@@ -120,7 +120,7 @@ test('relationEdgesOfBlock：一对一条边；同宿主多区间靠 propId＝an
     { block: hostA.id, anno: aA.id },
     { block: hostA.id, anno: aB.id },
   ])
-  const edges = relationEdgesOfBlock(note, new Map())
+  const edges = relationEdgesOfBlock(note, new Map(), new Set())
   assert.deepEqual(edges, [
     { from: note.id, to: hostA.id, kind: 'annotates', propId: aA.id },
     { from: note.id, to: hostA.id, kind: 'annotates', propId: aB.id },

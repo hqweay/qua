@@ -47,7 +47,7 @@
 import { isDeleted, type Block } from '../model/model.ts'
 import { walkForest } from '../model/walk.ts'
 import { ORDER_STEP } from '../infra/order.ts'
-import { collectPropKinds, relationEdgesOfBlock, type RelationKind } from '../relations/relations.ts'
+import { collectPropKinds, collectTagClassIds, relationEdgesOfBlock, type RelationKind } from '../relations/relations.ts'
 import { META_KEYS } from '../identity/library.ts'
 import { rowsToWorkspace, type RawLibraryRows, type RowWrite } from './db-rows.ts'
 
@@ -162,11 +162,13 @@ function derive(forest: readonly Block[], wanted: ReadonlySet<string> | null): D
   )
 
   /**
-   * 关系边的两条前置表，与 `Index.rebuild` 同一口径：
+   * 关系边的三条前置表，与 `Index.rebuild` 同一口径：
    *   · `propKinds` 只收**可见**的字段定义（定义被删 ⇒ 那格属性不再算关系）；
+   *   · `tagClass` 只收可见的标签类（目标被删 ⇒ 那枚 `#名` 算引用不算提及）；
    *   · `annoHosts` 只收可见块的 anno（引用的 `to` 必须是块 id：在边生成处归一化一次）。
    */
   const propKinds = collectPropKinds(forest)
+  const tagClass = collectTagClassIds(forest)
   const annoHosts = new Map<string, { hostId: string }>()
   walkForest(forest, (b) => {
     for (const a of b.annos ?? []) annoHosts.set(a.id, { hostId: b.id })
@@ -176,7 +178,7 @@ function derive(forest: readonly Block[], wanted: ReadonlySet<string> | null): D
   const seen = new Set<string>()
   walkForest(forest, (b) => {
     if (wanted !== null && !wanted.has(b.id)) return
-    for (const e of relationEdgesOfBlock(b, propKinds, annoHosts)) {
+    for (const e of relationEdgesOfBlock(b, propKinds, tagClass, annoHosts)) {
       /**
        * 去重键只有 `(from,to,kind)`：同一源到同一目标的多条边（同一块里引用两次、
        * 多个 anno 区间指向同一段）在「谁指向谁」这个问题下是一件事。

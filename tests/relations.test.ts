@@ -1,10 +1,11 @@
 /**
  * **关系层**：引用／属性引用／标签归属／标签提及是四种不同的事实。
  *
- * 这组测试钉住三件事：
- *   ① `{ref}` 默认收 inline／property／embed，**不收**标签归属与 `#名` 提及；
- *   ② `{ref:{kind}}` 能把这三种引用收窄；
- *   ③ 派生栏的「成员」「提及」与关系索引是同一份口径（不另扫一遍正文）。
+ * 这组测试钉住四件事：
+ *   ① `{ref}` 默认收 inline／property／embed，**不收**标签归属与 `#标签` 分类提及；
+ *   ② `#名` 按**目标身份**分两半：指向标签类是分类提及，指向记录（行内实例）是引用；
+ *   ③ `{ref:{kind}}` 能把三种引用收窄；
+ *   ④ 派生栏的「成员」「提及」与关系索引是同一份口径（不另扫一遍正文）。
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -17,6 +18,7 @@ import {
   rebuild,
   runQuery,
   type Block,
+  type QueryNode,
 } from '../src/core/index.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
 import { textRuns, type RefRun } from '../src/core/model/runs.ts'
@@ -63,6 +65,38 @@ test('{ref:{kind}} 能收窄到某一类引用', () => {
   assert.deepEqual(property.map((h) => h.blockId), ['src'], '属性引用也命中 src')
   const none = runQuery({ where: { ref: { to: 'target', kind: 'embed' } } }, { blocks })
   assert.deepEqual(none, [], '没有 embed 边')
+})
+
+test('行内实例：#名 指向记录是引用（{ref} 命中、进引用栏），指向标签类才是提及', () => {
+  const tag = b('tag', '人物', { props: { _aliases: ['人物'], _lists: ['tag'] } })
+  const record = b('rec', '张三', { props: { _tags: ['tag'] } })
+  const note = b('note', '写了 #张三 和 #人物', {
+    content: [
+      ...textRuns('写了 '),
+      ref('r1', 'rec', { flavor: '#' }),
+      ...textRuns(' 和 '),
+      ref('r2', 'tag', { flavor: '#' }),
+    ],
+  })
+  const blocks = [tag, record, note]
+  const ids = (where: QueryNode) => runQuery({ where }, { blocks }).map((h) => h.blockId)
+  assert.deepEqual(ids({ ref: 'rec' }), ['note'], '胶囊指向记录＝指向具体目标的引用')
+  assert.deepEqual(ids({ ref: 'tag' }), [], '胶囊指向标签类＝分类提及，两问不混')
+
+  // 索引路径与纯函数路径同口径（tagClass 集合由 rebuild 自收）
+  const idx = rebuild(blocks)
+  assert.deepEqual(
+    queryByIndex(idx, blocks, { where: { ref: 'rec' } }).map((h) => h.blockId),
+    ['note'],
+  )
+
+  // 引用栏收胶囊；提及栏只剩文本命中（原子不进正文投影 ⇒ 这枚胶囊不出现在提及里）
+  const kb = new MemoryKb(new BlockStore(blocks))
+  const rec = blocks.find((x) => x.id === 'rec')!
+  const refs = derivedRecordsOf(rec, kb, 'refs')
+  assert.deepEqual(refs.map((r) => r.block.id), ['note'], '记录的引用栏收行内实例')
+  const mentions = derivedRecordsOf(rec, kb, 'mentions')
+  assert.deepEqual(mentions.map((r) => r.block.id), [], '胶囊提及已迁入引用，不重复出在提及栏')
 })
 
 test('canonicalSpec：ref 的对象形式能存活，kind 规范成数组', () => {

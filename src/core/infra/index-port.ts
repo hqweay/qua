@@ -30,6 +30,7 @@ import {
 } from '../props/props.ts'
 import {
   collectPropKinds,
+  collectTagClassIds,
   isRefKind,
   relationEdgeKey,
   relationEdgesOfBlock,
@@ -65,6 +66,7 @@ import { candidateIdsOf, type CandidateTables } from '../query/candidates.ts'
  * | `blocks` | 这个 id 现在是哪一块、叫什么 | 引用解析（`resolveRef`） |
  * | `relations` / `outgoing` | 谁指向谁、以什么 kind | 反链、标签成员、属性引用、关系面板 |
  * | `propKinds` | 哪些字段定义是 `ref`（决定属性值算不算关系） | 关系边提取 |
+ * | `tagClassIds` | 哪些块是标签类（决定 `#名` 算提及还是引用） | 关系边提取 |
  * | `tags` / `journals` | 按名字/日期找块 | 标签解析、日记条件 |
  * | `rootOf` | 这块住在哪个顶层根 | 反链按来源根聚合 |
  * | `parentOf` | 这块的**树父**（`null` ＝ 森林顶层） | 面包屑／路径：沿父链向上 O(depth) |
@@ -84,6 +86,14 @@ export interface Index {
   outgoing: Map<string, RelationEdge[]>
   /** 字段定义 id → kind（只登记 `ref` 时用来判属性值算不算关系） */
   propKinds: Map<string, PropKind>
+  /**
+   * 标签类块 id 集（`_lists` 里有 `tag` 的活块）。
+   *
+   * 行内 `#名` 算「分类提及」还是「引用」，判据是**目标的身份**（与渲染层 `refKindOf`
+   * 同一份读法），不是 run 上的显示风味。集合成员变化（建/删标签、同名块被收编）时
+   * 引用者的边 kind 要跟着重算 —— 低频动作，走一次关系全量重算。
+   */
+  tagClassIds: Set<string>
   /**
    * 标签名表：规范化标签名 → 标签块 id。
    *
@@ -197,6 +207,7 @@ function emptyIndex(): Index {
     relations: new Map(),
     outgoing: new Map(),
     propKinds: new Map(),
+    tagClassIds: new Set(),
     tags: new Map(),
     aliases: new Map(),
     journals: new Map(),
@@ -222,10 +233,12 @@ export function rebuild(forest: readonly Block[]): Index {
   const idx = emptyIndex()
 
   /**
-   * 先收定义 kind，再收边：字段定义块可能住在后面的顶层根里，
-   * 边提取时 `propKinds` 必须已经知道哪些属性是 `ref`。
+   * 先收定义 kind 与标签类，再收边：字段定义块可能住在后面的顶层根里，
+   * 边提取时 `propKinds` 必须已经知道哪些属性是 `ref`，`#名` 的分类
+   * 必须已经知道哪些目标是标签类。
    */
   idx.propKinds = collectPropKinds(forest)
+  idx.tagClassIds = collectTagClassIds(forest)
 
   // 块表 / 标签表 / 日记表 / 根表 / 关系边（一次先序遍历；与增量修补同一口径）。
   // ⚠️ 遍历默认跳过被删的子树（原位软删：被删的块对索引不可见）。
@@ -380,7 +393,7 @@ function refreshRelations(idx: Index, blockId: string): void {
   const live = idx.blocks.get(blockId)
   if (!live) return
   removeOutgoing(idx, blockId)
-  for (const e of relationEdgesOfBlock(live, idx.propKinds, idx.annos)) addEdge(idx, e)
+  for (const e of relationEdgesOfBlock(live, idx.propKinds, idx.tagClassIds, idx.annos)) addEdge(idx, e)
 }
 
 /**
@@ -391,7 +404,7 @@ function refreshAllRelations(idx: Index): void {
   idx.relations.clear()
   idx.outgoing.clear()
   for (const b of idx.blocks.values()) {
-    for (const e of relationEdgesOfBlock(b, idx.propKinds, idx.annos)) addEdge(idx, e)
+    for (const e of relationEdgesOfBlock(b, idx.propKinds, idx.tagClassIds, idx.annos)) addEdge(idx, e)
   }
 }
 
@@ -565,7 +578,20 @@ export function applyOps(index: Index, ops: readonly Op[], forest: readonly Bloc
         if (fresh.has(op.block) && (op.name === ALIASES_PROP || op.name === LISTS_PROP || op.name === '_tags' || op.name === '_date' || op.name === '_kind')) break
         if (op.name === ALIASES_PROP || op.name === LISTS_PROP) {
           refreshTagsClaim(index, op.block, forest)
-          refreshRelations(index, op.block)
+          /**
+           * 标签类成员变化（`ensureTag` 收编同名块等）⇒ 指向它的 `#名` 边在
+           * 提及与引用之间翻转，引用者都得重算。低频动作，走一次全量重算
+           * 换掉「漏刷新一条边」的静默错误（与 `_kind` 同一权衡）。
+           */
+          const liveOp = index.blocks.get(op.block)
+          const isTagClass = liveOp !== undefined && hasList(liveOp, 'tag')
+          if (isTagClass !== index.tagClassIds.has(op.block)) {
+            if (isTagClass) index.tagClassIds.add(op.block)
+            else index.tagClassIds.delete(op.block)
+            refreshAllRelations(index)
+          } else {
+            refreshRelations(index, op.block)
+          }
         } else if (op.name === '_date') {
           refreshRelations(index, op.block)
         } else if (op.name === '_kind') {
@@ -713,6 +739,7 @@ function applyBlockDelete(index: Index, id: string, forest: readonly Block[], pu
   const names = new Set<string>()
   const dates = new Set<string>()
   let droppedPropKind = false
+  let droppedTagClass = false
   walkForest(
     [block],
     (b) => {
@@ -722,6 +749,7 @@ function applyBlockDelete(index: Index, id: string, forest: readonly Block[], pu
       }
       if (isJournal(b)) dates.add(journalDate(b))
       if (index.propKinds.delete(b.id)) droppedPropKind = true
+      if (index.tagClassIds.delete(b.id)) droppedTagClass = true
     },
     { includeDeleted: true },
   )
@@ -759,7 +787,8 @@ function applyBlockDelete(index: Index, id: string, forest: readonly Block[], pu
   // 日期表：先序第一个赢 ⇒ 「谁接手」只有整片森林知道，整表在 `applyOps` 末尾重建
   // 关系边：源在退场子树里的边一起摘（恢复时随子树重建）。
   // 字段定义退场 ⇒ 所有使用它的属性值都不再算关系，走一次全量重算（低频）。
-  if (droppedPropKind) {
+  // 标签类退场 ⇒ 指向它的 `#名` 边从提及翻成引用（目标不再是标签类），同一权衡。
+  if (droppedPropKind || droppedTagClass) {
     refreshAllRelations(index)
   } else {
     for (const bid of gone) removeOutgoing(index, bid)
@@ -921,16 +950,19 @@ function refreshVisibility(index: Index, blockId: string, forest: readonly Block
   indexSubtree(index, block, rootId, parentId)
   /**
    * 恢复的子树里如果带字段定义，别处使用该字段的属性值也要重新变成关系边
-   * （它们退场时 `propKinds` 被摘掉了）。低频动作，走一次全量重算。
+   * （它们退场时 `propKinds` 被摘掉了）；带标签类同理 —— 指向它的 `#名` 边
+   * 要翻回提及。低频动作，走一次全量重算。
    * 同一趟顺带回答「这里有没有日记」——有 ⇒ 日记归属整表重建（先序第一可能换人）。
    */
   let hasPropDef = false
   let hasJournal = false
+  let hasTagClass = false
   walkForest([block], (b) => {
     if (isPropDefBlock(b)) hasPropDef = true
     if (isJournal(b)) hasJournal = true
+    if (hasList(b, 'tag')) hasTagClass = true
   })
-  if (hasPropDef) refreshAllRelations(index)
+  if (hasPropDef || hasTagClass) refreshAllRelations(index)
   // 名字：入场后要重新认领（被删期间它们无权认领，见 `rebuild` 的同一口径）
   refreshTagsClaim(index, blockId, forest)
   return hasJournal
@@ -1001,6 +1033,7 @@ function indexSubtree(index: Index, root: Block, rootId: string, parentId: strin
      */
     index.parentOf.set(b.id, ctx.parent?.id ?? parentId)
     if (isPropDefBlock(b)) index.propKinds.set(b.id, propKindOf(b))
+    if (hasList(b, 'tag')) index.tagClassIds.add(b.id)
     /**
      * 地址表：**每一个**别名都是一个地址（一个块可以有多个名字）。
      * 重复时先序第一个赢（与「先序第一个命中」同一个口径，不随机覆盖）。
@@ -1019,7 +1052,7 @@ function indexSubtree(index: Index, root: Block, rootId: string, parentId: strin
   })
   for (const b of visited) {
     removeOutgoing(index, b.id)
-    for (const e of relationEdgesOfBlock(b, index.propKinds, index.annos)) addEdge(index, e)
+    for (const e of relationEdgesOfBlock(b, index.propKinds, index.tagClassIds, index.annos)) addEdge(index, e)
   }
   /**
    * **全部块表**（含被软删的）：与可见那趟分开走。
@@ -1060,6 +1093,7 @@ export function fingerprint(index: Index): string {
     relations: edgeMap(index.relations),
     outgoing: edgeMap(index.outgoing),
     propKinds: [...index.propKinds.entries()].sort((a, b) => a[0].localeCompare(b[0])),
+    tagClassIds: [...index.tagClassIds].sort(),
     tags: flat(index.tags),
     aliases: flat(index.aliases),
     journals: flat(index.journals),

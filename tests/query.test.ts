@@ -782,9 +782,10 @@ function selfFixture() {
   // 指向日记块：正文里一枚 flavor 缺省的引用 run
   const pointing = b('r1', '引用那一天')
   pointing.content.push({ id: 'r1a', t: 'ref', to: 'j1', label: '那天' })
-  // 正文里写一个 `#` 行内标签，指的那天和宿主同一天：它是露面（flavor '#'），**不是**指向边
+  // 正文里写一个 `#` 行内标签指**标签类**：它是分类提及（flavor '#'），**不是**指向边；
+  // 指向非标签类（记录／日记／普通块）的 `#名` 是引用边——那半在 relations.test 钉
   const inline = b('r2', '写在正文里的 ')
-  inline.content.push({ id: 'r2a', t: 'ref', to: 'j1', label: journalDateLabel('2026-10-26'), flavor: '#' })
+  inline.content.push({ id: 'r2a', t: 'ref', to: 'tag', label: '项目', flavor: '#' })
   // 正文里**真的写着**宿主的可读文本（`{text}` 吃的是文本段，不是原子标签）
   const literal = b('r3', `今天记了一笔：${journalDateLabel('2026-10-26')}`)
   return { blocks: [j, host, same, pointing, inline, literal, tag], host, j, same, pointing, inline, literal, tag }
@@ -839,7 +840,7 @@ test('U6 路径条件里的 $self 等价于写死那一天的日期', () => {
  *      只有「真的把这串字写在正文里」的块才算提及。
  * 于是两栏不重叠：引用我的块在「引用」里，写着我的名字的块在「提及」里。
  */
-test('U6b 提及的边界：`#名` 是露面不是边（不被 not-ref 排除）；真引用我的块不算提及', () => {
+test('U6b 提及的边界：`#标签` 是露面不是边（不被 not-ref 排除）；真引用我的块不算提及', () => {
   const { blocks, j, pointing, inline, literal } = selfFixture()
   // ① 只否指向边：行内 `#` 的那块还在，真引用我的那块被排除
   const notRef = runQuery({ where: { not: { ref: '$self' } } }, { blocks, selfId: j.id }).map((h) => h.blockId)
@@ -1315,18 +1316,20 @@ test('{link}：有外链即可；url 给了比 contains（大小写不敏）', (
   assertSameHits({ where: { link: {} } }, blocks)
 })
 
-test('{ref} 不限目标：发过任一指定 kind 引用边的块都命中；#名 提及不算引用', () => {
+test('{ref} 不限目标：发过任一指定 kind 引用边的块都命中；#标签 提及不算引用', () => {
+  // 目标是标签类 ⇒ hash 那枚 `#目标` 是分类提及（tagMention），不算引用
+  const tgt: Block = b('tgt', '目标', { props: { _lists: ['tag'] } })
   const x: Block = b('x', '甲')
   x.content = [{ id: 'r1', t: 'ref', to: 'tgt', label: '目标' }]
   const hash: Block = b('hash', '乙')
   hash.content = [{ id: 'r2', t: 'ref', to: 'tgt', flavor: '#', label: '目标' }]
   const z: Block = b('z', '丙')
-  const blocks = [x, hash, z]
+  const blocks = [tgt, x, hash, z]
   const ids = (where: QueryNode) => runQuery({ where }, { blocks }).map((h) => h.blockId)
   assert.deepEqual(ids({ ref: {} }), ['x'], '有引用即命中')
   assert.deepEqual(ids({ ref: { kind: ['inline'] } }), ['x'])
-  assert.deepEqual(ids({ ref: { kind: ['property'] } }), [], '只有 #名 提及不算（tagMention 不是引用 kind）')
-  assert.deepEqual(ids({ not: { ref: {} } }), ['hash', 'z'], '否定照常可组合')
+  assert.deepEqual(ids({ ref: { kind: ['property'] } }), [], '只有 #标签 提及不算（tagMention 不是引用 kind）')
+  assert.deepEqual(ids({ not: { ref: {} } }), ['tgt', 'hash', 'z'], '否定照常可组合（tgt 自己没发过引用边）')
   assert.equal(usesRefAny({ ref: {} }), true)
   assert.equal(usesRefAny({ ref: 'tgt' }), false, '指名目标走入向表，不建出向表')
   assert.equal(usesRefAny({ all: [{ ref: {} }] }), true)

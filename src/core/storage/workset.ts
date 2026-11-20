@@ -434,7 +434,7 @@ export function relationWritesOf(store: BlockStore, complete: ReadonlySet<string
     for (let cur: string | null | undefined = id; cur !== null && cur !== undefined; cur = index.parentOf.get(cur)) {
       root = cur
     }
-    for (const e of relationEdgesOfBlock(b, index.propKinds, index.annos)) {
+    for (const e of relationEdgesOfBlock(b, index.propKinds, index.tagClassIds, index.annos)) {
       const key = `${e.from}\u0000${e.to}\u0000${e.kind}`
       if (seen.has(key)) continue
       seen.add(key)
