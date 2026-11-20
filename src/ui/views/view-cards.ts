@@ -107,6 +107,11 @@ export class ViewCards {
   private below: ReadonlyMap<string, BelowFields> = new Map()
   /** 结构分组的形状签名（组 id ＋ 每组的卡 id）：变了才整片重画 */
   private structureShape = ''
+  /**
+   * 上一次整片画的「形状」：布局 ＋ 每张卡 id ＋ 它在哪一列。显示排序只改顺序、
+   * 不改形状 ⇒ 命中时把已有卡片节点搬成新序，不 replaceChildren（那会让卡片闪一下）。
+   */
+  private shapeSig = ''
 
   constructor(deps: ViewCardsDeps) {
     this.deps = deps
@@ -117,11 +122,71 @@ export class ViewCards {
 
   dispose(): void {}
 
+  /** 一次整片画的形状签名：布局 ＋ 每张卡在哪一列（**不含显示排序**） */
+  private shapeOf(view: ViewConfig | null): string {
+    const layout = cardLayoutOf(view)
+    const key = view?.groupBy ?? ''
+    if (layout !== 'columns' || key === '' || groupsByStructure(view)) {
+      return `${layout}|${this.deps.records().map((r) => r.block.id).join(',')}`
+    }
+    const o = this.bucketOpts(view)
+    const { buckets } = bucketize(this.deps.records(), key, o)
+    return `${layout}|${key}|` + buckets
+      .map((b) => `${b.id}:${b.records.map((r) => r.block.id).join(',')}`)
+      .sort()
+      .join('|')
+  }
+
+  /**
+   * 显示排序只改顺序、不改这一屏的卡片集合与分组。此时把已有的卡片节点按新序
+   * `appendChild` 搬一遍即可（DOM 节点不变 ⇒ 封面不重载、滚动与 hover 不丢），
+   * 不做 `replaceChildren`——那会把整批卡拆掉重建，肉眼就是「消失又出现」。
+   * 只处理网格与值分组的列内顺序；结构分组/animated 换列等复杂形状仍走整片重画。
+   */
+  private reorderInPlace(view: ViewConfig | null): boolean {
+    const layout = cardLayoutOf(view)
+    if (layout !== 'columns') {
+      const ids = sortRecords(this.deps.records(), view?.sort).map((r) => r.block.id)
+      const byId = new Map([...this.root.querySelectorAll<HTMLElement>('.vcard[data-block-id]')]
+        .map((el) => [el.dataset.blockId ?? '', el]))
+      if (ids.length === 0 || ids.length !== byId.size || ids.some((id) => !byId.has(id))) return false
+      for (const id of ids) this.root.appendChild(byId.get(id)!)
+      return true
+    }
+    const key = view?.groupBy ?? ''
+    if (key === '' || groupsByStructure(view)) return false
+    const o = this.bucketOpts(view)
+    const records = recordsForGrouping(this.deps.records(), view)
+    const { buckets } = bucketize(records, key, o)
+    if (buckets.length === 0) return false
+    const cols = [...this.root.querySelectorAll<HTMLElement>('.vcol')]
+    const byValue = new Map(cols.map((col) => [col.dataset.unset === '1' ? UNSET : (col.dataset.value ?? ''), col]))
+    const allIds = new Set(buckets.flatMap((b) => b.records.map((r) => r.block.id)))
+    const existing = [...this.root.querySelectorAll<HTMLElement>('.vcard[data-block-id]')]
+    if (existing.length !== allIds.size || existing.some((el) => !allIds.has(el.dataset.blockId ?? ''))) return false
+    const byId = new Map(existing.map((el) => [el.dataset.blockId ?? '', el]))
+    for (const b of buckets) {
+      const col = byValue.get(b.id)
+      if (!col) return false
+      const list = col.querySelector<HTMLElement>('.vcol-cards')
+      if (!list) return false
+      for (const r of b.records) {
+        const el = byId.get(r.block.id)
+        if (el) list.appendChild(el)
+      }
+    }
+    return true
+  }
+
   render(): void {
     // 整片重画会把正在编辑的那张卡的 DOM 换掉：先把这次编辑收尾
     this.deps.cell.commit()
     const view = this.deps.view()
     const layout = cardLayoutOf(view)
+    const shape = this.shapeOf(view)
+    // 形状没变（只有显示排序变了）⇒ 就地搬节点成新序，不拆卡
+    if (shape === this.shapeSig && this.reorderInPlace(view)) return
+    this.shapeSig = shape
     this.root.dataset.layout = layout
     this.refreshBelow(this.deps.records().map((r) => r.block))
     this.root.replaceChildren()

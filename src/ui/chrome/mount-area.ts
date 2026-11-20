@@ -2099,8 +2099,12 @@ export class MountArea {
     this.emptyEl.hidden = true
     this.viewEl.hidden = false
     if (entry.kind === 'local') {
-      // 按栏缓存：切 tab／切看法都不换实例（`mount()` ⇒ `sync()` 自会按激活视图换分支）
+      // 按栏缓存：切 tab／切看法都不换实例。只有**新建**那一台要 mount()（首次装载）；
+      // 缓存命中时调用 mount() 会把 frozen 清成 null，带排序的查询于是从空集重新装载
+      // ——卡片先消失再出现，点一次「应用」闪一下。已有实例只 sync()：它订阅了拥有者
+      // 配置，就地重读重画；切看法由 sync 内的 mode 判据换分支。
       let made = this.tabViews.get(entry.id) ?? null
+      const fresh = made === null
       if (!made) {
         made = this.deps.createView?.(host, entry) ?? null
         if (made) this.tabViews.set(entry.id, made)
@@ -2109,11 +2113,11 @@ export class MountArea {
       this.ownedView = null
       if (made) {
         if (made.root.parentElement !== this.viewEl) this.viewEl.replaceChildren(made.root)
-        made.mount()
+        if (fresh) made.mount()
+        else made.sync()
         return
       }
     } else {
-      // 派生栏：看法（kind）烤在实例里，现造现弃
       this.detachView()
       this.viewEl.hidden = false
       const made = this.deps.createView?.(host, entry) ?? null
