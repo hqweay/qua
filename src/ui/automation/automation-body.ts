@@ -139,15 +139,23 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
     return sec
   }
 
-  /** 一枚 chip（只读；点击行为由调用方接） */
+  /**
+   * 一枚 chip（只读；点击行为由调用方接）。
+   *
+   * 本体 inline-flex（图标与文字**同轴居中**，不再和 inline 基线搏斗）；
+   * 文字包进内层 label——省略号是 label 的职责（flex 容器自己省略不了裸文本节点）。
+   */
   const chip = (text: string, cls: string, onClick?: () => void): HTMLElement => {
     const c = document.createElement(onClick ? 'button' : 'span')
     if (onClick) {
       ;(c as HTMLButtonElement).type = 'button'
       c.addEventListener('click', onClick)
     }
-    c.className = `blk-auto-chip ui-ellipsis ${cls}`
-    c.textContent = text
+    c.className = `blk-auto-chip ${cls}`
+    const label = document.createElement('span')
+    label.className = 'blk-auto-chip-label ui-ellipsis'
+    label.textContent = text
+    c.appendChild(label)
     return c
   }
 

@@ -3344,7 +3344,13 @@
   background: var(--ui-surface);
   color: var(--ui-text-secondary);
   max-width: 100%;
-  /* 单行省略走原语：chip 上另挂 `ui-ellipsis`（组件侧），这里不再抄一份几何 */
+  /* 图标与文字同轴：本体 inline-flex，省略号在内层 label 上 */
+  display: inline-flex;
+  align-items: center;
+  overflow: hidden;
+}
+.blk-auto-chip-label {
+  min-width: 0;
 }
 button.blk-auto-chip {
   cursor: pointer;
@@ -3427,7 +3433,7 @@ button.blk-auto-chip {
    图标垂直对齐文字中线，解释悬停里给（界面少字） */
 .blk-auto-sev-ico {
   display: inline-flex;
-  vertical-align: middle;
+  flex: 0 0 auto;
   margin-inline-end: var(--ui-gap-1);
   color: var(--ui-sev-ink);
 }
