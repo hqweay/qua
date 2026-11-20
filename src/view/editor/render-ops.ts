@@ -473,6 +473,7 @@ export class RenderOps {
     const rows = this.ed.rows()
     const placeholders = new Map<string, HTMLElement>()
     this.ed.container.textContent = ''
+    this.ed.resetRowEls()
     this.mounted.clear()
     this.rebuildAncestors()
     this.caretMarks = ''
@@ -498,8 +499,12 @@ export class RenderOps {
     for (const id of placeholders.keys()) {
       const el = detached.get(id)
       const fresh = this.ed.container.querySelector<HTMLElement>(`[data-keep-id="${CSS.escape(id)}"]`)
-      if (!el || !fresh) continue
+      if (!el || !fresh) {
+        this.ed.dropRowEl(id)
+        continue
+      }
       fresh.replaceWith(el)
+      this.ed.setRowEl(id, el)
     }
     /**
      * **把保留行的身体接回去**。`renderAll` 开头的 `disposeAll` 对身体是「延后一拍拆」：
@@ -575,6 +580,7 @@ export class RenderOps {
       const fresh = this.ed.blockEl(anchorId)
       if (fresh && fresh !== oldEl) {
         fresh.replaceWith(oldEl)
+        this.ed.setRowEl(anchorId, oldEl)
         this.mounted.add(anchorId)
         if (focusInside) (active as HTMLElement).focus({ preventScroll: true })
       }
@@ -632,6 +638,7 @@ export class RenderOps {
       return
     }
     this.ed.container.textContent = ''
+    this.ed.resetRowEls()
     this.mounted.clear()
     this.rebuildAncestors()
     // DOM 重建 ⇒ `data-caret` 全丢，缓存也失效（否则 `markCaret` 会因为「id 没变」而跳过）
@@ -893,7 +900,10 @@ export class RenderOps {
         sec.dataset.sec = r.depth === 0 ? r.block.id : ''
         this.ed.container.appendChild(sec)
       }
-      sec.appendChild(this.makeBlockEl(r, gutters.get(r.block.id), below.get(r.block.id), single))
+      const rowEl = this.makeBlockEl(r, gutters.get(r.block.id), below.get(r.block.id), single)
+      sec.appendChild(rowEl)
+      // 行表只收真行：占位节点没有 `data-block-id`（rebuildWith 随后会换回真行并登记）
+      if (rowEl.dataset.blockId === r.block.id) this.ed.setRowEl(r.block.id, rowEl)
     }
     // 哨兵组头（`beforeRootId: ''`）：折叠组排在最后时，后面没有行可锚 ⇒ 落在文档末尾
     for (const head of groupHeads) if (head.beforeRootId === '') this.ed.container.appendChild(this.makeGroupHead(head))
@@ -932,14 +942,14 @@ export class RenderOps {
     // 单行重画也是「一批」：gutter 与块下行共用一份扫库结果
     const derive = this.deriveOf()
     this.ed.embeds.disposeRow(id)
-    el.replaceWith(
-      this.makeBlockEl(
-        row,
-        gutterFieldsFor([row.block], this.ed.store.blocks, derive).get(row.block.id),
-        this.belowOf([row.block], derive).get(row.block.id),
-        hasSingleLiveBlock(this.ed.doc),
-      ),
+    const nextEl = this.makeBlockEl(
+      row,
+      gutterFieldsFor([row.block], this.ed.store.blocks, derive).get(row.block.id),
+      this.belowOf([row.block], derive).get(row.block.id),
+      hasSingleLiveBlock(this.ed.doc),
     )
+    el.replaceWith(nextEl)
+    this.ed.setRowEl(id, nextEl)
     /**
      * 这一行的 DOM 刚被换掉：表里那个实测高是**换之前**的（改长／改短都算），
      * 现在量一次；量不到（不在窗口里）就删掉，退回估算。
@@ -1274,6 +1284,7 @@ export class RenderOps {
     this.probe.applyWindowRows += to - from
     this.ed.embeds.disposeAll()
     this.ed.container.textContent = ''
+    this.ed.resetRowEls()
     this.mounted.clear()
     // ⚠️ 祖先表对**全量** rows 算（上面已经拿到的就是全量可见行），
     //    不对下面 slice 重建 —— 否则窗口第一行的祖先全丢。

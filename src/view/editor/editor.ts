@@ -550,6 +550,10 @@ export class BlockEditor {
     rowsAllCalls: 0,
     /** 字段读取表重建次数（内容键入应为 0；标签声明/定义变更才 +1） */
     fieldTableBuilds: 0,
+    /** `blockEl` 调用次数（每键应只随「问了几次」增长，不随库体量） */
+    blockElCalls: 0,
+    /** 行表全容器扫描次数（暖起来之后每键应为 0） */
+    rowElScans: 0,
     /** `change` 回调总耗时/次数（装配层每次编辑通知都记一笔，诊断用） */
     changeCalls: 0,
     changeMs: 0,
@@ -690,6 +694,18 @@ export class BlockEditor {
     index: unknown
     table: FieldTable
   } | null = null
+  /**
+   * **本编辑器自己的行元素**（blockId → 这一行在这一屏的 `.blk`）。
+   *
+   * 渲染路径在挂行/换行时增量维护（`renderRows`／`renderBlock`／`rebuildWith`／
+   * `applyWindow`），`blockEl` 从「每次 querySelectorAll 全容器」变成 O(1) 查表。
+   * `null` ＝ 还没有人挂过（或刚 dispose）：第一次 `blockEl` 做一次全容器扫描，
+   * 之后一直走表。
+   *
+   * 只收**本编辑器**的行：嵌入身体的里层行是另一台编辑器的岛，由那台自己维护。
+   * 表里没有的 id 就是「这一行不在这一屏」——虚拟化下窗口外的块也就该是这个答案。
+   */
+  private rowEls: Map<string, HTMLElement> | null = null
   /** 当前动作的撤销捕获袋：`write` 的每个事务都会把出口捕获并进来（一次动作可能拆成多笔） */
   private entryCap: UndoCapture | null = null
   /** 当前动作开始时的选区（撤销后回到这里） */
@@ -826,6 +842,7 @@ export class BlockEditor {
 
   /** 从文档里摘掉这个视图：退订 store、卸掉事件（否则游离容器还会继续被重画） */
   dispose(): void {
+    this.rowEls = null
     this.embeds.disposeAll()
     this.offStore()
     this.unbind()
@@ -1221,15 +1238,43 @@ export class BlockEditor {
    * 另一个实例上——不报错，只是看起来没反应。
    *
    * 判据是**岛根**：元素最近的编辑岛必须与本编辑器的岛相同（主编辑器不在任何岛里 ⇒ `null`）。
+   * 行表由渲染路径维护；表里没有 ⇒ 这一行不在这一屏（不是「需要再扫一遍 DOM」）。
    */
   blockEl(id: string): HTMLElement | null {
-    const all = this.container.querySelectorAll<HTMLElement>(`.blk[data-block-id="${id}"]`)
-    if (all.length <= 1) return all[0] ?? null
+    this.perfProbe.blockElCalls++
+    if (this.rowEls === null) this.rowEls = this.scanRowEls()
+    const hit = this.rowEls.get(id)
+    if (hit && hit.isConnected) return hit
+    if (hit) this.rowEls.delete(id)
+    return null
+  }
+
+  /** 一次全容器扫描建行表（只在表为空时走；扫描口径与 `blockEl` 的岛判据同一份） */
+  private scanRowEls(): Map<string, HTMLElement> {
+    this.perfProbe.rowElScans++
     const own = this.container.closest<HTMLElement>(`[${EDIT_ISLAND_ATTR}]`)
-    for (const el of all) {
-      if (el.closest(`[${EDIT_ISLAND_ATTR}]`) === own) return el
+    const out = new Map<string, HTMLElement>()
+    for (const el of this.container.querySelectorAll<HTMLElement>('.blk[data-block-id]')) {
+      if (el.closest(`[${EDIT_ISLAND_ATTR}]`) !== own) continue
+      const id = el.dataset.blockId
+      if (id && !out.has(id)) out.set(id, el)
     }
-    return all[0] ?? null
+    return out
+  }
+
+  /** 渲染路径用：本屏行表换代（换窗/整页重排后由 `renderRows` 重新登记） */
+  resetRowEls(): void {
+    this.rowEls = new Map()
+  }
+
+  /** 渲染路径用：登记一行（占位节点没有 `data-block-id`，调用方只对真行调） */
+  setRowEl(id: string, el: HTMLElement): void {
+    this.rowEls?.set(id, el)
+  }
+
+  /** 渲染路径用：一行被摘掉/没有归位成功 */
+  dropRowEl(id: string): void {
+    this.rowEls?.delete(id)
   }
 
 
