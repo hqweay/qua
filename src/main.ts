@@ -576,8 +576,9 @@ const loadCandidateWindow = workset
       ctx: QueryContext,
       host: Block | undefined,
       req: CandidateWindowRequest,
+      withChildren?: boolean,
     ): Promise<CandidateLoadStep> =>
-      loadCandidateWindowOf({ client: libraryClient, workset, store: blocks }, spec, ctx, host, req)
+      loadCandidateWindowOf({ client: libraryClient, workset, store: blocks }, spec, ctx, host, req, withChildren)
   : undefined
 
 /**

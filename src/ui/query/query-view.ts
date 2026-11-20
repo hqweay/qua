@@ -208,6 +208,8 @@ export interface ViewHostDeps {
     ctx: QueryContext,
     host: Block | undefined,
     req: CandidateWindowRequest,
+    /** 候选连**一层子级**一起装（大纲要画命中块的子树）；记录看法不需要 */
+    withChildren?: boolean,
   ) => Promise<CandidateLoadStep>
   surface: ViewSurface
   /**
@@ -1092,6 +1094,16 @@ export class ViewHost {
     return this.candidatesLoaded
   }
 
+  /**
+   * **此刻（将要）画的是不是大纲**：报告给的记录看法只画命中那一行，读它的子级是白装；
+   * 大纲会把命中块的子树摊在结果里 ⇒ 候选必须带**一层子级**，否则工作集里那些块
+   * 是浅装进来的（`children` 空），展开箭头与「全部收起」都会消失——同一份查询在
+   * 整库模式（全在内存）和大库（工作集）里长出两种样子。
+   */
+  private outlineKind(): boolean {
+    return (this.defaultView()?.kind ?? 'outline') === 'outline'
+  }
+
   private ensureFrozen(): void {
     const spec = this.effective
     if (!spec) return
@@ -1163,7 +1175,7 @@ export class ViewHost {
             if (this.pendingRefresh !== null) return
             this.sync(true)
           },
-        })
+        }, this.outlineKind())
         this.cursor = step.next
         if (step.next === null) this.streamDone = true
         // 到底了就重算一次：整库／web 的流是「立即到底」的空流——首帧按空域冻结会把

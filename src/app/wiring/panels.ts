@@ -152,6 +152,8 @@ export type PanelsDeps = {
     ctx: QueryContext,
     host: Block | undefined,
     req: CandidateWindowRequest,
+    /** 候选连**一层子级**一起装（大纲要画命中块的子树） */
+    withChildren?: boolean,
   ) => Promise<CandidateLoadStep>
   /**
    * **派生栏的候选先装载**（引用／备注／成员／同类／提及／谁在用）：与查询视图同一条管道。
