@@ -142,6 +142,20 @@ function viewEvents(
         void getRegistry().invoke('core.automation/set-def', { automationId: block.id, def }, 'ui')
       },
       editWhen: () => viewMenus.openAutomationWhenBuilder(block.id),
+      pickBlock: (title, onPick) => {
+        const rows = runTargetRows({ kb, automationId: block.id })
+        layers.openMenu({
+          rows: rows(''),
+          title,
+          anchor: null,
+          searchable: true,
+          focusSearch: true,
+          placeholder: t('ui.automation.runPickPlaceholder'),
+          emptyText: t('ui.automation.runPickEmpty'),
+          onQuery: (q) => layers.setRows(rows(q)),
+          onPick: (row) => onPick(row.id),
+        })
+      },
     })
     into.appendChild(body.root)
     return { root: body.root, dispose: () => body.dispose() }

@@ -26,8 +26,8 @@ import { isQueryNode, type QueryNode } from '../query/query.ts'
  */
 export type AutomationTrigger =
   | 'manual'
-  /** 某属性变成 `to`（缺省＝任何变化）时触发 */
-  | { kind: 'prop'; prop: string; to?: string }
+  /** 某属性变成 `to`（缺省＝任何变化）时触发；`to` 按值格 kind 收（checkbox 是布尔） */
+  | { kind: 'prop'; prop: string; to?: string | boolean }
   /** 某标签被打上／摘掉时触发 */
   | { kind: 'tag'; tag: string; on: 'added' | 'removed' }
   /** 直接父块下新建子块时触发（`parent` 缺省＝任意父块；followRefs 沿传递型引用展开） */
@@ -73,8 +73,9 @@ export function isAutomationTrigger(v: unknown): v is AutomationTrigger {
   if (!v || typeof v !== 'object') return false
   const kind = (v as { kind?: unknown }).kind
   if (kind === 'prop') {
-    const t = v as { prop?: unknown }
-    return typeof t.prop === 'string' && t.prop !== ''
+    const t = v as { prop?: unknown; to?: unknown }
+    if (typeof t.prop !== 'string' || t.prop === '') return false
+    return t.to === undefined || typeof t.to === 'string' || typeof t.to === 'boolean'
   }
   if (kind === 'tag') {
     const t = v as { tag?: unknown; on?: unknown }

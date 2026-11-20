@@ -90,9 +90,9 @@ export function batchRunGuards(def: AutomationDef | null): AutomationGuards {
 
 /* ------------------------------------------------------------ 原语 */
 
-/** 自动化 runner 需要的读面（窄口：`tx` 之外只给按 id 找块与字段定义清单） */
+/** 自动化 runner 需要的读面（窄口：`tx` 之外只给按 id／路径找块与字段定义清单） */
 export interface AutomationKb
-  extends Pick<KbClient, 'get' | 'matchesSpec' | 'propDefs' | 'findTag' | 'resolveAlias' | 'roots'> {
+  extends Pick<KbClient, 'get' | 'matchesSpec' | 'propDefs' | 'findTag' | 'resolveAlias' | 'roots' | 'pathOf'> {
   /**
    * 事务入口：runner 把**全部步骤**包在这一笔里（真原子）。撤销捕获不经过这里——
    * 入口（装配层）拿到 undo 自己记账；runner 只关心「失败整批回滚」。
@@ -156,6 +156,12 @@ export function moveIdentityConstraint(kb: Pick<KbClient, 'get'>, blockId: strin
   return null
 }
 
+/** 一次步骤序列的执行上下文：目标是谁、`now` 定格在哪一刻（进 tx 前算好） */
+export interface StepRunContext {
+  targetId: string
+  nowMs: number
+}
+
 /**
  * 跑一条自动化定义的**步骤序列**（手动链）。
  *
@@ -173,15 +179,136 @@ export function runAutomationSteps(
   opts: { now?: number; lookup?: TagLookup } = {},
 ): { stepsRun: number } | null {
   const nowMs = opts.now ?? Date.now()
-  const ctx = { targetId, nowMs }
   let stepsRun = 0
   kb.tx((tx) => {
-    for (const step of def.steps) {
-      runStepInTx(kb, tx, step, targetId, ctx, opts.lookup)
-      stepsRun++
-    }
+    stepsRun = runStepsInTx(kb, tx, targetId, def, { targetId, nowMs }, opts.lookup)
   })
   return { stepsRun }
+}
+
+/**
+ * 在**已开着的**事务里跑一条定义的全部步骤（事件引擎用：步骤并入触发事务，
+ * 绝不自开——`kb.tx` 不可重入）。目标不存在等前置错误直接抛，由调用方决定
+ * 这次失败牵连多大（手动链＝整笔回滚；事件链＝预检后不该发生）。
+ */
+export function runStepsInTx(
+  kb: AutomationKb,
+  tx: Tx,
+  targetId: string,
+  def: AutomationDef,
+  ctx: StepRunContext,
+  lookup?: TagLookup,
+): number {
+  let stepsRun = 0
+  for (const step of def.steps) {
+    runStepInTx(kb, tx, step, targetId, ctx, lookup)
+    stepsRun++
+  }
+  return stepsRun
+}
+
+/**
+ * 全部步骤的**干跑校验**（事件引擎的预检）：逐条过一遍每个步骤会抛的前置检查、
+ * 一个字节不写。事件链与用户写入共用同一笔事务 ⇒ 不能靠回滚只退规则那一半，
+ * 所以「能预先判定的失败」必须在写之前拦住（残余风险只剩写中的真 bug，落日志）。
+ */
+export function checkStepsInTx(
+  kb: AutomationKb,
+  targetId: string,
+  def: AutomationDef,
+  ctx: StepRunContext,
+  lookup?: TagLookup,
+): void {
+  for (const step of def.steps) stepGuard(kb, step, targetId, ctx, lookup)
+}
+
+/** 一个步骤的**前置检查**（只判不写；与执行共用同一份判据——分两份迟早分叉） */
+function stepGuard(
+  kb: AutomationKb,
+  step: AutomationStep,
+  targetId: string,
+  ctx: StepRunContext,
+  lookup: TagLookup | undefined,
+): void {
+  const a = step.args
+  const requirePropDef = (propId: string): void => {
+    // 动作目标准入：只许属性定义块 id——`_` 系统键与引擎属性都不是规则该碰的格
+    if (propId === '') throw new Error(`automation step: ${step.cmd} needs propId`)
+    if (propId === AUTOMATION_PROP || propId.startsWith('_')) {
+      throw new Error(`automation step: "${propId}" is a system slot; rules only write declared user fields`)
+    }
+    if (!kb.propDefs().some((d) => d.id === propId)) {
+      throw new Error(`automation step: "${propId}" is not a property definition block`)
+    }
+  }
+  switch (step.cmd) {
+    case 'core.props/set-value': {
+      const propId = String(resolveArg(a.propId, ctx) ?? '')
+      requirePropDef(propId)
+      const def = kb.propDefs().find((d) => d.id === propId)
+      const rawValue = a.value ?? null
+      const value = isRawNow(rawValue) ? nowValueFor(ctx.nowMs, def) : resolveArg(rawValue, ctx)
+      if (!valuesOk(propKindOf(def!), value)) {
+        throw new Error(
+          `automation step: value ${JSON.stringify(value)} not valid for kind "${propKindOf(def!)}"` +
+            (formatOf(def!) ? ` (format "${formatOf(def!)}")` : ''),
+        )
+      }
+      stepTarget(kb, targetId, a.blockId)
+      return
+    }
+    case 'core.props/clear-value': {
+      requirePropDef(String(resolveArg(a.propId, ctx) ?? ''))
+      stepTarget(kb, targetId, a.blockId)
+      return
+    }
+    case 'core.tags/add': {
+      stepTarget(kb, targetId, a.blockId)
+      const rawTagId = a.tagId !== undefined ? String(resolveArg(a.tagId, ctx)) : ''
+      if (rawTagId !== '') {
+        if (!kb.get(rawTagId)) throw new Error(`automation step: tag "${rawTagId}" does not exist`)
+        return
+      }
+      const name = String(resolveArg(a.name, ctx) ?? '').trim()
+      if (name === '') throw new Error('automation step: tags/add needs tagId or name')
+      if (!lookup) throw new Error('automation step: tags/add by name needs a tag lookup')
+      // 未核定/未装载的名字在事务里拒建（与编辑器的闸同一份三态判据）：预检拦住，
+      // 不让「名字归属没核定」在写中炸掉（事件链不能只回滚规则那一半）
+      const state = lookup.aliasState?.(name)
+      if (state && (state.kind === 'unchecked' || (state.kind === 'owned' && !state.loaded))) {
+        throw new Error(`automation step: tag name "${name}" is not resolvable yet; refusing to create it in a rule`)
+      }
+      return
+    }
+    case 'core.tags/remove': {
+      stepTarget(kb, targetId, a.blockId)
+      if (String(resolveArg(a.tagId, ctx) ?? '') === '') {
+        throw new Error('automation step: tags/remove needs tagId')
+      }
+      return
+    }
+    case 'core.tree/insert-child': {
+      stepTarget(kb, targetId, a.parentId)
+      return
+    }
+    case 'core.tree/move': {
+      const blockId = String(resolveArg(a.blockId, ctx) ?? '')
+      if (blockId === '') throw new Error('automation step: move needs blockId')
+      if (!kb.get(blockId)) throw new Error(`automation step: no such block "${blockId}"`)
+      const rawParent = resolveArg(a.parentId, ctx)
+      const parent = rawParent === undefined || rawParent === null || rawParent === '' ? null : String(rawParent)
+      if (parent !== null && !kb.get(parent)) throw new Error(`automation step: no such parent "${parent}"`)
+      const why = moveIdentityConstraint(kb, blockId, parent)
+      if (why) throw new Error(why)
+      // 进自己子树：与 `tx.move` 同一份判据的预检（祖先链含目标即自环）
+      if (parent !== null && kb.pathOf(parent).some((p) => p.id === blockId)) {
+        throw new Error(`automation step: cannot move "${blockId}" into its own subtree`)
+      }
+      return
+    }
+    default:
+      throw new Error(`automation step: command "${step.cmd}" is not a step-capable command`)
+  }
 }
 
 /** 一个步骤在共享事务内的分派（闭集查表；不认识的 cmd 直接抛——声明层没有它） */
@@ -190,33 +317,23 @@ function runStepInTx(
   tx: Tx,
   step: AutomationStep,
   targetId: string,
-  ctx: { targetId: string; nowMs: number },
+  ctx: StepRunContext,
   lookup: TagLookup | undefined,
 ): void {
+  // 前置检查与写入同一份判据：事件引擎的预检吃它，手动链在这里再过一遍（防御性，成本一条 if 级）
+  stepGuard(kb, step, targetId, ctx, lookup)
   const a = step.args
   switch (step.cmd) {
     case 'core.props/set-value': {
       const propId = String(resolveArg(a.propId, ctx) ?? '')
-      if (propId === '') throw new Error('automation step: set-value needs propId')
-      if (propId === AUTOMATION_PROP) throw new Error('automation step: cannot write the automation definition slot')
-      const def = kb.propDefs().find((d) => d.id === propId)
-      // {ref:'now'} 先按值格的 kind 折算（date 格要本地 ISO 日，不是毫秒），再走通用解析
+      const def = kb.propDefs().find((d) => d.id === propId)!
       const rawValue = a.value ?? null
       const value = isRawNow(rawValue) ? nowValueFor(ctx.nowMs, def) : resolveArg(rawValue, ctx)
-      if (def && !valuesOk(propKindOf(def), value)) {
-        throw new Error(
-          `automation step: value ${JSON.stringify(value)} not valid for kind "${propKindOf(def)}"` +
-            (formatOf(def) ? ` (format "${formatOf(def)}")` : ''),
-        )
-      }
       tx.setProp(stepTarget(kb, targetId, a.blockId), propId, value)
       return
     }
     case 'core.props/clear-value': {
-      const propId = String(resolveArg(a.propId, ctx) ?? '')
-      if (propId === '') throw new Error('automation step: clear-value needs propId')
-      if (propId === AUTOMATION_PROP) throw new Error('automation step: cannot clear the automation definition slot')
-      tx.clearProp(stepTarget(kb, targetId, a.blockId), propId)
+      tx.clearProp(stepTarget(kb, targetId, a.blockId), String(resolveArg(a.propId, ctx) ?? ''))
       return
     }
     case 'core.tags/add': {
@@ -226,12 +343,9 @@ function runStepInTx(
       let tag: Block | null
       if (rawTagId !== '') {
         tag = kb.get(rawTagId) ?? null
-        if (!tag) throw new Error(`automation step: tag "${rawTagId}" does not exist`)
       } else {
         const name = String(resolveArg(a.name, ctx) ?? '').trim()
-        if (name === '') throw new Error('automation step: tags/add needs tagId or name')
-        if (!lookup) throw new Error('automation step: tags/add by name needs a tag lookup')
-        tag = ensureTagInTx(lookup, name, tx)
+        tag = ensureTagInTx(lookup!, name, tx)
       }
       if (!tag) throw new Error('automation step: tags/add resolved to nothing')
       const b = kb.get(blockId)
@@ -242,7 +356,6 @@ function runStepInTx(
     case 'core.tags/remove': {
       const blockId = stepTarget(kb, targetId, a.blockId)
       const tagId = String(resolveArg(a.tagId, ctx) ?? '')
-      if (tagId === '') throw new Error('automation step: tags/remove needs tagId')
       const b = kb.get(blockId)
       if (!b) throw new Error(`automation step: no such block "${blockId}"`)
       // 与 `core.tags/remove` 同一条语义：归属连正文里的 `#名` 露面一起收（画成标签却查不到＝撒谎）
@@ -266,11 +379,8 @@ function runStepInTx(
     }
     case 'core.tree/move': {
       const blockId = String(resolveArg(a.blockId, ctx) ?? '')
-      if (blockId === '') throw new Error('automation step: move needs blockId')
       const rawParent = resolveArg(a.parentId, ctx)
       const parent = rawParent === undefined || rawParent === null || rawParent === '' ? null : String(rawParent)
-      const why = moveIdentityConstraint(kb, blockId, parent)
-      if (why) throw new Error(why)
       const rawPos = resolveArg(a.position, ctx)
       const idx = rawPos === undefined || rawPos === null ? Number.MAX_SAFE_INTEGER : Number(rawPos)
       tx.move(blockId, parent, Number.isFinite(idx) && idx >= 0 ? idx : Number.MAX_SAFE_INTEGER)

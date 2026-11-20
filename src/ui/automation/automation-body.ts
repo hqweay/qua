@@ -20,6 +20,7 @@ import {
   propLabel,
   type AutomationDef,
   type AutomationStep,
+  type AutomationTrigger,
   type ArgRef,
   type Block,
 } from '../../core/index.ts'
@@ -58,6 +59,8 @@ export interface AutomationBodyDeps {
   writeDef(def: AutomationDef): void
   /** 打开「如果」的条件编辑弹层（同一台条件树；应用写 `_automation.when`） */
   editWhen(): void
+  /** 全库挑一块（触发器父块等处的点名候选；空词列页/标签，打字全库搜） */
+  pickBlock(title: string, onPick: (blockId: string) => void): void
 }
 
 export interface AutomationBody {
@@ -150,24 +153,161 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
     return c
   }
 
+  /** 一条触发器的人话（chip 显示；与引擎的触发键同一份形状来源） */
+  const triggerText = (tr: AutomationTrigger): string => {
+    if (tr === 'manual') return t('ui.automation.trigger.manual')
+    if (tr.kind === 'prop') {
+      const name = labelOfProp(tr.prop)
+      if (tr.to === undefined) return t('ui.automation.trigger.propAny', { prop: name })
+      // checkbox 的值位是布尔：人话用勾选两态，不走选项名解析
+      if (typeof tr.to === 'boolean') {
+        return t('ui.automation.trigger.propTo', { prop: name, to: t(tr.to ? 'ui.automation.valueChecked' : 'ui.automation.valueUnchecked') })
+      }
+      return t('ui.automation.trigger.propTo', { prop: name, to: choiceLabelOf(tr.prop, tr.to) })
+    }
+    if (tr.kind === 'tag') {
+      return t(tr.on === 'added' ? 'ui.automation.trigger.tagOn' : 'ui.automation.trigger.tagOff', { tag: labelOfTag(tr.tag) })
+    }
+    if (tr.parent === undefined) return t('ui.automation.trigger.childAdded')
+    return t('ui.automation.trigger.childAddedUnder', { parent: labelOfBlock(tr.parent) })
+  }
+
   const whenRows = (def: AutomationDef): HTMLElement[] => {
     const rows: HTMLElement[] = []
     const line = document.createElement('div')
     line.className = 'blk-auto-chips'
-    line.appendChild(chip(t('ui.automation.trigger.manual'), 'is-manual'))
-    for (const tr of def.triggers) {
-      if (tr === 'manual') continue
-      if (tr.kind === 'prop') {
-        const name = labelOfProp(tr.prop)
-        line.appendChild(chip(tr.to === undefined ? t('ui.automation.trigger.propAny', { prop: name }) : t('ui.automation.trigger.propTo', { prop: name, to: choiceLabelOf(tr.prop, tr.to) }), 'is-event'))
-      } else if (tr.kind === 'tag') {
-        line.appendChild(chip(t(tr.on === 'added' ? 'ui.automation.trigger.tagOn' : 'ui.automation.trigger.tagOff', { tag: labelOfTag(tr.tag) }), 'is-event'))
-      } else {
-        line.appendChild(chip(t('ui.automation.trigger.childAdded'), 'is-event'))
-      }
-    }
+    // 手动触发是出生自带的默认档：v1 不给删除（规则至少要有一条触发器）
+    line.appendChild(chip(triggerText('manual'), 'is-manual'))
+    def.triggers.forEach((tr, i) => {
+      if (tr === 'manual') return
+      // 点已有的触发器 ⇒ 改／删它（菜单在装配层）
+      line.appendChild(chip(triggerText(tr), 'is-event', () => openTriggerMenu(def, i)))
+    })
+    line.appendChild(chip(t('ui.automation.addTrigger'), 'is-edit', () => openTriggerAddMenu(def)))
     rows.push(line)
     return rows
+  }
+
+  /** 已有事件触发器的菜单：删除；`child.added` 另给「改父块」 */
+  const openTriggerMenu = (def: AutomationDef, at: number): void => {
+    const tr = def.triggers[at]
+    if (tr === undefined || tr === 'manual') return
+    const rows: Row[] = [{ id: 'trigger/remove', label: t('ui.automation.removeTrigger'), group: 'trigger/1' }]
+    if (tr.kind === 'child.added') {
+      rows.push({ id: 'trigger/reparent', label: t('ui.automation.reparent'), group: 'trigger/1' })
+    }
+    deps.openMenu(rows, (row) => {
+      if (row.id === 'trigger/remove') {
+        write({ ...def, triggers: def.triggers.filter((_, i) => i !== at) })
+        return
+      }
+      if (row.id === 'trigger/reparent') {
+        pickParent((parentId) => {
+          const next = def.triggers.map((x, i) => (i === at && x !== 'manual' && x.kind === 'child.added' ? { ...x, parent: parentId === '' ? undefined : parentId } : x))
+          write({ ...def, triggers: next })
+        })
+      }
+    }, triggerText(tr))
+  }
+
+  /** 加触发器：四种事件（属性变化／打标签／摘标签／新建子块）；手动是出生默认档 */
+  const openTriggerAddMenu = (def: AutomationDef): void => {
+    const rows: Row[] = [
+      { id: 'add/prop', label: t('ui.automation.trigger.addProp'), group: 'trigger/1' },
+      { id: 'add/tagOn', label: t('ui.automation.trigger.addTagOn'), group: 'trigger/1' },
+      { id: 'add/tagOff', label: t('ui.automation.trigger.addTagOff'), group: 'trigger/1' },
+      { id: 'add/child', label: t('ui.automation.trigger.addChild'), group: 'trigger/1' },
+    ]
+    deps.openMenu(rows, (row) => {
+      if (row.id === 'add/prop') {
+        pickPropForTrigger(def)
+        return
+      }
+      if (row.id === 'add/tagOn' || row.id === 'add/tagOff') {
+        const on: 'added' | 'removed' = row.id === 'add/tagOn' ? 'added' : 'removed'
+        pickTagForTrigger(def, on)
+        return
+      }
+      if (row.id === 'add/child') {
+        pickParentForTrigger(def)
+        return
+      }
+    }, t('ui.automation.addTriggerTitle'))
+  }
+
+  /** 属性变化触发器：先选字段，再选「变成什么」（select 给选项，checkbox 给两态，其余＝任何变化） */
+  const pickPropForTrigger = (def: AutomationDef): void => {
+    deps.openMenu(
+      deps.kb.propDefs().map((d) => ({ id: d.id, label: propLabel(d) || d.id, group: 'trigger/prop', icon: 'lucide:tag' })),
+      (row) => {
+        const propId = row.id
+        const defBlock = deps.kb.propDefs().find((x) => x.id === propId)
+        const kind = defBlock ? propKindOf(defBlock) : undefined
+        if (kind === 'select') {
+          deps.openMenu(
+            [{ id: '', label: t('ui.automation.trigger.propAnyValue'), group: 'trigger/val' }, ...choicesOf(defBlock!).map((c) => ({ id: c.id, label: c.label, group: 'trigger/val' }))],
+            (vrow) => {
+              const triggers: AutomationTrigger[] = [...def.triggers, vrow.id === '' ? { kind: 'prop', prop: propId } : { kind: 'prop', prop: propId, to: vrow.id }]
+              write({ ...def, triggers })
+            },
+            t('ui.automation.pickValueTitle'),
+          )
+          return
+        }
+        if (kind === 'checkbox') {
+          deps.openMenu(
+            [
+              { id: 'any', label: t('ui.automation.trigger.propAnyValue'), group: 'trigger/val' },
+              { id: 'on', label: t('ui.automation.valueChecked'), group: 'trigger/val' },
+              { id: 'off', label: t('ui.automation.valueUnchecked'), group: 'trigger/val' },
+            ],
+            (vrow) => {
+              const to = vrow.id === 'any' ? undefined : vrow.id === 'on'
+              const triggers: AutomationTrigger[] = [...def.triggers, to === undefined ? { kind: 'prop', prop: propId } : { kind: 'prop', prop: propId, to }]
+              write({ ...def, triggers })
+            },
+            t('ui.automation.pickValueTitle'),
+          )
+          return
+        }
+        write({ ...def, triggers: [...def.triggers, { kind: 'prop', prop: propId }] })
+      },
+      t('ui.automation.trigger.addPropTitle'),
+    )
+  }
+
+  const pickTagForTrigger = (def: AutomationDef, on: 'added' | 'removed'): void => {
+    deps.openMenu(
+      deps.kb.tags().map((tag) => ({ id: tag.id, label: `#${displayNameOf(tag)}`, group: 'trigger/tag' })),
+      (row) => {
+        write({ ...def, triggers: [...def.triggers, { kind: 'tag', tag: row.id, on }] })
+      },
+      t('ui.automation.pickTagTitle'),
+    )
+  }
+
+  /** 新建子块触发器：任意父块，或点名一个（更深的作用域走「如果」） */
+  const pickParentForTrigger = (def: AutomationDef): void => {
+    deps.openMenu(
+      [
+        { id: '', label: t('ui.automation.trigger.anyParent'), group: 'trigger/parent' },
+        { id: 'pick', label: t('ui.automation.trigger.pickParent'), group: 'trigger/parent' },
+      ],
+      (row) => {
+        if (row.id === '') {
+          write({ ...def, triggers: [...def.triggers, { kind: 'child.added' }] })
+          return
+        }
+        pickParent((parentId) => {
+          write({ ...def, triggers: [...def.triggers, parentId === '' ? { kind: 'child.added' } : { kind: 'child.added', parent: parentId }] })
+        })
+      },
+      t('ui.automation.trigger.addChildTitle'),
+    )
+  }
+
+  const pickParent = (onPick: (parentId: string) => void): void => {
+    deps.pickBlock(t('ui.automation.trigger.pickParentTitle'), onPick)
   }
 
   const condRows = (def: AutomationDef): HTMLElement[] => {

@@ -35,6 +35,7 @@ import { mountNotePopover, type NotePopoverHandle } from './ui/block-ui/note-pop
 import { type ObjFieldDeps } from './ui/overlay/panels.ts'
 import { devCommands, journalCommands, mentionCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, viewCommands, viewConfigCommands, buildFreshView, zoomCommands } from './app/commands-impl.ts'
 import { automationCommands } from './app/commands/automation.ts'
+import { createAutomationEngine } from './core/automation/engine.ts'
 import type { TxRun } from './app/commands/types.ts'
 import { setupPersistence } from './app/wiring/persistence.ts'
 import { setupAssets } from './app/wiring/assets.ts'
@@ -232,6 +233,15 @@ const device = await deviceStore.load()
 let ws: Workspace = { version: WORKSPACE_VERSION, blocks: [], activeId: '', savedAt: 0 }
 const blocks = new BlockStore(ws.blocks)
 const kb = new MemoryKb(blocks)
+/**
+ * **事件引擎接进写路径**（tx 出口第四口）：数据变了就跑的那一半。
+ * 引擎自兜每条规则的错（预检＋捕获），用户的写永远不会被规则失败回滚；
+ * 规则失败 v1 落 console（「最近运行」记录另立项）。
+ */
+const automationEngine = createAutomationEngine({ kb, lookup: kb, onError: ({ ruleId, targetId, error }) => {
+  console.warn(`[automation] rule ${ruleId} on ${targetId} failed:`, error)
+} })
+kb.setReactor((ctx) => automationEngine.react(ctx))
 /**
  * **库读端口的窄面**：只把工作集读面（doc/blocks/catalog）交出去——
  * `LibraryBridge` 的 `doc` 是可选格（测试可以造瘦桥），工作集装载只认**三个都在**的桥。

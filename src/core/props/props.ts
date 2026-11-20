@@ -90,9 +90,10 @@ import { REF_VIEW_PROP, isRefViewValue, type RefDefView } from './ref-target.ts'
 /**
  * 两个属性值是不是同一件事（**结构相等**：属性值可以是数组／对象，`Object.is` 不够）。
  *
- * 判据用途：只有真变了才算一次改动（写时刻、发 `prop.set`）。
+ * 判据用途：只有真变了才算一次改动（写时刻、发 `prop.set`）；
+ * 事件引擎的「值没真变不算变化」吃同一份（导出：两处各写一份迟早分叉）。
  */
-function sameValue(a: unknown, b: unknown): boolean {
+export function sameValue(a: unknown, b: unknown): boolean {
   return Object.is(a, b) || JSON.stringify(a) === JSON.stringify(b)
 }
 

@@ -83,11 +83,23 @@ function clone<T>(v: T): T {
 export class MemoryKb implements KbClient {
   private readonly store: BlockStore
   private readonly now: () => number
+  /**
+   * **事件引擎的注入口**（277 三口之外的第四口）：tx 成功出口、diffTouched 之前调一次，
+   * 拿同一个事务句柄写。`kb` 不认识规则——reactor 由装配层注入（core 不反向依赖引擎）。
+   *
+   * ⚠️ reactor **不许抛**：它在用户写的事务里，抛出会整笔回滚用户的输入。
+   *    引擎自己兜住每条规则的失败（预检＋捕获）。
+   */
+  private reactor: ((ctx: { tx: Tx; initial: readonly TouchedBlock[] }) => void) | null = null
 
   constructor(store: BlockStore, opts: { now?: () => number } = {}) {
     this.store = store
     // 时间注入只为让「op 带 at」可断言；默认就是墙钟
     this.now = opts.now ?? (() => Date.now())
+  }
+
+  setReactor(fn: ((ctx: { tx: Tx; initial: readonly TouchedBlock[] }) => void) | null): void {
+    this.reactor = fn
   }
 
   /**
@@ -395,6 +407,16 @@ export class MemoryKb implements KbClient {
     const parentOverride = new Map<string, string | null>()
     try {
       const result = fn(this.makeTx(touched, rollback, parentOverride))
+      /**
+       * **事件引擎的口**（fn 成功之后、op 产生之前）：初始变更集在这里定格——
+       * reactor 只对这份快照求值，它自己写出的变化不再进求值（防循环的不变量）。
+       * reactor 的写入经同一个 tx 句柄进同一张 touched 表 ⇒ 与用户的写并入同一笔
+       * 事务、同一批 op、同一次撤销捕获。
+       */
+      if (this.reactor) {
+        const initial = [...touched.values()]
+        this.reactor({ tx: this.makeTx(touched, rollback, parentOverride), initial })
+      }
       /**
        * **op 只在出口产生**：`diffTouched` 只比动过的块，成本与库体量无关。
        * 每个 `Tx` 方法只改内存，不再各自 `ops.push` —— 完备性由构造保证：

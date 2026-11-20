@@ -391,3 +391,157 @@ test('批量运行：没有「如果」就拒跑（没有选择器就是全库�
   assert.equal(kb.children(plain.id).length, 0, '什么都没写')
   assert.ok(toasts.some((x) => x.includes('条件')), '拒绝说清为什么')
 })
+
+/* ------------------------------------------------------------ 事件引擎（执行序④） */
+
+import { createAutomationEngine } from '../src/core/automation/engine.ts'
+
+function engineFixture(blocks: Block[]): { kb: MemoryKb; engine: ReturnType<typeof createAutomationEngine>; events: { ruleId: string; targetId: string; error: unknown }[] } {
+  const { kb } = fixture(blocks)
+  const events: { ruleId: string; targetId: string; error: unknown }[] = []
+  const engine = createAutomationEngine({ kb, lookup: kb, onError: (info) => events.push(info) })
+  kb.setReactor((ctx) => engine.react(ctx))
+  return { kb, engine, events }
+}
+
+test('事件①：属性触发器——值真变才跑，规则写入并入同一笔事务（一次撤销）', () => {
+  const state = mkPropDef('状态', 'select')
+  state.props = { ...state.props, _choices: [{ id: 'c-done', label: '完成' }, { id: 'c-doing', label: '进行中' }] }
+  const doneTag = mkBlock('已归档')
+  doneTag.props = { _aliases: ['已归档'], _lists: ['tag'] }
+  const target = mkBlock('一块任务')
+  const rule = mkAutomationBlock({
+    name: '状态变完成就归档',
+    def: {
+      enabled: true,
+      triggers: [{ kind: 'prop', prop: state.id, to: 'c-done' }],
+      steps: [{ cmd: 'core.tags/add', args: { tagId: doneTag.id } }],
+    },
+  })
+  const { kb } = engineFixture([state, doneTag, target, rule])
+
+  // 写成「进行中」：不是 to ⇒ 不跑
+  kb.tx((tx) => tx.setProp(target.id, state.id, 'c-doing'))
+  assert.equal(hasTag(kb.get(target.id)!, doneTag.id), false)
+
+  // 写同一个值：值没真变不算变化 ⇒ 不跑
+  kb.tx((tx) => tx.setProp(target.id, state.id, 'c-doing'))
+  assert.equal(hasTag(kb.get(target.id)!, doneTag.id), false)
+
+  // 写成「完成」：同一笔事务里规则把标签写上（引擎的反应与用户的写同批 op）
+  const r = kb.tx((tx) => tx.setProp(target.id, state.id, 'c-done'))
+  assert.equal(hasTag(kb.get(target.id)!, doneTag.id), true, '反应并入触发事务')
+  const tagOps = r.ops.filter((o) => o.e === 'prop' && (o as { name?: string }).name === '_tags')
+  assert.equal(tagOps.length, 1, '规则的写与用户的写在同一批 op 里（同一次撤销）')
+})
+
+test('事件②：child.added——A 之下新建子块自动打标；重放与撤销路径不触发', () => {
+  const aiTag = mkBlock('AI')
+  aiTag.props = { _aliases: ['AI'], _lists: ['tag'] }
+  const parentA = mkBlock('块A')
+  const rule = mkAutomationBlock({
+    name: 'A 下新建就打 AI',
+    def: {
+      enabled: true,
+      triggers: [{ kind: 'child.added', parent: parentA.id }],
+      steps: [{ cmd: 'core.tags/add', args: { tagId: aiTag.id } }],
+    },
+  })
+  const { kb } = engineFixture([aiTag, parentA, rule])
+
+  const fresh = mkBlock('新子块')
+  kb.tx((tx) => tx.insert(fresh, parentA.id, Number.MAX_SAFE_INTEGER))
+  assert.equal(hasTag(kb.get(fresh.id)!, aiTag.id), true, '新块在同一笔事务里被打上标签')
+  // genesis 完整：新块的落点账与标签账在同一批 op 里（重放端能重建出同样的块）
+  const inserted = kb.tx((tx) => tx.insert(mkBlock('另一个'), parentA.id, Number.MAX_SAFE_INTEGER))
+  const genesis = inserted.ops.find((o) => o.e === 'block' && (o as { op?: string }).op === 'upsert')
+  assert.ok(genesis, '新子块的 genesis 有账')
+  assert.ok(
+    inserted.ops.some((o) => o.e === 'prop' && (o as { name?: string }).name === '_tags'),
+    '标签的账在同一批 op 里（落库可重放）',
+  )
+
+  // 挂到别的父块下：不触发
+  const elsewhere = mkBlock('别的页')
+  elsewhere.props = { _lists: ['page'] }
+  kb.tx((tx) => tx.insert(elsewhere, null, 0))
+  const stray = kb.tx((tx) => tx.insert(mkBlock('别处的新块'), elsewhere.id, Number.MAX_SAFE_INTEGER))
+  assert.equal(
+    stray.ops.some((o) => o.e === 'prop' && (o as { name?: string }).name === '_tags'),
+    false,
+    '别的父块之下不触发（没有标签账）',
+  )
+})
+
+test('事件③：规则失败不牵连用户的写（reactor 不许抛）', () => {
+  const numDef = mkPropDef('数量', 'number')
+  const target = mkBlock('目标')
+  // 步骤的值形状非法：预检拦住 ⇒ 这条反应跳过，用户的写照常提交
+  const rule = mkAutomationBlock({
+    name: '会失败的规则',
+    def: {
+      enabled: true,
+      triggers: [{ kind: 'prop', prop: numDef.id }],
+      steps: [{ cmd: 'core.props/set-value', args: { propId: numDef.id, value: '不是数字' } }],
+    },
+  })
+  const { kb, events } = engineFixture([numDef, target, rule])
+
+  const r = kb.tx((tx) => tx.setProp(target.id, numDef.id, 7))
+  assert.equal(kb.get(target.id)?.props?.[numDef.id], 7, '用户的写提交了')
+  assert.ok(r.ops.length > 0, '事务成功出口')
+  assert.equal(events.length, 1, '失败落到 onError（落日志）')
+})
+
+test('事件④：停用的规则不跑；条件不满足不跑；条件按刚写完的状态算', () => {
+  const flag = mkPropDef('开关', 'checkbox')
+  const tag = mkBlock('有标记')
+  tag.props = { _aliases: ['有标记'], _lists: ['tag'] }
+  const disabled = mkAutomationBlock({
+    name: '停用规则',
+    def: { enabled: false, triggers: [{ kind: 'prop', prop: flag.id }], steps: [{ cmd: 'core.tags/add', args: { tagId: tag.id } }] },
+  })
+  const withWhen = mkAutomationBlock({
+    name: '只对有正文的',
+    def: {
+      enabled: true,
+      triggers: [{ kind: 'prop', prop: flag.id }],
+      when: { text: '有正文' },
+      steps: [{ cmd: 'core.tags/add', args: { tagId: tag.id } }],
+    },
+  })
+  // 两套独立夹具（块对象不可共享：内存库原地改，共享会让两个库互相同步）
+  // ⚠️ 目标正文里不能出现「有正文」这个子串——text 条件是子串匹配
+  const noWhenTarget = mkBlock('普通块')
+  const { kb } = engineFixture([flag, tag, noWhenTarget, disabled, withWhen])
+  kb.tx((tx) => tx.setProp(noWhenTarget.id, flag.id, true))
+  assert.equal(hasTag(kb.get(noWhenTarget.id)!, tag.id), false, '停用与条件不满足都不跑')
+
+  const withWhenTarget = mkBlock('有正文的任务')
+  withWhenTarget.content = [{ t: 'text', v: '这是一块有正文的块' }] as typeof withWhenTarget.content
+  const { kb: kb2 } = engineFixture([flag, tag, withWhenTarget, disabled, withWhen])
+  kb2.tx((tx) => tx.setProp(withWhenTarget.id, flag.id, true))
+  assert.equal(hasTag(kb2.get(withWhenTarget.id)!, tag.id), true, '条件满足 ⇒ 打标')
+})
+
+test('事件⑤：followRefs——传递型引用的父块沿目标展开（默认关）', () => {
+  const aiTag = mkBlock('AI')
+  aiTag.props = { _aliases: ['AI'], _lists: ['tag'] }
+  const realParent = mkBlock('真父块')
+  const passThrough = mkBlock('')
+  // 传递型＝正文只有一枚指向目标块的引用 run
+  passThrough.content = [{ id: 'ref-1', t: 'ref', to: realParent.id }] as typeof passThrough.content
+  const rule = mkAutomationBlock({
+    name: '沿引用打标',
+    def: {
+      enabled: true,
+      triggers: [{ kind: 'child.added', parent: realParent.id, followRefs: true }],
+      steps: [{ cmd: 'core.tags/add', args: { tagId: aiTag.id } }],
+    },
+  })
+  const { kb } = engineFixture([aiTag, realParent, passThrough, rule])
+
+  const fresh = mkBlock('透过引用进来的子块')
+  kb.tx((tx) => tx.insert(fresh, passThrough.id, Number.MAX_SAFE_INTEGER))
+  assert.equal(hasTag(kb.get(fresh.id)!, aiTag.id), true, '父块是传递型引用 ⇒ 沿目标匹配（followRefs 开）')
+})
