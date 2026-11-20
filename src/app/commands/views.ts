@@ -334,7 +334,10 @@ export function viewConfigCommands(
         return false
       }
       d.owners.write(owner, { views: upsertView(data.views, withSort(view, sortKeysOfRaw(sort))) })
-      after()
+      // 排序只换这批记录的显示序：屏幕跟着靠每台 ViewHost 自己的订阅就地重画。
+      // 用 reveal（不是 after 的整页重装）——挂载区/内联体里已经画着这一块时它直接返回，
+      // 否则整页 reload 会把查询体连同行一起拆建一次，点一下「应用」闪一下。
+      reveal(owner)
       return true
     },
 
