@@ -151,7 +151,20 @@ export function makeRunEl(r: RunWithId, view?: RefView, asset?: AssetView, onAss
     const text = document.createElement('span')
     text.className = 'atom-label'
     text.textContent = `#${label}`
-    el.append(...prependIcon(view), text)
+    /**
+     * **实例的两个专属入口**（都只占那个已有的图标槽，不另加宽度）：
+     *   · 有 closure 字段 ⇒ 状态标记：图标＝当前选项，点击翻转/⌥ 选状态；
+     *   · 有普通字段 ⇒ 脸槽 hover 换手：静止是目标的脸，指上去变 chevron，点击开字段卡。
+     * 两者互斥（一个胶囊只留一个控件）；没有字段 ⇒ 只剩脸，不假装有 body。
+     * 标签类（`tag`）不加：它没有被归类到宿主，没有「这一格的值」可编辑。
+     */
+    if (kind === 'obj' && r.t === 'ref' && r.to && view?.state === 'resolved' && view.closure) {
+      el.append(makeClosureMarker(r.to, view.closure), text)
+    } else if (kind === 'obj' && view?.state === 'resolved' && view.fields && view.icon) {
+      el.append(makeFieldsHandle(r.id, view.icon), text)
+    } else {
+      el.append(...prependIcon(view), text)
+    }
   } else if (r.t === 'asset') {
     el.append(...assetAtomContent(r, asset, label, onAssetError))
   } else if (r.t === 'link') {
@@ -194,6 +207,62 @@ function prependIcon(view: RefView | undefined): Node[] {
   ico.className = 'atom-ico'
   renderIcon(ico, view.icon, 'circle-help', 'sm')
   return [ico]
+}
+
+/**
+ * **实例的状态标记**：复用块标后状态标记的命中契约（`data-closure-for` /
+ * `data-prop-for` / `data-prop-id`），只是住在行内原子自己的图标槽里。
+ *
+ * 为什么用图标槽而不是另加一格：行内原子占正文 1 格，多一枚图标就是多一份宽度；
+ * 这块地方本来就要画目标的脸。状态比脸更该占这一格——它是会变的那半。
+ * ⚠️ 不能把 `data-closure-for` 挂到整个原子上：那样点名字也会翻转，导航语义被
+ *    状态控制吃掉。只挂在这枚 span 上，label 仍是导航。
+ */
+function makeClosureMarker(targetId: string, closure: NonNullable<RefView['closure']>): HTMLElement {
+  const el = document.createElement('span')
+  el.className = 'atom-ico atom-closure'
+  el.contentEditable = 'false'
+  el.draggable = false
+  el.dataset.closureFor = targetId
+  el.dataset.propFor = targetId
+  el.dataset.propId = closure.propId
+  el.dataset.closureState = closure.state
+  el.dataset.tip = t('ui.closure.toggle')
+  // 当前选项的图标就是「此刻是什么状态」；没有值时退回定义图标（与 gutter 同一档）
+  renderIcon(
+    el,
+    closure.icon ?? (closure.state === 'closed' ? 'lucide:circle-check' : 'lucide:circle'),
+    closure.state === 'closed' ? 'circle-check' : 'circle',
+    'sm',
+  )
+  // 按下不挪光标；动作交给容器的 mousedown/click 分支（gutter 同一条路径）
+  el.addEventListener('mousedown', (e) => e.preventDefault())
+  return el
+}
+
+/**
+ * **实例的字段手柄**：同一个图标槽，静止显示目标的脸，hover/focus 换成 chevron。
+ *
+ * 为什么不是「脸 + 三角」两枚图标：一行里每多一枚实例就多 10px，正文会被读成
+ * 一串工具条；这个槽本来就有，换手不增加宽度，也不改变行的排版。
+ * 点击开的是 102 那张字段卡，不是新面板；label 仍走 109 打开目标。
+ */
+function makeFieldsHandle(runId: string, icon: string): HTMLElement {
+  const el = document.createElement('span')
+  el.className = 'atom-ico atom-handle'
+  el.contentEditable = 'false'
+  el.draggable = false
+  el.dataset.refFields = runId
+  el.dataset.tip = t('ui.atom.fieldsTitle')
+  const face = document.createElement('span')
+  face.className = 'atom-handle-face'
+  renderIcon(face, icon, 'circle-help', 'sm')
+  const caret = document.createElement('span')
+  caret.className = 'atom-handle-caret'
+  renderIcon(caret, 'lucide:chevron-right', 'chevron-right', 'sm')
+  el.append(face, caret)
+  el.addEventListener('mousedown', (e) => e.preventDefault())
+  return el
 }
 
 /**

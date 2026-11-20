@@ -50,6 +50,23 @@ export interface RefView {
    * 省略 ＝ 目标无脸 ⇒ 替身不占位（图标是加分项，不是必需件）。
    */
   icon?: string
+  /**
+   * 目标有没有任何字段（标签声明 ∪ 自有槽）——呈现层据此决定「有没有 body 可披露」。
+   * 由视图层用 FieldTable 合并进来（`resolveRef` 只看块，不扫森林）；不是落盘字段。
+   */
+  fields?: boolean
+  /**
+   * 目标唯一的 closure 状态（有 ⇒ 行内状态标记；省略 ⇒ 这一枚没有关闭态）。
+   * 与 `fields` 同一来源：视图层合并，不在 run 上存第二份。
+   */
+  closure?: RefClosureView
+}
+
+/** 行内状态标记的呈现投影（`core.props/closure.ts` 的 `ClosureMark` 与它同形） */
+export interface RefClosureView {
+  state: 'open' | 'closed'
+  propId: string
+  icon?: string
 }
 
 /** 按 id 找块（整片森林；zoom 后引用目标可能在任意深度） */

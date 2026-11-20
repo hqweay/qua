@@ -1470,6 +1470,26 @@ export function ownFieldIds(block: Block): string[] {
 }
 
 /**
+ * 这一块**有没有任何字段**（自有槽 ∪ 标签声明）——只为呈现层的「有没有 body」判据。
+ *
+ * 为什么不复用 `fieldIdsOf`：它走 `fieldRows`，会为每一枚原子扫一遍整片森林；
+ * 一行里几枚实例就是几次全库扫。这里只读 `_ownProps` / `_fieldDefs` 两个槽，
+ * 成本是 O(标签数)，答案与 `fieldRows().length > 0` 一致。
+ *
+ * ⚠️ 判据是「有没有声明/槽」，不是「有没有值」：空字段也要能打开字段卡去填。
+ * ⚠️ 标签自己的 `_fieldDefs` 是**给成员的声明**，不是它自己的字段 —— 所以这里
+ *    只看目标块自己的标签，不把定义块本身算进来。
+ */
+export function hasAnyFieldOf(block: Block, find: (id: string) => Block | undefined): boolean {
+  if (ownFieldIds(block).length > 0) return true
+  for (const tagId of tagIdsOf(block)) {
+    const tag = find(tagId)
+    if (tag && declaredFieldIds(tag).length > 0) return true
+  }
+  return false
+}
+
+/**
  * **块中拆分（Enter）时的属性分家：值属性随前半走，身份留在原块。**
  *
  * 「是任务」「优先级」这类值属性说的是**这一行写的那句话**；拆开后那句话是

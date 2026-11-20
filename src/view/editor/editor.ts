@@ -336,6 +336,20 @@ export interface ViewEvents {
    */
   refCountClick?: (hostId: string, mods: RefClickMods, el?: HTMLElement) => void
   /**
+   * **点实例的字段手柄**（图标槽 hover 换手后的 chevron）：打开这条记录的字段卡。
+   *
+   * 与 `refClick` 分开：那是「去哪」，这是「就地改字段」。
+   * ⚠️ 未接 ⇒ 什么都不做，不退化成导航。
+   */
+  refFields?: (runId: string, el: HTMLElement) => void
+  /**
+   * **点块标签 chip 的三角**：打开宿主块在这枚标签下的字段卡。
+   *
+   * `hostId` 是值的家，`tagId` 是字段声明的家；两个一起给，浮层才能只列这一枚标签的字段。
+   * ⚠️ 未接 ⇒ 什么都不做，不退化成打开标签类。
+   */
+  tagFields?: (hostId: string, tagId: string, el: HTMLElement) => void
+  /**
    * **右键落在被备注的文本上**：「对这一处做什么」的菜单（打开／侧栏／删除），
    * 与 `atomMenu` 同族——右键原子是对一枚原子做什么，右键标记是对这一处做什么。
    * ⚠️ 未接 ⇒ 退回块菜单（不是没反应）。
@@ -3359,6 +3373,16 @@ export class BlockEditor {
       onRefCountClick: (id, el, mods) => {
         this.commitLeavingLine()
         this.events.refCountClick?.(id, mods, el)
+      },
+      /** 实例字段手柄：与 `onRefClick` 同一条编辑边界（contenteditable=false 不派 focusout） */
+      onRefFields: (runId, el) => {
+        this.commitLeavingLine()
+        this.events.refFields?.(runId, el)
+      },
+      /** 块标签 chip 的三角：同一套编辑边界 */
+      onTagFields: (hostId, tagId, el) => {
+        this.commitLeavingLine()
+        this.events.tagFields?.(hostId, tagId, el)
       },
       /**
        * 非引用的行内原子（图片/外链）。与 `onRefClick` 同一套编辑边界：

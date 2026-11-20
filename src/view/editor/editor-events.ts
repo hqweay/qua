@@ -318,6 +318,20 @@ export interface EditorBridge {
    */
   onRefCountClick?: (hostId: string, el: HTMLElement, mods: RefClickMods) => void
   /**
+   * **点实例的字段手柄**（脸槽 hover 换手后那一枚 chevron）：打开 102 字段卡。
+   *
+   * 与 `onRefClick` 分开：那是「去哪」，这是「就地改这条记录的字段」。
+   * ⚠️ 未接 ⇒ 什么都不做，不退化成导航。
+   */
+  onRefFields?: (runId: string, el: HTMLElement) => void
+  /**
+   * **点块标签 chip 的三角**：打开宿主块在这枚标签下的字段卡。
+   *
+   * 两个 id 一起给：值属于宿主块，筛选属于这枚标签声明。
+   * ⚠️ 未接 ⇒ 什么都不做，不退化成打开标签类。
+   */
+  onTagFields?: (hostId: string, tagId: string, el: HTMLElement) => void
+  /**
    * **非引用的行内原子被点**（图片／将来的文件、外链）。
    *
    * 为什么与 `onRefClick` 分成两个入口而不是「to 传空串」：
@@ -603,6 +617,12 @@ export function bindEditorEvents(br: EditorBridge): () => void {
    * 未被认领的 mousedown 清掉它，陈年认领不拦新点击。
    */
   let atomEdgeClaim: { runId: string; at: number } | null = null
+  /**
+   * **关闭态标记的 mousedown 认领**：mousedown 已经翻过值，紧随的 click
+   * （同一枚标记）只是收尾，不能再翻一次。与 `atomEdgeClaim` 同一条「600ms 内
+   * 命中同一元素才豁免」的判据；合成 click 没有 mousedown ⇒ 由 click 自己执行。
+   */
+  let closureClickClaim: { el: HTMLElement; at: number } | null = null
   on(c, 'mousedown', (e: MouseEvent) => {
     if (e.button !== 0) return
     const target = e.target as HTMLElement
@@ -976,6 +996,48 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     }
 
     /**
+     * **关闭态标记（行内）**：mousedown 已经翻过值（gutter 与行内共用那一支），
+     * 这一下 click 只是收尾。不能让它落到 `data-ref-to` 的导航分支——那会把
+     * 「点状态」变成「打开记录」。合成 click（没有 mousedown）时自己执行一次，
+     * 保证脚本/键盘路径不是静默空操作。
+     */
+    const closureEl = path.find((n): n is HTMLElement => n instanceof HTMLElement && n.dataset.closureFor !== undefined)
+    if (closureEl?.dataset.closureFor) {
+      e.preventDefault()
+      const claimed = closureClickClaim
+      closureClickClaim = null
+      if (claimed?.el === closureEl && performance.now() - claimed.at < 600) return
+      if (e.altKey && closureEl.dataset.propFor && closureEl.dataset.propId) {
+        br.pickGutterValue(closureEl.dataset.propFor, closureEl.dataset.propId, closureEl.getBoundingClientRect())
+      } else {
+        br.toggleClosure(closureEl.dataset.closureFor, closureEl.dataset.propId)
+      }
+      return
+    }
+
+    /**
+     * **实例的字段手柄**：脸槽 hover 换手后的那一枚。它住在带 `data-ref-to` 的原子
+     * 里面，所以这一支必须排在导航之前——语义是「就地改字段」，不是「去目标」。
+     */
+    const refFieldsEl = path.find((n): n is HTMLElement => n instanceof HTMLElement && n.dataset.refFields !== undefined)
+    if (refFieldsEl?.dataset.refFields) {
+      br.onRefFields?.(refFieldsEl.dataset.refFields, refFieldsEl)
+      e.preventDefault()
+      return
+    }
+
+    /**
+     * **块标签 chip 的三角**：同理，chip 本体带 `data-ref-to`（打开标签类），
+     * 三角是它内部独立的命中区；两个动作必须在同一枚 chip 上分开接。
+     */
+    const tagFieldsEl = path.find((n): n is HTMLElement => n instanceof HTMLElement && n.dataset.tagFieldsFor !== undefined)
+    if (tagFieldsEl?.dataset.tagFieldsFor && tagFieldsEl.dataset.tagFieldsTag) {
+      br.onTagFields?.(tagFieldsEl.dataset.tagFieldsFor, tagFieldsEl.dataset.tagFieldsTag, tagFieldsEl)
+      e.preventDefault()
+      return
+    }
+
+    /**
      * **指向某块的露面**（行内引用／行尾标签 chip）：同一句话，不分形状。
      *
      * 判据是 `data-ref-to` 而不是 `classList.contains('atom')`：chip 不是原子
@@ -1233,6 +1295,7 @@ export function bindEditorEvents(br: EditorBridge): () => void {
      * ⓞ 的插入点拦截放在它前面，右键照旧不挪光标。
      */
     if (e.button !== 0) return
+    closureClickClaim = null
 
     // ① 折叠三角：只给有子块的行生成，所以这里不需要判 empty
     const fold = target.closest<HTMLElement>('[data-fold-for]')
@@ -1274,6 +1337,7 @@ export function bindEditorEvents(br: EditorBridge): () => void {
       } else {
         br.toggleClosure(closure.dataset.closureFor, closure.dataset.propId)
       }
+      closureClickClaim = { el: closure, at: performance.now() }
       return
     }
 

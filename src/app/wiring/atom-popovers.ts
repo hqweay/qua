@@ -26,7 +26,13 @@ import type { BlockEditor } from '../../view/editor/editor.ts'
 import type { AtomMenuHit, RefClickHit, RefClickMods } from '../../view/editor/editor-events.ts'
 import type { RunWithId } from '../../core/model/runs.ts'
 import { openImageLightbox } from '../../ui/overlay/lightbox.ts'
-import { openDrawerFor as panelDrawer, showAtomPopover as panelPopover, type ObjFieldDeps, type PanelDeps } from '../../ui/overlay/panels.ts'
+import {
+  openDrawerFor as panelDrawer,
+  showAtomPopover as panelPopover,
+  showTagFieldsPopover as panelTagFields,
+  type ObjFieldDeps,
+  type PanelDeps,
+} from '../../ui/overlay/panels.ts'
 import type { Layers, Row } from '../../ui/overlay/layers.ts'
 import type { MenuRequest, PanelKind } from '../../core/infra/ports.ts'
 import type { Registry } from '../../core/commands/index.ts'
@@ -229,6 +235,31 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
   const openDrawerFor = (kind: PanelKind): void => panelDrawer(panelDeps, kind)
 
   /**
+   * **实例的字段手柄**：与 `⌥` 点实例开的是**同一张卡**（102），只是不带修饰键。
+   * 未找到 run（刚被删/重画）⇒ 什么都不做，不假装成功。
+   */
+  const handleRefFields = (runId: string, el: HTMLElement): void => {
+    const run = findRunOrNull(runId)
+    if (!run || run.t !== 'ref') return
+    showAtomPopover(run, anchorOf(el), { trigger: { el, key: run.id } })
+  }
+
+  /**
+   * **块标签 chip 的三角**：开宿主块在这枚标签下的字段卡。
+   *
+   * 与实例卡共用 `showTagFieldsPopover` 的同一份行渲染；`hostId` 是值的家，
+   * `tagId` 只决定列哪几行。字段能力未接 ⇒ 什么都不做（缺入口要看得见地缺）。
+   */
+  const handleTagFields = (hostId: string, tagId: string, el: HTMLElement): void => {
+    const fields = deps.objFieldDeps()
+    if (!fields) return
+    panelTagFields(panelDeps, hostId, tagId, anchorOf(el), fields, {
+      el,
+      key: `tag-fields:${hostId}:${tagId}`,
+    })
+  }
+
+  /**
    * 行内原子右键菜单里那两条**不是命令**的行。
    *
    * 判据：它们打开的是 UI 面（锚文本浮层、资产详情），不写模型 ⇒ 不发明一条
@@ -394,5 +425,18 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
     })
   }
 
-  return { showAtomPopover, findRunOrNull, showAssetDetails, openLightbox, handleAtomClick, handleRefClick, openDrawerFor, handleAtomMenu, handleAnnoMenu, anchorOf }
+  return {
+    showAtomPopover,
+    findRunOrNull,
+    showAssetDetails,
+    openLightbox,
+    handleAtomClick,
+    handleRefClick,
+    handleRefFields,
+    handleTagFields,
+    openDrawerFor,
+    handleAtomMenu,
+    handleAnnoMenu,
+    anchorOf,
+  }
 }

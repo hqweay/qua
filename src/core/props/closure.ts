@@ -5,8 +5,19 @@
  * 旧实现把这份判据放在编辑器里，于是「记录面右键切待办」只能再抄一遍——
  * 两份翻值逻辑必然漂移（`createCore` 与 `clear` 的边界最容易各写各的）。
  */
-import type { Block } from '../model/model.ts'
-import { TASK_STATUS_PROP_ID, TASK_STATUS_TODO_ID, clearValue, declareOwnProp, setValue } from './props.ts'
+import type { Block, ClosureState } from '../model/model.ts'
+import { ICON_PROP, prop } from '../model/model.ts'
+import {
+  TASK_STATUS_PROP_ID,
+  TASK_STATUS_TODO_ID,
+  allChoicesOf,
+  clearValue,
+  declareOwnProp,
+  readField,
+  setValue,
+  singleValueOf,
+  type FieldTable,
+} from './props.ts'
 import { closureTargetField, gutterFieldsOf, type GutterField } from './rows.ts'
 import { CLOSURE_USE } from './uses.ts'
 
@@ -67,4 +78,40 @@ export function closurePlanFor(
 /** 「取消待办」要摘的那一栏（库级唯一的任务语义）；没有 ⇒ `undefined`。 */
 export function closureFieldOf(block: Block, forest: readonly Block[]): GutterField | undefined {
   return gutterFieldsOf(block, forest).find((f) => f.use === CLOSURE_USE)
+}
+
+/**
+ * **行内状态标记**要画的那一格：状态 ＋ propId ＋ 当前选项的图标。
+ *
+ * 与 `closureOf` 同一个判据（同一张 `FieldTable`、同一个 `readField`），只是多带
+ * 两项呈现信息：`propId` 让点击回写知道写哪一栏，`icon` 让标记显示「当前状态」
+ * 而不是一枚固定方框。仍是**派生**，不落盘。
+ *
+ * ⚠️ 不要求 closure 字段在 `block-left`：它可能只在面板里。行内标记读的是
+ *    「这块有没有这一栏」，不是「这一栏画在哪」。
+ * ⚠️ 目标块不在当前森林 ⇒ 返回 `undefined`，呈现层不假装有状态。
+ */
+export interface ClosureMark {
+  state: ClosureState
+  propId: string
+  icon?: string
+}
+
+export function closureMarkOf(
+  block: Block,
+  table: FieldTable,
+  find: (id: string) => Block | undefined,
+): ClosureMark | undefined {
+  const binding = table.byUse.get(CLOSURE_USE)?.find((b) => b.check !== undefined)
+  const check = binding?.check
+  if (!binding || !check) return undefined
+  const def = find(binding.defId)
+  if (!def) return undefined
+  const { declared, value } = readField(block, binding.defId, table)
+  if (!declared) return undefined
+  const valueId = singleValueOf(value)
+  const state: ClosureState = valueId === check.on ? 'closed' : 'open'
+  const choice = valueId === '' ? undefined : allChoicesOf(def).find((c) => c.id === valueId)
+  const icon = choice?.icon ?? prop<string>(def, ICON_PROP)
+  return { state, propId: binding.defId, icon }
 }

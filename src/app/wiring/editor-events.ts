@@ -312,6 +312,8 @@ function viewEvents(
       openTrigger(hit.ch, hit.query, rect)
     },
     refClick: (ref, mods, el) => getPopovers().handleRefClick(ref, mods, el),
+    refFields: (runId, el) => getPopovers().handleRefFields(runId, el),
+    tagFields: (hostId, tagId, el) => getPopovers().handleTagFields(hostId, tagId, el),
     /** 行尾引用数徽标：不弹预览，zoom 到本体并打开底部反链栏（预览归 hover） */
     refCountClick: (id) => refPeek.openAtBar(id),
     /**

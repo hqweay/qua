@@ -7,7 +7,7 @@
  * ⚠️ 组件自持 DOM：这里不 `getElementById`，所有元素都建在传进来的 `host` 上。
  * ⚠️ 分层：本文件在 `ui` 层，只依赖 core 的类型与函数，**不 import view/装配层**。
  */
-import { openActionOf, type Block, type CtxKeys, type FieldRow, type OpenAction } from '../../core/index.ts'
+import { blockLabel, openActionOf, type Block, type CtxKeys, type FieldRow, type OpenAction } from '../../core/index.ts'
 import type { RunWithId } from '../../core/model/runs.ts'
 import { resolveRef } from '../../core/relations/ref.ts'
 import { checkExternalUrl, rejectText } from '../../core/relations/link.ts'
@@ -110,32 +110,39 @@ function fmtVal(shortId: (id: string) => string, k: string, v: unknown): string 
 }
 
 /**
- * **实例的字段卡**：锚在行内实例上的属性区。
+ * **字段卡的共用画法**：标题 ＋ 一组 `makeFieldRow` ＋ 一条说明 ＋ 动作行。
  *
- * 它和右侧属性区共用 `makeFieldRow`——同一行渲染、同一组读写回调；
- * 差别只在「画给谁」：这里的目标永远是那枚露面指向的**记录块**。
- * 所以浮层里没有标签行、归属行、系统信息，只有值。
+ * 实例字段卡与块标签字段卡是同一个东西的两种筛选：
+ *   · 实例：`rows()` ＝ 记录的全部字段（102）；
+ *   · 块标签：`rows()` ＝ 宿主块在这一枚标签声明下的字段（chip 的三角）。
+ * 渲染与写回只有这一份；两处各自只给 `rows()`、`data-*` 探针与 footer。
+ * 值始终写 `target.id`，不写宿主/浮层自己的任何东西。
  */
-function renderObjFields(
+function renderFieldPanel(
   host: HTMLElement,
   target: Block,
   fields: ObjFieldDeps,
-  label: string,
-  atomId: string,
-  shortId: (id: string) => string,
-  deps: PanelDeps,
+  opts: {
+    title: string
+    rows: () => readonly FieldRow[]
+    /** 诊断/冒烟读点：`objFieldsOf` 或 `tagFieldsOf`（写成 `data-*-of`） */
+    dataName: string
+    dataValue: string
+    note: string
+    shortId: (id: string) => string
+    footer: (actions: HTMLElement) => void
+  },
 ): void {
   const draw = (): void => {
     host.replaceChildren()
     host.classList.add('popover-obj')
     const h = document.createElement('h4')
-    h.textContent = t('ui.popover.objTitle', { label })
+    h.textContent = opts.title
     const body = document.createElement('div')
     body.className = 'popover-fields'
-    // 诊断/冒烟面：这一段画的是哪条记录的字段（不是宿主块）
-    body.dataset.objFieldsOf = target.id
+    body.dataset[opts.dataName] = opts.dataValue
 
-    const rows = fields.rows(target.id)
+    const rows = opts.rows()
     if (rows.length === 0) {
       const empty = document.createElement('p')
       empty.className = 'popover-note'
@@ -145,7 +152,7 @@ function renderObjFields(
       const labelCount = new Map<string, number>()
       for (const r of rows) labelCount.set(r.label, (labelCount.get(r.label) ?? 0) + 1)
       const rowDeps: FieldRowDeps = {
-        shortId,
+        shortId: opts.shortId,
         setValue: (b, propId, value) => {
           fields.setValue(b.id, propId, value)
           draw()
@@ -175,29 +182,106 @@ function renderObjFields(
 
     const note = document.createElement('div')
     note.className = 'popover-note'
-    note.textContent = t('ui.popover.objNote')
+    note.textContent = opts.note
     host.appendChild(note)
 
     const actions = document.createElement('div')
     actions.className = 'row'
-    const open = document.createElement('button')
-    open.type = 'button'
-    open.textContent = t('ui.popover.openObject')
-    open.addEventListener('click', (e) => {
-      deps.closePopover()
-      deps.openBlock(target.id, openActionOf(e))
-    })
-    const del = document.createElement('button')
-    del.type = 'button'
-    del.textContent = t('ui.popover.deleteRef')
-    del.addEventListener('click', () => {
-      deps.closePopover()
-      deps.removeAtom(atomId)
-    })
-    actions.append(open, del)
+    opts.footer(actions)
     host.appendChild(actions)
   }
   draw()
+}
+
+/**
+ * **实例的字段卡**：锚在行内实例上的属性区。
+ *
+ * 它和右侧属性区共用 `makeFieldRow`——同一行渲染、同一组读写回调；
+ * 差别只在「画给谁」：这里的目标永远是那枚露面指向的**记录块**。
+ * 所以浮层里没有标签行、归属行、系统信息，只有值。
+ */
+function renderObjFields(
+  host: HTMLElement,
+  target: Block,
+  fields: ObjFieldDeps,
+  label: string,
+  atomId: string,
+  shortId: (id: string) => string,
+  deps: PanelDeps,
+): void {
+  renderFieldPanel(host, target, fields, {
+    title: t('ui.popover.objTitle', { label }),
+    rows: () => fields.rows(target.id),
+    dataName: 'objFieldsOf',
+    dataValue: target.id,
+    note: t('ui.popover.objNote'),
+    shortId,
+    footer: (actions) => {
+      const open = document.createElement('button')
+      open.type = 'button'
+      open.textContent = t('ui.popover.openObject')
+      open.addEventListener('click', (e) => {
+        deps.closePopover()
+        deps.openBlock(target.id, openActionOf(e))
+      })
+      const del = document.createElement('button')
+      del.type = 'button'
+      del.textContent = t('ui.popover.deleteRef')
+      del.addEventListener('click', () => {
+        deps.closePopover()
+        deps.removeAtom(atomId)
+      })
+      actions.append(open, del)
+    },
+  })
+}
+
+/**
+ * **块标签 chip 的字段卡**：宿主块在这枚标签声明下的那一组值。
+ *
+ * 与实例卡共用 `renderFieldPanel`，只换三件事：
+ *   · `rows` 按「这枚标签声明过」过滤（多标签时不是并集）；
+ *   · 标题说清是哪枚标签；
+ *   · footer 只留「打开属性」——这里没有 run 可删，声明也不在浮层里加。
+ *
+ * 值的家永远是宿主块；标签只决定「列哪几行」。
+ */
+export function showTagFieldsPopover(
+  deps: PanelDeps,
+  hostId: string,
+  tagId: string,
+  anchor: DOMRect | null | (() => DOMRect | null),
+  fields: ObjFieldDeps,
+  trigger?: { el?: HTMLElement; key?: string },
+): void {
+  const target = deps.findBlock(hostId)
+  const tag = deps.findBlock(tagId)
+  if (!target || !tag) return
+  const tagLabel = blockLabel(tag, deps.findBlock)
+  deps.openPopover(
+    (host) => {
+      renderFieldPanel(host, target, fields, {
+        title: t('ui.popover.tagFieldsTitle', { label: tagLabel }),
+        rows: () => fields.rows(hostId).filter((r) => r.sources.some((s) => s.id === tagId)),
+        dataName: 'tagFieldsOf',
+        dataValue: tagId,
+        note: t('ui.popover.tagFieldsNote'),
+        shortId: deps.shortId,
+        footer: (actions) => {
+          const open = document.createElement('button')
+          open.type = 'button'
+          open.textContent = t('ui.popover.openProperties')
+          open.addEventListener('click', () => {
+            deps.closePopover()
+            deps.openBlock(hostId, 'inspect')
+          })
+          actions.appendChild(open)
+        },
+      })
+    },
+    anchor,
+    trigger,
+  )
 }
 
 /**

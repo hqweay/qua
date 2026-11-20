@@ -46,6 +46,8 @@ import {
   TASK_STATUS_PROP_ID,
   TASK_STATUS_TODO_ID,
   closureOf,
+  closureMarkOf,
+  hasAnyFieldOf,
   undeclareField,
   UI_POSITION_PROP,
   uiPositionOf,
@@ -352,6 +354,59 @@ test('完成是定义的 `_use: status` + `_check.on`：自定义任务也走 cl
   plain.children = [{ ...mkBlock('高'), id: 'p1' }]
   const h2: Block = { id: 'h2', text: '', children: [], props: { 'p-plain': 'p1' } }
   assert.equal(closureOf(h2, fieldTableOf([plain, h2])), undefined, '没有 closure 角色 ⇒ 只是普通属性')
+})
+
+test('hasAnyFieldOf：标签声明/自有槽才算有 body；标签自己的声明不算它自己的字段', () => {
+  const def = mkPropDef('评分', 'number')
+  const tagBlock = mkTagBlock('书')
+  declareField(tagBlock, def.id)
+  const tagged = tag(mkBlock('成员'), tagBlock.id)
+  const own = mkBlock('自有')
+  declareOwnProp(own, def.id)
+  const plain = mkBlock('普通')
+  const forest = [def, tagBlock, tagged, own, plain]
+  const find = (id: string) => forest.find((b) => b.id === id)
+  assert.equal(hasAnyFieldOf(tagged, find), true, '标签声明给成员 ⇒ 有字段（哪怕没填）')
+  assert.equal(hasAnyFieldOf(own, find), true, '自有槽也算')
+  assert.equal(hasAnyFieldOf(plain, find), false, '没有声明/槽 ⇒ 没有 body')
+  assert.equal(hasAnyFieldOf(tagBlock, find), false, '标签自己的 _fieldDefs 是给成员的，不是它自己的字段')
+})
+
+test('closureMarkOf：状态、propId、当前选项图标；没有 closure / 没声明 ⇒ undefined', () => {
+  const def = mkPropDef(
+    '任务状态',
+    'select',
+    {
+      [USE_PROP]: 'closure',
+      [CHECK_PROP]: { on: 'done', off: 'todo' },
+      _icon: 'lucide:circle',
+    },
+    'p-status',
+  )
+  setChoices(def, [
+    { id: 'todo', label: '待办', icon: 'lucide:circle' },
+    { id: 'done', label: '完成', icon: 'lucide:check' },
+  ])
+  const tagBlock = mkTagBlock('任务')
+  declareField(tagBlock, def.id)
+  const done = tag(mkBlock('完成的'), tagBlock.id)
+  done.props = { ...done.props, [def.id]: 'done' }
+  const todo = tag(mkBlock('待办'), tagBlock.id)
+  const none = mkBlock('普通')
+  const forest = [def, tagBlock, done, todo, none]
+  const table = fieldTableOf(forest)
+  const find = (id: string) => forest.find((b) => b.id === id)
+  assert.deepEqual(closureMarkOf(done, table, find), {
+    state: 'closed',
+    propId: def.id,
+    icon: 'lucide:check',
+  })
+  assert.deepEqual(
+    closureMarkOf(todo, table, find),
+    { state: 'open', propId: def.id, icon: 'lucide:circle' },
+    '未填/待办都是 open；图标退回定义/选项',
+  )
+  assert.equal(closureMarkOf(none, table, find), undefined, '没有这一栏 ⇒ 没有状态标记')
 })
 
 test('gutter 派生：select 带当前选项的图标与完成档；未填退回定义图标', () => {

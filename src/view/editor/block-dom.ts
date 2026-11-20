@@ -21,6 +21,7 @@ import {
   DISPLAY_PROP,
   aliasesOf,
   blockTypeOf,
+  declaredFieldIds,
   displayNameOf,
   embedBodyOf,
   hasChildrenViewBody,
@@ -46,6 +47,7 @@ import {
   type FoldState,
   type GutterField,
   type NoteSourceCell,
+  type RefView,
   type VisibleRow,
 } from '../../core/index.ts'
 import { MARK_KINDS, isEmptyContent, plainText, refRunsOf, type Marks } from '../../core/model/runs.ts'
@@ -227,10 +229,30 @@ export function fillBlockText(
    * 不传 ⇒ 图裂了就只是图裂了（索引里仍认为它有）。
    */
   onAssetError?: (hash: string) => void,
+  /**
+   * **原子的呈现元信息**（可选）：目标有没有字段、有没有 closure 状态。
+   *
+   * 由视图层注入：它手里有 `FieldTable`，而 `core/ref.ts` 只看块、不扫森林。
+   * 不传 ⇒ 只画普通引用（旧行为）；传了 ⇒ 实例的图标槽可以变成状态标记 / 字段手柄。
+   */
+  refMeta?: (targetId: string) => Pick<RefView, 'fields' | 'closure'> | undefined,
 ): void {
   tx.textContent = ''
   const refRuns = refRunsOf(b.content)
   const views = find ? resolveRefs(find, refRuns) : undefined
+  if (views && refMeta) {
+    /**
+     * 合并而不是重算：`resolveRefs` 已经解析了名字/身份/色/脸，元信息只补两格。
+     * 按 run id 写回，同一目标被引用多次时各枚都拿到同一份派生（不走第二套缓存）。
+     */
+    for (const r of refRuns) {
+      if (r.t !== 'ref' || !r.to) continue
+      const meta = refMeta(r.to)
+      if (!meta) continue
+      const v = views.get(r.id)
+      if (v) views.set(r.id, { ...v, ...meta })
+    }
+  }
 
   for (const r of b.content) {
     if (r.t === 'text') {
@@ -324,6 +346,24 @@ export function makeTagsEl(
   for (const tagId of tags) {
     const tag = find(tagId)!
     const chip = makeTagChipEl(tagId, blockLabel(tag, find), prop<string>(tag, COLOR_PROP))
+    /** 只有「这枚标签声明了字段」才有 body 可披露；没有字段就不给三角 */
+    if (declaredFieldIds(tag).length > 0) {
+      const caret = document.createElement('span')
+      caret.className = 'tag-chip-caret'
+      caret.contentEditable = 'false'
+      caret.draggable = false
+      caret.dataset.tagFieldsFor = b.id
+      caret.dataset.tagFieldsTag = tagId
+      caret.dataset.tip = t('ui.chip.fieldsTitle', { label: blockLabel(tag, find) })
+      renderIcon(caret, 'lucide:chevron-right', 'chevron-right', 'sm')
+      // 按下不挪光标、不起拖；click 冒到容器走 tagFields 分支（chip 本体仍走导航）
+      caret.addEventListener('mousedown', (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+      })
+      caret.addEventListener('dragstart', (e) => e.preventDefault())
+      chip.prepend(caret)
+    }
     if (draggable) {
       chip.draggable = true
       chip.addEventListener('dragstart', (e) => {

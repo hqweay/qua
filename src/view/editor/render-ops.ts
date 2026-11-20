@@ -13,11 +13,13 @@
 import {
   ancestorsByBlockId,
   belowFieldsFor,
+  closureMarkOf,
   constrainBelowFields,
   depthOf,
   displayRowPropIds,
   foldStateOf,
   gutterFieldsFor,
+  hasAnyFieldOf,
   hasLiveChildren,
   hasSingleLiveBlock,
   isFolded,
@@ -31,6 +33,7 @@ import {
   type BelowFields,
   type GutterField,
   type NoteSourceCell,
+  type RefView,
   type RowDerive,
   type ShellCol,
   type VisibleRow,
@@ -842,6 +845,23 @@ export class RenderOps {
     return constrainBelowFields(below, allowed)
   }
 
+  /**
+   * 行内原子的呈现元信息：目标有没有字段、有没有 closure 状态。
+   *
+   * 为什么住渲染层而不是 `resolveRef`：判 closure 要 `FieldTable`（标签声明那一半），
+   * 而 `core/ref.ts` 只看块、不持有森林。这里用编辑器的缓存表，**不新扫库**。
+   * 目标不在当前森林 ⇒ `undefined`，原子退回普通引用（不假装有 body/状态）。
+   */
+  private refMetaOf(id: string): Pick<RefView, 'fields' | 'closure'> | undefined {
+    const find = (x: string) => this.ed.store.find(x)
+    const target = find(id)
+    if (!target) return undefined
+    const fields = hasAnyFieldOf(target, find)
+    if (!fields) return { fields: false }
+    const closure = closureMarkOf(target, this.ed.fieldTable(), find)
+    return { fields: true, ...(closure ? { closure } : {}) }
+  }
+
   private renderRows(rows: readonly VisibleRow[], tailComplete = true): void {
     this.probe.renderRowsCalls++
     this.probe.renderRowsRendered += rows.length
@@ -982,6 +1002,15 @@ export class RenderOps {
     // 引用解析走**共享 store** 的森林：引用目标可能在当前视图之外（另一页／另一天），
     // 只有整片森林能回答「它还在不在、现在叫什么」。
     const find = (id: string) => this.ed.store.find(id)
+    /**
+     * 同一行里同一目标可能出现多次：元信息按目标 id 缓存一次，避免重复读 FieldTable。
+     * 缓存只活在这一行的构造里——模型一变就整行重画，不存在跨帧过期。
+     */
+    const refMetaCache = new Map<string, Pick<RefView, 'fields' | 'closure'> | undefined>()
+    const refMeta = (id: string): Pick<RefView, 'fields' | 'closure'> | undefined => {
+      if (!refMetaCache.has(id)) refMetaCache.set(id, this.refMetaOf(id))
+      return refMetaCache.get(id)
+    }
     const el = makeBlockEl(
       r,
       /**
@@ -994,7 +1023,15 @@ export class RenderOps {
        *    `unavailable`，之后没有任何人再重画（那一行已经"画完了"）——
        *    表现为「重开之后图全是库不可用」，而库里明明有字节。
        */
-      (tx) => fillBlockText(tx, r.block, find, this.ed.events.assetView ?? assetViewOf, this.ed.events.onAssetError ?? markAssetMissing),
+      (tx) =>
+        fillBlockText(
+          tx,
+          r.block,
+          find,
+          this.ed.events.assetView ?? assetViewOf,
+          this.ed.events.onAssetError ?? markAssetMissing,
+          refMeta,
+        ),
       {
         single,
         ancestors: this.ancestors.get(r.block.id) ?? [],
