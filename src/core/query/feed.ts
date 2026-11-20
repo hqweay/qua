@@ -16,7 +16,8 @@
  */
 import { journalDate, todayISO } from '../identity/journal.ts'
 import type { Block } from '../model/model.ts'
-import { findById, runQuery, type QuerySpec } from './query.ts'
+import { walkForest } from '../model/walk.ts'
+import { runQuery, type QuerySpec } from './query.ts'
 
 /** 日记流的来源字面量：`_date` 降序（今日在顶）、只取**存在的**天；取几段由装载窗口定 */
 export const FEED_SPEC: QuerySpec = {
@@ -50,9 +51,22 @@ export function feedWindow(blocks: readonly Block[], anchor: string, limit: numb
  */
 export function feedDays(blocks: readonly Block[], limit: number, now?: Date): Block[] {
   const hits = runQuery(FEED_SPEC, { blocks })
-    .map((h) => findById(blocks, h.blockId))
-    .filter((b): b is Block => b !== undefined)
-  return feedWindow(hits, todayISO(now), limit)
+  if (hits.length === 0) return []
+  /**
+   * **一次建表，别再按命中逐条全树找**：`findById` 是一次可见森林 DFS，
+   * 命中几天就走几遍（1,000 天 × 20k 块 = 2,000 万步）。这里一次 walk 建
+   * `id → 块`，随后每条命中是一次 Map 查。
+   */
+  const byId = new Map<string, Block>()
+  walkForest(blocks, (b) => {
+    byId.set(b.id, b)
+  })
+  const days: Block[] = []
+  for (const h of hits) {
+    const b = byId.get(h.blockId)
+    if (b) days.push(b)
+  }
+  return feedWindow(days, todayISO(now), limit)
 }
 
 /**

@@ -1293,6 +1293,21 @@ export function canonicalNode(n: QueryNode): QueryNode {
 }
 
 /**
+ * 空字段表：条件里没有 `{prop}` 也没有 `$self` 时用它。
+ *
+ * 只读（消费者只查不改）；不共享可变状态——各 Map/Set 都是空容器，
+ * 即便有人误写也只会写进这一次求值的空表。
+ */
+const EMPTY_FIELD_TABLE: FieldTable = {
+  byTag: new Map(),
+  liveTags: new Set(),
+  kinds: new Map(),
+  defaults: new Map(),
+  byUse: new Map(),
+  cardinality: new Map(),
+}
+
+/**
  * 求值一次。**纯函数**：同样的输入永远同样的输出顺序（按森林的先序），
  * 这样「冻结」只要保存输出的 `blockId[]` 就够了（D4：冻结成员与顺序）。
  *
@@ -1302,11 +1317,12 @@ export function canonicalNode(n: QueryNode): QueryNode {
  */
 export function runQuery(spec: QuerySpec, input: QueryRunInput): QueryHit[] {
   const host = input.selfId !== undefined ? findById(input.blocks, input.selfId) : undefined
+  const selfUsed = usesSelf(spec.where)
   // 含 `$self` 却没有宿主 ⇒ 空结果。**不退回全库**：那会把「看不懂的指代」变成一次大范围命中，
   // 而用户看到的只是「结果不对」，没有任何线索指向条件。
-  if (!host && usesSelf(spec.where)) return []
-  // 字段表建一次传两处：`$self` 的 `{prop}` 分支与环境读同一份（旧写法会扫两趟）
-  const fields = fieldTableOf(input.blocks)
+  if (!host && selfUsed) return []
+  // 字段表只服务 `{prop}` 与 `$self` 解析：纯 role/tag/text 查询不必扫两趟全库
+  const fields = selfUsed || usesProp(spec.where) ? fieldTableOf(input.blocks) : EMPTY_FIELD_TABLE
   const q = host ? resolveSelfSpec(spec, host, input.blocks, fields) : spec
   const refTables = usesRef(q.where) ? refTablesOfForest(input.blocks) : undefined
   const env: QueryEnv = {
@@ -1355,6 +1371,22 @@ export function usesSelf(node: QueryNode): boolean {
   if ('text' in node) return node.text === SELF
   if ('prop' in node) return 'eq' in node.prop && node.prop.eq === SELF
   return false
+}
+
+/**
+ * 条件里有没有 `{prop}` 节点（含嵌套在 all/any/not/方向原子里的）。
+ *
+ * 字段表只服务 `{prop}` 判定与 `$self` 解析；纯 `{role}`／`{tag}`／`{text}`
+ * 查询带一张表只是白扫两趟森林（日记流每次装载都会付）。
+ */
+function usesProp(node: QueryNode): boolean {
+  if ('all' in node) return node.all.some(usesProp)
+  if ('any' in node) return node.any.some(usesProp)
+  if ('not' in node) return usesProp(node.not)
+  if ('up' in node) return usesProp(node.up)
+  if ('down' in node) return usesProp(node.down)
+  if ('near' in node) return usesProp(node.near)
+  return 'prop' in node
 }
 
 /** 哨兵字面量：条件里写它 ＝ 「这一块自己」的这一侧面 */
