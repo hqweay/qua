@@ -57,6 +57,7 @@ import {
   frozenStale,
   specKeyOf,
   contextKey,
+  viewOwnerKey,
   readViewSet,
   mkBlock,
   setValue,
@@ -601,7 +602,7 @@ export class ViewHost {
      * 认 DOM 里这一格、不另建一张「哪些块正被画着」的登记表：登记表漏一次 dispose
      * 就会永远说「画着」，而它不报错，只表现为「切了视图，点了没反应」。
      */
-    if (deps.owner.kind === 'block') this.els.root.dataset.viewOwner = deps.owner.blockId
+    this.els.root.dataset.viewOwner = viewOwnerKey(deps.owner)
     /**
      * 派生栏的抬头由挂载区画（栏名／条数／说明／快速筛选都在那边），这一层只借渲染器
      * ——但**分组选择**留在这条抬头里：与自定义查询同一颗 select、同一份候选口径，
@@ -725,7 +726,14 @@ export class ViewHost {
          * 真变时重查：换视图（`viewKey` 变）与切片编辑都会重冻成员。
          */
         const owner = this.bound.owner
-        if (owner.kind === 'block' && ids.includes(owner.blockId)) {
+        const host = this.deps.host()
+        // 拥有者自己的配置变了 ⇒ 重读重画。块拥有者的配置在块上；local tab 的配置在
+        // 宿主 `_mounts` 里，所以认 host id——先前只认 block 拥有者，tab 那一栏改
+        // 排序/筛选写进去了却不重画（「点了没生效」），只能靠整页 reload 兜，那会闪一下。
+        if (
+          (owner.kind === 'block' && ids.includes(owner.blockId)) ||
+          (owner.kind === 'tab' && host && ids.includes(host.id))
+        ) {
           this.sync()
           return
         }

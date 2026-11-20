@@ -10,7 +10,7 @@
  * ⚠️ 读一律走**读门面**（`KbClient` 的窄方法：按 id、按名字、按清单取数）——
  *   命令层写不出「遍历全库」：整库在内存是门面实现的事，不是调用方的假设。
  */
-import type { Block, SecLayout, ShellCol } from '../../core/index.ts'
+import type { Block, SecLayout, ShellCol, ViewOwnerRef } from '../../core/index.ts'
 import type { KbClient, Op, Tx } from '../../core/kb/types.ts'
 import type { OwnerStore } from '../wiring/owners.ts'
 import type { CheckEdgeResult, Dangling } from '../../core/relations/hierarchy.ts'
@@ -349,14 +349,14 @@ export interface ViewConfigDeps {
   /** 这一屏现在装的是哪些根（判断「要不要换屏」：一屏多根时视图宿主根本不存在） */
   rootIds: () => readonly string[]
   /**
-   * **这一块的视图身体此刻有没有被某个表面画着**（正文里的内联体 / 段尾宿主 /
-   * 侧槽窗口的卡 / 挂载区的栏）。
+   * **这个拥有者的视图身体此刻有没有被某个表面画着**（正文里的内联体 / 段尾宿主 /
+   * 侧槽窗口的卡 / 挂载区的栏与 local tab）。
    *
-   * 切视图只写配置，屏幕跟上靠每台视图宿主自己订阅 ⇒ 有表面在画它时就地重画即可；
+   * 切视图/改配置只写配置，屏幕跟上靠每台视图宿主自己订阅 ⇒ 有表面在画它时就地重画即可；
    * 没有（收藏块、children 源的激活视图只在打开时才画）才必须把这一块打开，
-   * 否则就是「点了没生效」。
+   * 否则就是「点了没生效」。块与 local tab 都要认（tab 的配置在宿主 `_mounts` 里）。
    */
-  viewShown: (blockId: string) => boolean
+  viewShown: (owner: ViewOwnerRef) => boolean
   /** 当前中心槽的对象（「页内查询块」的落点） */
   activeId: () => string
   /** 把某一块打开成**这一屏唯一的根**（给「在日记流里给某一天建表」这种跨屏的入口用） */

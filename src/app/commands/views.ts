@@ -134,10 +134,18 @@ export function viewConfigCommands(
    */
   const reveal = (owner: ViewOwnerRef): void => {
     if (owner.kind !== 'block') {
-      // local tab：它就在当前这一屏的挂载区里 ⇒ 重画当前屏就够（换屏会把用户带离宿主）
+      /**
+       * local tab：配置写在宿主 `_mounts` 的那一条里，身体由挂载区自己的 ViewHost 画。
+       * 那一台已经挂上（DOM 里有它的拥有者键）时，排序/筛选这类配置写入它**自己订阅
+       * 就地重画**就够——再 `reloadPage()` 就是整页行一起拆建，点一次「应用」闪一下。
+       * 首次建 tab / 还没挂身体时这里读到 false ⇒ 照旧重装，把身体造出来。
+       */
+      if (d.viewShown(owner)) return
       d.reloadPage()
       return
     }
+    // 块拥有者：**先**判「单根／多根」（装载形状变了要重装/打开），再看有没有表面在画它。
+    // 这两条对「就地画」的块也成立（重画让身体出现在这一行下面），不能提前用 viewShown 截胡。
     const roots = d.rootIds()
     if (roots.length === 1 && roots[0] === owner.blockId) {
       d.reloadPage()
@@ -177,9 +185,8 @@ export function viewConfigCommands(
     /**
      * **它是这一屏里的一行，且已经有表面在画它的身体**（正文内联体／侧槽窗口的卡／挂载区的栏）
      * ⇒ 那台视图宿主自己订阅了拥有者的配置，就地重画就够。
-     * **不换屏、不动光标**：切个看法不该把用户正在读/写的位置换掉，更不该把这一行放大成整屏。
      */
-    if (d.viewShown(owner.blockId)) return
+    if (d.viewShown(owner)) return
     d.openBlock(owner.blockId)
   }
   /** 只重装，不换屏（行操作：容器本来就是这一屏的根，才可能走到这些入口） */

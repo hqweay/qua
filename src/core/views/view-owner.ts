@@ -283,8 +283,20 @@ export interface ViewOwnerStore {
   setBindingView(binding: ViewBindingRef, view: string): void
 }
 
-/* ------------------------------------------------------------ 表面 */
+/**
+ * 一个拥有者的稳定键：装配层据此回答「此刻有没有表面在画它」。
+ *
+ * 认 DOM 里的这一格、不建「谁正被画着」的登记表——登记表漏一次 dispose 就永远说
+ * 「画着」，且它不报错，只表现为「改了配置、屏幕不动」。键要覆盖两种拥有者：
+ * 块（配置在块上）与 local tab（配置在宿主的 `_mounts` 里，块 id 认不出它）。
+ */
+export function viewOwnerKey(owner: ViewOwnerRef): string {
+  return owner.kind === 'block'
+    ? `b:${owner.blockId}`
+    : `t:${owner.host.kind === 'block' ? owner.host.blockId : 'journal'}:${owner.tabId}`
+}
 
+/* ------------------------------------------------------------ 表面 */
 /**
  * 表面：一份配置**在哪儿**被看到。它只提供上下文与尺寸，不拥有配置。
  *
