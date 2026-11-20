@@ -2942,7 +2942,9 @@ await check('T216 挂载栏本地查询：缺省大纲仍有抬头/条件 chip�
     page.evaluate(() => {
       const m = document.querySelector('#editor .mount')
       return {
-        current: m?.querySelector('.qv-view-current-label')?.textContent ?? '',
+        // 读数收窄到查询自己的抬头：派生抬头（.mount-derived-head）现在也画一颗
+        // 同款看法按钮（复用 qv-view-current-label 类名），隐藏态仍会被裸 querySelector 抓到
+        current: m?.querySelector('.queryview-head .qv-view-current-label')?.textContent ?? '',
         headVisible: !(m?.querySelector('.queryview-head')?.hidden ?? true),
         chip: m?.querySelector('.queryview-filters .queryview-chip')?.textContent ?? '',
         titleHidden: m?.querySelector('.queryview-title')?.hidden ?? true,
@@ -18113,8 +18115,11 @@ await check('T176 悬停有中性反馈：回收站行 hover 出底色（--ui-bg
   // 这条断言问的是 hover 有没有底色，不是角标的落点 ⇒ 先把它滚到中间再悬停。
   const row = page.locator('[data-card-id="trash"] [data-trash-row]').first()
   await row.evaluate((el) => el.scrollIntoView({ block: 'center' }))
+  await page.waitForTimeout(600)
   await row.hover()
-  // 底色有 120ms 的过渡：等它走完再读，读到的才是 hover 稳态
+  // 删除是结构变化：槽里的挂载体随后会异步重载，身体可能长高一截、把下面的卡往下推。
+  // 悬停等布局落定再打——光标停在旧位置的话，读数时 :hover 已经没了（夹具问题：
+  // 钉高的时代这段位移被 minHeight 掩盖过，现在按设计不再钉高）。
   await page.waitForTimeout(250)
   const bg = await page.evaluate(
     () => getComputedStyle(document.querySelector('[data-card-id="trash"] [data-trash-row]')).backgroundColor,
@@ -29773,7 +29778,8 @@ await check('T307 引用数徽标：hover 弹可编辑反链块；点击 zoom �
     }
   })
   assert(peek.editable && peek.rows > 0, `浮层里应是可编辑块列：${JSON.stringify(peek)}`)
-  assert(peek.title === '反链', `浮层应落在反链栏：${JSON.stringify(peek)}`)
+  // 抬头不再写名字（tab/脚注已说明是哪一栏，标题是同一句话的第二遍）——身份由脚注点名
+  assert(peek.title === '' && peek.foot.includes('反链'), `浮层应落在反链栏：${JSON.stringify(peek)}`)
   assert(peek.atoms > 0, `块行要把引用原子原样画出来，不是替数据做摘要：${JSON.stringify(peek)}`)
 
   // ② 真按键打一个字：证明那台编辑器是活的（不是只读投影卡片）
@@ -29798,7 +29804,8 @@ await check('T307 引用数徽标：hover 弹可编辑反链块；点击 zoom �
   await page.waitForTimeout(550)
   const jumped = await page.evaluate(() => ({
     active: window.__qua.snapshot().activeId,
-    head: document.querySelector('#editor .mount-derived-head .mount-derived-title')?.textContent ?? '',
+    // 抬头不再写名字（同屏第二遍）——激活哪一栏读 tab 条：选中的那一格就是答案
+    head: document.querySelector('#editor .mount .mount-tabwrap[data-active="1"] .mount-tab')?.textContent ?? '',
     headChip: document.querySelectorAll('#editor .mount-derived-head .ref-badge-in-head').length,
   }))
   assert(jumped.active === setup.host, `点徽标应 zoom 到被引用块本体：${JSON.stringify(jumped)}`)
