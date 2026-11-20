@@ -18,7 +18,6 @@ import {
   choiceDisplayLabel,
   choicesFor,
   embedBodyOf,
-  iconOf,
   isDeleted,
   openAxisOf,
   readEmbed,
@@ -34,6 +33,7 @@ import { takenWhere } from '../../app/commands-impl.ts'
 import { openChoicePicker } from '../../app/choice-picker.ts'
 import { renderPropsLine } from '../../ui/block-ui/props-line.ts'
 import { createAutomationBody } from '../../ui/automation/automation-body.ts'
+import { runTargetRows } from '../../app/retrieval/run-target-rows.ts'
 import { type Registry, type MenuRequest } from '../../core/commands/index.ts'
 import { Layers, type Row } from '../../ui/overlay/layers.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
@@ -99,21 +99,20 @@ function viewEvents(
   /**
    * **自动化身体的目标选择**（运行按钮的落点）：手动链目标必须**显式点出来**——
    * 块身体上没有「当前块」语义（人正看着的是规则，不是目标），猜一个就会跑错地方。
+   * 候选是**任意块**（自动化作用于块，旗舰用例的目标是一块任务，不是页）：
+   * 空词列页/标签（可浏览的默认集），打字全库搜（名字 → 正文，同「关联到…」一族）。
    */
   const pickRunTarget = (automationId: string): void => {
-    const rows: Row[] = [...kb.pages(), ...kb.tags()].map((b) => ({
-      id: b.id,
-      label: blockLabel(b, kbGet),
-      group: 'pick/run-target',
-      icon: iconOf(b) ?? 'lucide:circle',
-    }))
+    const rows = runTargetRows({ kb, automationId })
     layers.openMenu({
-      rows,
+      rows: rows(''),
       title: t('ui.automation.runPickTitle'),
       anchor: null,
       searchable: true,
       focusSearch: true,
+      placeholder: t('ui.automation.runPickPlaceholder'),
       emptyText: t('ui.automation.runPickEmpty'),
+      onQuery: (q) => layers.setRows(rows(q)),
       onPick: (row) => {
         void getRegistry().invoke('core.automation/run', { automationId, blockId: row.id }, 'ui')
       },
