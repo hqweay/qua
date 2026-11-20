@@ -135,12 +135,13 @@ export function createAutomationEngine(deps: AutomationEngineDeps) {
         if (tr.on === 'removed' && was && !is) return true
         continue
       }
-      // child.added：新块（before === null）按落点找直接父块；move 不算（child.entered 未立项）
+      // child.added：新块（before === null）按落点找直接父块；move 不算（child.entered 未立项）。
+      // 父块筛选是**作用在父块上的条件**（§8.9 原始形状）：{is} 精确到某块、{tag} 按标签、
+      // {up} 任意层——求值走与「如果」同一台求值器。
       if (entry.before === null && entry.afterPlacement !== undefined) {
         const parentId = entry.afterPlacement.parent
         const parent = parentId === null ? undefined : kb.get(parentId)
-        const query = tr.parent === undefined ? undefined : ({ is: tr.parent } as QueryNode)
-        if (parentMatches(parent, query, tr.followRefs === true, new Set())) return true
+        if (parentMatches(parent, tr.parent, tr.followRefs === true, new Set())) return true
       }
     }
     return false

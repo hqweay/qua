@@ -14,7 +14,7 @@
  */
 import { mkBlock, prop, type Block } from '../model/model.ts'
 import { plainText, textRuns } from '../model/runs.ts'
-import { isQueryNode, type QueryNode } from '../query/query.ts'
+import { canonicalNode, isQueryNode, type QueryNode } from '../query/query.ts'
 
 /* ------------------------------------------------------------ 形状 */
 
@@ -30,8 +30,9 @@ export type AutomationTrigger =
   | { kind: 'prop'; prop: string; to?: string | boolean }
   /** 某标签被打上／摘掉时触发 */
   | { kind: 'tag'; tag: string; on: 'added' | 'removed' }
-  /** 直接父块下新建子块时触发（`parent` 缺省＝任意父块；followRefs 沿传递型引用展开） */
-  | { kind: 'child.added'; parent?: string; followRefs?: true }
+  /** 直接父块下新建子块时触发；`parent` 是**作用在父块上**的条件（§8.9 原始形状）——
+   *  「父块是某块的传递型引用」这类语义只有这里表达得了（`{up}` 走的是真祖先链） */
+  | { kind: 'child.added'; parent?: QueryNode; followRefs?: true }
 
 /** 步骤参数的值位：字面量，或一个引用（run 开始时解析） */
 export type ArgRef =
@@ -83,7 +84,11 @@ export function isAutomationTrigger(v: unknown): v is AutomationTrigger {
   }
   if (kind === 'child.added') {
     const t = v as { parent?: unknown; followRefs?: unknown }
-    if (t.parent !== undefined && (typeof t.parent !== 'string' || t.parent === '')) return false
+    if (t.parent !== undefined) {
+      if (t.parent !== undefined && !(typeof t.parent === 'object' && t.parent !== null && isQueryNode(t.parent))) {
+        return false
+      }
+    }
     return t.followRefs === undefined || t.followRefs === true
   }
   return false
@@ -166,7 +171,11 @@ export function canonicalAutomation(def: AutomationDef): AutomationDef {
           ? { kind: 'tag', tag: tr.tag, on: tr.on }
           : (tr.parent === undefined
               ? { kind: 'child.added', ...(tr.followRefs === true ? { followRefs: true } : {}) }
-              : { kind: 'child.added', parent: tr.parent, ...(tr.followRefs === true ? { followRefs: true } : {}) }),
+              : {
+                  kind: 'child.added',
+                  parent: canonicalNode(tr.parent),
+                  ...(tr.followRefs === true ? { followRefs: true } : {}),
+                }),
   )
   const steps = def.steps.map((s) => ({ cmd: s.cmd, args: { ...s.args } }))
   const out: AutomationDef = { enabled: def.enabled, triggers, steps: def.steps.length === 0 ? [] : steps }

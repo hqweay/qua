@@ -444,7 +444,7 @@ test('事件②：child.added——A 之下新建子块自动打标；重放与�
     name: 'A 下新建就打 AI',
     def: {
       enabled: true,
-      triggers: [{ kind: 'child.added', parent: parentA.id }],
+      triggers: [{ kind: 'child.added', parent: { is: parentA.id } }],
       steps: [{ cmd: 'core.tags/add', args: { tagId: aiTag.id } }],
     },
   })
@@ -536,7 +536,7 @@ test('事件⑤：followRefs——传递型引用的父块沿目标展开（默�
     name: '沿引用打标',
     def: {
       enabled: true,
-      triggers: [{ kind: 'child.added', parent: realParent.id, followRefs: true }],
+      triggers: [{ kind: 'child.added', parent: { is: realParent.id }, followRefs: true }],
       steps: [{ cmd: 'core.tags/add', args: { tagId: aiTag.id } }],
     },
   })
@@ -553,4 +553,46 @@ test('mentionsContentAtoms：内容原子才算错配；{up} 子树说的是祖�
   assert.equal(mentionsContentAtoms({ up: { all: [{ is: 'a' }, { text: '呵呵' }] } }), false, '祖先有正文，出生即可命中')
   assert.equal(mentionsContentAtoms({ tag: 't1' }), false)
   assert.equal(mentionsContentAtoms({ not: { text: '呵呵' } }), true, 'not 下语义会翻转——仍提示（措辞用「多半」）')
+})
+
+test('事件⑥：父块筛选是条件——{tag} 按标签、{is} 按块', () => {
+  const aiTag = mkBlock('AI')
+  aiTag.props = { _aliases: ['AI'], _lists: ['tag'] }
+  const inboxTag = mkBlock('收件箱')
+  inboxTag.props = { _aliases: ['收件箱'], _lists: ['tag'] }
+  const taggedParent = mkBlock('带收件箱的父块')
+  taggedParent.props = { _tags: [inboxTag.id] }
+  const plainParent = mkBlock('普通父块')
+  const rule = mkAutomationBlock({
+    name: '收件箱之子打 AI',
+    def: {
+      enabled: true,
+      triggers: [{ kind: 'child.added', parent: { tag: inboxTag.id } }],
+      steps: [{ cmd: 'core.tags/add', args: { tagId: aiTag.id } }],
+    },
+  })
+  const { kb } = engineFixture([aiTag, inboxTag, taggedParent, plainParent, rule])
+
+  const hit = mkBlock('命中父块的子块')
+  kb.tx((tx) => tx.insert(hit, taggedParent.id, Number.MAX_SAFE_INTEGER))
+  assert.equal(hasTag(kb.get(hit.id)!, aiTag.id), true, '父块带收件箱标签 ⇒ 触发')
+
+  const miss = mkBlock('普通父块的子块')
+  kb.tx((tx) => tx.insert(miss, plainParent.id, Number.MAX_SAFE_INTEGER))
+  assert.equal(hasTag(kb.get(miss.id)!, aiTag.id), false, '父块不满足条件 ⇒ 不触发')
+
+  // {is} 精确到某块：与 {tag} 同一求值器
+  const named = mkBlock('点名父块')
+  const rule2 = mkAutomationBlock({
+    name: '点名规则',
+    def: {
+      enabled: true,
+      triggers: [{ kind: 'child.added', parent: { is: named.id } }],
+      steps: [{ cmd: 'core.tags/add', args: { tagId: aiTag.id } }],
+    },
+  })
+  const { kb: kb2 } = engineFixture([aiTag, named, rule2])
+  const fresh = mkBlock('点名父块的子块')
+  kb2.tx((tx) => tx.insert(fresh, named.id, Number.MAX_SAFE_INTEGER))
+  assert.equal(hasTag(kb2.get(fresh.id)!, aiTag.id), true, '{is} 父块照常触发')
 })

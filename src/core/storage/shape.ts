@@ -173,8 +173,11 @@ import {
  *            `table.columns` 拆成 `displayProps` + `table.widths`；删死配置 `mindmap.cardFields`；
  *            新增 `_defaultDisplayProps`）。旧列清单/列宽/列选不迁移：`canonicalViews` 当未知键
  *            丢弃、显示按计算缺省降级；`WORKSPACE_VERSION` +1 让 localStorage 旧库显式作废重 seed。
+ * v47 → v48：**自动化触发器的父块筛选升 `QueryNode`**（§8.9 原始形状：作用在父块上的
+ *            条件——「父块是某块的传递型引用」只有这里表达得了）。首日的 string 旧形状
+ *            不认：触发器形状校验直接拒绝（定义读不出＝降级显示），作废重 seed，不写兼容分支。
  */
-export const WORKSPACE_VERSION = 47
+export const WORKSPACE_VERSION = 48
 
 /** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {

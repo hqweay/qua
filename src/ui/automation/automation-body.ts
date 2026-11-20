@@ -32,7 +32,7 @@ import { mentionsContentAtoms } from '../../core/automation/automation.ts'
 import { renderIcon } from '../../view/icons.ts'
 import { canonicalAutomation, readAutomation } from '../../core/automation/automation.ts'
 import { displayNameOf } from '../../core/identity/alias.ts'
-import type { QuerySpec } from '../../core/query/query.ts'
+import type { QueryNode, QuerySpec } from '../../core/query/query.ts'
 import { queryChips } from '../query/query-builder.ts'
 import { t } from '../../core/infra/msg.ts'
 import type { Row } from '../overlay/layers.ts'
@@ -64,6 +64,8 @@ export interface AutomationBodyDeps {
   writeDef(def: AutomationDef): void
   /** 打开「如果」的条件编辑弹层（同一台条件树；应用写 `_automation.when`） */
   editWhen(): void
+  /** 编辑「新建子块」触发器的**父块筛选**（同一台条件树；应用写 trigger.parent，清空＝任意父块） */
+  editParentFilter(triggerIndex: number): void
   /** 全库挑一块（触发器父块等处的点名候选；空词列页/标签，打字全库搜） */
   pickBlock(title: string, onPick: (blockId: string) => void): void
 }
@@ -174,8 +176,32 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
     if (tr.kind === 'tag') {
       return t(tr.on === 'added' ? 'ui.automation.trigger.tagOn' : 'ui.automation.trigger.tagOff', { tag: labelOfTag(tr.tag) })
     }
-    if (tr.parent === undefined) return t('ui.automation.trigger.childAdded')
-    return t('ui.automation.trigger.childAddedUnder', { parent: labelOfBlock(tr.parent) })
+    if (tr.parent === undefined) {
+      return tr.followRefs === true
+        ? t('ui.automation.trigger.childAddedRefs')
+        : t('ui.automation.trigger.childAdded')
+    }
+    // {is} 精确到某块保持「在 X 下新建子块时」；其余条件走人话投影
+    const isNode = tr.parent as { is?: unknown }
+    if ('is' in tr.parent && typeof isNode.is === 'string') {
+      const base = t('ui.automation.trigger.childAddedUnder', { parent: labelOfBlock(isNode.is) })
+      return tr.followRefs === true ? `${base}${t('ui.automation.trigger.refsSuffix')}` : base
+    }
+    const chips = parentCondChips(tr.parent)
+    const base = t('ui.automation.trigger.childAddedQuery', { cond: chips.join(' ') })
+    return tr.followRefs === true ? `${base}${t('ui.automation.trigger.refsSuffix')}` : base
+  }
+
+  /** 父块筛选条件的人话（与「如果」同一份投影，fields/choices 同源） */
+  const parentCondChips = (when: QueryNode): string[] => {
+    try {
+      return queryChips({ where: when }, deps.kb.propDefs().map((d) => ({ id: d.id, label: propLabel(d) || d.id, kind: propKindOf(d) })), (propId) => {
+        const def = deps.kb.propDefs().find((x) => x.id === propId)
+        return def ? choicesOf(def).map((c) => ({ id: c.id, label: c.label })) : []
+      }, (id) => labelOfBlock(id), (id) => labelOfTag(id))
+    } catch {
+      return [t('ui.automation.complexCond')]
+    }
   }
 
   const whenRows = (def: AutomationDef): HTMLElement[] => {
@@ -206,13 +232,19 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
     return rows
   }
 
-  /** 已有事件触发器的菜单：删除；`child.added` 另给「改父块」 */
+  /** 已有事件触发器的菜单：删除；`child.added` 另给「改父块筛选」与「引用窗口」开关 */
   const openTriggerMenu = (def: AutomationDef, at: number): void => {
     const tr = def.triggers[at]
     if (tr === undefined || tr === 'manual') return
     const rows: Row[] = [{ id: 'trigger/remove', label: t('ui.automation.removeTrigger'), group: 'trigger/1' }]
     if (tr.kind === 'child.added') {
       rows.push({ id: 'trigger/reparent', label: t('ui.automation.reparent'), group: 'trigger/1' })
+      rows.push({
+        id: 'trigger/followrefs',
+        label: t('ui.automation.trigger.followRefsToggle', { on: tr.followRefs === true ? t('ui.automation.on') : t('ui.automation.off') }),
+        hint: t('ui.automation.trigger.followRefsHint'),
+        group: 'trigger/1',
+      })
     }
     deps.openMenu(rows, (row) => {
       if (row.id === 'trigger/remove') {
@@ -220,10 +252,21 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
         return
       }
       if (row.id === 'trigger/reparent') {
-        pickParent((parentId) => {
-          const next = def.triggers.map((x, i) => (i === at && x !== 'manual' && x.kind === 'child.added' ? { ...x, parent: parentId === '' ? undefined : parentId } : x))
-          write({ ...def, triggers: next })
+        deps.editParentFilter(at)
+        return
+      }
+      if (row.id === 'trigger/followrefs') {
+        const next = def.triggers.map((x, i): AutomationTrigger => {
+          if (i !== at || x === 'manual' || x.kind !== 'child.added') return x
+          // 显式字面量（条件展开会让推断把 followRefs 拓宽成 boolean）
+          if (x.followRefs === true) {
+            return x.parent === undefined ? { kind: 'child.added' } : { kind: 'child.added', parent: x.parent }
+          }
+          return x.parent === undefined
+            ? { kind: 'child.added', followRefs: true }
+            : { kind: 'child.added', followRefs: true, parent: x.parent }
         })
+        write({ ...def, triggers: next })
       }
     }, triggerText(tr))
   }
@@ -304,20 +347,27 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
     )
   }
 
-  /** 新建子块触发器：任意父块，或点名一个（更深的作用域走「如果」） */
+  /** 新建子块触发器：任意父块，或点名一个，或用条件筛（父块是 Qua 的传递型引用这类语义） */
   const pickParentForTrigger = (def: AutomationDef): void => {
     deps.openMenu(
       [
         { id: '', label: t('ui.automation.trigger.anyParent'), group: 'trigger/parent' },
         { id: 'pick', label: t('ui.automation.trigger.pickParent'), group: 'trigger/parent' },
+        { id: 'query', label: t('ui.automation.trigger.queryParent'), hint: t('ui.automation.trigger.queryParentHint'), group: 'trigger/parent' },
       ],
       (row) => {
         if (row.id === '') {
           write({ ...def, triggers: [...def.triggers, { kind: 'child.added' }] })
           return
         }
+        if (row.id === 'query') {
+          // 加触发器时还没有下标：先落一条无筛选的，随即开条件树改它的父块筛选
+          write({ ...def, triggers: [...def.triggers, { kind: 'child.added' }] })
+          deps.editParentFilter(def.triggers.length)
+          return
+        }
         pickParent((parentId) => {
-          write({ ...def, triggers: [...def.triggers, parentId === '' ? { kind: 'child.added' } : { kind: 'child.added', parent: parentId }] })
+          write({ ...def, triggers: [...def.triggers, parentId === '' ? { kind: 'child.added' } : { kind: 'child.added', parent: { is: parentId } }] })
         })
       },
       t('ui.automation.trigger.addChildTitle'),

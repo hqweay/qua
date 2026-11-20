@@ -55,7 +55,7 @@ import {
   type ViewOwnerRef,
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
-import { readAutomation, type AutomationDef } from '../../core/automation/automation.ts'
+import { readAutomation, type AutomationDef, type AutomationTrigger } from '../../core/automation/automation.ts'
 import type { App } from '../../core/infra/ports.ts'
 import type { BlockEditor } from '../../view/editor/editor.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
@@ -782,6 +782,50 @@ function deleteTag(blockId: string): boolean {
     })
   }
 
+  /**
+   * **「新建子块」触发器的父块筛选编辑**：与「如果」同一台条件树，落点是
+   * `trigger.parent`（**作用在父块上**——「父块是 Qua 的传递型引用」这类语义
+   * 只有这里表达得了）。清空草稿 ＝ 任意父块；`followRefs` 在触发器菜单里开关。
+   */
+  function openAutomationParentBuilder(automationId: string, triggerIndex: number): void {
+    const readParent = (): QueryNode | undefined => {
+      const block = kb.get(automationId)
+      const def = block ? readAutomation(block) : null
+      const tr = def?.triggers[triggerIndex]
+      if (!tr || tr === 'manual' || tr.kind !== 'child.added') return undefined
+      if (tr.parent === undefined) return undefined
+      return tr.parent
+    }
+    const anchor = getEd().blockEl(automationId)?.getBoundingClientRect() ?? getEd().caretRect()
+    openSpecPopover({
+      owner: { kind: 'block', blockId: automationId },
+      anchor,
+      spec: () => ({ where: readParent() ?? { any: [] } }),
+      note: t('ui.automation.parentBuilderNote'),
+      onApply: (spec) => {
+        const block = kb.get(automationId)
+        const def = block ? readAutomation(block) : null
+        if (!def) return
+        const empty = JSON.stringify(canonicalNode(spec.where)) === JSON.stringify({ any: [] })
+        const next: AutomationDef = {
+          ...def,
+          triggers: def.triggers.map((tr, i): AutomationTrigger => {
+            if (i !== triggerIndex || tr === 'manual' || tr.kind !== 'child.added') return tr
+            // 显式字面量（条件展开会让推断把 followRefs 拓宽成 boolean）
+            const followRefs = tr.followRefs === true
+            const parent = canonicalNode(spec.where)
+            if (empty && !followRefs) return { kind: 'child.added' }
+            if (empty) return { kind: 'child.added', followRefs: true }
+            if (followRefs) return { kind: 'child.added', followRefs: true, parent }
+            return { kind: 'child.added', parent }
+          }),
+        }
+        void getRegistry().invoke('core.automation/set-def', { automationId, def: next }, 'builder')
+        layers.closePopover()
+      },
+    })
+  }
+
   return {
     openEmbedViewMenu,
     openSpecPopover,
@@ -791,6 +835,7 @@ function deleteTag(blockId: string): boolean {
     openDerivedSlice,
     openQueryBuilder,
     openAutomationWhenBuilder,
+    openAutomationParentBuilder,
     showLinkComposer,
     showChildPropsPicker,
     showTagPicker,
