@@ -32401,6 +32401,68 @@ await check('T339 划选经过引用：显示名随原生选区一起选中，�
   await ctx.close()
   return `划选经过引用：显示名随原生选区一起选中；复制载荷仍干净`
 })
+/**
+ * T340｜**浮层里再开菜单**：新面替换旧面，不叠在下面（点得到、落得下）。
+ *
+ * 修前：视图选项是 `.popover`（z=70），「编辑默认」开的子块属性选择器是 `.layer`（z=60）
+ * ⇒ 新菜单被旧浮层盖住，看起来灰着、按了没反馈。判据是两条：旧面必须关掉；
+ * 开关行必须是 `elementFromPoint` 的命中物，并且真按一下能落盘。
+ */
+await check('T340 浮层里开菜单：旧浮层关闭、新菜单在最上且可点（编辑默认 → 子块继承开关）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  const host = await page.evaluate(() => {
+    const q = window.__qua
+    const b = q.__editor.store.blocks.find(
+      (x) => x.children.length >= 1 && !x.props?._date && !x.props?._query,
+    )
+    if (!b) throw new Error('前置：没有带子块的内容块')
+    const r = q.invoke('core.view/options', { owner: { kind: 'block', blockId: b.id } })
+    if (!r?.ok) throw new Error('前置：视图选项没打开 ' + JSON.stringify(r))
+    return b.id
+  })
+  await page.waitForSelector('.popover .vopt-seg', { timeout: 3000 })
+
+  // 「编辑默认」是第二颗分段按钮（第一颗＝跟随默认，第三颗＝自定义）
+  const editAt = await page.evaluate(() => {
+    const b = document.querySelectorAll('.popover .vopt-seg-btn')[1]
+    const r = b.getBoundingClientRect()
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
+  })
+  await page.mouse.click(editAt.x, editAt.y)
+  await page.waitForSelector('.layer', { timeout: 3000 })
+  await page.waitForTimeout(150)
+
+  const state = await page.evaluate(() => {
+    const layer = document.querySelector('.layer')
+    const row = document.querySelector('.layer-item[data-id="childprop-follow"]')
+    if (!layer || !row) return { err: 'no follow row', ids: [...document.querySelectorAll('.layer-item')].map((e) => e.dataset.id) }
+    const r = row.getBoundingClientRect()
+    const x = r.left + Math.min(60, r.width / 2)
+    const y = r.top + r.height / 2
+    const hit = document.elementFromPoint(x, y)
+    return {
+      popovers: document.querySelectorAll('.popover').length,
+      layers: document.querySelectorAll('.layer').length,
+      hit: hit?.closest?.('.layer-item')?.getAttribute('data-id') ?? hit?.className ?? null,
+      x,
+      y,
+    }
+  })
+
+  assert(state.popovers === 0, `开菜单后旧浮层应关掉：${JSON.stringify(state)}`)
+  assert(state.layers === 1, `同屏只留一个菜单：${JSON.stringify(state)}`)
+  assert(state.hit === 'childprop-follow', `开关行应在最上、可点：${JSON.stringify(state)}`)
+  await page.mouse.click(state.x, state.y)
+  await page.waitForTimeout(250)
+  const off = await page.evaluate((h) => window.__qua.__editor.store.find(h)?.props?._childPropsFollow, host)
+  assert(off === false, `点开关应落盘 false：${JSON.stringify({ off, state })}`)
+
+  await ctx.close()
+  return `浮层→菜单：旧浮层关闭、开关行在最上并落 false`
+})
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

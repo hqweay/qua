@@ -361,35 +361,37 @@ export class ViewOptionsPanel {
     const seg = document.createElement('div')
     seg.className = 'vopt-seg'
     const editing = custom || this.displayEditing
-    seg.append(
-      this.segBtn(t('ui.view.opt.followDefault'), !editing, () => {
-        this.displayEditing = false
-        if (custom) {
-          this.deps.invoke('core.view/set-display', { owner: this.deps.owner, viewId: this.deps.viewId(), props: null })
-        }
-        this.refresh()
-      }),
-    )
+    const followBtn = this.segBtn(t('ui.view.opt.followDefault'), !editing, () => {
+      this.displayEditing = false
+      if (custom) {
+        this.deps.invoke('core.view/set-display', { owner: this.deps.owner, viewId: this.deps.viewId(), props: null })
+      }
+      this.refresh()
+    })
+    followBtn.dataset.tip = t('ui.view.opt.followDefaultHint')
+    seg.append(followBtn)
     // 「编辑默认」只在声明真正生效的组合给：children 源（声明喂的是直接子块）的大纲与卡片。
     // 表格的缺省是计算列、query 命中的声明各在各的父块——这些组合里调它等于没按
     const declarationApplies = source.kind === 'children' && (view === null || view.kind === 'cards')
-    if (declarationApplies && this.deps.openChildProps && this.deps.owner.kind === 'block') {
-      seg.append(
-        this.segBtn(t('ui.view.opt.editDefault'), false, () => {
-          this.deps.openChildProps?.((this.deps.owner as { blockId: string }).blockId)
-        }),
-      )
+    const owner = this.deps.owner
+    if (declarationApplies && this.deps.openChildProps && owner.kind === 'block') {
+      const blockId = owner.blockId
+      const editBtn = this.segBtn(t('ui.view.opt.editDefault'), false, () => {
+        this.deps.openChildProps?.(blockId)
+      })
+      editBtn.dataset.tip = t('ui.view.opt.editDefaultHint')
+      seg.append(editBtn)
     }
-    seg.append(
-      this.segBtn(t('ui.view.opt.custom'), custom, () => {
-        // 进入编辑态**不写盘**：勾选清单按当前生效显示预选，首次勾选才落白名单——
-        // 「点开看看」不该让显示跳变（配置写一条撤销，但没动过的配置不该产生撤销）
-        if (!editing) {
-          this.displayEditing = true
-          this.render()
-        }
-      }),
-    )
+    const customBtn = this.segBtn(t('ui.view.opt.custom'), custom, () => {
+      // 进入编辑态**不写盘**：勾选清单按当前生效显示预选，首次勾选才落白名单——
+      // 「点开看看」不该让显示跳变（配置写一条撤销，但没动过的配置不该产生撤销）
+      if (!editing) {
+        this.displayEditing = true
+        this.render()
+      }
+    })
+    customBtn.dataset.tip = t('ui.view.opt.customHint')
+    seg.append(customBtn)
     body.append(seg)
 
     if (!editing) return

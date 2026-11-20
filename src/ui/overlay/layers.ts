@@ -293,6 +293,15 @@ export class Layers {
       return
     }
     this.closeMenu(false)
+    /**
+     * **菜单与信息浮层是同一类「瞬时面」：同屏只留最后打开的那一个。**
+     *
+     * 两层各有各的 z（浮层 70 > 菜单 60），同时开着时新打开的那一层反而被旧的盖住：
+     * 「编辑默认」从视图选项浮层里开子块属性选择器，结果选择器在浮层 **下面**，
+     * 看起来灰着、按了也没反应。替换而不是叠放，理由与「菜单是一次性动作面板」同一条：
+     * 用户点第二下是要换面，不是要在旧面上再叠一张。
+     */
+    this.closePopover()
     this.menuTrigger = o.trigger ?? null
     /**
      * **焦点归还**：菜单会抢焦点（搜索框要能打字），关掉之后必须还回去。
@@ -833,6 +842,9 @@ export class Layers {
       return
     }
     this.closePopover()
+    // 同屏只留最后打开的那一个瞬时面（与 `openMenu` 收在同一处，理由见那里）：
+    // 菜单里点「视图选项…」等入口时，旧菜单不能留在浮层背后继续接 Esc／点外关闭。
+    this.closeMenu()
     this.popTriggerEl = trigger?.el ?? null
     this.popTriggerKey = trigger?.key
     const box = document.createElement('div')
