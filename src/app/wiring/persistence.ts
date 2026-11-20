@@ -163,6 +163,100 @@ export function setupPersistence(deps: PersistenceDeps) {
    */
   let lastOps: Op[] = []
   let saveTimer: number | null = null
+  /**
+   * **在途保存**。同一时刻只允许一批在途：两批并发会各自「拿走」同一份
+   * `pendingOps` 的前缀，落盘顺序与 op 顺序不再一致。
+   */
+  let inFlight: Promise<void> | null = null
+  /** 在途期间又来了 `saveNow()`：这批落完立刻再落下一批，不丢一次排期 */
+  let saveQueued = false
+  /**
+   * **库的代数**：`clearPendingOps`（换库）时加一。
+   *
+   * 在途保存的成功回调若跨了换库，**不许**把旧库的 `genesis`/`savedSwap` 写进新库状态；
+   * 旧库的批次也不许回填进新库的 `pendingOps`。代数是这条边界的唯一判据。
+   */
+  let epoch = 0
+  /** 失败后的单次重试定时器（固定 5s，不做指数退避；失败提示本身只发一次） */
+  let retryTimer: number | null = null
+  const SAVE_RETRY_MS = 5000
+
+  /**
+   * **落一批**：仓库层只回答「这一批落盘了没有」，状态推进要等这个答案。
+   *
+   * 三个状态必须在 `ok` 之后才动：
+   *   · `genesis`：失败时保持 true，下一笔重算 `diff([], 当前模型)`（它是可再生的）；
+   *   · `savedSwap`：只有这一批真的落盘，盘上才算「已追到这次换森林」；
+   *   · `pendingOps`：非 genesis 的批次失败要**放回队首**，且排在此期间新产生的 op 之前。
+   * 之前的实现先关 genesis、先清 pendingOps、先推进 savedSwap，再 `void persist(...)`：
+   * 一次失败就永久丢掉这批（以及「盘上还没这份模型」这个事实）。
+   */
+  function startSave(): Promise<void> {
+    const first = genesis
+    const swapAtStart = blocks.swapCount
+    const epochAtStart = epoch
+    /**
+     * **第一笔是 genesis**：`diff([], 当前模型)` 覆盖全库，待落盘队列里已有的 op
+     * （bootOps 与期间编辑）都被它包含，直接让位给这一份；失败时 genesis 仍为 true，
+     * 下一笔会按**那时的**模型重算，不会漏掉期间的编辑。
+     */
+    const batch = first ? diff([], deps.getWs().blocks) : pendingOps
+    if (!first) pendingOps = []
+    /**
+     * **整份替换的判据**只剩两条：第一笔 genesis，或者森林被整片换过（换库）。
+     * 零 op 但森林没换（例如只换了落点）⇒ 照常增量，只写 meta 两格。
+     */
+    const replace = first || swapAtStart !== savedSwap
+    /** 失败收口：只碰还在同一代、且这一批确实属于本库的状态 */
+    const onFailure = (error: unknown): void => {
+      if (epochAtStart !== epoch) return
+      /**
+       * 批次放回队首。期间新产生的 op 已经在 `pendingOps` 里，接在它后面——
+       * 顺序仍是「先发生的先落」。genesis 批次不回填（它可由当前模型重算）。
+       * 先回填再提示：提示链路（toast／notice）本身不该决定这一批还留不留。
+       */
+      if (!first) pendingOps = [...batch, ...pendingOps]
+      if (retryTimer === null) {
+        retryTimer = window.setTimeout(() => {
+          retryTimer = null
+          saveNow()
+        }, SAVE_RETRY_MS)
+      }
+      warnSaveFailed(error)
+    }
+    const p = Promise.resolve()
+      .then(() => persist(batch, replace))
+      .then(
+        (saved) => {
+          // 跨了换库：这一批属于旧库，状态推进与回填都不许碰新库
+          if (epochAtStart !== epoch) return
+          if (!saved.ok) {
+            onFailure(saved.error)
+            return
+          }
+          if (retryTimer !== null) {
+            window.clearTimeout(retryTimer)
+            retryTimer = null
+          }
+          genesis = false
+          savedSwap = swapAtStart
+          // 落盘期间又攒了 op：再排一批（防抖窗口会把连续编辑并回去）
+          if (pendingOps.length > 0) scheduleSave()
+        },
+        // 只接 `persist` 的拒绝（同步 throw 也被 `Promise.resolve().then` 转成拒绝）；
+        // 成功分支里的异常不在这里被误判成「这批没落盘」
+        (error: unknown) => onFailure(error),
+      )
+      .finally(() => {
+        inFlight = null
+        if (saveQueued) {
+          saveQueued = false
+          saveNow()
+        }
+      })
+    inFlight = p
+    return p
+  }
 
   function saveNow(): void {
     if (deps.bootState.readOnly) return
@@ -170,28 +264,12 @@ export function setupPersistence(deps: PersistenceDeps) {
       window.clearTimeout(saveTimer)
       saveTimer = null
     }
-    /**
-     * **第一笔是 genesis，不是「整份替换」**：`diff([], 当前模型)` 的每一块都带
-     * 位置、出生、时刻与正文；行写入仍走增量那条路，`op_log` 也拿到同一批 op。
-     *
-     * 种子／旧库作废／换库之后的第一次落盘都是它；此后 `genesis` 永假。
-     */
-    const first = genesis
-    genesis = false
-    let ops = pendingOps
-    pendingOps = []
-    if (first) ops = diff([], deps.getWs().blocks)
-    /**
-     * **整份替换的判据**只剩两条：第一笔 genesis（盘上还没有这份模型），
-     * 或者**森林被整片换过** —— 后者只剩「换库」一条：
-     * 撤销/重做改走 op 之后，它们与一次普通编辑同路（增量写盘）。
-     * 零 op 但森林没换（例如只换了落点）⇒ 照常增量，只写 meta 两格。
-     */
-    const replace = first || blocks.swapCount !== savedSwap
-    savedSwap = blocks.swapCount
-    void persist(ops, replace).then((saved) => {
-      if (!saved.ok) warnSaveFailed(saved.error)
-    })
+    if (inFlight) {
+      // 在途：只记「还要再落一次」。它不是丢排期——这一批的 finally 会接上。
+      saveQueued = true
+      return
+    }
+    void startSave()
   }
 
   function scheduleSave(): void {
@@ -213,15 +291,33 @@ export function setupPersistence(deps: PersistenceDeps) {
    * `diff([], 当前森林)` 与 `replace` 一起表达它，而后把 `genesis` 关掉。
    */
   async function forceReplaceNow(): Promise<{ ok: true } | { ok: false; error: unknown }> {
-    genesis = false
+    // 先等在途的那批落完：它可能正拿着旧库的批次，和这次整份替换并发会打乱落盘顺序
+    if (inFlight) await inFlight
+    // 这次是显式整份替换：清掉失败重试，避免它和替换并发
+    if (retryTimer !== null) {
+      window.clearTimeout(retryTimer)
+      retryTimer = null
+    }
+    /**
+     * 整份替换覆盖的是**调用这一刻**的模型；期间新产生的 op 不丢——替换成功后
+     * 仍留在 `pendingOps`，由下一次保存接着写。
+     */
+    const covered = pendingOps
     pendingOps = []
+    const swapAt = blocks.swapCount
     const r = await persist(diff([], deps.getWs().blocks), true, true)
-    if (!r.ok) return { ok: false, error: r.error }
+    if (!r.ok) {
+      // 失败：把被这次替换覆盖的 op 放回队首；genesis/savedSwap 一律不动
+      pendingOps = [...covered, ...pendingOps]
+      return { ok: false, error: r.error }
+    }
+    genesis = false
+    savedSwap = swapAt
     deps.bootState.readOnly = false
     deps.bootState.notice = null
     // 上一次失败的告警不该跟着新库继续挂着
     saveFailureShown = false
-    savedSwap = blocks.swapCount
+    if (pendingOps.length > 0) scheduleSave()
     return { ok: true }
   }
 
@@ -329,9 +425,15 @@ export function setupPersistence(deps: PersistenceDeps) {
     run,
     /** 只读副本：调用方改数组不该影响这里记着的那一份 */
     getLastOps: () => lastOps.slice(),
-    /** 换库前清空：旧库的 op 带过河就是脏写 */
+    /** 换库前清空：旧库的 op 带过河就是脏写；代数加一让在途保存的状态推进失效 */
     clearPendingOps: () => {
       pendingOps = []
+      epoch++
+      saveQueued = false
+      if (retryTimer !== null) {
+        window.clearTimeout(retryTimer)
+        retryTimer = null
+      }
     },
   }
 }
