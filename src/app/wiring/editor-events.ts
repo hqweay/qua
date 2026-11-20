@@ -18,6 +18,7 @@ import {
   choiceDisplayLabel,
   choicesFor,
   embedBodyOf,
+  iconOf,
   isDeleted,
   openAxisOf,
   readEmbed,
@@ -104,7 +105,7 @@ function viewEvents(
       id: b.id,
       label: blockLabel(b, kbGet),
       group: 'pick/run-target',
-      icon: 'lucide:zap',
+      icon: iconOf(b) ?? 'lucide:circle',
     }))
     layers.openMenu({
       rows,
