@@ -544,10 +544,54 @@ export class BlockEditor {
   }
   /**
    * 行投影的调用计数（诊断探针）：`rowsCalls` 是调用次数，真正走没走
-   * `visibleRows` 看 `treeProbe.visibleRowsCalls`（将来加缓存时两者会分开）。
+   * `visibleRows` 看 `treeProbe.visibleRowsCalls`——两者之间的差就是缓存命中的量。
    * 只有测试面读它（`window.__qua.perf`），产品逻辑不读。
    */
-  readonly perfProbe = { rowsCalls: 0, rowsAllCalls: 0 }
+  readonly perfProbe = {
+    rowsCalls: 0,
+    rowsAllCalls: 0,
+    /** `change` 回调总耗时/次数（装配层每次编辑通知都记一笔，诊断用） */
+    changeCalls: 0,
+    changeMs: 0,
+    /** 其中 `renderDocks()` 占的毫秒数（回答「每键是不是还在重排侧槽」） */
+    docksMs: 0,
+  }
+
+  /**
+   * **当前装载的活块数**（`flatten(doc).length` 的口径）。
+   *
+   * 角标、诊断快照、按键上下文的 `blockCount` 每次按键都要这个数；跟着行投影
+   * 一起在**缓存未命中**时重算一次，读侧 O(1)。内容改动不改变这个数，所以
+   * 它不随 `revision` 变——只随行投影的前提（结构/装载形状）变。
+   */
+  docBlockCount = 0
+
+  /**
+   * **可见行投影缓存**。
+   *
+   * 可见行只由五样东西决定：装载的那份 `Doc`（roots）、折叠态（`doc.folded`
+   * 每次写都换新对象）、聚焦位（`focusRootId`/`focusRootOpen`，同步时可原地改）、
+   * 非大纲宿主的 `viewRootId`、以及**树的形状**（`store.structureRevision`）。
+   * 内容与属性写入只推 `store.revision`，不推 `structureRevision` ⇒ 键入不会
+   * 让行集合失效。
+   *
+   * ⚠️ 缓存的是**数组本体**：调用方只读（`find`／`filter`／遍历），不要原地排序/增删。
+   * ⚠️ 行里的 `block` 是活引用：正文改了不需要重算行，读 `.content` 自然是新值。
+   */
+  private rowsCache: {
+    doc: Doc
+    roots: Doc['roots']
+    folded: Doc['folded']
+    focusRootId: string | undefined
+    focusRootOpen: boolean | undefined
+    viewRootId: string | undefined
+    structureRev: number
+    withBody: boolean
+    rows: VisibleRow[]
+  } | null = null
+
+  /** 与行投影同一代的行索引（`blockId → VisibleRow`）：`ctxKeys`／`belowOf` 每键都要查 */
+  private rowIndex: Map<string, VisibleRow> | null = null
   sel: Sel | null = null
   virtualize = false
   radius = 12
@@ -1338,11 +1382,52 @@ export class BlockEditor {
   }
 
   private rawRows(): VisibleRow[] {
-    return visibleRows(this.doc, {
+    const doc = this.doc
+    const withBody = this.events.viewBody !== undefined
+    const c = this.rowsCache
+    if (
+      c !== null &&
+      c.doc === doc &&
+      c.roots === doc.roots &&
+      c.folded === doc.folded &&
+      c.focusRootId === doc.focusRootId &&
+      c.focusRootOpen === doc.focusRootOpen &&
+      c.viewRootId === doc.viewRootId &&
+      c.structureRev === this.store.structureRevision &&
+      c.withBody === withBody
+    ) {
+      return c.rows
+    }
+    // 活块数的口径是 `flatten(doc)`（含折叠隐藏、不含软删）；只在缓存未命中时走一遍
+    this.docBlockCount = flatten(doc).length
+    const rows = visibleRows(doc, {
       // 只有这一屏真会画身体的编辑器才让子块行让位（没有 viewBody 回调的
       // 里层编辑器——挂载区／镜像／查询结果——子块仍照常画）
       ...(this.events.viewBody ? { bodyHosts: hasChildrenViewBody } : {}),
     }).filter((r) => !r.hidden)
+    this.rowsCache = {
+      doc,
+      roots: doc.roots,
+      folded: doc.folded,
+      focusRootId: doc.focusRootId,
+      focusRootOpen: doc.focusRootOpen,
+      viewRootId: doc.viewRootId,
+      structureRev: this.store.structureRevision,
+      withBody,
+      rows,
+    }
+    this.rowIndex = new Map(rows.map((r) => [r.block.id, r]))
+    return rows
+  }
+
+  /**
+   * 这一块此刻的**可见行**（按 id 查，命中行索引就 O(1)）。
+   * 单行重画每键都要这一行；走 `rows().find` 在有筛选时还要现过滤一遍。
+   */
+  rowOf(id: string): VisibleRow | undefined {
+    const hit = this.rowIndex?.get(id)
+    if (hit) return hit
+    return this.rows().find((r) => r.block.id === id)
   }
 
   /** 可见行（**折叠的子树在这里被排除**；有筛选时只留命中行与它们的上下文） */
@@ -2587,11 +2672,12 @@ export class BlockEditor {
   selectionSpot(): { blockId: string; start: number; end: number; text: string } | null {
     const s = this.sel
     if (!s || s.aBlock !== s.hBlock) return null
-    const b = locate(this.doc, s.aBlock)?.block
-    if (!b || !canWriteText(b)) return null
+    // 塌缩选区直接收工，不必为「有没有选区」先找一遍块（这一步在每次按键的上下文键里）
     const from = Math.min(s.aOff, s.hOff)
     const to = Math.max(s.aOff, s.hOff)
     if (from >= to) return null
+    const b = this.store.find(s.aBlock)
+    if (!b || !canWriteText(b)) return null
     const slice = sliceRuns(b.content, from, to)
     if (slice.length === 0 || slice.some((r) => r.t !== 'text')) return null
     const raw = plainText(slice)
@@ -3399,8 +3485,19 @@ export class BlockEditor {
   ctxKeys(): CtxKeys {
     const s = this.sel
     const id = s?.aBlock ?? null
-    const at = id ? locate(this.doc, id) : null
-    const b = at?.block
+    /**
+     * **光标块走行索引**（O(1)）：`ctxKeys` 在每一次按键派发里都会被读。
+     * 行索引命中时就地拿 depth；未命中（折叠隐藏／缓存还没建）才退回 `locate`，
+     * 保证「在不在这一屏」的口径不变。
+     */
+    const row = id ? this.rowIndex?.get(id) : undefined
+    let b = row?.block
+    let isDocRoot = row !== undefined && row.depth === 0
+    if (!b && id) {
+      const at = locate(this.doc, id)
+      b = at?.block
+      isDocRoot = at !== null && at.parent === null
+    }
     /**
      * **森林根**不是「装载根」：一个嵌在天下面的页被单独打开时，`blockIsRoot` 也是 true，
      * 但它并不是森林顶层。`store.blocks` 是森林根数组，O(根数) 就能判。
@@ -3412,7 +3509,7 @@ export class BlockEditor {
      */
     const blockKeys = b
       ? blockMenuCtxOf(b, this.store.blocks, {
-          isDocRoot: at !== null && at.parent === null,
+          isDocRoot,
           isForestRoot: forestRoot,
           fields: this.fieldTable(),
         })
@@ -3428,7 +3525,7 @@ export class BlockEditor {
       blockFocused: Boolean(id),
       blockMenuTarget: Boolean(id),
       blockId: id ?? '',
-      blockIsRoot: at !== null && at.parent === null,
+      blockIsRoot: isDocRoot,
       blockIsForestRoot: forestRoot,
       // 光标落在命中高亮里（块菜单「转为引用」的准入，与 ⌥ 单击同一份判据）
       mentionHit: this.mentionHitAtCaret() !== null,
@@ -3450,7 +3547,7 @@ export class BlockEditor {
       isMac: /Mac|iPhone|iPad/.test(navigator.platform),
       undoDepth: this.undo.depth(),
       redoDepth: this.undo.redoDepth(),
-      blockCount: flatten(this.doc).length,
+      blockCount: this.docBlockCount,
       mountedCount: this.mounted.size,
       virtualize: this.virtualize,
     }

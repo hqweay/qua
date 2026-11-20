@@ -1,12 +1,11 @@
 /**
  * **树投影的批级判据**（渲染热路径的等价性钉）。
  *
- * 三件事：
+ * 两件事：
  *   ① `hasSingleLiveBlock` 与 `flatten(doc).length === 1` 同一口径（逐行判便宜的替代）；
- *   ② `parentsByBlockId` 与逐块 `locate(...).parent` 同一份父链；
- *   ③ `RowDerive` 只是「一批共用一次扫库」，**结果必须与不传时逐字相同**。
+ *   ② `RowDerive` 只是「一批共用一次扫库」，**结果必须与不传时逐字相同**。
  *
- * 前两条防「优化后口径漂了」；第三条防「缓存了一份不等于现算的东西」。
+ * 前一条防「优化后口径漂了」；后一条防「缓存了一份不等于现算的东西」。
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -16,14 +15,11 @@ import {
   flatten,
   gutterFieldsFor,
   hasSingleLiveBlock,
-  locate,
   mkBlock,
   mkPropDef,
   mkTagBlock,
-  parentsByBlockId,
   rowDeriveOf,
   setValue,
-  walkForest,
   type Block,
   type Doc,
 } from '../src/core/index.ts'
@@ -64,21 +60,7 @@ test('① 单块判据与 flatten 同口径（活根数 × 活孩子 × 软删�
   }
 })
 
-test('② 父块表与逐块 locate 的父链一致', () => {
-  const forest = [mk('a', [mk('a1', [mk('a11')]), mk('a2')]), mk('b', [mk('b1')])]
-  const d = doc(forest)
-  const parents = parentsByBlockId(d)
-  const ids: string[] = []
-  walkForest(forest, (b) => {
-    ids.push(b.id)
-  })
-  assert.equal(ids.length, 6)
-  for (const id of ids) {
-    assert.equal(parents.get(id)?.id, locate(d, id)?.parent?.id ?? undefined, id)
-  }
-})
-
-test('③ RowDerive 共用扫库结果，派生值与逐次现算逐字相同', () => {
+test('② RowDerive 共用扫库结果，派生值与逐次现算逐字相同', () => {
   const def = mkPropDef('评分', 'number', { _uiPosition: 'block-left' })
   const tagB = mkTagBlock('书')
   assert.equal(declareField(tagB, def.id), true)

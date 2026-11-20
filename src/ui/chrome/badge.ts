@@ -10,7 +10,14 @@ import { flatten, type CtxKeys } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import type { MsgId } from '../../core/infra/msg.ts'
 
-export interface BadgeSnapshot {
+/**
+ * **角标本体的轻量读数**：每次刷新只读这一份。
+ *
+ * 为什么单拆一层：角标每帧都可能刷新，而全量快照里有整库 `JSON.stringify`、
+ * 格式/原子计数、上下文键——那些只在**诊断面板展开**时才需要。两者分开，
+ * 角标常驻不再替面板付全量的钱。
+ */
+export interface BadgeSummary {
   /** 模型里的块数 */
   blocks: number
   /** DOM 里挂着的 .blk 数（虚拟化证据） */
@@ -19,9 +26,12 @@ export interface BadgeSnapshot {
   domNodes: number
   mounted: number
   virtualize: boolean
-  radius: number
   theme: string
   composing: boolean
+}
+
+export interface BadgeSnapshot extends BadgeSummary {
+  radius: number
   compositionSeq: string[]
   selection: { aBlock: string; aOff: number; hBlock: string; hOff: number } | null
   /** 块选区：跨块拖拽时选中整块 */
@@ -42,6 +52,9 @@ export interface BadgeSnapshot {
 }
 
 export interface BadgeHost {
+  /** 轻量读数：角标本体每次刷新读它 */
+  summary: () => BadgeSummary
+  /** 全量读数：只在诊断面板展开时读 */
   snapshot: () => BadgeSnapshot
   /** 短 id（面板里只显示尾部随机段） */
   shortId: (id: string) => string
@@ -127,7 +140,8 @@ export function createBadge(host: BadgeHost): Badge {
 
   function update(): void {
     raf = 0
-    const s = host.snapshot()
+    // 本体只要这七格；全量快照（整库序列化、格式/原子计数）留给面板
+    const s = host.summary()
     badgeEl.dataset.composing = s.composing ? '1' : '0'
     badgeEl.innerHTML =
       `<span class="dot"></span>` +

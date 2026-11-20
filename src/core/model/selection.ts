@@ -41,6 +41,8 @@ function normSelIn(all: readonly Block[], sel: Sel): SelRange {
 
 /** 归一化为「起点在前」的形态 */
 export function normSel(doc: Doc, sel: Sel): SelRange {
+  // 同一块内先答，**不要先求值 `flatten(doc)`**：那样快路等于没走（键入路径每次都问）
+  if (sel.aBlock === sel.hBlock) return normSelIn([], sel)
   return normSelIn(flatten(doc), sel)
 }
 

@@ -187,6 +187,20 @@ export function setupChrome(deps: ChromeDeps) {
 
   const badge = createBadge({
     shortId,
+    /**
+     * 角标本体的读数：只取七格。整库 `JSON.stringify`、格式/原子计数与上下文键
+     * 都在下面的 `snapshot` 里——那些只在诊断面板展开时需要。
+     */
+    summary: () => {
+      const mainEd = deps.getMainEd()
+      return {
+        ...deps.getDomStats(),
+        mounted: mainEd.mounted.size,
+        virtualize: mainEd.virtualize,
+        theme: prefs().theme,
+        composing: mainEd.probe.isComposing,
+      }
+    },
     snapshot: (): BadgeSnapshot => {
       const page = deps.getActiveBlock()
       const mainEd = deps.getMainEd()

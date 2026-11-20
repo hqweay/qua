@@ -359,7 +359,8 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
     const own = (sel: string): number =>
       [...editorEl.querySelectorAll(sel)].filter((el) => !el.closest('.mount, .queryview, .blk-embed-body')).length
     return {
-      blocks: flatten(mainEd.doc).length,
+      // 行投影缓存顺带记下的活块数（口径同 `flatten(doc).length`），读侧 O(1)
+      blocks: mainEd.docBlockCount,
       domBlocks: own('.blk'),
       domNodes: own('*'),
     }

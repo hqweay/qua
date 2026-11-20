@@ -2144,13 +2144,30 @@ function scheduleTabs(): void {
   }, 60)
 }
 
+/**
+ * 侧槽的重画同样**去抖**：正文每敲一个字都会 `change`，而槽里的卡（检视、反链、
+ * 快捷标题）只有「名字/成员变了」才需要重画。每次通知都整叠重排两个槽，在长文档上
+ * 是每键十几毫秒的主要来源——60ms 与属性面板、tab 标题同档，用户看不出来。
+ */
+let docksTimer: number | null = null
+function scheduleDocks(): void {
+  if (docksTimer !== null) window.clearTimeout(docksTimer)
+  docksTimer = window.setTimeout(() => {
+    docksTimer = null
+    renderDocks()
+  }, 60)
+}
+
 ed.events = viewEvents(
   () => mainEd,
   (kind) => {
+    const t0 = performance.now()
     syncSections()
     scheduleSave()
     chrome.renderEmptyHint(activeBlock().children)
-    renderDocks() // 块数变了要更新
+    const t1 = performance.now()
+    scheduleDocks() // 块数/名字变了要更新（去抖：不在每键的通知里整叠重排）
+    const t2 = performance.now()
     scheduleTabs()
     scheduleBadge()
     /**
@@ -2161,6 +2178,10 @@ ed.events = viewEvents(
      * 「⌘Z 之后模型已经回到表格，屏幕还停在大纲」，不报错。
      */
     if (kind === 'struct') panels?.renderMounts()
+    // 诊断计数器（探针读；产品逻辑不读）：回答「每键的通知回调里侧槽占多少」
+    mainEd.perfProbe.changeCalls++
+    mainEd.perfProbe.changeMs += performance.now() - t0
+    mainEd.perfProbe.docksMs += t2 - t1
   },
   'editor',
   // 正文这一台把查询结果画在自己行下；里层编辑器（`wireViewEditor`）默认不挂

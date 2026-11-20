@@ -24,7 +24,6 @@ import {
   journalDateLabel,
   locate,
   noteSourceCellsOf,
-  parentsByBlockId,
   refSourcesOf,
   rowDeriveOf,
   walkForest,
@@ -70,6 +69,38 @@ export class RenderOps {
    * 但 `applyWindow` 仍要对全量行算占位高度——这两个数分开记，才能看出「虚拟化只省了
    * DOM、没省行投影」。只有测试面读它（`window.__qua.perf`）。
    */
+  /**
+   * **行派生的缓存**（定义块/标签块/父声明/选项表）。
+   *
+   * 这几张表只在「树形/存在」或「属性」变化时才变，**文本输入不碰它们**——
+   * 逐键重扫整库（`allPropDefs` ＋ `tagsById`）是单行重画里最后两遍全库遍历。
+   * 失效键＝store 的两个修订号（结构／属性）＋ **当前索引对象**（索引被丢弃重建时
+   * 连带作废：缓存里握着的 byId 表已经不代表这一代了）。
+   */
+  private deriveCache: {
+    structureRev: number
+    propsRev: number
+    index: unknown
+    derive: RowDerive
+  } | null = null
+
+  private deriveOf(): RowDerive {
+    const store = this.ed.store
+    const index = store.index
+    const c = this.deriveCache
+    if (
+      c !== null &&
+      c.structureRev === store.structureRevision &&
+      c.propsRev === store.propsRevision &&
+      c.index === index
+    ) {
+      return c.derive
+    }
+    const derive = rowDeriveOf(store.blocks, index.blocks)
+    this.deriveCache = { structureRev: store.structureRevision, propsRev: store.propsRevision, index, derive }
+    return derive
+  }
+
   readonly probe = {
     renderAllCalls: 0,
     renderAllRows: 0,
@@ -189,7 +220,7 @@ export class RenderOps {
     const batch = pending.slice(0, this.idleBatch)
     // 与在线渲染同一条批级路径：扫库一次、单块判据一次
     const batchBlocks = batch.map((r) => r.block)
-    const derive = rowDeriveOf(this.ed.store.blocks, this.ed.store.index.blocks)
+    const derive = this.deriveOf()
     const gutters = gutterFieldsFor(batchBlocks, this.ed.store.blocks, derive)
     const below = this.belowOf(batchBlocks, derive)
     const single = hasSingleLiveBlock(this.ed.doc)
@@ -596,8 +627,19 @@ export class RenderOps {
    * 每个改结构的入口都要调它——导轨画的是「此刻的树」，不是「上次渲染的树」。
    */
   private rebuildAncestors(): void {
-    this.ancestors = ancestorsByBlockId(this.ed.rows())
+    const rows = this.ed.rows()
+    /**
+     * **同一份行数组不重算**：`rows()` 已经是缓存投影，数组身份就是「这一代可见行」
+     * 的身份。虚拟化每换一次窗都会走到这里，而换窗不改变行集合——旧写法会把
+     * O(全量行) 的祖先表重算一遍，等于把缓存省下的又花回去。
+     */
+    if (this.ancestorsRows === rows) return
+    this.ancestors = ancestorsByBlockId(rows)
+    this.ancestorsRows = rows
   }
+
+  /** 上次算祖先表用的是哪一份行数组（缓存身份） */
+  private ancestorsRows: readonly VisibleRow[] | null = null
 
   /**
    * **分段大纲的组头**（chrome 行）：折叠箭头 ＋ 页名 ＋ 条数。
@@ -685,7 +727,13 @@ export class RenderOps {
    * 「显示跟数据走」就靠这一步把模型父链接回来（嵌入岛装的是同一棵子树 ⇒ 自动跟随）。
    */
   private parentOfRow(id: string): Block | null {
-    return locate(this.ed.doc, id)?.parent ?? null
+    /**
+     * 父链直接从**索引的树父表**取（O(1)）：`applyWindow` 会对全量行问这一格，
+     * 逐块 `locate` 是 O(N²)，一次换窗就付一次。父块必须是活的（按 id 从
+     * 可见表取）——渲染中的行不可能挂在软删父块下面。
+     */
+    const parentId = this.ed.store.index.parentOf.get(id)
+    return parentId ? (this.ed.store.index.blocks.get(parentId) ?? null) : null
   }
 
   /**
@@ -697,16 +745,8 @@ export class RenderOps {
    */
   private belowOf(blocks: readonly Block[], derive?: RowDerive): Map<string, BelowFields> {
     const allowed = displayRowPropIds(this.ed.doc.displayProps)
-    /**
-     * 父块查询：批里超过一块时**一次 walk 建表**，行级查表；单块仍走 `locate`
-     * （单块场景建整张表反而更贵，且 `locate` 命中即收工）。
-     * 旧写法是每块一次 `locate`——`applyWindow` 拿**全量行**问这一格时是 O(N²)，
-     * 虚拟化换一次窗就付一次。
-     */
-    const parents = blocks.length > 1 ? parentsByBlockId(this.ed.doc) : null
-    const parentOf = parents
-      ? (id: string) => parents.get(id) ?? null
-      : (id: string) => this.parentOfRow(id)
+    // 父块查询走索引表（O(1)/行），整批不再有额外遍历
+    const parentOf = (id: string) => this.parentOfRow(id)
     const below = belowFieldsFor(
       blocks,
       this.ed.store.blocks,
@@ -723,7 +763,7 @@ export class RenderOps {
     this.probe.renderRowsRendered += rows.length
     const blocks = rows.map((r) => r.block)
     // 一批只扫一次库：gutter 与块下行共用同一份定义/标签/选项表
-    const derive = rowDeriveOf(this.ed.store.blocks, this.ed.store.index.blocks)
+    const derive = this.deriveOf()
     const gutters = gutterFieldsFor(blocks, this.ed.store.blocks, derive)
     const below = this.belowOf(blocks, derive)
     // 「这一屏只有一块」是整批的事实：在循环外算一次，别每行走一遍树
@@ -806,14 +846,14 @@ export class RenderOps {
      *    它换的是 `.tx` 所在的那一行 ⇒ 输入法正持有的文本节点被换掉，预编辑串当场落成正文。
      */
     if (this.ed.deferWhileComposing()) return
-    const row = this.ed.rows().find((r) => r.block.id === id) ?? {
+    const row = this.ed.rowOf(id) ?? {
       block,
       depth: depthOf(this.ed.doc, id),
       hidden: false,
       hasChildren: hasLiveChildren(block),
     }
     // 单行重画也是「一批」：gutter 与块下行共用一份扫库结果
-    const derive = rowDeriveOf(this.ed.store.blocks, this.ed.store.index.blocks)
+    const derive = this.deriveOf()
     this.ed.embeds.disposeRow(id)
     el.replaceWith(
       this.makeBlockEl(

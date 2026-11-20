@@ -78,3 +78,26 @@ test('store.apply 把 structuralOf 的结果带给订阅者；打字路径 false
   kb.tx((tx) => tx.remove('c1'))
   assert.equal(seen.structural.at(-1), true, 'tx.remove ＝ 结构变化')
 })
+
+test('structureRevision 只随结构/存在推进——内容写入不推（行投影缓存的失效键）', () => {
+  const root = b('p', '', [b('c1', '一')])
+  const store = new BlockStore([root])
+  const kb = new MemoryKb(store, { now: () => 1000 })
+  const start = store.structureRevision
+
+  // 打字：内容改了，行集合没变
+  kb.tx((tx) => tx.patch('c1', (x) => writeBlockContent(x, textRuns('一二'))))
+  assert.equal(store.structureRevision, start, 'content patch 不推结构修订号')
+
+  // 插入：树形变了
+  kb.tx((tx) => tx.insert(mkBlock('二'), 'p', 1))
+  assert.equal(store.structureRevision, start + 1, '插入推一次')
+
+  // 软删：存在变了
+  kb.tx((tx) => tx.remove('c1'))
+  assert.equal(store.structureRevision, start + 2, '删除推一次')
+
+  // 换库：前提全变
+  store.reset([b('p', '', [])])
+  assert.equal(store.structureRevision, start + 3, 'reset 推一次')
+})

@@ -134,6 +134,7 @@ async function measureTyping(blockId) {
   await sleep(300)
   const after = await page.evaluate(() => window.__qua.perf())
   const samples = await page.evaluate(() => window.__perfSamples.slice())
+  const changeCalls = Math.max(1, after.editor.changeCalls)
   const per25 = {
     flatten: after.tree.flattenCalls,
     visibleRows: after.tree.visibleRowsCalls,
@@ -144,6 +145,9 @@ async function measureTyping(blockId) {
     renderRowsRendered: after.render.renderRowsRendered,
     storeRebuild: after.store.rebuildCount,
   }
+  /** 通知回调里的墙钟（ms/次）：`docks` 回答「每键是不是还在重排侧槽」 */
+  const changeMsPerCall = Number((after.editor.changeMs / changeCalls).toFixed(2))
+  const docksMsPerCall = Number((after.editor.docksMs / changeCalls).toFixed(2))
   /**
    * 单键的调用栈采样：回答「这 28 遍 flatten 是谁走的」。
    * 单独敲一键再读，避免 25 键把采样窗口撑满。
@@ -163,6 +167,8 @@ async function measureTyping(blockId) {
   return {
     rows,
     per25,
+    changeMsPerCall,
+    docksMsPerCall,
     samples,
     oneKey: {
       flatten: one.tree.flattenCalls,
@@ -243,6 +249,8 @@ try {
           Object.entries(typing.per25).map(([k, v]) => [k, Number((v / Math.max(1, typing.samples.length)).toFixed(2))]),
         ),
         oneKey: typing.oneKey,
+        changeMsPerCall: typing.changeMsPerCall,
+        docksMsPerCall: typing.docksMsPerCall,
         flattenStacks: typing.flattenStacks,
       },
       scroll,

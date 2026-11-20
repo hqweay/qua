@@ -114,6 +114,21 @@ export class BlockStore {
    * 修订号是唯一便宜的答案。渲染在 stamp 时读它，保留时对它。
    */
   revision = 0
+  /**
+   * **结构修订号**：只随「树形／存在」变化推进（`block.upsert` 带 parent/prev、
+   * `block.exist`、换库），**内容与属性的写入不推**。
+   *
+   * 为什么不能复用 `revision`：`revision` 每键都变，拿它当行投影的缓存键等于
+   * 每键都失效。可见行只由「谁是活的、谁的孩子」＋折叠态决定——内容改一个字
+   * 不改变行集合，却会推 `revision`。这两个问题的失效条件分开，缓存才有意义。
+   */
+  structureRevision = 0
+  /**
+   * **属性修订号**：任何 `prop.set` 都推（身份/字段声明/选项表这些「派生表的形状」
+   * 可能跟着变）。内容与结构各有自己的键，这一格只回答「行派生的扫库结果还能不能复用」。
+   * 低频：打字不产生 prop op。
+   */
+  propsRevision = 0
   private subs = new Set<StoreSubscriber>()
   /**
    * **派生索引**（懒重建）：`null` ＝ 已失效，下次访问时从当前 `blocks` 重算一遍。
@@ -177,9 +192,12 @@ export class BlockStore {
    */
   apply(ops: readonly Op[], source?: unknown): void {
     if (ops.length > 0) this.revision++
+    const structural = structuralOf(ops)
+    if (structural) this.structureRevision++
+    if (ops.some((o) => o.e === 'prop')) this.propsRevision++
     patchIndex(this.index, ops, this.blocks)
     const ids = [...new Set(changesOf(ops).map((c) => c.id))]
-    this.notify(source, ids, structuralOf(ops))
+    this.notify(source, ids, structural)
   }
 
   /** 索引（**懒重建**）。任何改动之后第一次访问会重算一次，之后所有查询共用。 */
@@ -556,6 +574,9 @@ export class BlockStore {
   reset(blocks: Block[]): void {
     this.replaced++
     this.revision++
+    // 整片森林换掉 = 最强的一次结构变化（行集合的前提全变了）
+    this.structureRevision++
+    this.propsRevision++
     this.blocks = blocks
     /**
      * **换库回到整库模式**：`reset` 的输入是一份完整模型（种子／演示状态），

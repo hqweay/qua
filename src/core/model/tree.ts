@@ -232,22 +232,6 @@ export function pathTo(doc: Doc, id: string): Block[] | null {
 }
 
 /**
- * 每个块的**模型父块**（`null` ＝ 顶层）。
- *
- * 用途：块下行的 `_childProps` 显示声明要问「这一行的父块是谁」。渲染层手里的
- * `VisibleRow` 只有 depth、没有 parent 指针，过去的写法是逐块 `locate(doc, id)`——
- * 一批 N 行就是 N 次全树 DFS（虚拟化换窗一次批 N 全量行时退化成 O(N²)）。
- * 一次 walk 建表，行级只查表。
- */
-export function parentsByBlockId(doc: Doc): Map<string, Block | null> {
-  const out = new Map<string, Block | null>()
-  walkForest(doc.roots, (b, ctx) => {
-    out.set(b.id, ctx.parent)
-  })
-  return out
-}
-
-/**
  * **这一屏是不是只有一块**（`flatten(doc).length === 1` 的 O(度) 判据）。
  *
  * 为什么不能直接用 `flatten().length`：它被单行渲染路径每画一行问一次，
