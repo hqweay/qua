@@ -26,6 +26,13 @@ import { annotatesPairsOf } from '../relations/annotates.ts'
 import { compareRanks } from '../infra/order.ts'
 import type { KbClient } from '../kb/types.ts'
 
+/**
+ * 本地化字符串比较**只建一次**：旧写法在 `compareValues` 里每次比较都
+ * `new Intl.Collator`（或传 options 的 `localeCompare`），排序 10k 命中时
+ * 光构造 collator 就有几十万次。只读、无状态，模块级共享安全。
+ */
+const ZH_COLLATOR = new Intl.Collator('zh-Hans-CN', { numeric: true })
+
 /* ------------------------------------------------------------ 条件形状 */
 
 /**
@@ -657,9 +664,20 @@ function applySort(
   for (let i = sort.length - 1; i >= 0; i--) {
     const { by, dir, seed } = sort[i]!
     const sign = dir === 'desc' ? -1 : 1
+    /**
+     * **每个命中每键只算一次**：比较器会被调 O(n log n) 次，`sortValueOf` 里
+     * `_date` 要爬祖先链、`random` 要哈希；逐次算等于把排序成本乘上比较次数。
+     */
+    const values = new Map<object, unknown>()
+    const valueOf = (h: { block: Block; ancestors: readonly Block[] }): unknown => {
+      if (values.has(h)) return values.get(h)
+      const v = sortValueOf(h, by, seed, refCounts)
+      values.set(h, v)
+      return v
+    }
     hits.sort((x, y) => {
-      const xv = sortValueOf(x, by, seed, refCounts)
-      const yv = sortValueOf(y, by, seed, refCounts)
+      const xv = valueOf(x)
+      const yv = valueOf(y)
       if (xv === undefined || yv === undefined) {
         if (xv === undefined && yv === undefined) return 0
         return xv === undefined ? 1 : -1
@@ -1095,7 +1113,7 @@ function compareValues(a: unknown, b: unknown): number | null {
   if (typeof a === 'number' && typeof b === 'number') return a - b
   // 属性值可能是 `"3"` 这种旧输入遗留：一边是数字串也按数值比
   if (typeof a === 'string' && typeof b === 'string') {
-    return a.localeCompare(b, 'zh-Hans-CN', { numeric: true })
+    return ZH_COLLATOR.compare(a, b)
   }
   if (typeof a === 'number' && typeof b === 'string' && b.trim() !== '' && !Number.isNaN(Number(b))) {
     return a - Number(b)
