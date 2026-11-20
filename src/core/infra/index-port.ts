@@ -11,7 +11,7 @@
  *    谁认领哪个名字）与**内容里指向谁**（边）——按 op 修补的正是这两部分（`applyOps`）。
  * ⚠️ 本文件零 DOM、零持久化：它只吃森林，所以能直接单测。
  */
-import { aliasesOf, ALIASES_PROP, hasList, isDeleted, isPropDefBlock, LISTS_PROP, type Block } from '../model/model.ts'
+import { aliasesOf, ALIASES_PROP, hasList, isAutomationBlock, isDeleted, isPropDefBlock, LISTS_PROP, type Block } from '../model/model.ts'
 import type { Anno } from '../model/runs.ts'
 import { walkForest } from '../model/walk.ts'
 import { normalizeAlias } from '../identity/alias.ts'
@@ -167,6 +167,11 @@ export interface Index {
      * 与别的列表同一套失效口径：`_date` 写、含日记的子树挪动/存在性变化。
      */
     journals: Block[] | null
+    /**
+     * **全部自动化块**（可见、森林先序）。命令面板投影与「自动化」库视图都要
+     * 枚举它们；判据是 `_automation` 在场（`isAutomationBlock`），与 propDefs 同套失效口径。
+     */
+    automations: Block[] | null
   }
   /**
    * **字段读取表**缓存（`fieldTableOf` 的两趟全林扫描）。
@@ -201,7 +206,7 @@ function emptyIndex(): Index {
     all: new Map(),
     parentOfAll: new Map(),
     annos: new Map(),
-    lists: { pages: null, tags: null, propDefs: null, trash: null, journals: null },
+    lists: { pages: null, tags: null, propDefs: null, trash: null, journals: null, automations: null },
     fields: null,
     cacheProbe: { listsBuilds: 0, fieldBuilds: 0, candidateQueries: 0, fallbackQueries: 0 },
   }
@@ -271,13 +276,14 @@ export function indexInsertedSubtrees(
 
 /* ------------------------------------------------------------ 派生缓存 */
 
-/** `ensureIndexLists` 的返回值：五张表都保证已建好（`Index.lists` 的可空是「未建」标记） */
+/** `ensureIndexLists` 的返回值：六张表都保证已建好（`Index.lists` 的可空是「未建」标记） */
 export interface IndexLists {
   pages: Block[]
   tags: Block[]
   propDefs: Block[]
   trash: Block[]
   journals: Block[]
+  automations: Block[]
 }
 
 /**
@@ -296,20 +302,23 @@ export function ensureIndexLists(index: Index, forest: readonly Block[]): IndexL
   const wantDefs = lists.propDefs === null
   const wantTrash = lists.trash === null
   const wantJournals = lists.journals === null
-  if (!wantPages && !wantTags && !wantDefs && !wantTrash && !wantJournals) return lists as IndexLists
+  const wantAutomations = lists.automations === null
+  if (!wantPages && !wantTags && !wantDefs && !wantTrash && !wantJournals && !wantAutomations) return lists as IndexLists
 
   index.cacheProbe.listsBuilds++
   if (wantPages) lists.pages = []
   if (wantTags) lists.tags = []
   if (wantDefs) lists.propDefs = []
   if (wantJournals) lists.journals = []
+  if (wantAutomations) lists.automations = []
 
-  if (wantPages || wantTags || wantDefs || wantJournals) {
+  if (wantPages || wantTags || wantDefs || wantJournals || wantAutomations) {
     walkForest(forest, (b) => {
       if (wantPages && hasList(b, 'page')) lists.pages!.push(b)
       if (wantTags && hasList(b, 'tag')) lists.tags!.push(b)
       if (wantDefs && isPropDefBlock(b)) lists.propDefs!.push(b)
       if (wantJournals && isJournal(b)) lists.journals!.push(b)
+      if (wantAutomations && isAutomationBlock(b)) lists.automations!.push(b)
     })
   }
 
@@ -398,6 +407,7 @@ function invalidateForSubtree(index: Index, block: Block): boolean {
   let defs = false
   let trash = false
   let journals = false
+  let automations = false
   walkForest(
     [block],
     (b) => {
@@ -406,6 +416,7 @@ function invalidateForSubtree(index: Index, block: Block): boolean {
       if (isPropDefBlock(b)) defs = true
       if (isDeleted(b)) trash = true
       if (isJournal(b)) journals = true
+      if (isAutomationBlock(b)) automations = true
     },
     { includeDeleted: true },
   )
@@ -420,6 +431,7 @@ function invalidateForSubtree(index: Index, block: Block): boolean {
   }
   if (trash) index.lists.trash = null
   if (journals) index.lists.journals = null
+  if (automations) index.lists.automations = null
   return journals
 }
 
@@ -438,6 +450,10 @@ function invalidateForProp(index: Index, name: string): void {
   }
   if (name === '_date') {
     index.lists.journals = null
+    return
+  }
+  if (name === '_automation') {
+    index.lists.automations = null
     return
   }
   if (
@@ -529,6 +545,7 @@ export function applyOps(index: Index, ops: readonly Op[], forest: readonly Bloc
           index.lists.propDefs = null
           index.lists.trash = null
           index.lists.journals = null
+          index.lists.automations = null
           index.fields = null
         }
         break

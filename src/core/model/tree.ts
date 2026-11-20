@@ -328,9 +328,9 @@ export function hasDescendant(doc: Doc, ancestorId: string, maybeChildId: string
  *    只剔 `_aliases` 会留下「在页列表里、却没有名字」的副本；
  *    留下 `_display` 则是一个还没身份就先决定行头怎么显示的怪状态。
  *
- * ⚠️ **派生身份的载体也要剔除**（`_date`／`_kind`／`_query`）：它们与列表是同一件事的
- *    两种写法（列表收窄成两个「露面」之后，日记／定义／查询的身份**由数据派生**）。
- *    只剔 `_lists` 会漏掉这三条 ⇒ 复制日记得到第二个「同一天」，
+ * ⚠️ **派生身份的载体也要剔除**（`_date`／`_kind`／`_query`／`_automation`）：它们与列表是同一件事的
+ *    两种写法（列表收窄成两个「露面」之后，日记／定义／查询／自动化的身份**由数据派生**）。
+ *    只剔 `_lists` 会漏掉这几条 ⇒ 复制日记得到第二个「同一天」，
  *    而 `journalDays` 按「先序第一个」去重 ⇒ 那个副本对日记流／索引／引用解析
  *    **完全不可见**：不报错、不崩，只是静静地多出一个引用不到的块。
  *    判据一句话：**凡是 `hasIdentity` 会认的，副本都不能是。**
@@ -356,6 +356,7 @@ const IDENTITY_PROPS: readonly string[] = [
   '_date',
   '_kind',
   '_query',
+  '_automation',
 ]
 
 function contentProps(props: BlockProps): BlockProps | undefined {

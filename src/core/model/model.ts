@@ -244,6 +244,8 @@ export type SystemPropId =
   | typeof DEFAULT_DISPLAY_PROPS_PROP
   | typeof DEFAULT_SHOW_PATHS_PROP
   | typeof DEFAULT_GROUP_PROP
+  // 自动化定义（见 `core/automation/automation.ts`）：触发器＋条件＋步骤住在 props
+  | '_automation'
   // 露面指针（见 `core/embed.ts`）：同一块在别处再出现一次
   | '_embed'
   // 字段定义（prop-def）：kind / 格式 / 声明列表 / 选项记录域
@@ -535,6 +537,24 @@ export function isQueryBlock(b: Block | undefined): boolean {
 }
 
 /**
+ * **自动化块**：`_automation` 是一个带触发器的定义对象。
+ *
+ * 与 `isQueryBlock` 同一条形状纪律：这里只查**最小形状**（有没有触发器这一格），
+ * 完整合法性（触发器值域／步骤形状）归领域模块——读到坏形状的自动化块仍然是
+ * 自动化块（显示成「定义读不出来」的降级态），不是普通内容块。
+ *
+ * ⚠️ 住在 `model.ts`（零依赖叶子）：`canWriteText`／`hasIdentity` 要用它，
+ *    反向 import 会成环——与 `isQueryBlock` 同一个理由。
+ */
+export function isAutomationBlock(b: Block | undefined): boolean {
+  if (!b) return false
+  const raw = prop<unknown>(b, '_automation')
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false
+  const triggers = (raw as { triggers?: unknown }).triggers
+  return Array.isArray(triggers) && triggers.length > 0
+}
+
+/**
  * **这一块的正文是名字或投影，不是内容** —— 身份块的总判据。
  *
  * 身份有两个来源，缺一不可：地址（`_aliases`）／露面（`_lists`），以及由数据派生的身份
@@ -551,7 +571,8 @@ export function hasIdentity(b: Block | undefined): boolean {
     listsOf(b).length > 0 ||
     isJournalBlock(b) ||
     isPropDefBlock(b) ||
-    isQueryBlock(b)
+    isQueryBlock(b) ||
+    isAutomationBlock(b)
   )
 }
 
@@ -573,6 +594,7 @@ export function identityTags(b: Block | undefined): string[] {
   if (isJournalBlock(b)) tags.push('journal')
   if (isPropDefBlock(b)) tags.push('schema')
   if (isQueryBlock(b)) tags.push('query')
+  if (isAutomationBlock(b)) tags.push('automation')
   return tags
 }
 

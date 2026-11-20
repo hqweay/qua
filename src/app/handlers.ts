@@ -13,6 +13,7 @@
  *    改成变量再 spread 会让断言数不到（数到 0 也照样报过 —— 断言空转比红更危险）。
  */
 import type { Handler } from '../core/infra/ports.ts'
+import { AUTOMATION_HANDLERS } from './handlers/automation.ts'
 import { EMBED_HANDLERS } from './handlers/embed.ts'
 import { STRUCT_HANDLERS } from './handlers/block.ts'
 import { DEV_HANDLERS } from './handlers/dev.ts'
@@ -38,6 +39,7 @@ const DEV_SURFACE = __QUA_DEV_SURFACE__
 
 export const HANDLERS: Record<string, Handler> = {
   ...STRUCT_HANDLERS,
+  ...AUTOMATION_HANDLERS,
   ...PROPS_HANDLERS,
   ...MOUNT_HANDLERS,
   ...EMBED_HANDLERS,

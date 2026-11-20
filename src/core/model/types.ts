@@ -17,6 +17,7 @@ import { EMBED_TYPE } from '../views/embed.ts'
 import {
   DEFAULT_BLOCK_TYPE,
   blockTypeOf,
+  isAutomationBlock,
   isJournalBlock,
   isPropDefBlock,
   isQueryBlock,
@@ -115,6 +116,7 @@ export function canWriteText(b: Block): boolean {
     !isJournalBlock(b) &&
     !isPropDefBlock(b) &&
     !isQueryBlock(b) &&
+    !isAutomationBlock(b) &&
     typeDeclOf(b).text !== 'readonly'
   )
 }
@@ -124,14 +126,14 @@ export function canWriteText(b: Block): boolean {
  *
  * 与 `canWriteText` 回答的是两件事：那条管**内容写路径**（合并／拆分／程序化整段替换），
  * 它们不该碰「正文是名字」的块。但「正文是名字」不等于「这一行不可编辑」：
- * 查询块的名字只住在正文里（它没有地址），在这一行打字是它唯一的改名路径，
+ * 查询块／自动化块的名字只住在正文里（它们没有地址），在这一行打字是它们唯一的改名路径，
  * 行内 run 编辑（插图、加粗、行内引用）与打字同档 —— 都是用户正对着这一行的直接编辑。
  *
  * 其余受保护块不在此列：日记的正文是日期投影（恒空），字段定义的正文是标签（改名走命令），
  * 只读类型根本没有正文 —— 它们连直接编辑也不放行。
  */
 export function canDirectEditText(b: Block): boolean {
-  return isQueryBlock(b) || canWriteText(b)
+  return isQueryBlock(b) || isAutomationBlock(b) || canWriteText(b)
 }
 
 /**

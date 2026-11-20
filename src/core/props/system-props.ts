@@ -73,6 +73,7 @@ import {
   parseChoiceScope,
 } from './props.ts'
 import { isQueryNode, isQuerySpec } from '../query/query.ts'
+import { isAutomationDef } from '../automation/automation.ts'
 import { REF_DOMAIN_PROP, isRefDomainValue } from './ref-domain.ts'
 import { isActiveViewValue, isViewsValue } from '../views/view.ts'
 import { MOUNTS_PROP, isMountsValue } from '../views/mount.ts'
@@ -93,6 +94,9 @@ export const SYSTEM_PROP_CHECKS: Readonly<Record<string, (value: unknown) => boo
   [LISTS_PROP]: isListsValue,
   [DISPLAY_PROP]: isDisplayValue,
   _query: isQuerySpec,
+  // 自动化定义（触发器＋条件＋步骤）：写侧只收合法定义（`mkAutomationBlock` 的 canonical 形状）；
+  // 读侧（shape.ts）不上落盘闸——坏形状按「定义读不出来」降级显示，与 `_query` 同一条宽容
+  _automation: isAutomationDef,
   [VIEWS_PROP]: isViewsValue,
   [ACTIVE_VIEW_PROP]: isActiveViewValue,
   [DEFAULT_FILTER_PROP]: isQueryNode,

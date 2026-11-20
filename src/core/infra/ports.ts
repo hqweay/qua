@@ -77,6 +77,13 @@ export interface SelectionToRefRequest {
  */
 export type PropCreateMode = 'reuse' | 'new'
 
+/**
+ * 一个参数的**语义引用**：这一格要填的是哪一类东西。
+ * 自动化步骤编辑器渲染 picker 的唯一来源——没有它，步骤编辑器就得为每条命令
+ * 硬编码第二份映射（两份迟早分叉）。
+ */
+export type ArgRefKind = 'prop' | 'tag' | 'block' | 'choice'
+
 /** 命令声明（纯语义）：**没有 `key`／`context`／`host`**——落点归绑定表 */
 export interface CommandDecl {
   /** 命名空间名（`core/*` 保留给系统命令） */
@@ -90,8 +97,22 @@ export interface CommandDecl {
   category: string
   /** 搜索别名（让「加粗 / bold」都能搜到） */
   keywords?: string[]
-  /** `args` 的单一来源（最小 JSONSchema 形状） */
+  /**
+   * `args` 的单一来源（最小 JSONSchema 形状）。
+   *
+   * 两个自动化步骤编辑器按它画表单的保留约定（别在别处再造第二份）：
+   *   · `args.required`：`string[]`——缺了整条命令没法跑的参数名；
+   *   · 参数格里的 `ref`：这一格填哪一类东西（`ArgRefKind`）。`value` 一类
+   *     要按其它参数现解 kind 的格不给 `ref`，由编辑器按依赖参数定画法。
+   */
   args?: Record<string, unknown>
+  /**
+   * 可以作为自动化的**步骤**被引用（声明层的准入标记）。
+   *
+   * 手动链吃这一格；事件链（事件引擎接上后）只吃 `capability:'write'`＋`undoable`。
+   * 投影命令（`automation/<id>`）**不打**这一格——步骤引用它们要天然被拒（防递归）。
+   */
+  automation?: true
   /** 不进命令面板（编辑器内部键位） */
   hidden?: boolean
   /**
@@ -825,6 +846,17 @@ export interface App {
   insertViewBlock(blockId: string, kind: string): string
   /** 改一次露面选的视图（`core.embed/set-view` 的落点） */
   setEmbedView(blockId: string, view: string): boolean
+  /* ---- 自动化（命令块）：创建物化顶层；手动链目标＝当前块，防自改 ---- */
+  /** 新建一条自动化（默认手动触发、停用、空步骤），跳到那一块开始写定义 */
+  createAutomation(name: string): string
+  /** 手动运行一条自动化（`targetId` 缺省＝当前块）；guards 与面板灰态同一份判据 */
+  runAutomation(automationId: string, targetId?: string): boolean
+  /** 启停一条自动化（`on` 缺省＝翻转） */
+  toggleAutomation(automationId: string, on?: boolean): boolean
+  /** id 绑定的插块（自动化步骤可用的那两条机器形状；`core.editor/insert-block` 绑光标） */
+  treeInsertChild(parentId: string, text: string): string
+  /** id 绑定的移动（身份约束与 runner 同一份） */
+  treeMove(blockId: string, parentId: string | null, position?: number): boolean
   /* 浮层 / 提示 */
   toast(text: string, kind?: 'ok' | 'warn' | 'info'): void
   /**

@@ -75,8 +75,18 @@ export const TAGS_HANDLERS: Record<string, Handler> = {
    */
   'core.tags/add': (a, app) => {
     const blockId = S(a.blockId, '')
+    if (blockId === '') return false
+    // id 优先（id 不漂——步骤存 id）；只给名字（旧调用面）按名字找到或创建
+    const tagId = S(a.tagId, '')
+    if (tagId !== '') {
+      const tag = app.ed.store.find(tagId)
+      const aliases = tag?.props?._aliases
+      const displayName = Array.isArray(aliases) ? aliases[0] : undefined
+      if (typeof displayName !== 'string' || displayName === '') return false
+      return app.ed.addTag(blockId, displayName)
+    }
     const name = S(a.name, '').trim()
-    if (blockId === '' || name === '') return false
+    if (name === '') return false
     return app.ed.addTag(blockId, name)
   },
   'core.tags/remove': (a, app) => {

@@ -220,6 +220,10 @@ export class MemoryKb implements KbClient {
     return this.indexLists().tags
   }
 
+  automations(): readonly Block[] {
+    return this.indexLists().automations
+  }
+
   trash(): readonly Block[] {
     return this.indexLists().trash
   }

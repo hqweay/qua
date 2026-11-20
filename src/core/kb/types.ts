@@ -317,6 +317,8 @@ export interface KbClient {
   pages(): readonly Block[]
   /** 库里的标签块（先序）；标签清单是小集合，大库时改走 `query` */
   tags(): readonly Block[]
+  /** 库里的自动化块（`_automation` 在场，先序）；投影与「自动化」库视图枚举它 */
+  automations(): readonly Block[]
   /**
    * 回收站（**派生**）：库里所有带删除标记的块（被删子树的操作根，先序）。
    * 没有第二个存放处——这个清单每次从森林现算，恢复经 `Tx.restore` 回原位。

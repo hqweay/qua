@@ -34,6 +34,7 @@ import { createIcon } from './view/icons.ts'
 import { mountNotePopover, type NotePopoverHandle } from './ui/block-ui/note-popover.ts'
 import { type ObjFieldDeps } from './ui/overlay/panels.ts'
 import { devCommands, journalCommands, mentionCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, viewCommands, viewConfigCommands, buildFreshView, zoomCommands } from './app/commands-impl.ts'
+import { automationCommands } from './app/commands/automation.ts'
 import type { TxRun } from './app/commands/types.ts'
 import { setupPersistence } from './app/wiring/persistence.ts'
 import { setupAssets } from './app/wiring/assets.ts'
@@ -1896,6 +1897,20 @@ const app: App = {
     if (ok && ed !== mainEd && !ed.container.isConnected) ed = mainEd
     return ok
   },
+
+  /* ---- 自动化（命令块）：core runner 管事务与原子性；这里收尾记账／重画／提示 ---- */
+  ...automationCommands({
+    kb,
+    // 适配 `txRun` 的形状（它的第二参是 source）：runner 只要「一笔事务 ＋ undo 捕获」
+    tx: (fn, opts) => txRun(fn, undefined, opts),
+    recordUndo: (undo) => blocks.record(undo, ed.sel, 'other', Date.now()),
+    sel: () => ed.sel,
+    repaintBlocks: (ids) => {
+      for (const id of ids) repaintBlock(id)
+    },
+    openBlock: (id) => app.zoomTo(id),
+    toast: (text, kind) => app.toast(text, kind),
+  }),
 
   /**
    * **备份并重建本地库**（只读态下唯一的出路）。

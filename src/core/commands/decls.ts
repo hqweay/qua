@@ -110,9 +110,11 @@ export const COMMANDS: CommandDecl[] = [
   /* ---- 标签层级（属于 / 包含：一条边，两个读法） ----
      ⚠️ 下面到「露面」为止有一批 `hidden` 的**机器面命令**：参数（块 id／栏 id／值）
      由抽屉、选择器与机器接口给，面板裸按只会「未处理」——不放假条目 ⇒ 不进面板。
-     `hidden` 只管面板可见性，HTTP/MCP/CLI 照常可调。 */
-  { name: 'core.tags/add', title: t('cmd.tags.add'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, name: { type: 'string' } }, keywords: ['tag', t('menu.kw.tag')], hidden: true },
-  { name: 'core.tags/remove', title: t('cmd.tags.remove'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, tagId: { type: 'string' } }, keywords: ['tag', t('menu.kw.tag'), 'remove'], hidden: true },
+     `hidden` 只管面板可见性，HTTP/MCP/CLI 照常可调。
+     `automation: true` ＝ 可以作为自动化步骤引用；args 里的 `required`／`ref`
+     是步骤编辑器画表单的唯一来源（契约见 ports.ts 的 CommandDecl）。 */
+  { name: 'core.tags/add', title: t('cmd.tags.add'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string', ref: 'block' }, tagId: { type: 'string', ref: 'tag', description: 'tag id (preferred — ids do not drift)' }, name: { type: 'string', ref: 'tag', description: 'tag name; resolved or created (steps should store tagId instead)' } }, keywords: ['tag', t('menu.kw.tag')], hidden: true, automation: true },
+  { name: 'core.tags/remove', title: t('cmd.tags.remove'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string', ref: 'block' }, tagId: { type: 'string', ref: 'tag' } }, keywords: ['tag', t('menu.kw.tag'), 'remove'], hidden: true, automation: true },
   /**
    * 重排一个块的归属序（`_tags` 数组序）。只许换序不许增删（集合必须一致）——
    * 顺序喂着块标的借形/借色取「第一个」，是用户可编辑的真实数据，不是打标先打的偶然。
@@ -122,9 +124,11 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.belongs-to/remove', title: t('cmd.belongs.remove'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { childId: { type: 'string' }, parentId: { type: 'string' } }, hidden: true },
   { name: 'core.belongs-to/prune', title: t('cmd.belongs.prune'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { childId: { type: 'string' } }, hidden: true },
 
-  /* ---- 属性（属性是块第一公民；值在块上 props[propId]） ---- */
-  { name: 'core.props/set-value', title: t('cmd.props.set-value'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, propId: { type: 'string' }, value: {} }, hidden: true },
-  { name: 'core.props/clear-value', title: t('cmd.props.clear-value'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, propId: { type: 'string' } }, hidden: true },
+  /* ---- 属性（属性是块第一公民；值在块上 props[propId]） ----
+     set/clear 两条是自动化步骤的成员（`automation: true`）；`value` 的编辑器
+     按 `propId` 现解 kind 再定画法，所以它不带 `ref`（契约见 ports.ts）。 */
+  { name: 'core.props/set-value', title: t('cmd.props.set-value'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { required: ['propId'], blockId: { type: 'string', ref: 'block' }, propId: { type: 'string', ref: 'prop' }, value: {} }, hidden: true, automation: true },
+  { name: 'core.props/clear-value', title: t('cmd.props.clear-value'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { required: ['propId'], blockId: { type: 'string', ref: 'block' }, propId: { type: 'string', ref: 'prop' } }, hidden: true, automation: true },
   { name: 'core.props/create-def', title: t('cmd.props.create-def'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, label: { type: 'string' }, kind: { type: 'string' }, target: { type: 'string', description: 'own = this block\u2019s own value slot; declared = declared to members' }, mode: { type: 'string', enum: ['reuse', 'new'], description: 'reuse an existing same-name definition, or create a second one' }, format: { type: 'string', description: 'format within the kind\u2019s allowed set (e.g. text + url); ignored when the kind has no format axis' } }, hidden: true },
   { name: 'core.props/add-field', title: t('cmd.props.add-field'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, propId: { type: 'string' }, target: { type: 'string', description: 'own = this block\u2019s own value slot; declared = declared to members' } }, hidden: true },
   /* ---- 选项（select）：选项是定义块的直接子块，值存选项块 id ---- */
@@ -269,6 +273,16 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.query/open-builder', title: t('cmd.query.open-builder'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { owner: {} }, keywords: ['query', t('menu.kw.query'), 'builder', 'condition', 'filter'] },
   { name: 'core.query/create', title: t('cmd.query.create'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { name: { type: 'string' }, spec: {}, parentId: { type: 'string' } }, keywords: ['query', t('menu.kw.query'), 'block', 'new'], hidden: true },
   { name: 'core.query/insert', title: t('cmd.query.insert'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' } }, keywords: ['query', t('menu.kw.query'), 'filter', 'insert', 'where'] },
+
+  /* ---- 自动化（命令块：一条写在块里的「当…就…」） ----
+     create 面板可列（发现的入口之一）；run 由面板投影携带（`automation/<id>` 行
+     带着 automationId 调它），面板不再单独列裸命令。 */
+  { name: 'core.automation/create', title: t('cmd.automation.create'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.automation'), args: { name: { type: 'string' } }, keywords: ['automation', 'rule', t('menu.kw.automation')] },
+  { name: 'core.automation/run', title: t('cmd.automation.run'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.automation'), args: { required: ['automationId'], automationId: { type: 'string', ref: 'block' }, blockId: { type: 'string', ref: 'block' } }, hidden: true },
+  { name: 'core.automation/toggle-enabled', title: t('cmd.automation.toggle'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.automation'), args: { required: ['automationId'], automationId: { type: 'string', ref: 'block' }, on: { type: 'boolean' } }, hidden: true },
+  /* ---- id 绑定的树结构（自动化步骤的机器形状；core.editor/insert-block 绑光标） ---- */
+  { name: 'core.tree/insert-child', title: t('cmd.tree.insertChild'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.automation'), args: { required: ['parentId'], parentId: { type: 'string', ref: 'block' }, text: { type: 'string' } }, hidden: true, automation: true },
+  { name: 'core.tree/move', title: t('cmd.tree.move'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.automation'), args: { required: ['blockId'], blockId: { type: 'string', ref: 'block' }, parentId: { type: 'string', ref: 'block' }, position: { type: 'integer' } }, hidden: true, automation: true },
 
   /* ---- 露面（镜像／投影：同一块在别处再出现一次） ---- */
   { name: 'core.embed/insert', title: t('cmd.embed.insert'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, targetId: { type: 'string' }, view: { type: 'string', enum: ['mirror', 'table'] } }, keywords: ['embed', t('menu.kw.embed'), 'mirror', 'reference', 'view'] },

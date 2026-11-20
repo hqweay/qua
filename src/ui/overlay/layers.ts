@@ -1145,7 +1145,7 @@ export class Layers {
 export function paletteRows(
   decls: CommandDecl[],
   keyHints: Map<string, string>,
-  opts: { recents?: string[]; query?: string } = {},
+  opts: { recents?: string[]; query?: string; extra?: Row[] } = {},
 ): Row[] {
   const q = (opts.query ?? '').trim().toLowerCase()
   const row = (d: CommandDecl, id: string) => ({
@@ -1167,9 +1167,11 @@ export function paletteRows(
           .filter((d): d is CommandDecl => d !== undefined)
           .map((d) => row(d, `recent//${d.name}`))
       : []
-  const rest = visibleDecls
+  // 投影行（如自动化）与静态声明同一张列表、同一个过滤与排序——投影不是第二张命令表
+  const extra = (opts.extra ?? []).filter((r) => q === '' || r.label.toLowerCase().includes(q))
+  const rest = [...visibleDecls
     .filter((d) => q === '' || `${d.title} ${d.name}`.toLowerCase().includes(q))
-    .map((d) => row(d, d.name))
-    .sort((a, b) => a.group.localeCompare(b.group) || a.label.localeCompare(b.label))
+    .map((d) => row(d, d.name)), ...extra]
+    .sort((a, b) => (a.group ?? '').localeCompare(b.group ?? '') || a.label.localeCompare(b.label))
   return [...recent, ...rest]
 }

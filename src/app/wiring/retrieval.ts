@@ -13,6 +13,7 @@ import { selectionRefRows } from '../../app/retrieval/selection-ref-rows.ts'
 import { resolveBindings, type Binding } from '../../core/infra/bindings.ts'
 import { type ActsOn, type MenuRequest, type MenuTarget, type Registry } from '../../core/commands/index.ts'
 import { blockMenuCtxOf, findInForest, inboundRefCount, type ColorAxis, type CtxKeys, type TriggerChar } from '../../core/index.ts'
+import { projectManualAutomations } from '../../core/automation/projection.ts'
 import { Layers } from '../../ui/overlay/layers.ts'
 import type { BlockEditor } from '../../view/editor/editor.ts'
 import type { TriggerQuery } from '../../view/editor/editor-events.ts'
@@ -51,6 +52,27 @@ export interface RetrievalDeps {
 
 export function setupRetrieval(deps: RetrievalDeps) {
   const { ws, kb, layers, uiCtx, keyHints, isMac, prefs, getEd, getRegistry, getPanels, scheduleDeviceSave } = deps
+
+  /**
+   * **自动化的面板投影**（派生的动态命令，不是第二张命令表）：
+   * 目标＝此刻聚焦的那一块；不适用灰掉并说明——发现性靠它，不是靠隐藏。
+   * 灰行的 hint 与运行前拦截的 toast 共用同一组文案 id（两个答案不许分叉）。
+   */
+  const automationPaletteRows = (): Row[] => {
+    const ed = getEd()
+    const targetId = ed.sel?.aBlock ?? ed.caretBlock() ?? undefined
+    return projectManualAutomations(kb, targetId).map((e) => ({
+      id: e.id,
+      label: e.title,
+      // 灰行的 hint 说的是「为什么现在不能跑」；可运行的行不占提示位
+      hint: e.reason ? t(`ui.automation.blocked.${e.reason}`, { name: e.title }) : '',
+      icon: e.icon,
+      group: `palette/${t('menu.cat.automation')}`,
+      command: 'core.automation/run',
+      args: { automationId: e.automationId, ...(targetId !== undefined ? { blockId: targetId } : {}) },
+      disabled: !e.runnable,
+    }))
+  }
 
   // 会话状态（唯一持有者；外面经 triggerState 读写，不许复制成两份）
   let triggerCh: TriggerChar | null = null
@@ -491,7 +513,11 @@ function showMenu(req: MenuRequest): void {
     const ctx = req.ctx ?? uiCtx()
     // 空查询带「最近执行」段、有查询词收起——收放判据在 `paletteRows`，这里只传话
     const buildRows = (q: string): Row[] =>
-      paletteRows(getRegistry().list(), keyHints(), { recents: prefs().recentCommands, query: q })
+      paletteRows(getRegistry().list(), keyHints(), {
+        recents: prefs().recentCommands,
+        query: q,
+        extra: automationPaletteRows(),
+      })
     layers.openMenu({
       rows: buildRows(''),
       anchor: null,
