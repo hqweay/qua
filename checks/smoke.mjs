@@ -18097,6 +18097,9 @@ await check('T175 键盘焦点处处可见：按钮亮 accent 环、菜单搜索
   await page.evaluate(() => window.__qua.focus())
   await page.keyboard.press(kbd('mod+p'))
   // ① 菜单搜索框自己的焦点语言：下分隔线换 accent（它没有边框可换）
+  // 菜单打开与搜索框取焦是两条异步（渲染一帧后才 focus）：先等焦点真的落进去，
+  // 再读它自己的焦点语言；否则读到的是「已挂上、还没聚焦」的中性分隔线。
+  await page.waitForFunction(() => document.activeElement?.classList?.contains('layer-input'), null, { timeout: 4000 })
   const inputLine = await page.evaluate(() => getComputedStyle(document.querySelector('.layer-input')).borderBottomColor)
   const accent = await page.evaluate(() => {
     const p = document.createElement('span')
