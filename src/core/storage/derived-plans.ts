@@ -78,12 +78,18 @@ export type DerivedPlan =
  * 参数顺序与 `derivedPlanParams` 逐字对齐——两处必须一起改。
  */
 export const DERIVED_PLAN_SQL = {
+  /**
+   * **前缀匹配用范围谓词，不用 `LIKE`**：SQLite 默认 `LIKE` 大小写不敏感，
+   * `path like ?1 || '%'` 吃不到 `idx_BlockIndex_path` 的范围查找，会退化成
+   * 整条索引扫描（实测 `EXPLAIN` 是 SCAN）。派生路径只含 `/` 与数字，
+   * `prefix <= path < prefix || '~'` 与「前缀」逐条等价（`~` 比路径段的所有字符都大）。
+   */
   reindexSubtree: `update ${I}
       set path = ?2 || substr(path, length(?1) + 1),
           root = coalesce((select r.root from ${I} r where r.block = ?3), ?4)
-    where path like ?1 || '%'`,
+    where path >= ?1 and path < ?1 || '~'`,
 
-  dropSubtree: `delete from ${I} where path like ?1 || '%'`,
+  dropSubtree: `delete from ${I} where path >= ?1 and path < ?1 || '~'`,
 
   recomputeHidden: `with recursive sub(id, h) as (
       select i.block, case when b.deleted is not null or ?2 = 1 then 1 else null end
