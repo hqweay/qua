@@ -1,0 +1,959 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --ink: #1d1f23;
+    --ink2: #4d525a;
+    --ink3: #6b7078;
+    --ink4: #9aa0a8;
+    --line: #e4e6e9;
+    --line2: #eff1f3;
+    --bg: #fcfcfd;
+    --card: #ffffff;
+    --accent: #6b5bd2;
+    --accent-soft: #f2f0fd;
+    --ok: #2f855a;
+    --ok-soft: #eef8f2;
+    --warn: #b8742a;
+    --warn-soft: #fdf5ec;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  body {
+    width: 1680px;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", sans-serif;
+    padding: 46px 52px 40px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── 抬头 ── */
+  header { display: flex; align-items: flex-end; justify-content: space-between; padding-bottom: 22px; border-bottom: 2px solid var(--ink); }
+  h1 { font-size: 30px; font-weight: 700; letter-spacing: -0.01em; }
+  h1 span { color: var(--ink4); font-weight: 500; }
+  .sub { margin-top: 7px; font-size: 13.5px; color: var(--ink3); line-height: 1.55; }
+  .stamp { text-align: right; font-size: 11.5px; color: var(--ink4); line-height: 1.7; font-family: var(--mono); }
+
+  /* ── 通用卡片 ── */
+  .sec { margin-top: 26px; }
+  .sec-h { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+  .sec-h b { font-size: 15px; font-weight: 650; letter-spacing: 0.01em; }
+  .sec-h i { font-style: normal; font-size: 11.5px; color: var(--ink4); }
+  .sec-h::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+  .pad { padding: 16px 18px; }
+
+  /* ── 分层 ── */
+  .layers { display: flex; flex-direction: column; gap: 0; }
+  .layer { display: grid; grid-template-columns: 76px 1fr; gap: 16px; align-items: center; padding: 11px 16px; border-radius: 8px; }
+  .layer + .layer { border-top: 1px dashed var(--line2); }
+  .layer .tag {
+    font-family: var(--mono); font-size: 12px; font-weight: 600; text-align: center;
+    padding: 4px 0; border-radius: 5px; letter-spacing: 0.02em;
+  }
+  .layer .body { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  .layer .files { font-family: var(--mono); font-size: 11.5px; color: var(--ink2); }
+  .layer .note2 { font-size: 11.5px; color: var(--ink3); line-height: 1.6; }
+  .l-host .tag { background: #f1f2f4; color: var(--ink2); }
+  .l-app .tag  { background: #f0eefb; color: #5a4bc0; }
+  .l-ui .tag   { background: #eef3fb; color: #3f6ba8; }
+  .l-view .tag { background: #edf6f1; color: #2f7a58; }
+  .l-core .tag { background: #1d1f23; color: #fff; }
+
+  .arrowline { display: flex; align-items: center; gap: 8px; margin: 0 0 10px 92px; font-size: 11px; color: var(--ink4); font-family: var(--mono); }
+  .arrowline .bar { flex: 1; height: 1px; background: repeating-linear-gradient(90deg, var(--line) 0 5px, transparent 5px 10px); }
+
+  .grid2 { display: grid; grid-template-columns: 1.35fr 1fr; gap: 18px; align-items: start; }
+  .grid2e { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; }
+  .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; align-items: start; }
+
+  /* ── 数据流 ── */
+  .flow { display: flex; align-items: stretch; gap: 0; }
+  .step { flex: 1; padding: 13px 12px; position: relative; }
+  .step + .step { border-left: 1px solid var(--line2); }
+  .step .k { font-size: 10.5px; color: var(--ink4); font-family: var(--mono); margin-bottom: 5px; letter-spacing: 0.03em; }
+  .step .v { font-size: 13px; font-weight: 600; }
+  .step .d { font-size: 11px; color: var(--ink3); margin-top: 5px; line-height: 1.5; }
+  .step .v code, .layer .files code { font-family: var(--mono); font-size: 11.5px; background: #f5f6f7; padding: 1px 5px; border-radius: 4px; }
+  .step.accent { background: var(--accent-soft); border-radius: 8px; }
+  .step.accent .v { color: #5344b8; }
+
+  /* ── 数据结构 ── */
+  .struct { font-family: var(--mono); font-size: 12px; line-height: 1.95; color: var(--ink2); white-space: pre-wrap; }
+  .struct .type { color: var(--accent); font-weight: 600; }
+  .struct .key { color: var(--ink); }
+  .struct .cmt { color: var(--ink4); font-size: 11px; font-family: -apple-system, "PingFang SC", sans-serif; }
+  .struct .pipe { color: var(--ink4); }
+
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 5px 14px; font-size: 12px; line-height: 1.7; }
+  .kv dt { font-family: var(--mono); font-size: 11.5px; color: #5a4bc0; }
+  .kv dd { color: var(--ink2); }
+
+  .chip { display: inline-block; font-size: 10.5px; padding: 1px 7px; border-radius: 20px; vertical-align: 1px; }
+  .chip.sys { background: #f1f2f4; color: var(--ink2); font-family: var(--mono); }
+  .chip.ok { background: var(--ok-soft); color: var(--ok); }
+  .chip.warn { background: var(--warn-soft); color: var(--warn); }
+
+  .note { font-size: 11.5px; color: var(--ink3); line-height: 1.65; }
+  .note b { color: var(--ink2); font-weight: 600; }
+  .note code { font-family: var(--mono); font-size: 11px; background: #f5f6f7; padding: 0 4px; border-radius: 3px; }
+
+  footer { margin-top: 26px; padding-top: 14px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; font-size: 11px; color: var(--ink4); font-family: var(--mono); }
+
+  .must { display: flex; flex-direction: column; gap: 8px; }
+  .must .row { display: flex; gap: 9px; font-size: 12px; line-height: 1.55; color: var(--ink2); }
+  .must .n { flex: 0 0 17px; height: 17px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 10.5px; font-weight: 700; display: grid; place-items: center; margin-top: 1px; }
+
+  /* ── 表格 ── */
+  .tbl { width: 100%; border-collapse: collapse; }
+  .tbl th { text-align: left; font-weight: 600; font-size: 10.5px; letter-spacing: 0.03em; color: var(--ink4); padding: 0 10px 6px 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  .tbl td { padding: 6px 10px 6px 0; vertical-align: top; font-size: 11.5px; line-height: 1.55; color: var(--ink2); border-bottom: 1px dashed var(--line2); }
+  .tbl tr:last-child td { border-bottom: 0; }
+  .tbl td:first-child { color: var(--ink); font-weight: 600; white-space: nowrap; }
+  .tbl .m { font-family: var(--mono); font-size: 11px; }
+  .tbl .acc { color: #5a4bc0; font-family: var(--mono); font-size: 11px; }
+  .tbl .dim { color: var(--ink4); }
+
+  /* ── 算子三组 ── */
+  .ops { display: flex; flex-direction: column; gap: 8px; }
+  .ops .row { display: grid; grid-template-columns: 58px 1fr; gap: 10px; align-items: start; }
+  .ops .g { font-size: 10.5px; color: var(--ink4); font-family: var(--mono); padding-top: 2px; }
+  .ops .set { display: flex; flex-wrap: wrap; gap: 5px; }
+  .ops .op { font-family: var(--mono); font-size: 11px; background: #f5f6f7; border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; color: var(--ink2); }
+  .ops .op.hi { background: var(--accent-soft); border-color: #ddd8f7; color: #5344b8; }
+
+  /* ── 槽的示意 ── */
+  .mock { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .slotbox { background: #f8f9fb; border: 1px solid var(--line); border-radius: 9px; padding: 9px; }
+  .slotbox .sh { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--ink4); font-family: var(--mono); margin-bottom: 8px; }
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 7px; }
+  .tile { height: 30px; border: 1px solid var(--line); border-radius: 5px; background: #fff; display: grid; place-items: center; font-size: 9.5px; color: var(--ink3); }
+  .mcard { background: #fff; border: 1px solid var(--line); border-radius: 6px; margin-bottom: 7px; }
+  .mcard .h { display: flex; align-items: center; gap: 5px; padding: 5px 7px; font-size: 10px; color: var(--ink2); border-bottom: 1px solid var(--line2); }
+  .mcard .h .dots { margin-left: auto; color: var(--ink4); font-size: 9px; letter-spacing: 1px; }
+  .mcard .b { padding: 7px; display: flex; flex-direction: column; gap: 5px; }
+  .mcard .l { height: 4px; border-radius: 2px; background: var(--line2); }
+  .mcard .l.s { width: 62%; }
+  .mcard .l.m { width: 82%; }
+  .mcard.off .b { display: none; }
+  .mcard.solo { box-shadow: 0 0 0 2px #e6e1fb; border-color: #cfc7f2; }
+
+  .hr { height: 1px; background: var(--line2); margin: 12px 0; }
+  .subh { font-size: 12.5px; font-weight: 650; margin-bottom: 8px; display: flex; align-items: baseline; gap: 8px; }
+  .subh span { font-size: 10.5px; color: var(--ink4); font-weight: 400; font-family: var(--mono); }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>相 / Qua <span>— 设计架构与数据结构</span></h1>
+    <div class="sub">块级大纲笔记 · Electron 桌面版。库里只有一种实体：<b>块</b>。页、日记、标签、实例都是块；查询条件与视图配置是块上的<b>值</b>（栏也能拥有，但那不是块）；左右槽只存这台设备的布局。</div>
+  </div>
+  <div class="stamp">
+    WORKSPACE_VERSION 49<br>
+    layers core ← view ← ui ← app ← host<br>
+    gate arch 32/32 · core 1729/1729（本次现算）
+  </div>
+</header>
+
+<!-- ───────────── 一、分层 ───────────── -->
+<section class="sec">
+  <div class="sec-h"><b>一、分层：单向依赖，由内向外</b><i>arch-check [13] 硬断言，不设白名单例外</i></div>
+  <div class="card layers">
+    <div class="layer l-host">
+      <div class="tag">host</div>
+      <div class="body">
+        <span class="files">electron/ · main.ts · preload.ts · library/（sqlite／session／registry／assets／windows）</span>
+        <span class="note2">窗口 · 库会话 · SQLite · fs · 路径 · 菜单。<b>准入是白名单</b>（arch <code>[2+]</code>）：只许 <code>node:*</code>／<code>electron</code>／<code>core/infra/msg</code>／<code>core/identity/library</code>／<code>core/infra/assets</code> ＋ core 的<b>类型</b>；块语义、查询、渲染一律不许。IPC 按 <code>sender.id</code> 路由，渲染层不告诉主进程「我是哪个库」</span>
+      </div>
+    </div>
+    <div class="layer l-app">
+      <div class="tag">app</div>
+      <div class="body">
+        <span class="files">src/app/ · commands/ · handlers/ · retrieval/ · search/ · wiring/</span>
+        <span class="note2">命令实现与装配。<b>handler 不得碰 DOM</b>（arch [18]），要焦点/滚动/剪贴板一律走 <code>App</code> 门面。视图配置的读写接缝 <code>ViewOwnerStore</code> 也在这里（wiring/owners.ts）</span>
+      </div>
+    </div>
+    <div class="layer l-ui">
+      <div class="tag">ui</div>
+      <div class="body">
+        <span class="files">src/ui/ · block-ui／cards／chrome／dock／overlay／query／search／settings／views</span>
+        <span class="note2">堆叠归槽、卡片归块；槽的清单里只有<b>位置</b>（块 id ／ <code>cmd:</code> 小卡 ／ 宿主现算的派生卡 ／ <code>utility:</code> 工具面），没有「页面列表组件」这类实体化容器。一块可以同时有窗口卡与快捷卡（两条独立露面）；卡片外壳只有一个产地（<code>ui/dock/dock.ts</code>）</span>
+      </div>
+    </div>
+    <div class="layer l-view">
+      <div class="tag">view</div>
+      <div class="body">
+        <span class="files">src/view/ · editor/（block-dom／editor-events／input-session…）· dnd（拖拽的载荷与落点）· icons</span>
+        <span class="note2"><b>view 不得 import ui</b>（这条被断言拦下来过）。块 DOM 契约在这里诞生：<code>data-block-id / data-depth / .marker / .left / .tx</code></span>
+      </div>
+    </div>
+    <div class="layer l-core">
+      <div class="tag">core</div>
+      <div class="body">
+        <span class="files">src/core/ · 129 个模块 · 12 个域（model／kb／query／views／props／relations／identity／storage／search／infra／commands／fixtures）</span>
+        <span class="note2"><b>零 DOM</b>。模型 / 行内内容 / 树 / 查询求值 / 视图配置 / 拥有者 / 命令声明 / 绑定表 / 上下文键 / 持久化全在这层，可直接在 Node 里单测</span>
+      </div>
+    </div>
+  </div>
+  <div class="arrowline">
+    <span>依赖只能向下（外→内）</span><span class="bar"></span><span>inner 不知道 outer 的存在</span>
+  </div>
+</section>
+
+<!-- ───────────── 二、数据结构 ───────────── -->
+<section class="sec">
+  <div class="sec-h"><b>二、数据结构：一片森林，行内内容是块上的一串 run</b><i>落盘形状见 src/core/storage/shape.ts · 类型见 src/core/model/runs.ts</i></div>
+  <div class="grid2">
+    <div class="card pad">
+      <div class="struct">
+<span class="type">Block</span> <span class="pipe">{</span>
+  <span class="key">id</span>: string            <span class="cmt">32-hex UUIDv7</span>
+  <span class="key">content</span>: Run[]        <span class="cmt">行内内容＝run 序列；空块＝[]</span>
+  <span class="key">children</span>: Block[]    <span class="cmt">子树；整库是一片森林，没有「页实体」</span>
+  <span class="key">created</span>: number      <span class="cmt">出生时刻（墙钟毫秒）。必填：不可能缺席，所以不是属性槽</span>
+  <span class="key">modified</span>: number     <span class="cmt">最后一次改动（只在编辑边界更新，并进内容那条 upsert）</span>
+  <span class="key">annos?</span>: Anno[]       <span class="cmt">可引用区间：只在被引用时才存在（不写空数组）</span>
+  <span class="key">props?</span>: {            <span class="cmt">属性袋：键＝定义块的 id，不是名字</span>
+    <span class="key">_type</span>?      <span class="cmt">封闭注册表：outline（缺省）· core/divider · core/view-embed</span>
+    <span class="key">_icon</span>?      <span class="cmt">lucide:&lt;name&gt; 或字面文本</span>
+    <span class="key">_date</span>?      <span class="cmt">有它 ⇒ 日记块（只读、全局一天一个）</span>
+    <span class="key">_aliases</span>?   <span class="cmt">地址：0..N，首个是主名，全局唯一</span>
+    <span class="key">_lists</span>?     <span class="cmt">露面：page / tag，可兼位、可空</span>
+    <span class="key">_display</span>?   <span class="cmt">这一行显示别名还是正文</span>
+    <span class="key">_tags</span>?      <span class="cmt">分类归属：存标签块的 id（有序）</span>
+    <span class="key">_belongsTo</span>? <span class="cmt">归属（filed-under）：子块 → 上级，任何块都能配、可多父</span>
+    <span class="key">_deletedAt</span>? <span class="cmt">有它 ⇒ 这块被软删了（子树不可见是继承来的）</span>
+    <span class="key">_kind</span>?      <span class="cmt">有它 ⇒ 属性定义块（种类是它自己的数据）</span>
+    <span class="key">_query</span>?     <span class="cmt">有它 ⇒ 查询块（值＝where 条件）；结果按表面实例冻结，不在这里</span>
+    <span class="key">_mounts</span>?   <span class="cmt">块底那几栏：local（自己带 spec/views）／derived（宿主现算）；不指向块</span>
+    <span class="key">_views</span>?    <span class="cmt">命名视图（列/序/分组…）：这一块怎么看，换设备要一致</span>
+    <span class="key">_activeView</span>? <span class="cmt">当前激活的视图 id；缺席＝这一份源的默认看法</span>
+    <span class="key">_embed</span>?    <span class="cmt">露面：{ block, view } 指针。看法住在<b>源块</b>的命名视图上</span>
+    <span class="key">_fieldDefs</span>? · <span class="key">_choiceScope</span>? · <span class="key">_ownProps</span>? · <span class="key">_childProps</span>? · <span class="key">_uiPosition</span>?
+    <span class="key">_default</span>?  <span class="cmt">定义块上的缺省值：声明了却没填的块，读侧按它取值</span>
+    <span class="key">_use</span>?      <span class="cmt">属性用途：status＝库级唯一的任务状态（语义）</span>
+    <span class="key">_check</span>?    <span class="cmt">勾选框映射 {on, off}：勾选/取消写哪两个值（显示/编辑）</span>
+    <span class="key">_cardinality</span>? <span class="cmt">字段基数 one／many；多值 select 的值＝选项 id 数组</span>
+    <span class="key">[定义块 id]</span>: unknown  <span class="cmt">用户/插件定义的字段值</span>
+  <span class="pipe">}</span>
+<span class="pipe">}</span>
+
+<span class="type">Doc</span>   <span class="pipe">= {</span> roots, folded?, contexts?, expandedRoots?, viewRootId? <span class="pipe">}</span>   <span class="cmt">折叠／面包屑／视图宿主位都是「这一屏怎么画」，不进库</span>
+<span class="type">Workspace</span> <span class="pipe">= {</span>
+  version: 49, blocks: Block[], activeId: string, savedAt: number
+<span class="pipe">}</span>                                   <span class="cmt">行内内容与区间都住在块上：库里没有第二份扁平数组</span>
+      </div>
+    </div>
+
+    <div class="card pad">
+      <div class="struct">
+<span class="type">Run</span> <span class="pipe">=</span> text | ref | link | asset    <span class="cmt">判别键 t 开放扩展</span>
+
+  <span class="key">text</span>  <span class="pipe">{</span> t, v, marks? <span class="pipe">}</span>          <span class="cmt">格式是 run 的属性，不是另一个实体</span>
+  <span class="key">ref</span>   <span class="pipe">{</span> id, t, to?, flavor?: '#',      <span class="cmt">flavor '#' ＝ 行内 # 露面（指向标签类或实例）</span>
+          label?, anchor?, marks? <span class="pipe">}</span>  <span class="cmt">显示名＝现算 ＋ anchor 覆盖（用户写的这一处）；label 只在 dangling 且无 anchor 时兜底</span>
+  <span class="key">link</span>  <span class="pipe">{</span> id, t, v, url, marks? <span class="pipe">}</span>     <span class="cmt">外链：v 是显示文本，不产生块间边</span>
+  <span class="key">asset</span> <span class="pipe">{</span> id, t, asset, label? <span class="pipe">}</span>
+                                   <span class="cmt">asset ＝ 内容 hash（字节住资产库）；永不带 marks</span>
+                                   <span class="cmt">尺寸/状态不在这里：由资产库索引回答（AssetView）</span>
+
+<span class="cmt">── 资产是独立对象（不是第二个内容实体，也不是 run 的载荷） ──</span>
+<span class="type">AssetMeta</span> <span class="pipe">= {</span> hash, mime, size, w?, h?, createdAt <span class="pipe">}</span>   <span class="cmt">bytes 只在资产库记录里</span>
+<span class="type">AssetView</span> <span class="pipe">= {</span> state: 'ready' | 'missing' | 'unavailable', mime?, url?, w?, h? <span class="pipe">}</span>
+                                   <span class="cmt">state 是<b>现算</b>的：missing ＝ 库里没有这份 hash</span>
+                                   <span class="cmt">unavailable ＝ 资产库本身打不开（两种建议不同）</span>
+<span class="type">AssetStorePort</span> <span class="pipe">= {</span> put(blob) · index() · urlOf(hash) · onAddressChange(fn) <span class="pipe">}</span>
+                                   <span class="cmt">端口给<b>地址</b>不给字节：桌面版＝ qua-asset://&lt;hash&gt;（常量）</span>
+                                   <span class="cmt">浏览器＝实现内部自己建/回收 Blob URL，调用方零生命周期</span>
+
+<span class="cmt">── 实例（obj）不新增类型：props._tags 非空的块就是一条记录 ──</span>
+<span class="type">记录</span> <span class="pipe">=</span> Block <span class="pipe">{</span> props: <span class="pipe">{</span> _tags: [标签 id] <span class="pipe">}</span> <span class="pipe">}</span>
+       <span class="cmt">值住它自己的 props（同一个属性袋）；正文里那枚 #名 只是一次提及，不写 _tags</span>
+       <span class="cmt">目标身份由 RefView.kind 现算：tag / obj / page（不落盘）</span>
+
+<span class="type">RefView</span> <span class="pipe">= {</span> label, state: 'resolved' | 'dangling', kind?: 'tag' | 'obj' | 'page' <span class="pipe">}</span>
+
+<span class="type">Anno</span> <span class="pipe">= {</span> id, range: {start,end}, quote?, version? <span class="pipe">}</span>
+
+<span class="cmt">── 两套坐标：所有 start/end/off 都要先问自己用的是哪套 ──</span>
+<span class="key">plain</span>     <span class="cmt">文本字符数 ＋ 每个原子算 1 格（与 DOM 同系）</span>
+           <span class="cmt">选区 / 光标 / IME / run 切片 / anno.range 用它</span>
+<span class="key">projection</span> <span class="cmt">plainText 里的位置：原子贡献 0 格</span>
+           <span class="cmt">引文快照用它（quote.exact 必须是投影的子串）</span>
+           <span class="cmt">换算走 projectOff / projectRange，别手算</span>
+</div>
+      <div class="note" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line2)">
+        <b>原子是不可分节点</b>（ref/link/asset）：位置由邻居携带，删它一定是显式动作——
+        不需要「原子在字符串里占一格」的占位符，也不需要偏移映射。<b>格式随 run 走</b>，
+        打字继承邻位格式是序列的自然结果。<b>区间（annos）按需物化</b>，只在被引用时存在。
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── 三、写：事务与 op ───────────── -->
+<section class="sec">
+  <div class="sec-h"><b>三、写路径：一次用户动作 ＝ 一笔事务 ＝ 一批 op</b><i>Tx 是唯一的模型写入口；失败整批回滚，没有「半批」</i></div>
+  <div class="card">
+    <div class="flow">
+      <div class="step">
+        <div class="k">① 入口</div>
+        <div class="v">键位 / 菜单 / 斜杠</div>
+        <div class="d"><code>bindings.ts</code> 一张表供五处共用；<code>when.ts</code> 求值上下文键</div>
+      </div>
+      <div class="step">
+        <div class="k">② 声明</div>
+        <div class="v">命令（197 条）</div>
+        <div class="d">纯语义：capability / undoable，没有 key、没有 context</div>
+      </div>
+      <div class="step">
+        <div class="k">③ 实现</div>
+        <div class="v">handler ＋ App 门面</div>
+        <div class="d">命令不知道 UI 长什么样；最终落到内存文档</div>
+      </div>
+      <div class="step accent">
+        <div class="k">④ 事务</div>
+        <div class="v">KbClient.tx</div>
+        <div class="d">patch / insert / move / remove / restore / setProp / setAnnos；别名、露面、标签走专用 setter</div>
+      </div>
+      <div class="step">
+        <div class="k">⑤ 产出</div>
+        <div class="v">Op[] ＋ Change[]</div>
+        <div class="d">Op 给存储，Change 只做失效通知（不带 payload）</div>
+      </div>
+      <div class="step">
+        <div class="k">⑥ 落盘</div>
+        <div class="v">StoragePort.commit</div>
+        <div class="d">单写者串行队列；<code>localStorage</code> 只出现在一个适配器里（arch [20]）</div>
+      </div>
+    </div>
+  </div>
+  <div class="grid2" style="margin-top:18px">
+    <div class="card pad">
+      <div class="sec-h" style="margin:0 0 10px"><b style="font-size:13px">Op — 持久化事件（4 类，一格一个地址）</b></div>
+      <div class="struct">
+<span class="pipe">{</span> e: <span class="key">'block'</span>, id, op: <span class="key">'upsert'</span>, value: { content?, created?, modified?, parent?, prev? }, at <span class="pipe">}</span>   <span class="cmt">新块的 genesis 一次说全：位置＋出生＋时刻＋正文</span>
+<span class="pipe">{</span> e: <span class="key">'block'</span>, id, op: <span class="key">'exist'</span>, state: <span class="key">'present'</span> | <span class="key">'deleted'</span> | <span class="key">'purged'</span>, at <span class="pipe">}</span>
+<span class="pipe">{</span> e: <span class="key">'prop'</span>,  block, name, op: <span class="key">'set'</span> | <span class="key">'delete'</span>, value?, at <span class="pipe">}</span>   <span class="cmt">含 _aliases／_lists／_tags 整袋值</span>
+<span class="pipe">{</span> e: <span class="key">'anno'</span>,  block, id, op: <span class="key">'set'</span> | <span class="key">'delete'</span>, value?, at <span class="pipe">}</span>   <span class="cmt">只在真被引用时出现</span>
+      </div>
+      <div class="note" style="margin-top:9px">结构用 <code>parent ＋ prev</code>（<b>前兄弟 id</b>）表达，不另造 <code>insert</code> 事件——「它现在在哪」只有一种说法。不用整数下标：下标只对「那一刻的兄弟列表」有意义，同一个下标在短列表上会静默落到别处，而 op 是不可逆历史。<b>格式与原子的一次改动就是一条 <code>upsert{content}</code></b>：内容整组替换，不是逐段记差。<b>存在是一个格、三个值</b>：软删是可恢复的 <code>deleted</code>，撤销一次插入是终态 <code>purged</code>——曾经它们共用一个 <code>delete</code>，于是撤销后重开，块会从回收站冒出来。<b>一格只有一个地址</b>：地址与露面走 <code>prop</code> 的整袋值，不另立 <code>alias</code>／<code>list</code> 两种「按项增量」——同一个格两条账会让重放顺序决定结果、幂等性也破。只有「绝对的、按格寻址的 set」才能满足<b>应用两次等于一次</b>，而那是撤销与同步的共同前提。</div>
+    </div>
+    <div class="card pad">
+      <div class="sec-h" style="margin:0 0 10px"><b style="font-size:13px">落盘：两种宿主，三条不可逆契约</b></div>
+      <div class="kv">
+        <dt>qua.db（Electron）</dt><dd><b>每个库一份</b> SQLite（主进程单写者，WAL）。块是<b>自己的行</b>：<code>Block</code>（正文 run 序列／annos／时刻／落库编码的 <code>parent</code>＋<code>left</code>／软删；<code>_display</code>／<code>_kind</code>／<code>_date</code>／<code>_query</code>／<code>_type</code> 升列）＋ <code>BlockProperty</code>（一格一行，有序列表拆行＋<code>pos</code>）＋ <code>BlockAlias</code>（地址：原样拼写是主键，归一化键 <code>norm</code> 是按名点查的索引——「这个名字归谁」一次索引查找就够，不读全表）＋ <code>BlockList</code>（露面）＋ <code>BlockFTS</code>／<code>BlockFTSMap</code>（全文派生：contentless 两表 ＋ 稳定 rowid 映射，状态在 <code>meta</code>）＋ <code>BlockGram</code>（子串派生：trigram 分词的一张三字滑窗表，rowid <b>与正文索引行同址</b>——「库里有没有这一串」由它回答）＋ <code>BlockIndex</code>（<code>root</code>／<code>path</code>／<code>hidden</code>：位置派生）／<code>BlockRelation</code>（<code>from_id</code>／<code>to_id</code>／<code>kind</code>／<code>from_root</code>：关系派生；两张都可从内容全量重建，状态在 <code>meta</code>）＋ <code>meta</code>／<code>settings</code>／<code>op_log</code>（<b>变更流</b>，与内容行<b>同一个事务</b>追加；整份替换＝新 genesis：清旧日志、序号归零，再把这一批 op 写进去）。schema 版本＝<code>PRAGMA user_version</code>（唯一判据，当前 16）</dd>
+        <dt>编码在哪</dt><dd>「一个块长成哪几行」只有一份定义（<code>storage/db-rows.ts</code>）；主进程只做<b>通用 SQL</b>（表名/列名白名单，不认识块）。一次编辑只写动过的那几块 ⇒ <b>写成本不随库体量增长</b></dd>
+        <dt>qua.workspace（web）</dt><dd>整库（块森林；行内内容与区间都在块上），套一层信封 <code>{ backend, envelope, data }</code>。浏览器没有用户可选目录的同等语义 ⇒ 单窗口单库</dd>
+        <dt>qua.device</dt><dd>设备态：主题 / 槽宽 / <b>左右槽的卡片清单</b> / 钉住清单（<b>不进 KB</b>）</dd>
+        <dt>assets/（Electron）</dt><dd><b>资产库</b>：一图<b>一行一文件</b> —— 元信息在 <code>qua.db</code> 的 <code>assets</code> 表（<code>hash / mime / size / w / h / added_at</code>），字节在 <code>assets/&lt;hash前2&gt;/&lt;hash&gt;.&lt;ext&gt;</code>，<b>没有侧车</b>；渲染层拿到的是<b>地址</b> <code>qua-asset://&lt;hash&gt;</code>（壳的协议处理器直出文件），没有对象 URL 生命周期。web 仍走 IndexedDB <code>hash → { mime, size, w?, h?, createdAt, bytes }</code>。内容寻址 ⇒ 同字节只存一份；后缀只写不读（类型只从行里来）</dd>
+      </div>
+      <div class="note" style="margin-top:9px">两个存储之间<b>没有跨库事务</b>：写图片的顺序固定为
+        <b>字节先落 → 引用后落</b>（put 成功才写 run）。崩在中间只留孤儿字节（无害）；
+        反过来会留下一枚指向空字节的 run。v1 无 GC，删 run 不回收字节。</div>
+      <div class="note" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line2)">
+        <b>开发阶段不做旧数据迁移</b>：<code>WORKSPACE_VERSION + 1</code> ＝ 旧库显式作废重 seed。
+        接库之后库内换形状走 <code>user_version</code> ＋ 只加不删迁移 ＋ 迁移前快照（实测：版本号随事务原子回滚）。
+        换键／换库名 ＝ 用户数据静默消失，所以它们被逐字钉死在门禁里。
+      </div>
+    </div>
+  </div>
+
+  <div class="card pad" style="margin-top:18px">
+    <div class="sec-h" style="margin:0 0 10px"><b style="font-size:13px">变化代数：状态 → op</b><i>撤销 / 导出 / 导入 / 同步收端 / 崩溃恢复 / 块历史，全由它派生</i></div>
+    <div class="grid2">
+      <div>
+        <div class="struct" style="line-height:1.9"><span class="key">diff</span>(a, b) <span class="pipe">→</span> Op[]      <span class="cmt">整片森林 a→b：首次落盘／重放／对账</span>
+<span class="key">scopedOps</span>(now, 条目一侧) <span class="pipe">→</span> Op[]  <span class="cmt">撤销/重做：只对 touched 块生成</span>
+<span class="key">applyOps</span>(forest, ops, lookup?)  <span class="cmt">原地写格；给 lookup 就不摊平整库</span></div>
+        <div class="note" style="margin-top:9px"><b>四条性质</b>（每条都能单独证伪）：① <code>applyOps(a, diff(a,b))</code> 与 <code>b</code> <b>逐字节相等</b>；② <code>diff(x,x) == []</code>；③ 发射序＝目标森林<b>先序</b>（父 op 先于子 op）；④ 同一次 diff 跑两次<b>字节相同</b>（<code>at</code> 从目标森林派生，不取墙钟）。<br><b><code>scopedOps</code> 的等式</b>：<code>applyOps(now, scopedOps(now, side))</code> 与 <code>side</code> 的 touched 子集<b>逐字节相等</b>；条目里只有 id／格／落点，没有整片森林。</div>
+      </div>
+      <div>
+        <div class="kv">
+          <dt>撤销</dt><dd>条目存这次事务 <b>touched 块的前态／后态</b>（深拷的格 ＋ 落点）＋ 选区。⌘Z ＝ <code>scopedOps(now, 条目前态)</code> → <code>applyOps(…, lookup)</code>；<b>首键与 ⌘Z 都不再碰整片森林</b>。仍是状态，不是逆 op；合并窗口内只更新上一条的 <code>after</code>（不新建条目、不取整库快照）</dd>
+          <dt>索引</dt><dd>唯一的宣布者是事务出口 <code>store.apply(ops)</code>：按 op <b>增量修补</b>，不整库作废；订阅者只被通知一次。两张含软删的表（<code>all</code>／<code>parentOfAll</code>）专供撤销读面——可见表看不见被软删的块，而恢复路径要找它们</dd>
+          <dt>回滚</dt><dd>事务失败走<b>回滚日志</b>（O(动过的块)），不是整库快照。它不是逆 op：生命周期＝一个调用，不落盘、不进历史</dd>
+        </div>
+      </div>
+    </div>
+    <div class="note" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line2)">
+      <b>为什么 <code>applyOps</code> 必须原地写格</b>：索引存的是块的<b>活引用</b>。若替换块对象（CoW／<code>JSON.parse</code>），索引会<b>静默失效</b>——它手里那批对象当场过期，而没有任何一层会报错。
+      ⇒ 这也是「撤销不再需要 <code>forestReplaced</code> 旗标」的原因：旗标存在的唯一理由是旧机制的实现细节。
+      <br><b>为什么撤销不能只缩快照</b>：若仍 <code>diff(整片森林, …)</code>，省掉的只有序列化，最大那一笔（摊平两份森林）一点没少。⇒ 条目带两侧，撤销/重做各自只对 touched 块生成 op；恢复父先于子、清除子先于父。
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── 四、读：门面 ───────────── -->
+<section class="sec">
+  <div class="sec-h"><b>四、读路径：一个门面，不给「遍历全库」的入口</b><i>方法只按 id 取或按子树取；查询条件见第五节</i></div>
+  <div class="grid3">
+    <div class="card pad">
+      <div class="sec-h" style="margin:0 0 9px"><b style="font-size:13px">结构读</b></div>
+      <div class="struct" style="line-height:1.8">get(id) · children(id)<br>roots() · parentOf(id) · pathOf(id)</div>
+      <div class="note" style="margin-top:8px">阶段 1 实现可以整库缓存，但<b>调用方写不出「遍历全库」</b>——否则懒加载那天要改遍每个调用方。</div>
+    </div>
+    <div class="card pad">
+      <div class="sec-h" style="margin:0 0 9px"><b style="font-size:13px">语义读</b></div>
+      <div class="struct" style="line-height:1.8">resolveAlias(name) · allPaths()<br>pages() · tags() · trash() · purgeTrash()<br>fieldsOf · declaredFieldsOf · tagsOf<br>journalDay() · journalDates()</div>
+      <div class="note" style="margin-top:8px">页／标签／回收站都是<b>派生</b>：没有第二存放处，每次从森林现算。<code>fieldsOf(记录 id)</code> 同时供属性区与行内实例字段卡，值只写记录块。</div>
+    </div>
+    <div class="card pad">
+      <div class="sec-h" style="margin:0 0 9px"><b style="font-size:13px">查询与反向</b></div>
+      <div class="struct" style="line-height:1.8">query(spec, {selfId, excludeIds, today})<br>backlinksOf · backrefBlocksOf · annosOf<br>relationsTo / relationsFrom</div>
+      <div class="note" style="margin-top:8px">同一个 <code>query()</code> 服务所有表面：纯函数路径与索引路径由等式测试钉住「结果相同」；上下文（<code>$self</code>／scope／exclude）由调用方给。<br><b>⌘P</b> 正文检索：FTS <code>ready</code> 时走 SQLite FTS（worker 建索引），否则扫描；web 恒扫描并在标题标明降级。</div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── 五、查询模型 ───────────── -->
+<section class="sec">
+  <div class="sec-h"><b>五、查询模型：条件是内容，结果是一次求值的投影</b><i>src/core/query/（query.ts 条件与求值 · query-view.ts 冻结 · query-tree.ts 条件树 · query-draft.ts 表单草稿）</i></div>
+  <div class="grid2">
+    <div class="card pad">
+      <div class="subh">QuerySpec <span>存进 props._query 的唯一形状</span></div>
+      <div class="struct">
+<span class="type">QuerySpec</span> <span class="pipe">{</span>
+  <span class="key">where</span>: QueryNode        <span class="cmt">条件树；canonical JSON 才落盘（键序固定）</span>
+  <span class="key">sort?</span>: SortKey[]        <span class="cmt">成员顺序（取哪些），在 limit 之前生效</span>
+  <span class="key">limit?</span>: number          <span class="cmt">排序之后截断；缺省不限</span>
+  <span class="key">todayFrom?</span>: 'host'      <span class="cmt">{today} 的基准：宿主那一天；缺省系统今天</span>
+<span class="pipe">}</span>
+
+<span class="cmt">── 七个原子 ＋ 三个方向 ＋ 三种组合（每个原子都必须在 canonicalSpec 里有一支） ──</span>
+<span class="key">{ ref: 块 id }</span>          <span class="cmt">反链的最小形态：只认 id，不认 label；可收窄 kind</span>
+<span class="key">{ tag: 标签名 }</span>         <span class="cmt">按归属边（_tags）判；名字解析不到＝空集</span>
+<span class="key">{ text: 串 }</span>              <span class="cmt">正文投影包含；未链接提及走这里，不算反链</span>
+<span class="key">{ prop: { id, 算子 } }</span>  <span class="cmt">通用路径：键是定义块 id，改显示名不动语义；任务三态也走这里</span>
+<span class="key">{ is: 块 id }</span>           <span class="cmt">「就是这一块」（身份判定，不是成员判定）</span>
+<span class="key">{ role: 'journal' | 'page' }</span> <span class="cmt">是这种东西<b>本身</b>（成员条件）</span>
+<span class="key">{ today: { offset } }</span>   <span class="cmt">相对日期：基准 ± offset 那天的日记块；存表达式不存字面量</span>
+<span class="key">{ up } / { down } / { near }</span> <span class="cmt">存在一个祖先／子孙／任一处满足条件；方向是独立一轴，可套任意条件</span>
+<span class="key">{ all } / { any } / { not }</span>  <span class="cmt">可嵌套；能组合表达的，不另造专用键</span>
+      </div>
+      <div class="note" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line2)">
+        <b>三种东西别混</b>：<b>条件</b>（入 KB、进撤销）／<b>结果集</b>（一次求值，冻结在表面实例）／<b>内容</b>（永远按 block id 现读）。
+        专用键每多一个，<code>canonicalSpec</code> 就多一处会漏的分支，而漏掉的表现是「条件看着没变、结果对不上」。
+        <code>role</code> 与方向原子的分工写死：<code>{up}/{down}/{near}</code> 问<b>位置</b>，<code>role</code> 问<b>身份</b>——「某一天下面」＝<code>{up:{all:[{role:'journal'},{prop:{id:'_date',eq:…}}]}}</code>，不是又一个专用键。
+      </div>
+    </div>
+
+    <div class="card pad">
+      <div class="subh">九个算子 <span>PropOp —— 一条属性条件只带一个算子</span></div>
+      <div class="ops">
+        <div class="row">
+          <div class="g">值比较</div>
+          <div class="set">
+            <span class="op">eq</span><span class="op">neq</span><span class="op">contains</span>
+            <span class="op">gt</span><span class="op">gte</span><span class="op">lt</span><span class="op">lte</span>
+          </div>
+        </div>
+        <div class="row">
+          <div class="g">槽存在</div>
+          <div class="set"><span class="op hi">exists</span></div>
+        </div>
+        <div class="row">
+          <div class="g">空/非空</div>
+          <div class="set"><span class="op hi">empty</span></div>
+        </div>
+      </div>
+      <div class="note" style="margin-top:9px">
+        「有没有这一栏」只有一处判据：<b>值 ∪ 自有槽 ∪ 标签声明</b>（标签声明的字段块上一个字节都没有，屏幕上也照样画方框）。
+        值比较<b>有这一栏才比</b>，没有就是不匹配。<code>neq</code> 同一条口径——否则它会变成「绝大多数块」。
+        <code>gt</code>／<code>lt</code> 只在<b>同一量纲</b>上比；比不了返回空 ⇒ 不匹配（按字符串比会让 <code>true &gt; 5</code> 成立）。
+        <br><b><code>empty</code> 与 <code>exists</code> 分开</b>：文本字段「有这一栏、还没填」与「没有这一栏」是两个真问题。
+        <b>布尔属性没有未填态</b>（声明了就按 <code>false</code> 读）⇒ 对它 <code>empty</code> 与 <code>exists:false</code> 同义，构建器不再给这个选项。
+        九个算子必须逐支进 <code>canonicalSpec</code>，漏一支＝条件静默丢失。
+      </div>
+      <div class="hr"></div>
+      <div class="subh">构建器 <span>条件树 ⇄ JSON，同一份数据</span></div>
+      <div class="struct" style="line-height:1.85"><span class="type">TreeRow</span>   <span class="pipe">{</span> kind: tag|prop|text|ref|path|role|is, … <span class="pipe">}</span>
+<span class="type">TreeDraft</span> <span class="pipe">{</span> root: TreeGroup, limit?, sort?, todayFrom? <span class="pipe">}</span></div>
+      <div class="note" style="margin-top:8px">
+        <code>path</code> 行是<b>方向预设</b>：它展开成 <code>{up:…}</code>／<code>{down:…}</code>／<code>{near:…}</code>，落盘的只有一种形状 —— 界面留着「上级／下级／任一处」三个词，模型里不多一个原子。
+        <code>specOfTree(treeOfSpec(s))</code> 与 <code>canonicalSpec(s)</code> <b>逐字节相等</b>（有单测）；两边各写一份转换，就一定会在某个原子上分叉。
+        拆不成行的嵌套（<code>not</code> 里套 <code>any</code>）整块走 JSON，<b>不拆</b>——拆了再拼回来就不是它自己。一次「应用」＝一笔事务＝一轮撤销；JSON 解析失败<b>保留原文</b>，绝不静默清空。
+      </div>
+    </div>
+  </div>
+
+  <div class="card pad" style="margin-top:18px">
+    <div class="sec-h" style="margin:0 0 10px"><b style="font-size:13px">求值上下文与冻结：谁都不许把它们烤进条件</b><i>QueryContext 三件分开；FrozenResult 住表面实例（arch [32]）</i></div>
+    <div class="grid2">
+      <div>
+        <table class="tbl">
+          <thead><tr><th>表面</th><th>selfId（解析 $self）</th><th>excludeIds（结果剔除）</th><th>today（相对日期基准）</th></tr></thead>
+          <tbody>
+            <tr><td>center 查询块</td><td class="m">parentOf(块)</td><td class="m">[查询块自己]</td><td class="m">系统今天 · 可 todayFrom:'host'</td></tr>
+            <tr><td>mount local</td><td class="m">宿主块</td><td class="m">[宿主]</td><td class="m">日记宿主取那一天</td></tr>
+            <tr><td>embed</td><td class="m">parentOf(露面块)</td><td class="m">[露面块, 源块]</td><td class="m">系统今天 · 可 todayFrom:'host'</td></tr>
+            <tr><td>dock 窗口</td><td class="m">parentOf(窗口块)</td><td class="m">[窗口块]</td><td class="m">系统今天</td></tr>
+          </tbody>
+        </table>
+        <div class="note" style="margin-top:9px">
+          <b><code>selfId</code> 只负责解析 <code>$self</code>，不再顺带排除</b>——「想解析它、又不得不把它从结果里去掉」是把两件事塞进同一个字段的后果。
+          挂载宿主与查询块自己一律不进结果：那是<b>位置的性质</b>，不是条件的性质。相对条件解析出空值 ⇒ <b>永不命中</b>，不退回全库。
+          <b><code>scope</code> 已退场</b>：子树锚点与「哪一天」改由 <code>{up}/{down}/{near}</code>／<code>{today}</code> 表达，条件住在内容里；上下文只剩三格。
+        </div>
+      </div>
+      <div>
+        <div class="struct" style="line-height:1.85"><span class="type">FrozenResult</span> <span class="pipe">= {</span>
+  specKey: string     <span class="cmt">canonicalSpec(_query) 的 JSON</span>
+  viewKey: string     <span class="cmt">这一份冻结属于哪张视图（''＝默认看法）</span>
+  contextKey: string  <span class="cmt">selfId / excludeIds / today 的稳定串</span>
+  hits: QueryHit[]
+<span class="pipe">}</span></div>
+        <div class="kv" style="margin-top:10px">
+          <dt>谁持有</dt><dd><code>ViewHost</code>（center）、每个 mount tab、<code>EmbedBody</code>、dock 卡——<b>每个表面实例一份</b></dd>
+          <dt>何时重算</dt><dd>首次显示；<code>specKey</code> 变（条件被编辑/撤销）；<code>viewKey</code> 变（换视图）；<code>contextKey</code> 变（换宿主/表面/日期）；用户点刷新</dd>
+          <dt>不落盘</dt><dd>只在内存：刷新不写块、不改 <code>modified</code>、不进撤销。<code>_queryResult</code> 已删且不得复活</dd>
+          <dt>stale</dt><dd>外部改动命中当前 hits ⇒ 只点亮提示，<b>不改列表</b>；刷新才移除（移除条数给 toast）</dd>
+          <dt>代价</dt><dd>同一条件在两个表面各有一份快照：一个刷新，另一个仍是旧的——这是表面状态，不是内容版本</dd>
+        </div>
+      </div>
+    </div>
+    <div class="note" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line2)">
+      <b>为什么结果不入库</b>：条件相同、数据相同 ⇒ 结果相同。结果不是用户写下的东西，是数据的一个投影；投影存进内容层，就必然说谎——撤销会撤掉「上一次刷新」、跨端结果不同、外部改了数据而界面看不出它在说谎。
+      <b>「编辑时行不跳」由实例冻结满足</b>，不需要把它存成内容。
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── 六、源 × 视图 × 表面 ───────────── -->
+<section class="sec">
+  <div class="sec-h"><b>六、源 × 视图 × 表面：配置有拥有者，表面只给上下文</b><i>src/core/views/view.ts · view-owner.ts · app/wiring/owners.ts（唯一读写接缝）</i></div>
+  <div class="grid3">
+    <div class="card pad">
+      <div class="subh">源 <span>sourceOf 唯一一份，派生不存</span></div>
+      <div class="struct" style="line-height:1.85"><span class="type">Source</span> <span class="pipe">=</span> query{spec} | children{blockId}</div>
+      <div class="kv" style="margin-top:9px;gap:4px 10px">
+        <dt>1</dt><dd><code>_query</code> 在 ⇒ query</dd>
+        <dt>2</dt><dd><code>_embed</code> 在 ⇒ <b>目标的源</b>（深度 1；目标又是露面就停）</dd>
+        <dt>3</dt><dd>否则 ⇒ children（直接子块）</dd>
+      </div>
+      <table class="tbl" style="margin-top:10px">
+        <thead><tr><th>源</th><th>记录</th><th>顺序</th></tr></thead>
+        <tbody>
+          <tr><td>query</td><td>每条命中一行（大纲才折叠「祖先也在结果里」）</td><td>冻结结果</td></tr>
+          <tr><td>children</td><td>直接子块（跳过软删）</td><td><code>children</code></td></tr>
+        </tbody>
+      </table>
+      <div class="note" style="margin-top:9px"><b><code>_query</code>／<code>_embed</code> 互斥</b>：一个块不能同时是查询与露面指针。<code>sourceConflicts</code> 是唯一判据，写入与落盘校验共用——各判一次，「什么算冲突」就会有两个答案。</div>
+    </div>
+
+    <div class="card pad">
+      <div class="subh">视图 <span>kind 是封闭表，兼容性只有一张表</span></div>
+      <div class="struct" style="line-height:1.8"><span class="type">ViewKind</span> <span class="pipe">=</span> outline | table | list-table
+           | cards | calendar | mindmap | tabs
+<span class="cmt">outline 不落盘：没有激活视图 ＝ 大纲（query/children）；它是可编辑的那一种，没有第二个只读「列表」</span>
+<span class="cmt">cards 的两副面孔由 groupBy 派生：不分组＝网格（画廊），有键＝列（看板）</span>
+<span class="cmt">tabs 是页签：一次只看一个子块，激活项是视图实例状态（不进配置）</span>
+<span class="cmt">每张视图可带 filter（与源条件 AND 叠加）／groupBy／groupOrder／table.sort…</span></div>
+      <table class="tbl" style="margin-top:10px">
+        <thead><tr><th>源</th><th>能落盘的 kind</th><th>默认</th></tr></thead>
+        <tbody>
+          <tr><td>query</td><td class="m">table · cards · calendar</td><td>大纲</td></tr>
+          <tr><td>children</td><td class="m">↑ ＋ list-table · mindmap · tabs</td><td>大纲</td></tr>
+        </tbody>
+      </table>
+      <div class="note" style="margin-top:9px">
+        <code>list-table</code>（结构映射表）与 <code>mindmap</code>／<code>tabs</code> 只接 children——<b>只有 children 是树</b>，命中集合没有「第 k 个孩子」可对齐。
+        <code>canonicalViews</code> 按这张表丢不兼容项（arch [34] 钉住「不许第二张表」）。
+      </div>
+    </div>
+
+    <div class="card pad">
+      <div class="subh">拥有者 vs 绑定 <span>两个类型，不要混</span></div>
+      <div class="struct" style="line-height:1.8"><span class="type">ViewOwnerRef</span> <span class="pipe">=</span>
+  { block: blockId }
+  | { tab: local tabId }        <span class="cmt">只指 local</span>
+
+<span class="type">ViewBindingRef</span> <span class="pipe">=</span>
+  { embed: blockId }
+  | { dock: side, cardId }</div>
+      <table class="tbl" style="margin-top:10px">
+        <thead><tr><th>谁</th><th>配置存哪</th><th>能被引用</th></tr></thead>
+        <tbody>
+          <tr><td>block</td><td class="m">_query · _views · _activeView</td><td>能（内容对象）</td></tr>
+          <tr><td>local tab</td><td class="m">块 _mounts / 日记 Prefs.journalMounts</td><td>不能</td></tr>
+          <tr><td>derived</td><td class="dim">没有配置（宿主现算）</td><td>—</td></tr>
+          <tr><td>binding</td><td class="m">{ block, view } 指针</td><td>指向别人</td></tr>
+        </tbody>
+      </table>
+      <div class="note" style="margin-top:9px">命令与 UI 只经 <code>ViewOwnerStore</code> 读写视图配置（arch [33]）：直接摸 <code>_views</code>／<code>_mounts</code>／<code>Prefs</code> 就是在造第二份真相。<b>面板 local 不提升、不转本地</b>；共享/复用一个查询块走 embed，不建指针。</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:18px">
+    <div class="flow">
+      <div class="step">
+        <div class="k">表面 ①</div>
+        <div class="v">center · 页签</div>
+        <div class="d">中心 tab 分三类：<b>块</b>（拥有者＝这个块，<code>_activeView</code>）／<b>派生面</b>／<b>工具面</b>（搜索、设置；派生与工具按 kind 去重）。查询块加抬头：条数／上下文 chip／筛选 chip／刷新</div>
+      </div>
+      <div class="step">
+        <div class="k">表面 ②</div>
+        <div class="v">mount · 块底挂载区</div>
+        <div class="d">每栏一个 entry，稳定 id：<b>local</b> 自己拥有 spec/views／<b>derived</b>（成员／引用／同类／提及）宿主现算、无配置。local 不是块、也不指向块，不可被引用；<code>＋</code> 直接建 local</div>
+      </div>
+      <div class="step">
+        <div class="k">表面 ③</div>
+        <div class="v">embed · 正文露面</div>
+        <div class="d"><code>_embed = {block, view}</code>；露面块自己<b>没有</b> <code>_views</code>，想换看法就在源块上建一张命名视图。深度 1 构造截断，悬空只剩一句实话</div>
+      </div>
+      <div class="step">
+        <div class="k">表面 ④</div>
+        <div class="v">dock · 左右槽</div>
+        <div class="d">卡片显示块的默认看法（<code>activeView</code>／大纲／children 列表）。卡片本身是<b>设备状态</b>，不是内容——见第七节</div>
+      </div>
+    </div>
+  </div>
+  <div class="note" style="margin-top:8px;margin-left:2px">
+    <b>源 × 视图 × 表面正交</b>：源由拥有者的数据派生，视图配置住在拥有者上，表面只决定「在哪、多宽、什么上下文」。
+    同一个拥有者挂在两个宿主上，天然得到两套结果——那正是 <code>$self</code> 的定义。
+  </div>
+</section>
+
+<!-- ───────────── 七、左右槽卡片模型 ───────────── -->
+<section class="sec">
+  <div class="sec-h"><b>七、左右槽：槽是一列条目，条目是设备的布局</b><i>src/core/storage/prefs.ts（形状）· ui/dock/dock.ts（卡壳）· app/wiring/docks.ts（装配）</i></div>
+  <div class="grid2">
+    <div class="card pad">
+      <div class="subh">Prefs.dock <span>设备状态：不进 KB、不参与同步</span></div>
+      <div class="struct">
+<span class="type">DockPrefs</span> <span class="pipe">{</span>
+  <span class="key">left</span> / <span class="key">right</span>: <span class="pipe">{</span>
+    open: boolean
+    width: number | null     <span class="cmt">用户拖过的宽度；null ＝ 用 token 默认值</span>
+    cards: DockEntry[]       <span class="cmt">这一槽的条目，<b>有序</b>；身份见下一张表</span>
+  <span class="pipe">}</span>
+  <span class="key">collapsedCards</span>: Record&lt;卡片 id, true&gt;  <span class="cmt">只记收起的（与块的 folded 同一口径）</span>
+  <span class="key">pinnedCards</span>: Record&lt;卡片 id, true&gt;     <span class="cmt">常驻的窗口卡；没 pin 的块窗口重启即清</span>
+  <span class="key">solo</span>: <span class="pipe">{</span> left: id | null, right: id | null <span class="pipe">}</span>  <span class="cmt">单卡：每侧独立</span>
+<span class="pipe">}</span>
+      </div>
+      <div class="note" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line2)">
+        卡片清单是<b>布局</b>（看哪几张、什么顺序），不是「库里有哪些块」。<b>隐藏的卡也留在这里</b>——位置是布局，可用性是内容；删块／撤销不会污染清单。
+        一个块<b>全局最多一张窗口卡</b>（左右先到先得），但可以再有一条<b>快捷小卡</b>（两条独立露面）；<code>cmd:</code> 与 <code>utility:</code> 不是块，同一面可两槽同现。
+      </div>
+    </div>
+
+    <div class="card pad">
+      <div class="subh">一张卡的 id 可以是五类东西 <span>同一个 cards 列表里混排</span></div>
+      <table class="tbl">
+        <thead><tr><th>id 形态</th><th>是什么</th><th>body</th></tr></thead>
+        <tbody>
+          <tr><td>32-hex 块 id</td><td>窗口卡（普通块的一次露面）</td><td>那个块的<b>真实编辑器</b>（共享 store：槽里改、正文同步）</td></tr>
+          <tr><td class="m">shortcut:&lt;块 id&gt;</td><td>快捷小卡</td><td>指向同一个块；与窗口卡是两条独立露面，常驻</td></tr>
+          <tr><td class="m">inspect · belongs<br>backrefs · trash<br>calendar</td><td>派生卡</td><td>宿主<b>现算</b>，没有配置；关掉只是摘掉这一次露面</td></tr>
+          <tr><td class="m">cmd:&lt;命令名&gt;</td><td>小卡（44px 动作格）</td><td>点击执行命令。<b>不是卡片</b>：没有卡头、没有折叠/单卡</td></tr>
+          <tr><td class="m">utility:&lt;face&gt;</td><td>工具面卡</td><td>搜索等系统面住进槽；与中心 tab 是同一个面的两种挂载</td></tr>
+        </tbody>
+      </table>
+      <div class="note" style="margin-top:9px">
+        「打开的块＝窗口」是这一层的全部含义：它不认单独的「打开清单」——清单已经变成槽的 <code>cards</code>（位置）。
+        快捷小卡与工具面卡是槽的<b>家具</b>：不属于「打开的东西」，重启清理不碰。小卡硬塞进卡壳，会长出「没有折叠按钮的卡」那种半成品，44px 也放不下卡头。
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2e" style="margin-top:18px">
+    <div class="card pad">
+      <div class="subh">三个状态轴正交 <span>不要互相推导</span></div>
+      <table class="tbl">
+        <thead><tr><th>轴</th><th>存哪</th><th>判据与边界</th></tr></thead>
+        <tbody>
+          <tr><td>位置</td><td class="m">cards 顺序</td><td>拖拽改序、跨槽搬；数组位只表示顺序，条目有稳定 id</td></tr>
+          <tr><td>收起</td><td class="m">collapsedCards[id]</td><td>只隐藏 body，<b>不销毁编辑器</b>；按卡片实例 id，跨槽移动后状态跟着卡走</td></tr>
+          <tr><td>单卡</td><td class="m">solo[side]</td><td>只看这一张，由槽层用 <code>data-solo</code> 过滤其它卡；目标不可见时<b>不生效</b>（状态保留，回来再生效）</td></tr>
+        </tbody>
+      </table>
+      <div class="note" style="margin-top:9px">
+        三个轴各存各的：「收起」与「单卡」合成一个值，就会出现「收起了却还占着单卡位」。
+        重画槽时卡片是 entry，<b>按顺序原地不动</b>——搬一个正在编辑的 <code>contenteditable</code> 会丢焦点与光标（每敲一个字跳一次）。
+      </div>
+    </div>
+
+    <div class="card pad">
+      <div class="subh">四条纪律 <span>踩过的坑，别推翻</span></div>
+      <div class="must">
+        <div class="row"><span class="n">1</span><div><b>卡壳只有一个产地</b>（<code>ui/dock/dock.ts</code>）：头／收起／单卡／关闭／拖拽。窗口、快捷、派生、工具面共用一套，否则「所有卡片都支持 X」一定会漏掉某一张（真踩过：手写的头没有折叠按钮）。</div></div>
+        <div class="row"><span class="n">2</span><div><b>卡头只有三颗控件</b>，每张卡同构。作用于<b>内容</b>的动作（回到本月、清空回收站）长在 body 里、贴着它作用的东西——卡头是跨卡扫视的一列，多一颗按钮整列图标就错开。</div></div>
+        <div class="row"><span class="n">3</span><div><b><code>hidden</code>（没有内容）≠ <code>data-collapsed</code>（用户收起）</b>：前者是可用性，归卡片内容的主人；后者是布局。同一个值表达两件事，就再也分不开「没有主体」和「收起了」。</div></div>
+        <div class="row"><span class="n">4</span><div><b>槽内只许纵向。</b>卡片与卡片之间没有横向排列入口；小卡是 44px 的格子，单独一格一组，不参与卡片的折叠/单卡。</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card pad" style="margin-top:18px">
+    <div class="subh">默认布局 <span>左槽＝导航与时间，右槽＝当前块的检视与出处</span></div>
+    <div class="mock">
+      <div class="slotbox">
+        <div class="sh"><span>左槽 · cards</span><span>4 小卡 ＋ 2 卡</span></div>
+        <div class="tiles">
+          <div class="tile">今天</div><div class="tile">新建页</div>
+          <div class="tile">命令</div><div class="tile">上一天</div>
+        </div>
+        <div class="mcard">
+          <div class="h"><span>日历</span><span class="dots">⌄ ⤢ ✕</span></div>
+          <div class="b"><div class="l m"></div><div class="l"></div><div class="l s"></div></div>
+        </div>
+        <div class="mcard off">
+          <div class="h"><span>归属树（已收起）</span><span class="dots">› ⤢ ✕</span></div>
+          <div class="b"><div class="l"></div></div>
+        </div>
+      </div>
+      <div class="slotbox">
+        <div class="sh"><span>右槽 · cards</span><span>3 卡</span></div>
+        <div class="mcard solo">
+          <div class="h"><span>检视 · 当前块</span><span class="dots">⌄ ⤢ ✕</span></div>
+          <div class="b"><div class="l m"></div><div class="l"></div><div class="l s"></div><div class="l"></div></div>
+        </div>
+        <div class="mcard">
+          <div class="h"><span>反链</span><span class="dots">⌄ ⤢ ✕</span></div>
+          <div class="b"><div class="l"></div><div class="l m"></div></div>
+        </div>
+        <div class="mcard">
+          <div class="h"><span>回收站</span><span class="dots">⌄ ⤢ ✕</span></div>
+          <div class="b"><div class="l s"></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="note" style="margin-top:10px">
+      示意里三件事各示范一处：<b>小卡</b>是格子不是卡片；<b>归属树</b>是「收起」（<code>data-collapsed</code>，body 隐藏、编辑器还在）；<b>检视</b>是「单卡」（槽层 <code>data-solo</code>，其它卡让位但状态不变）。
+      收起的卡与单卡的目标都<b>按 id 记在设备状态里</b>，所以拖到另一槽、刷新、重开都还在。
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── 八、一切皆块 ───────────── -->
+<section class="sec">
+  <div class="sec-h"><b>八、「一切皆块」落在哪：身份是派生的，位置只是默认落点</b><i>不再造 Page / Tag / Journal / View 实体</i></div>
+  <div class="grid2">
+    <div class="card pad">
+      <div class="kv" style="gap:7px 16px">
+        <dt>页</dt><dd>带 <code>page</code> 露面的块；页名＝主别名，正文是描述</dd>
+        <dt>日记</dt><dd>有 <code>_date</code> 的块；日期是只读投影，<b>不进正文</b>，全局一天一个</dd>
+        <dt>标签</dt><dd>带 <code>tag</code> 露面的块；归属在 <code>props._tags</code>，<b>只有块级一处入口写它</b>，渲染成行右端标签槽 <code>.blk-tags</code> 里的 chip（不占正文）。正文里敲的 <code>#名</code> 是<b>提及</b>（ref run），不写归属</dd>
+        <dt>实例（obj）</dt><dd><b>不是新类型</b>：<code>props._tags</code> 非空的块就是那个标签的一条记录（归属即实例，不看身份与正文）。行内 <code>#名</code> 的 ref run 指向它，但那只是提及；值住它自己的 <code>props</code>（同一个属性袋），字段来自标签声明；<code>⌥</code> 字段卡与属性区共用同一行渲染器，值只写记录块</dd>
+        <dt>属性</dt><dd>键＝定义块的 id ⇒ 改显示名不动任何值，两个插件撞名也不冲突</dd>
+        <dt>类型</dt><dd>唯一「值必须来自封闭注册表」的字段；声明（纯数据）与绑定（渲染器）分家</dd>
+        <dt>查询</dt><dd>有 <code>_query</code> 的块：<b>条件</b>是内容（入 KB、可引用、进回收站），<b>结果</b>只是表面实例的冻结快照（第五节）</dd>
+        <dt>视图</dt><dd>对<b>一份源</b>的记录怎么排、怎么画；配置住拥有者（<code>_views</code>／<code>_activeView</code>），滚动/选中/冻结结果外挂、不入 KB</dd>
+        <dt>侧栏</dt><dd>一个槽，里面是一列<b>条目</b>：窗口卡／快捷卡／派生卡／命令小卡／工具面卡。堆叠归槽、卡片归块；清单是设备状态（第七节）</dd>
+        <dt>落点</dt><dd><b>页</b>（新建 / <code>@</code> 建页）与<b>身份</b>（tag / schema / journal）创建时物化在森林顶层；<b>记录 / 笔记</b>落当天。<code>标记为页</code> 原地；<code>提取为页</code> 才把块连子树搬到顶层，并在原位置留一枚引用。用户世界仍没有「根」：无根视图、无「提取为无名根」</dd>
+      </div>
+    </div>
+    <div class="card pad">
+      <div class="sec-h" style="margin:0 0 10px"><b style="font-size:13px">三条不变量</b></div>
+      <div class="must">
+        <div class="row"><span class="n">A</span><div><b>位置＝默认落点</b>，不是不变量：身份块创建时物化在顶层，此后移动/加露面不再强制移出——被卷进所附内容的删除由软删兜底。</div></div>
+        <div class="row"><span class="n">B</span><div><b>正文语义</b>：身份块的正文是名字或投影，内容写路径一律不许改它（一个 <code>canWriteText</code> 判据喂给所有写路径）。</div></div>
+        <div class="row"><span class="n">C</span><div><b>存在</b>：软删除 ＋ 同地址复活——删了能回来、类不分裂；恢复是摘标记回原位。</div></div>
+      </div>
+      <div class="note" style="margin-top:11px;padding-top:10px;border-top:1px dashed var(--line2)">
+        B、C 在 <code>core/</code> 里维护，<b>只查被操作的那一块自己，不扫子树</b>——代价放到低频入口，让高频出口零判断。
+      </div>
+      <div class="note" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line2)">
+        <b>同一条判据贯穿后三节</b>：数据只回答「是什么」（<code>_query</code>／<code>_embed</code> 决定源），
+        配置只回答「怎么看」（拥有者的 <code>_views</code>），表面只回答「在哪看」（center／mount／embed／dock）。
+        各自只有一份真相，所以「改一处」不会悄悄改掉另一处。
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── 九、库内形状 ───────────── -->
+<section class="sec">
+  <div class="sec-h"><b>九、库内形状：一张 SQLite 文件，源表与派生表分开记账</b><i>electron/library/sqlite.ts（DDL·迁移）· src/core/storage/db-rows.ts（行编码）· derived-rows.ts（派生编码）</i></div>
+  <div class="grid2">
+    <div class="card pad">
+      <div class="subh">表清单 <span>schema 16 · 源表 4 · 派生 5 · 库级 4</span></div>
+      <table class="tbl">
+        <thead><tr><th>表</th><th>键</th><th>职责与形状判据</th></tr></thead>
+        <tbody>
+          <tr><td>Block</td><td class="m">id PK</td><td>一行一块：正文 run 序列／annos／<code>parent＋left</code>（落库编码）／created·modified／deleted（软删）；<code>display·kind·date·query·type</code> 升列——每行渲染或每次条件求值都要读的东西，不值当逐次解析 JSON</td></tr>
+          <tr><td>BlockProperty</td><td class="m">(block,name,pos)</td><td>属性一格一行，有序列表拆行；<code>pos</code> 进主键——顺序本身是语义，不留给隐式 rowid</td></tr>
+          <tr><td>BlockAlias</td><td class="m">name PK</td><td>地址：原样拼写是主键；<code>norm</code> 列是按名点查的索引（「这个名字归谁」一次查找，不读全表）</td></tr>
+          <tr><td>BlockList</td><td class="m">(block,list)</td><td>露面（page／tag）；页列表与标签列表只按它过滤</td></tr>
+          <tr><td>BlockFTS ＋ Map</td><td class="m">派生</td><td>contentless FTS5：词级／逐字／拼音三列各司其职；Map 把「块 id＋来源」映射到稳定 rowid——可搜文本不止正文（正文／地址／标签／属性值／链接各一行，独立维护）</td></tr>
+          <tr><td>BlockGram</td><td class="m">派生</td><td>trigram 三字滑窗：只答「库里有没有这一串」（子串命中可走索引）；rowid 与 FTS 正文行同址，不存第二张映射；两字以下退回扫描</td></tr>
+          <tr><td>BlockIndex</td><td class="m">block PK</td><td>位置派生：<code>root</code>／<code>path</code>／<code>hidden</code>。path 是定长段——前缀查询＝子树、字典序＝先序；<code>hidden=1</code>＝自己或祖先被软删（被删子树仍留表里）</td></tr>
+          <tr><td>BlockRelation</td><td class="m">(from,to,kind)</td><td>「谁指向谁」，按三元组去重；<code>from_root</code> 让反链按来源根聚合，不必回查位置表</td></tr>
+          <tr><td>meta · settings</td><td class="m">key PK</td><td>派生状态（pending/ready）、FTS 状态与分词器版本、库级水位；与内容表分开——它们换库不换形状</td></tr>
+          <tr><td>op_log</td><td class="m">(device,seq)</td><td><b>变更流</b>：与内容行<b>同一个事务</b>追加；<code>PK(device_id,seq)</code> 让重发天然幂等。整份替换＝新 genesis：清旧日志、序号归零，这一批成为新历史的第一段——日志永远不混两段历史</td></tr>
+          <tr><td>assets</td><td class="m">hash PK</td><td>资产元信息一行一档案；字节在 <code>assets/&lt;hash前2&gt;/</code>。字节不入库文件：库要整个目录可拷走，几百 MB 二进制塞进一个 SQLite 文件会让每次同步变成整文件冲突</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card pad">
+      <div class="subh">派生表的三条纪律 <span>悬空是中间态，漏记靠等式拦</span></div>
+      <div class="must">
+        <div class="row"><span class="n">1</span><div><b>可全量重建，「重建＝增量」是验收标准</b>：从内容行全量重建与一路增量累积必须得到同一份结果（指纹逐字节相等，等式测试钉住）。派生行漏记一种变更，界面上只是「偶尔少一条」——静默错误没有报错可看，只能用等式拦。</div></div>
+        <div class="row"><span class="n">2</span><div><b>状态在 meta，pending 不许信</b>：派生表作废回 <code>pending</code>，重建完成前读路径退回宽超集（宁可多读，不许静默漏）。重建是流式的（逐根读子树→提交），大库的全文重建不占首帧。</div></div>
+        <div class="row"><span class="n">3</span><div><b>不设外键</b>：悬空边与悬空块是可重建的中间态，写入顺序由重建／维护批次决定；真实约束只落在源表。</div></div>
+      </div>
+      <div class="hr"></div>
+      <div class="kv">
+        <dt>主进程边界</dt><dd>只执行<b>通用 SQL</b>（表/列白名单＋参数），不 import 块语义；「一个块长成哪几行」只有一份定义（db-rows.ts）。查询域在库里，渲染层就不必在 JS 里把数据库再造一遍。</dd>
+        <dt>schema 版本</dt><dd><code>PRAGMA user_version</code> 是唯一判据，且随事务原子回滚（实测）；迁移只加表/索引不搬内容，迁移前快照失败即中止。</dd>
+        <dt>写成本</dt><dd>一次编辑只写动过的那几块 ⇒ 不随库体量增长；批＝一次用户动作，没有半批——半批会让日志声称一件表里没发生的事。</dd>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── 十、缓存 ───────────── -->
+<section class="sec">
+  <div class="sec-h"><b>十、缓存：三层派生，各答各的问题</b><i>src/core/infra/index-port.ts（内存索引与失效）· infra/order.ts（先序）· query/candidates.ts ＋ storage/query-candidates.ts（候选）· model/store.ts（工作集淘汰）· storage/workset.ts（行缓存）</i></div>
+  <div class="card">
+    <div class="flow">
+      <div class="step">
+        <div class="k">① 库内</div>
+        <div class="v">SQLite 派生表</div>
+        <div class="d">查询候选／全文／关系／路径都住在库里（第九节）；启动不再在 JS 里重建全库索引</div>
+      </div>
+      <div class="step">
+        <div class="k">② 内存</div>
+        <div class="v">全局列表＋字段表</div>
+        <div class="d">Index 上的派生缓存：null＝未建、读时重建；按 op 标脏——<b>写什么不失效</b>比失效什么更关键</div>
+      </div>
+      <div class="step">
+        <div class="k">③ 求值</div>
+        <div class="v">先序 rank ＋ 候选集</div>
+        <div class="d">延迟跟候选数走；收窄不了的条件显式回退，计数器把回退报出来，不许静默</div>
+      </div>
+      <div class="step accent">
+        <div class="k">④ 手里</div>
+        <div class="v">工作集 WorkingSet</div>
+        <div class="d">渲染层只有有界工作集，不再持有整库模型；行缓存合并保对象身份；pin／LRU 整树淘汰</div>
+      </div>
+    </div>
+  </div>
+  <div class="grid2" style="margin-top:18px">
+    <div class="card pad">
+      <div class="subh">内存缓存（Index，建在工作集森林上） <span>失效判据按 op 逐类登记</span></div>
+      <div class="struct" style="line-height:1.85"><span class="type">Index</span> <span class="pipe">= {</span>
+  <span class="key">lists</span>: { pages, tags, propDefs, trash, journals }
+                                        <span class="cmt">全局列表；逐成员判 null：未建的才重建</span>
+  <span class="key">fields</span>: FieldTable | null           <span class="cmt">字段表：查询与属性区共用，懒建</span>
+  <span class="key">order</span>: RankMap                   <span class="cmt">先序 rank：步长 1024、中点插入；覆盖全部块（含软删）</span>
+  <span class="key">cacheProbe</span>: { listsBuilds, fieldBuilds,
+               candidateQueries, fallbackQueries } <span class="cmt">计数器：让「静默全林」变成可数的数</span>
+<span class="pipe">}</span></div>
+      <div class="note" style="margin-top:9px">
+        <b>失效的另一半</b>：正文／行内原子／<code>_tags</code>／<code>_date</code>／<code>_aliases</code> 的写<b>不</b>失效这些缓存——它们在打字热路径上，失效等于每敲一个字一趟全林。只有结构与身份类写（露面／定义声明／存在）才标脏。
+        <br><b>先序 rank 的契约是 id 序列</b>，数值不进（给中点留空间）；同层多个变动 ⇒ 该层重编号；软删保留、恢复免费、purge 才摘。
+      </div>
+    </div>
+    <div class="card pad">
+      <div class="subh">候选集 <span>两条投影，一个判据</span></div>
+      <div class="note">
+        候选只答「哪些块<b>可能</b>命中」，判据只有一条：<b>⊇ 真命中</b>（超集）。matcher 仍是判定的唯一来源，候选只负责把求值范围从全库收窄到「值得判的那一批」——桌面把它编译成 SQL 计划，web 走内存集合，两路用等式测试钉住同义。
+      </div>
+      <div class="kv" style="margin-top:9px;gap:5px 14px">
+        <dt>不知道 ≠ 空集</dt><dd>收窄不了的条件显式回退（内存路径 <code>undefined</code>＝回退全林；SQL 计划给「全部可见块」，成本随命中面走）。空集是合法答案——拿它冒充「不知道」会把整批结果吞掉</dd>
+        <dt>求值次序</dt><dd>先按树序（rank）、再按条件（sort）、最后 limit；延迟跟候选数走，不跟库走</dd>
+        <dt>分页</dt><dd>游标是上一页最后一条的 <code>path</code>；分页单位是候选流，不是结果集（判定在本地）</dd>
+      </div>
+    </div>
+  </div>
+  <div class="grid2e" style="margin-top:18px">
+    <div class="card pad">
+      <div class="subh">工作集（BlockStore · workset.ts） <span>部分装载的五条底线</span></div>
+      <div class="kv" style="gap:6px 14px">
+        <dt>首帧</dt><dd>目录＋今日窗口（或上次活跃位置），引用目标与身份块按需批量预取——启动成本与库大小解耦</dd>
+        <dt>行缓存合并</dt><dd>已加载的 id <b>不换对象、不改内容</b>：本地编辑永远比缓存行新，只有新 id 才建对象。否则同一块两个对象，编辑会静默丢</dd>
+        <dt>装载窗口</dt><dd>窗口是 DFS 前缀：新块永远接在已装兄弟后面 ⇒ 增量挂接 O(本窗)，装载出的索引与整份重建逐条一致</dd>
+        <dt>pin／LRU</dt><dd>超预算按 LRU 整树摘（最久没被读到的先走；钉住的子树不走）。淘汰只丢内存副本——库里都在，丢的不是数据</dd>
+        <dt>未加载 ≠ 删除</dt><dd>渲染层永远不为未加载块生成「删除／不存在」的 diff；保存只覆盖已加载范围。这是部分装载的数据安全底线，优先级高于任何性能数字</dd>
+      </div>
+    </div>
+    <div class="card pad">
+      <div class="subh">预算观 <span>缓存有预算，不是产品上限</span></div>
+      <div class="note">
+        小库首帧后可在内存预算内缓存整库；大库只缓存当前 Doc／最近页／查询页——同一套架构，不设「大库模式」。
+        护栏按 Doc 与查询结果设，不按库大小设：库多大都能开，慢的是那一次操作，不是启动。
+        <br><b>为什么行缓存留在工作集而不每次重读</b>：部分装载下会反复打开同一批块（今日窗口、引用目标、标签），每次重读会把同一块变成第二个对象，也会把本地没落盘的编辑覆盖回旧行。
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── 十一、同步 ───────────── -->
+<section class="sec">
+  <div class="sec-h"><b>十一、同步：S3 是唯一后端，设备自己协调</b><i>形状已定 · 实现未开工——写侧的变更流已就位（可被直接消费），协议与传输未动</i></div>
+  <div class="note" style="margin:-2px 0 12px 2px">
+    一句话：库存在用户自己的 S3 兼容桶里，端到端加密；没有服务器，也没有账号；每台设备自己同步、自己合并，仓库只保管加密文件。
+    协调面下沉客户端不是过渡——端到端加密下服务器读不懂内容，本来就不能做语义判断；把协调放回唯一可信方。
+  </div>
+  <div class="grid2">
+    <div class="card pad">
+      <div class="subh">桶布局 <span>对象全部不可变 ·「最新」由 listing 计算</span></div>
+      <div class="struct" style="line-height:1.9"><span class="key">&lt;prefix&gt;/&lt;libId&gt;/&lt;schemaEpoch&gt;/</span>
+  <span class="key">devices/&lt;deviceId&gt;/head</span>                    <span class="cmt">{seq,hlc} 只做轮询加速；丢了可从 listing 重建</span>
+  <span class="key">…/changes/&lt;from&gt;-&lt;to&gt;-&lt;hash&gt;.cbin</span>    <span class="cmt">加密 op 段，只追加；上传单元≠事务</span>
+  <span class="key">snapshots·baselines/…sbin</span>              <span class="cmt">不可变 manifest＝cursor 向量 {device:seq}</span>
+  <span class="key">chunks/&lt;hmac&gt;.cbin</span>                      <span class="cmt">加密快照块，按明文 hash 寻址（CDC）</span>
+  <span class="key">assets/&lt;hmac&gt;.abin</span>                      <span class="cmt">加密资产块：同形状，独立命名空间</span>
+  <span class="key">keys/&lt;epoch&gt;/&lt;wrapId&gt;.kbin</span>                <span class="cmt">根密钥的包裹（口令／恢复码／设备）</span>
+  <span class="key">gc/&lt;epoch&gt;/…</span>                              <span class="cmt">两阶段 GC 的候选</span></div>
+      <div class="note" style="margin-top:9px">
+        桶上没有可变根、没有锁、没有服务端数据库；桶要求只有 PUT/GET/LIST/DELETE＋读己写。
+        防回滚＝本地高水位＋多设备互证：恶意服务商隐藏／回滚挡不住，这是接受的代价，不是疏忽。
+      </div>
+      <div class="note" style="margin-top:9px">
+        <b>密钥</b>：口令→主钥→包裹根密钥（恢复码与设备各包一份），子钥按用途分开派生。
+        内容对象名＝HMAC(名钥, 明文 hash)——<b>不绑位置 ⇒ 去重可用</b>；唯一对象（段/快照/密钥）才把位置绑进认证数据。
+        服务端可见对象数／大小／时间，不可见内容、标题、标签与搜索索引。密钥只住同步进程，渲染层与插件不持有。
+      </div>
+    </div>
+    <div class="card pad">
+      <div class="subh">三条机制 <span>增量、快照、合并</span></div>
+      <div class="kv" style="gap:6px 14px">
+        <dt>增量＝段</dt><dd>每 N 个 op／T 秒封一段 PUT；拉取＝按设备前缀 LIST（起点＝各自水位）。重传同内容同名，服务端视为成功——幂等靠名字，不靠状态</dd>
+        <dt>快照＝CDC</dt><dd>确定性序列化→切块→只传缺失块→manifest 最后写（manifest 是提交点，中断只留孤儿块）。新设备＝最新快照＋各设备尾巴，唯一一次全量</dd>
+        <dt>合并</dt><dd>段头带因果水位 {device:seq}：收端满足才应用，否则暂存；逐寄存器 LWW 判赢，被覆盖版本留日志。这是「不丢」的合并，不是「无冲突」——同时编辑同一段是另立项</dd>
+        <dt>GC 三层</dt><dd>根（op 段／资产／密钥／基线）／缓存（快照与块，可从根重建）／垃圾。日志默认不删；要截断先有基线覆盖；两阶段候选＋宽限期，误删可由任一有明文的设备重传</dd>
+        <dt>schema epoch</dt><dd>路径含 epoch：不兼容变更开新 epoch＋新基线，旧格式变更禁止回灌；epoch 是命名空间，不是密钥轮换</dd>
+      </div>
+    </div>
+  </div>
+  <div class="grid2e" style="margin-top:18px">
+    <div class="card pad">
+      <div class="subh">写侧已就位 <span class="chip ok">可被直接消费</span></div>
+      <div class="must">
+        <div class="row"><span class="n">1</span><div><b>变更流唯一生产者</b>：一次用户动作＝一笔事务＝op_log 连续一段（同事务，没有半批）。</div></div>
+        <div class="row"><span class="n">2</span><div><b>幂等键 (device_id, seq)</b>：重发同一段不会变成两行。</div></div>
+        <div class="row"><span class="n">3</span><div><b>重放等价</b>：从空库重放日志与当前模型逐字节一致（等式测试钉住）。</div></div>
+        <div class="row"><span class="n">4</span><div><b>自足排序</b>：op 自带位置值，落库解析成兄弟链——重放不依赖应用时刻。</div></div>
+        <div class="row"><span class="n">5</span><div><b>收端校验</b>：系统属性有登记表，未登记的键拒绝落格；资产内容寻址，同字节只存一份。</div></div>
+      </div>
+      <div class="note" style="margin-top:9px">还缺的第一读者：按 (device, seq) 拉增量的读 API——生产路径现在零读者，只有重放测试在读。</div>
+    </div>
+    <div class="card pad">
+      <div class="subh">未定四件 <span class="chip warn">定稿前不动传输</span></div>
+      <div class="must">
+        <div class="row"><span class="n">1</span><div><b>同字段并发写的冲突策略</b>：逐寄存器 LWW 是方向，「保留双方」的具体形状未定。</div></div>
+        <div class="row"><span class="n">2</span><div><b>同组并发插入／移动的确定性 tie-break</b>：「插在哪」有解，「两台设备同时插同一处谁先」没有。</div></div>
+        <div class="row"><span class="n">3</span><div><b>撤销插入后的复活守卫</b>：单设备恒成立，多设备要显式语义（别的设备可能已重建同名内容）。</div></div>
+        <div class="row"><span class="n">4</span><div><b>删除权边界</b>：「彻底遗忘」要连日志段一起截，hard delete 的语义未声明。</div></div>
+      </div>
+      <div class="note" style="margin-top:9px">这四件决定 op 形状与落库，必须在有真数据之前定下来；先写传输等于把冲突与序号问题留给有真数据之后。</div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <span>qua · 一切皆块 · 块的身份与内容槽：id / content / children / created / modified / props</span>
+  <span>结构取自代码类型与架构断言；数字由 render 脚本现读</span>
+</footer>
+
+</body>
+</html>
