@@ -58,6 +58,7 @@ import { BelongsTree } from '../../ui/cards/belongs-tree.ts'
 import { renderIcon } from '../../view/icons.ts'
 import { bindDropTarget, setDragCard } from '../../view/dnd.ts'
 import { bindWindowDrop } from '../../ui/dock/dock-windows.ts'
+import { whenDocLoaded } from '../doc-load.ts'
 
 export type DocksDeps = {
   kb: MemoryKb
@@ -337,7 +338,7 @@ export function setupDocks(deps: DocksDeps) {
     if (!findInForest(deps.getWs().blocks, blockId)) return
     // 裸块先补子树：窗口卡里是那一块的真实编辑器，children 空着就只剩根行
     if (deps.kb.needsDoc(blockId)) {
-      deps.ensureDoc([blockId], () => openWindow(side, blockId, action, at, solo))
+      deps.ensureDoc([blockId], whenDocLoaded(deps.kb, blockId, () => openWindow(side, blockId, action, at, solo)))
       return
     }
     const dock = deps.prefs().dock

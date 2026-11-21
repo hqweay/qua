@@ -109,7 +109,8 @@ export async function loadWorksetBoot(deps: WorksetBootDeps): Promise<WorksetBoo
         roots.push(...deps.workset.loadDoc(withAncestors(w), w.rootIds))
         // 一窗到底 ⇒ 这棵子树的 children 在身上；还有下一窗 ⇒ 形状不全，先标未知，
         // 由装配层的 `finishDocWindows` 读到最后一窗后转成已知
-        if (w.next === null) deps.workset.markChildrenKnown(rowsIds(w.rows))
+        // 根自己也算「这一窗读过的块」：窗口可能只装根（叶子/空窗），漏了它会让 needsDoc 恒真
+        if (w.next === null) deps.workset.markChildrenKnown([...w.rootIds, ...rowsIds(w.rows)])
         else deps.workset.markChildrenUnknown(w.rootIds)
         merged.rows.blocks.push(...w.rows.blocks)
         merged.rows.props.push(...w.rows.props)
@@ -124,7 +125,7 @@ export async function loadWorksetBoot(deps: WorksetBootDeps): Promise<WorksetBoo
     if (r.status !== 'ok') {
       return r.status === 'no-library' ? { status: 'no-library' } : { status: 'error', error: `doc: ${describe(r)}` }
     }
-    deps.workset.markChildrenKnown(rowsIds(r.value.rows))
+    deps.workset.markChildrenKnown([...r.value.rootIds, ...rowsIds(r.value.rows)])
     return {
       status: 'ok',
       roots: deps.workset.loadDoc(withAncestors(r.value), r.value.rootIds),

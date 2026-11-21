@@ -44,6 +44,7 @@ import type { Chrome } from '../../ui/chrome/chrome.ts'
 import { isReadonlyBlock } from '../../view/editor/block-dom.ts'
 import type { BlockEditor, ViewState } from '../../view/editor/editor.ts'
 import { rootsFor, rootsForMany } from '../commands/roots.ts'
+import { whenDocLoaded } from '../doc-load.ts'
 import { datePicker } from '../../ui/overlay/date-picker.ts'
 import type { PageDeps } from '../commands-impl.ts'
 
@@ -367,7 +368,7 @@ export function setupPages(deps: PagesDeps) {
      * 同一块已经在 tab 里时也走这一道：那次装载可能同样缺子树。
      */
     if (kb.needsDoc(id)) {
-      deps.loadDocThen([id], () => void openInNewTab(id, feed))
+      deps.loadDocThen([id], whenDocLoaded(kb, id, () => void openInNewTab(id, feed)))
       return true
     }
     initTabs()
@@ -907,6 +908,11 @@ export function setupPages(deps: PagesDeps) {
       if (!inForest) {
         // 工作集装载下「不在森林」可能是没装：先装再回放（装载完它就在森林里）
         deps.loadDocThen([point.id], () => {
+          // 补读没补上（读失败）⇒ 停在这里；无条件递归会让同一个历史点在「再装一次」上死循环
+          if (findInForest(deps.getWs().blocks, point.id) === undefined && !deps.kb.isLoaded(point.id)) {
+            console.warn('[doc] history target still missing; skip:', point.id)
+            return
+          }
           replay(point)
         })
         return true

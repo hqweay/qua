@@ -224,6 +224,11 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
     // 删一天要看它的子树有多大（确认框）⇒ 未装载先装载（软删块也读得回来）
     if (!d.kb.isLoaded(id)) {
       d.loadDocThen([id], () => {
+        // 补读没成功就不再递归（否则同一天在「再装一次」上死循环，点了没反应）
+        if (!d.kb.isLoaded(id)) {
+          console.warn('[doc] journal still unloaded; skip delete:', id)
+          return
+        }
         deleteJournal(id)
       })
       return true

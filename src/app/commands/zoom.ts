@@ -5,6 +5,7 @@ import { FEED_INITIAL, FEED_SPEC, feedWindow, hasList, isJournal, todayISO } fro
 import type { App } from '../../core/infra/ports.ts'
 import type { Block } from '../../core/model/model.ts'
 import { rootsFor, rootsForMany } from './roots.ts'
+import { whenDocLoaded } from '../doc-load.ts'
 import type { PageDeps } from './types.ts'
 
 /**
@@ -30,7 +31,7 @@ export function zoomCommands(d: PageDeps): Pick<App, 'zoomTo' | 'zoomOut'> {
      * 放在「已经是这一根」的早退之前：早退的前提是这一屏已经装对了。
      */
     if (d.kb.needsDoc(id)) {
-      d.loadDocThen([id], () => open(id, feed, restore))
+      d.loadDocThen([id], whenDocLoaded(d.kb, id, () => open(id, feed, restore)))
       return
     }
     const b = d.kb.get(id)

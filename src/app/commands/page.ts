@@ -37,6 +37,7 @@ import { t } from '../../core/infra/msg.ts'
 import type { App } from '../../core/infra/ports.ts'
 import type { Row } from '../../ui/overlay/layers.ts'
 import { rootsFor, rootsForMany, takenWhere } from './roots.ts'
+import { whenDocLoaded } from '../doc-load.ts'
 import type { PageDeps } from './types.ts'
 
 /**
@@ -113,9 +114,9 @@ export function pageCommands(d: PageDeps): Pick<
      * 预取进来，`children` 还空着；直接 `rootsFor` 得到的就是只有根行的一屏。
      */
     if (d.kb.needsDoc(id)) {
-      d.loadDocThen([id], () => {
+      d.loadDocThen([id], whenDocLoaded(d.kb, id, () => {
         openPageNow(id)
-      })
+      }))
       return
     }
     const p = d.kb.get(id)
