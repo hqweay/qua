@@ -33032,6 +33032,44 @@ await check('T348 长块引折行不溢出：显示名守住正文列，inline �
   return `长块引折行：溢出 ${Math.round(g.overflowPx)}px；inline＋可选；全名三处都在`
 })
 
+/**
+ * T349｜同类扫：文件 chip 的长名字与块引同一个口子——随正文折行，不顶破正文列。
+ */
+await check('T349 长文件名折行不溢出：文件 chip 守住正文列，名字不裁', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  await page.waitForTimeout(200)
+  const LONG = '这是一段非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常长的文件名用来量溢出'
+  const g = await page.evaluate((name) => {
+    const ed = window.__qua.__editor
+    const host = ed.insert.insertBlockAfter(ed.rows()[0].block.id, '')
+    ed.write((tx) => tx.patch(host, (b) => {
+      b.content = [{ id: 't349-a', t: 'asset', asset: 'deadbeef', label: name }]
+    }))
+    ed.renderAll()
+    const chip = document.querySelector(`.blk[data-block-id="${host}"] .asset-chip`)
+    const label = document.querySelector(`.blk[data-block-id="${host}"] .asset-chip-label`)
+    const txEl = document.querySelector(`.blk[data-block-id="${host}"] .tx`)
+    if (!chip || !label || !txEl) return { error: '前置失败：找不到文件 chip／名字／正文槽' }
+    const r = (e) => e.getBoundingClientRect()
+    return {
+      chipOverflowPx: r(chip).right - r(txEl).right,
+      labelOverflowPx: r(label).right - r(txEl).right,
+      labelWS: getComputedStyle(label).whiteSpace,
+      fullInDom: label.textContent.includes(name),
+      tipHasFull: (chip.closest('.atom')?.dataset.tip ?? '').includes(name),
+    }
+  }, LONG)
+  assert(!g.error, `前置：${JSON.stringify(g)}`)
+  assert(g.chipOverflowPx <= 0 && g.labelOverflowPx <= 0, `长文件名不该溢出正文列：${JSON.stringify(g)}`)
+  assert(g.labelWS === 'normal', `文件 chip 名字随正文折行：${JSON.stringify(g)}`)
+  assert(g.fullInDom && g.tipHasFull, `全名在 DOM 与 tip 里，折行不是少报：${JSON.stringify(g)}`)
+
+  await ctx.close()
+  return `长文件名折行：chip 溢出 ${Math.round(g.chipOverflowPx)}px；全名仍在`
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

@@ -2536,8 +2536,14 @@
   align-items: center;
   opacity: var(--ui-soft);
 }
+/*
+  **文件 chip 的名字与行内替身同一个口子**：它也是行内原子里可读的字，长文件名
+  不该被 `.atom` 的 nowrap 顶破正文列（与 `.atom-label` 同一条修复）。
+*/
 .asset-chip-label {
   font-size: 0.93em;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 /* 缩略图：**行高不变**（1.35em、随基线），宽按原比例 —— 行内层的契约是一个点，不是一张画 */
 .asset-thumb {
