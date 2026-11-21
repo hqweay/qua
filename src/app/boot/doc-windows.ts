@@ -83,6 +83,7 @@ export async function finishDocWindows(
   for (const job of pending) {
     let after: string | null = job.after
     let loaded = false
+    const seen: string[] = []
     while (after !== null) {
       const r = await read(job.id, after, DOC_WINDOW)
       if (r.status !== 'ok') {
@@ -90,10 +91,17 @@ export async function finishDocWindows(
         break
       }
       workset.loadDoc(withAncestors(r.value), [job.id])
+      for (const row of r.value.rows.blocks) if (typeof row.id === 'string') seen.push(row.id)
       loaded = true
       after = r.value.next
     }
     if (!loaded) continue
+    /**
+     * 只有**读到最后一窗**（`after === null`）才算这棵子树的 children 齐了；
+     * 中途失败停在先序前缀上，标记已知会让之后打开这一块跳过补读（正文永远少一截）。
+     */
+    // 根在**首窗**里读到，续装窗口不再包含它 ⇒ 根要单独带上
+    if (after === null && seen.length > 0) workset.markChildrenKnown([job.id, ...seen])
     workset.pin([job.id])
     grew = true
   }

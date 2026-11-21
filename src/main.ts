@@ -98,6 +98,7 @@ import { WORKSPACE_VERSION } from './core/infra/workspace.ts'
 import { createLibraryClient, type LibraryClient, type LibraryReadBridge } from './core/storage/library-client.ts'
 import { createMemoryLibraryClient } from './core/storage/memory-client.ts'
 import { Workset, worksetClosureIds } from './core/storage/workset.ts'
+import type { RawLibraryRows } from './core/storage/db-rows.ts'
 import { indexReadsOf, indexWritesOf, type IndexReads } from './core/storage/index-rows.ts'
 import { AliasClaimError } from './core/kb/unsupported.ts'
 import { deferAliasGate } from './core/kb/alias-gate.ts'
@@ -421,9 +422,13 @@ search = createSearchService({
   // 命中块按 id 连祖先链装进工作集（⌘K 的结果呈现要块对象）
   loadBlocks: async (ids) => {
     if (!libraryClient || !workset || ids.length === 0) return
+    const loadedBefore = new Set(ids.filter((id) => blocks.isLoaded(id)))
     const r = await libraryClient.tree(ids, false)
-    if (r.status === 'ok') workset.loadBlocks(r.value, true)
-    else console.warn('[search] hit load failed:', r.status === 'error' ? r.error : r.status)
+    if (r.status === 'ok') {
+      workset.loadBlocks(r.value, true)
+      // 只给「这次才装进来的」块涂未知：已经在内存里的可能已读过子树，别让它白补读
+      workset.markChildrenUnknown(blockRowIds(r.value).filter((id) => !loadedBefore.has(id)))
+    } else console.warn('[search] hit load failed:', r.status === 'error' ? r.error : r.status)
   },
   // 依赖方走全库（改名/清除的低频路径）：未装载依赖块的 FTS 行也住着旧名字
   dependentsOf: async (id) => {
@@ -512,7 +517,12 @@ function ensureDocsLoaded(ids: readonly string[], then: () => void): void {
     then()
     return
   }
-  const missing = [...new Set(ids)].filter((id) => !blocks.isLoaded(id))
+  /**
+   * **「没装载」与「装的是裸块」都要补**：按 id 的预取（身份块／引用目标／候选闭包）
+   * 只给块自己的行，`children` 是空的——直接拿来打开，正文就只有根行。
+   * 判据是 `childrenKnown`，不是 `children.length === 0`（真叶子不能被当成没装）。
+   */
+  const missing = [...new Set(ids)].filter((id) => kb.needsDoc(id))
   if (missing.length === 0) {
     then()
     return
@@ -541,6 +551,10 @@ async function loadDocs(ids: readonly string[], onFirst: () => void): Promise<vo
     for (const w of windows) {
       ws.loadDoc(withAncestors(w), w.rootIds)
       ws.pin(w.rootIds)
+      // 一窗读完 ⇒ 这棵子树的 children 全在身上；还有下一窗的根只是先序前缀，标未知，
+      // 由 `finishDocWindows` 读到最后一窗后转成已知
+      if (w.next === null) ws.markChildrenKnown(blockRowIds(w.rows))
+      else ws.markChildrenUnknown(w.rootIds)
     }
     onFirst()
     if (await finishDocWindows(client, ws, pendingOf(windows))) repaintAfterGrow()
@@ -550,10 +564,19 @@ async function loadDocs(ids: readonly string[], onFirst: () => void): Promise<vo
   if (r.status === 'ok') {
     ws.loadDoc(withAncestors(r.value), r.value.rootIds)
     ws.pin(r.value.rootIds)
+    // 整棵读：子树里的每一块 children 都齐了（祖先链只补名字，不算）
+    ws.markChildrenKnown(blockRowIds(r.value.rows))
   } else {
     console.warn('[workset] doc load failed:', r.status === 'error' ? r.error : r.status)
   }
   onFirst()
+}
+
+/** 一批装载行里的块 id（标记「children 已读全」的单位） */
+function blockRowIds(rows: RawLibraryRows): string[] {
+  const out: string[] = []
+  for (const r of rows.blocks) if (typeof r.id === 'string') out.push(r.id)
+  return out
 }
 
 /**
@@ -619,8 +642,10 @@ if (worksetBoot && libraryClient) {
   const missing = closureIds.filter((id) => !blocks.isLoaded(id))
   if (missing.length > 0) {
     const r = await libraryClient.blocks(missing)
-    if (r.status === 'ok') bootWorkset.loadBlocks(r.value)
-    else console.warn('[boot] closure prefetch failed:', r.status === 'error' ? r.error : r.status)
+    if (r.status === 'ok') {
+      bootWorkset.loadBlocks(r.value)
+      bootWorkset.markChildrenUnknown(blockRowIds(r.value))
+    } else console.warn('[boot] closure prefetch failed:', r.status === 'error' ? r.error : r.status)
   }
   // —— pin：首帧闭包全部钉住 ——
   // 引用目标/标签/定义被淘汰会让首帧渲染拿到过期副本；预算淘汰从导航装载开始才有意义
@@ -1626,8 +1651,9 @@ const app: App = {
    * ⚠️ `inspect` 放在最前：它是**目标自己的面**，不是「去哪」，先分流掉才不会落进导航。
    */
   openBlock: (id, action = 'center', opts) => {
-    // 工作集装载下「点一个未加载的目标」＝先装再打开（不丢点击、不把未加载当不存在）
-    if (blocks.partial && !kb.isLoaded(id)) {
+    // 工作集装载下「点一个未加载（或只装了裸块）的目标」＝先装子树再打开
+    // （不丢点击、不把未加载当不存在，也不把「子树还没装」当成「真的没有子块」）
+    if (kb.needsDoc(id)) {
       ensureDocsLoaded([id], () => app.openBlock(id, action, opts))
       return
     }

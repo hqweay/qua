@@ -92,6 +92,17 @@ export type WorksetState = {
   /** 装载顺序（LRU 淘汰的读数；`find` 命中会刷新） */
   order: Map<string, number>
   tick: number
+  /**
+   * **children 还不全的块**（按 id 预取进来的裸块：标签、定义、引用目标、身份块）。
+   *
+   * 与 `loaded` 分开：`loaded` 只回答「有没有这一块」，不回答「它的子树读全了没有」。
+   * 裸块与真叶子在形状上一样（`children: []`），于是「打开一个只有一行的空页」和
+   * 「打开一个子树还没装的页」分不开——前者是内容，后者是bug。打开导航前据这一格
+   * 补一次子树读（`childrenKnown`），否则正文只有根行、直到别处的装载把它凑齐。
+   *
+   * 只有工作集模式有意义；整库模式恒为「知道」。
+   */
+  childrenUnknown: Set<string>
 }
 
 export class BlockStore {
@@ -151,7 +162,7 @@ export class BlockStore {
    * `loaded`／`pinned` 是当前值，不是累计值。
    */
   readonly worksetProbe = { merges: 0, evictions: 0, loaded: 0, pinned: 0 }
-  private workset: WorksetState = { loaded: null, pinned: new Set(), order: new Map(), tick: 0 }
+  private workset: WorksetState = { loaded: null, pinned: new Set(), order: new Map(), tick: 0, childrenUnknown: new Set() }
 
   constructor(blocks: Block[]) {
     this.blocks = blocks
@@ -244,6 +255,28 @@ export class BlockStore {
   }
 
   /**
+   * 这一块的 **children 读全了没有**（整库模式恒真）。
+   *
+   * 只有工作集模式会返回假：按 id 预取的裸块（身份块／引用目标／候选闭包）
+   * `children` 是空的，但那不是「它没有子块」。打开导航前必须补读，否则正文只有根行。
+   */
+  childrenKnown(id: string): boolean {
+    return this.workset.loaded === null ? true : !this.workset.childrenUnknown.has(id)
+  }
+
+  /** 标记这批块的 children 还没读（裸块装载之后） */
+  markChildrenUnknown(ids: Iterable<string>): void {
+    if (this.workset.loaded === null) return
+    for (const id of ids) this.workset.childrenUnknown.add(id)
+  }
+
+  /** 标记这批块的 children 已经读全（子树读之后） */
+  markChildrenKnown(ids: Iterable<string>): void {
+    if (this.workset.loaded === null) return
+    for (const id of ids) this.workset.childrenUnknown.delete(id)
+  }
+
+  /**
    * 钉住一批块：淘汰不许动它们。
    *
    * 钉的是**对象所在的子树**：视图打开着的根、它引用的身份块、以及为面包屑加载的
@@ -285,6 +318,8 @@ export class BlockStore {
     this.blocks.splice(0, this.blocks.length, ...roots)
     const previous = this.workset.loaded
     this.workset.loaded = new Set(ids)
+    // 整份换进来的那批按「形状完整」对待（测试夹具／将来换库）
+    this.workset.childrenUnknown = new Set()
     // 只给**新装进来的**块盖装载时刻：否则每次再装一页都会把所有块刷成“刚用过”，LRU 失真
     for (const id of ids) if (!previous?.has(id)) this.touch(id)
     this.worksetProbe.merges++
@@ -395,6 +430,8 @@ export class BlockStore {
       evicted += n
     }
     if (evicted > 0) {
+      // 淘汰掉的块不再有「children 全不全」这件事；留着会让将来重装它时跳过子树读
+      for (const id of this.workset.childrenUnknown) if (!loaded.has(id)) this.workset.childrenUnknown.delete(id)
       this.worksetProbe.evictions++
       this.worksetProbe.loaded = loaded.size
       this.discardIndex()
@@ -583,7 +620,7 @@ export class BlockStore {
      * 它没有「未加载」这部分语义。工作集模式下的 pin/loaded 若留着，会把整库
      * 里不在旧工作集的块判成「未加载」——那正是两份模型会打架的地方。
      */
-    this.workset = { loaded: null, pinned: new Set(), order: new Map(), tick: 0 }
+    this.workset = { loaded: null, pinned: new Set(), order: new Map(), tick: 0, childrenUnknown: new Set() }
     this.worksetProbe.loaded = 0
     this.worksetProbe.pinned = 0
     /** 名字归属的答案只属于上一份库：换库必须连它一起清 */

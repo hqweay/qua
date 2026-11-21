@@ -120,6 +120,25 @@ export class Workset {
     if (complete) for (const r of rows.blocks) this.complete.add(idOf(r))
   }
 
+  /**
+   * **children 读全了没有**（`BlockStore.childrenKnown` 的装载侧入口）。
+   *
+   * 按 id 的预取（`loadBlocks`）不带子树，装进来的块在形状上与真叶子一样；
+   * 调用方读完子树（`doc`／`tree(…, true)`）后必须 `markChildrenKnown`，
+   * 否则打开这一块时会拿只有根行的正文，直到别处的装载把它凑齐。
+   */
+  childrenKnown(id: string): boolean {
+    return this.store.childrenKnown(id)
+  }
+
+  markChildrenUnknown(ids: Iterable<string>): void {
+    this.store.markChildrenUnknown(ids)
+  }
+
+  markChildrenKnown(ids: Iterable<string>): void {
+    this.store.markChildrenKnown(ids)
+  }
+
   /** 钉住这些块（与 `BlockStore.pin` 同一份判据） */
   pin(ids: Iterable<string>): void {
     this.store.pin(ids)

@@ -107,6 +107,10 @@ export async function loadWorksetBoot(deps: WorksetBootDeps): Promise<WorksetBoo
       }
       for (const w of windows) {
         roots.push(...deps.workset.loadDoc(withAncestors(w), w.rootIds))
+        // 一窗到底 ⇒ 这棵子树的 children 在身上；还有下一窗 ⇒ 形状不全，先标未知，
+        // 由装配层的 `finishDocWindows` 读到最后一窗后转成已知
+        if (w.next === null) deps.workset.markChildrenKnown(rowsIds(w.rows))
+        else deps.workset.markChildrenUnknown(w.rootIds)
         merged.rows.blocks.push(...w.rows.blocks)
         merged.rows.props.push(...w.rows.props)
         merged.rows.aliases.push(...w.rows.aliases)
@@ -120,6 +124,7 @@ export async function loadWorksetBoot(deps: WorksetBootDeps): Promise<WorksetBoo
     if (r.status !== 'ok') {
       return r.status === 'no-library' ? { status: 'no-library' } : { status: 'error', error: `doc: ${describe(r)}` }
     }
+    deps.workset.markChildrenKnown(rowsIds(r.value.rows))
     return {
       status: 'ok',
       roots: deps.workset.loadDoc(withAncestors(r.value), r.value.rootIds),
@@ -138,6 +143,13 @@ export async function loadWorksetBoot(deps: WorksetBootDeps): Promise<WorksetBoo
   }
   // 全局身份块都是顶层（身份不占位置）⇒ 祖先链天然完整，可参与派生行计算
   deps.workset.loadBlocks(idn.value, true)
+  /**
+   * 身份读只给块自己的行 ⇒ 这些块的 children 还没读（打开它们时按这一格补子树）。
+   * 但**当前对象也可能是一页**（active 是页时 `loadOnce` 已把它的子树读全了）——
+   * 那一批不能再涂回「未知」，否则每次启动第一次打开当前页都要白补读一次。
+   */
+  const docLoaded = first.pending.length === 0 ? new Set(rowsIds(first.doc.rows)) : new Set<string>()
+  deps.workset.markChildrenUnknown(rowsIds(idn.value).filter((id) => !docLoaded.has(id)))
 
   let doc = first.doc
   let roots = first.roots
@@ -175,6 +187,13 @@ export async function loadWorksetBoot(deps: WorksetBootDeps): Promise<WorksetBoo
       loadedBlocks: deps.workset.size,
     },
   }
+}
+
+/** 一批装载行里的块 id（标记「children 已读全」的单位） */
+function rowsIds(rows: { blocks: readonly Record<string, unknown>[] }): string[] {
+  const out: string[] = []
+  for (const r of rows.blocks) if (typeof r.id === 'string') out.push(r.id)
+  return out
 }
 
 function describe(r: { status: string; error?: string }): string {

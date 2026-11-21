@@ -322,6 +322,16 @@ export class MemoryKb implements KbClient {
     return this.get(id)?.annos ?? []
   }
 
+  /** 子树读全了没有（工作集装载的导航门禁；整库模式恒真） */
+  childrenKnown(id: string): boolean {
+    return this.store.childrenKnown(id)
+  }
+
+  /** 打开这一块前要不要补子树读（四条打开入口共用的唯一判据） */
+  needsDoc(id: string): boolean {
+    return this.store.partial && (!this.store.isLoaded(id) || !this.store.childrenKnown(id))
+  }
+
   query(
     spec: QuerySpec,
     opts: { selfId?: string; excludeIds?: readonly string[]; today?: string } = {},

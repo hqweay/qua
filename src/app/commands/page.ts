@@ -108,7 +108,11 @@ export function pageCommands(d: PageDeps): Pick<
    * 「今天」是入口不是普通块：从左槽点它 ＝ 回今日日记流（今日在顶、更早的天往下）。
    */
   const openPageNow = (id: string): void => {
-    if (!d.kb.isLoaded(id)) {
+    /**
+     * **「没装」和「只装了裸块」都要先补子树**：身份块（页/标签）在启动时按 id
+     * 预取进来，`children` 还空着；直接 `rootsFor` 得到的就是只有根行的一屏。
+     */
+    if (d.kb.needsDoc(id)) {
       d.loadDocThen([id], () => {
         openPageNow(id)
       })

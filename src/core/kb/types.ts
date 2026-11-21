@@ -358,6 +358,19 @@ export interface KbClient {
    */
   journalRecord(date: string): { id: string; deleted: number | null } | undefined
 
+  /**
+   * 这一块的 **children 读全了没有**。整库模式恒真；工作集模式下，按 id 预取进来的
+   * 裸块（身份块／引用目标／候选闭包）为假 ⇒ 打开它之前要先补一次子树读，
+   * 不能把「还没装」当成「真的没有子块」（正文只有根行就是这么来的）。
+   */
+  childrenKnown(id: string): boolean
+
+  /**
+   * 打开这一块之前**要不要先补一次子树读**：工作集模式下「没装」或「只装了裸块」。
+   * 四条打开入口（块打开／开页／聚焦／新 tab）共用的唯一判据——散成四份迟早漂。
+   */
+  needsDoc(id: string): boolean
+
   /** 这一块当前的可引用区间（通常为空——anno 只在被引用时存在） */
   annosOf(id: string): readonly Anno[]
 

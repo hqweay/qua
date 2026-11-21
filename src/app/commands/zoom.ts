@@ -24,6 +24,15 @@ export function zoomCommands(d: PageDeps): Pick<App, 'zoomTo' | 'zoomOut'> {
    * 普通聚焦（块标 / 面包屑 / 引用）永远是 `feed = false`：**只装这一块**。
    */
   const open = (id: string, feed = false, restore?: 'saved' | 'none'): void => {
+    /**
+     * **裸块不能直接当一屏**：按 id 预取只给块自己的行，`children` 是空的。
+     * 先补子树再继续——否则正文只有根行，要等用户点一下正文才被别处的装载凑齐。
+     * 放在「已经是这一根」的早退之前：早退的前提是这一屏已经装对了。
+     */
+    if (d.kb.needsDoc(id)) {
+      d.loadDocThen([id], () => open(id, feed, restore))
+      return
+    }
     const b = d.kb.get(id)
     if (!b) return
     /**

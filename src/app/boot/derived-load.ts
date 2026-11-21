@@ -35,6 +35,8 @@ import { loadCandidateWindow } from './query-load.ts'
 export interface DerivedLoadStore {
   readonly partial: boolean
   isLoaded(id: string): boolean
+  /** 这一块的 children 读全了没有（引用栏要一层子级时据此补读裸块） */
+  childrenKnown(id: string): boolean
   readonly blocks: readonly Block[]
   find(id: string): Block | undefined
 }
@@ -108,5 +110,7 @@ async function ensureNotesLoaded(deps: DerivedLoadDeps, host: Block): Promise<bo
   const rows = await client!.tree(sources, false)
   if (rows.status !== 'ok') throw new Error(`library/tree: ${rows.status === 'error' ? rows.error : rows.status}`)
   workset!.loadBlocks(rows.value, true)
+  // `tree(..., false)`：来源块自己的 children 还没读（打开它时按这一格补）
+  workset!.markChildrenUnknown(sources)
   return true
 }

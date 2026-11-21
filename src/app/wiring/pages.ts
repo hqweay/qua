@@ -361,6 +361,15 @@ export function setupPages(deps: PagesDeps) {
 
   /** 新 tab 打开一个目标视图；同一个视图已经开着就切过去（一个视图只开一张 tab） */
   function openInNewTab(id: string, feed = false): boolean {
+    /**
+     * **新 tab 也是「一屏以这一块为根」**：裸块（按 id 预取的页/标签/引用目标）
+     * 的 children 还没读，直接 `makeTab` 会得到只有根行的正文。先补子树再建 tab。
+     * 同一块已经在 tab 里时也走这一道：那次装载可能同样缺子树。
+     */
+    if (kb.needsDoc(id)) {
+      deps.loadDocThen([id], () => void openInNewTab(id, feed))
+      return true
+    }
     initTabs()
     const existing = tabs.find((tab) => tab.kind === 'block' && tab.activeId === id && tab.feed === feed)
     if (existing) {

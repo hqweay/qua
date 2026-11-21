@@ -38,6 +38,8 @@ export const CANDIDATE_PAGE = 400
 export interface QueryLoadStore {
   readonly partial: boolean
   isLoaded(id: string): boolean
+  /** 这一块的 children 读全了没有（`withChildren` 那一档要据此补读裸块） */
+  childrenKnown(id: string): boolean
   readonly blocks: readonly Block[]
   find(id: string): Block | undefined
 }
@@ -80,6 +82,8 @@ export async function loadCandidatePage(
     const r = await client.blocks(named)
     if (r.status === 'ok') {
       workset.loadBlocks(r.value)
+      // 按 id 的预取不带子树：这些块的 children 还没读
+      workset.markChildrenUnknown(idsOfRows(r.value))
       loaded = true
     }
   }
@@ -88,11 +92,22 @@ export async function loadCandidatePage(
   if (page.status !== 'ok') {
     throw new Error(`library/candidates: ${page.status === 'error' ? page.error : page.status}`)
   }
-  const missing = page.value.ids.filter((id) => !store.isLoaded(id))
+  /**
+   * 候选根：没装 ⇒ 装；**要一层子级**（引用栏的透传行）而它只是裸块 ⇒ 也要重读，
+   * 否则「按 id 预取过」的那几个来源块永远摊不开子树，而且 `missing` 判成空后
+   * 它们也不会再被标记成已知。
+   */
+  const missing = page.value.ids.filter((id) => !store.isLoaded(id) || (children && !store.childrenKnown(id)))
   if (missing.length > 0) {
     const rows = await client.tree(missing, children)
     if (rows.status !== 'ok') throw new Error(`library/tree: ${rows.status === 'error' ? rows.error : rows.status}`)
     workset.loadBlocks(rows.value, true)
+    /**
+     * `tree(missing, children=true)` 读的是**候选根的一层子级** ⇒ 这些根的 children 齐了；
+     * 子级自己被装进来时没有自己的子级（仍按裸块记）。`children=false` 则全是裸块。
+     */
+    if (children) workset.markChildrenKnown(missing)
+    else workset.markChildrenUnknown(missing)
     loaded = true
   }
 
@@ -104,11 +119,19 @@ export async function loadCandidatePage(
     const r = await client.blocks(closure)
     if (r.status === 'ok') {
       workset.loadBlocks(r.value)
+      workset.markChildrenUnknown(idsOfRows(r.value))
       loaded = true
     }
   }
 
   return { loaded, next: page.value.next, ids: page.value.ids }
+}
+
+/** 一批装载行里的块 id（标记「children 读没读全」的单位） */
+function idsOfRows(rows: { blocks: readonly Record<string, unknown>[] }): string[] {
+  const out: string[] = []
+  for (const r of rows.blocks) if (typeof r.id === 'string') out.push(r.id)
+  return out
 }
 
 /** 一窗的硬上限（库坏了／游标不动时的刹车；正常一两页就够） */

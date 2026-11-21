@@ -21,6 +21,7 @@ import { BlockStore } from '../src/core/model/store.ts'
 import { Workset } from '../src/core/storage/workset.ts'
 import { createMemoryLibraryClient } from '../src/core/storage/memory-client.ts'
 import { mkBlock, type Block } from '../src/core/model/model.ts'
+import { MemoryKb } from '../src/core/kb/memory.ts'
 import { fingerprint } from '../src/core/infra/index-port.ts'
 import type { LibraryDocRows } from '../src/core/storage/library-reads.ts'
 
@@ -171,7 +172,6 @@ test('启动/导航共用的窗口装载：首窗 ＋ pendingOf ＋ finishDocWin
   for (const w of windows) workset.loadDoc(withAncestors(w), w.rootIds)
   const pending = pendingOf(windows)
   assert.equal(pending.length, 1, '还有余下的窗口')
-
   assert.equal(await finishDocWindows(client, workset, pending), true, '续装长过')
   assert.deepEqual(shapeOf(store), shapeOf(wholeStore))
   assert.equal(
@@ -202,10 +202,43 @@ test('启动：active 是跨窗大页 ⇒ 首窗就返回、余下交 pending，
   assert.equal(boot.counts.docBlocks, DOC_WINDOW, '启动只装了首窗')
   assert.equal(boot.pending.length, 1, '余下的交给首帧后续装')
   assert.equal(workset.isLoaded('big-2099'), false)
+  assert.equal(workset.childrenKnown('big-page'), false, '首窗只是先序前缀：children 还不全')
 
   assert.equal(await finishDocWindows(client, workset, boot.pending), true)
   assert.equal(workset.isLoaded('big-2099'), true, '续装把余下的装齐')
+  assert.equal(workset.childrenKnown('big-page'), true, '读完最后一窗才标记 children 齐了')
   assert.equal(workset.size, 2101)
+})
+
+test('身份块裸装：active 页的子树已读全、别的页只标「children 未知」；needsDoc 据此补读', async () => {
+  const page = (id: string, text: string, childId: string): Block => {
+    const b: Block = { ...mkBlock(text), id, children: [{ ...mkBlock('子块'), id: childId, children: [] }] }
+    b.props = { _lists: ['page'], _aliases: [text], _display: 'alias' }
+    return b
+  }
+  const a = page('page-a', 'A', 'a1')
+  const b = page('page-b', 'B', 'b1')
+  const source = new BlockStore([a, b])
+  const client = createMemoryLibraryClient({ ws: () => ({ blocks: source.blocks, activeId: 'page-a', savedAt: 1 }), store: source })
+  const store = new BlockStore([])
+  const workset = new Workset(store)
+  const boot = await loadWorksetBoot({ client, workset })
+  assert.equal(boot.status, 'ok')
+  const kb = new MemoryKb(store)
+  assert.equal(workset.childrenKnown('page-a'), true, '启动时 active 页的子树已读全')
+  assert.equal(workset.childrenKnown('a1'), true)
+  assert.equal(workset.childrenKnown('page-b'), false, '非 active 的身份页只是按 id 预取的裸块')
+  assert.equal(kb.needsDoc('page-b'), true, '打开前要先补子树读')
+  assert.equal(kb.needsDoc('page-a'), false)
+
+  const doc = await client.doc(['page-b'])
+  assert.equal(doc.status, 'ok')
+  if (doc.status !== 'ok') return
+  workset.loadDoc(withAncestors(doc.value), doc.value.rootIds)
+  workset.markChildrenKnown(doc.value.rows.blocks.map((r) => String((r as { id: unknown }).id)))
+  assert.equal(kb.needsDoc('page-b'), false, '子树读全之后不再补读')
+
+  assert.equal(new MemoryKb(new BlockStore([b])).needsDoc('page-b'), false, '整库模式永远不需要补读')
 })
 
 /** 一片森林的形状：先序 id ＋ 每个块的子块 id 列表（顺序也算） */
