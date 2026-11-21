@@ -107,6 +107,8 @@ export class RowProjection {
 
   /** 这一块此刻的**可见行**（命中行索引 O(1)；没有就现算一次并查） */
   rowOf(id: string): VisibleRow | undefined {
+    // 属性/结构写入后 rowIndex 可能是上一代的（让位、depth 都变了）；先换代再读。
+    this.rawRows()
     const hit = this.rowIndex?.get(id)
     if (hit) return hit
     return this.rows().find((r) => r.block.id === id)

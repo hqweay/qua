@@ -138,6 +138,7 @@ test('⑤ 属性改动换行集合：给行内的块激活视图，子块行当�
   // 写 _views/_activeView 是 prop op：只推 propsRevision，不推结构与内容修订号
   owner.props = { _views: [{ id: 'v1', kind: 'cards' }], _activeView: 'v1' }
   h.propsChanged()
+  assert.equal(h.projection.rowOf('owner')?.hasChildren, false, 'rowOf 读换代后的行，不读上一代 rowIndex')
   assert.deepEqual(
     h.projection.rows().map((r) => r.block.id),
     ['p', 'owner'],

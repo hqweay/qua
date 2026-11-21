@@ -953,8 +953,6 @@ export class RenderOps {
      *    它换的是 `.tx` 所在的那一行 ⇒ 输入法正持有的文本节点被换掉，预编辑串当场落成正文。
      */
     if (this.ed.deferWhileComposing()) return
-    // 先让行投影换代：rowOf 直接读上一代 rowIndex，属性写入让位后它仍报 hasChildren=true。
-    this.ed.rows()
     const row = this.ed.rowOf(id) ?? {
       block,
       depth: depthOf(this.ed.doc, id),
