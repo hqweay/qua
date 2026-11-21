@@ -4378,7 +4378,7 @@ await check('T31 普通块块首 Enter ⇒ 上方插空块并把光标放进去�
   return `原块「${st.text}」不变；上方新块获得光标（depth ${st.selDepth}）`
 })
 
-await check('T32 Shift+Enter 刻意等同 Enter（v1 不做软换行）', async () => {
+await check('T32 ⇧↵ 改绑新建子块（不再等同 Enter 拆块；v1 仍无软换行）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
   const ids = await page.evaluate(() => {
@@ -4386,10 +4386,6 @@ await check('T32 Shift+Enter 刻意等同 Enter（v1 不做软换行）', async 
     const rootId = ed.doc.roots[0].id
     return { id: ed.insert.insertBlockAfter(rootId, '软换甲乙丙') }
   })
-  const depth = await page.evaluate(
-    (id) => Number(document.querySelector(`.blk[data-block-id="${id}"]`).dataset.depth),
-    ids.id,
-  )
   const n0 = await page.evaluate(() => window.__qua.snapshot().totalBlocks)
   await page.evaluate((id) => window.__qua.focusBlock(id, 2), ids.id)
   await page.keyboard.press('Shift+Enter')
@@ -4397,21 +4393,18 @@ await check('T32 Shift+Enter 刻意等同 Enter（v1 不做软换行）', async 
     const b = window.__qua.blocks().find((x) => x.id === id)
     const sel = window.__qua.snapshot().selection
     const rows = window.__qua.blocks()
-    return { text: b?.text, sel, rows: rows.map((r) => r.text) }
+    const node = window.__qua.__editor.store.find(id)
+    return { text: b?.text, sel, rows, kids: node?.children.length ?? -1 }
   }, ids.id)
-  assert(st.text === '甲乙丙', `Shift+Enter 应像 Enter 一样保留右半：${JSON.stringify(st.text)}`)
-  assert(st.rows.includes('软换'), `左半应在上方新块：${JSON.stringify(st.rows)}`)
-  assert(!st.rows.some((t) => t.includes('\n')), `不应插入软换行：${JSON.stringify(st.rows)}`)
-  assert(st.sel.aBlock === ids.id && st.sel.aOff === 0, `光标应留原块 0 位：${JSON.stringify(st.sel)}`)
+  assert(st.kids === 1, `⇧↵ 应在目标块的首个子位建子块：${JSON.stringify(st.kids)}`)
+  assert(st.text === '软换甲乙丙', `原块正文不动（⇧↵ 不再拆块）：${JSON.stringify(st.text)}`)
+  assert(st.rows.some((r) => r.text === '软换甲乙丙'), `原块还在原位：${JSON.stringify(st.rows.find((r) => r.id === ids.id))}`)
+  assert(!st.rows.some((r) => typeof r.text === 'string' && r.text.includes('\n')), `不插入软换行：${JSON.stringify(st.rows.filter((r) => typeof r.text === 'string' && r.text.includes('\n')))}`)
+  assert(st.sel.aBlock !== ids.id, `光标进新子块（不再是原块）：${JSON.stringify(st.sel)}`)
   const n1 = await page.evaluate(() => window.__qua.snapshot().totalBlocks)
-  assert(n1 === n0 + 1, `应拆出一块：${n0} → ${n1}`)
-  const selDepth = await page.evaluate(
-    (id) => Number(document.querySelector(`.blk[data-block-id="${id}"]`).dataset.depth),
-    st.sel.aBlock,
-  )
-  assert(selDepth === depth, `新块应与原块同级：${depth} → ${selDepth}`)
+  assert(n1 === n0 + 1, `应新建一块：${n0} → ${n1}`)
   await ctx.close()
-  return `Shift+Enter 与 Enter 同形：左半「软换」在上、原块「${st.text}」、光标留原块`
+  return `⇧↵＝新建子块：原块不动、新块在首个子位、无软换行`
 })
 
 await check('T33 同块选区 + Enter ⇒ 先删选区、再在起点拆（一次撤销复原）', async () => {
@@ -24784,7 +24777,7 @@ await check('T249 搜索面两档布局：≥900 左右分栏、<900 上下堆�
  * 焦点逃逸守卫原先只认「在不在浮层 box 内」：块菜单／`#` 选择器挂在 `body`（`.layer`），
  * 焦点一进去就把整个搜索浮层关掉。判据要扩到「本浮层及其派生覆盖层」，且 Esc 按层退。
  */
-await check('T250 浮层焦点守卫：块菜单开在 box 外不关搜索面、Esc 只关菜单、再 Esc 关浮层并还焦点', async () => {
+await check('T250 浮层焦点守卫：块菜单替换搜索面（瞬时面互斥）、Esc 按层退、关闭后焦点回正文', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const probeId = await plantProbe(page, '菜单探针HIJ')
@@ -24802,7 +24795,8 @@ await check('T250 浮层焦点守卫：块菜单开在 box 外不关搜索面、
   await page.fill('.popover.search-overlay .search-face-input', '菜单探针HIJ')
   await page.waitForFunction(() => Boolean(document.querySelector('.popover.search-overlay .search-face-preview .blk')), null, { timeout: 3000 })
 
-  // 右键预览里的块：菜单是 `body > .layer`，不在浮层 box 内
+  // 右键预览里的块：菜单与浮层是同一类「瞬时面」，同屏只留最后打开的那一个
+  // （替换而非叠放——新面被旧面盖住读作「点了没反应」，见 T340 的同一条拍板）
   await page.click(`.popover.search-overlay .search-face-preview .blk[data-block-id="${probeId}"] .tx`, { button: 'right' })
   await page.waitForSelector('.layer', { timeout: 3000 })
   const both = await page.evaluate(() => ({
@@ -24810,31 +24804,18 @@ await check('T250 浮层焦点守卫：块菜单开在 box 外不关搜索面、
     layers: document.querySelectorAll('.layer').length,
   }))
   assert(both.layers > 0, `右键要真的开块菜单：${JSON.stringify(both)}`)
-  assert(both.overlay, `块菜单开在 box 外，不许把搜索浮层关掉：${JSON.stringify(both)}`)
+  assert(!both.overlay, `开菜单要替换掉搜索浮层（瞬时面互斥，不叠放）：${JSON.stringify(both)}`)
 
-  // 第一次 Esc：只关菜单
+  // Esc：关掉菜单；菜单当初替换了浮层 ⇒ 浮层已不在，Esc 后两层都空
   await page.keyboard.press('Escape')
   await page.waitForFunction(() => document.querySelectorAll('.layer').length === 0, null, { timeout: 3000 })
   assert(
-    await page.evaluate(() => Boolean(document.querySelector('.popover.search-overlay'))),
-    '第一次 Esc 只关菜单，搜索浮层要留着',
+    !(await page.evaluate(() => Boolean(document.querySelector('.popover.search-overlay')))),
+    '菜单被 Esc 关掉后搜索浮层也不该回来（它已被替换）',
   )
 
-  // 第二次 Esc：关浮层，焦点回正文，活动编辑器回主编辑器
-  await page.keyboard.press('Escape')
-  await page.waitForFunction(() => !document.querySelector('.popover.search-overlay'), null, { timeout: 3000 })
-  const post = await page.evaluate(() => ({
-    overlay: Boolean(document.querySelector('.popover.search-overlay')),
-    inEditor: Boolean(document.activeElement?.closest('#editor')),
-    onBody: document.activeElement === document.body,
-    activeIsMain: window.__qua.activeEditor() === window.__qua.__editor,
-  }))
-  assert(!post.overlay, '第二次 Esc 关掉浮层')
-  assert(post.inEditor && !post.onBody, `关浮层后焦点回打开前的正文：${JSON.stringify(post)}`)
-  assert(post.activeIsMain, `活动编辑器要回到主编辑器（不是停在浮层曾聚焦的预览里）：${JSON.stringify(post)}`)
-
   await ctx.close()
-  return '块菜单不关搜索面、Esc 按层退、关闭后焦点与活动编辑器都回正文'
+  return '菜单替换浮层、Esc 收菜单、瞬时面同屏只留一个'
 })
 
 /**
@@ -30187,7 +30168,7 @@ await check('T309 ref 的候选域：四档切换；标签档过滤候选；手�
   await page.evaluate((defId) => window.__qua.invoke('core.block/focus-block', { blockId: defId }), setup.defId)
   await page.waitForTimeout(300)
   const emptyState = await page.evaluate(() => {
-    const row = document.querySelector('.prop-ref-domain-row')
+    const row = document.querySelector('#properties-body .prop-ref-domain-row')
     const sel = row?.querySelector('.prop-ref-mode')
     return {
       row: Boolean(row),
@@ -30205,7 +30186,7 @@ await check('T309 ref 的候选域：四档切换；标签档过滤候选；手�
 
   // 切档本身不写库（取消选择＝一切照旧）；真选中标签才落一条 tags 档的域
   await page.evaluate(() => {
-    const sel = document.querySelector('.prop-ref-mode')
+    const sel = document.querySelector('#properties-body .prop-ref-mode')
     sel.value = 'tags'
     sel.dispatchEvent(new Event('change', { bubbles: true }))
   })
@@ -30222,8 +30203,8 @@ await check('T309 ref 的候选域：四档切换；标签档过滤候选；手�
     return {
       domain: live?.props?._refDomain ?? null,
       legacy: live?.props?._refTags ?? null,
-      chips: [...document.querySelectorAll('.prop-ref-domain-row .props-tag')].map((e) => e.textContent ?? ''),
-      mode: document.querySelector('.prop-ref-mode')?.value ?? '',
+      chips: [...document.querySelectorAll('#properties-body .prop-ref-domain-row .props-tag')].map((e) => e.textContent ?? ''),
+      mode: document.querySelector('#properties-body .prop-ref-mode')?.value ?? '',
     }
   }, setup.defId)
   assert(
@@ -30315,7 +30296,7 @@ await check('T309 ref 的候选域：四档切换；标签档过滤候选；手�
   await page.evaluate((defId) => window.__qua.invoke('core.block/focus-block', { blockId: defId }), setup.defId)
   await page.waitForTimeout(280)
   await page.evaluate(() => {
-    const sel = document.querySelector('.prop-ref-mode')
+    const sel = document.querySelector('#properties-body .prop-ref-mode')
     sel.value = 'blocks'
     sel.dispatchEvent(new Event('change', { bubbles: true }))
   })
@@ -30340,7 +30321,7 @@ await check('T309 ref 的候选域：四档切换；标签档过滤候选；手�
   // ⑦ 手选两个块 ⇒ 清单就是候选（不是子树）；已选的不再出现；抬头只报数量、不念块名
   const pickBlock = async (name) => {
     await page.evaluate(() => {
-      const sel = document.querySelector('.prop-ref-mode')
+      const sel = document.querySelector('#properties-body .prop-ref-mode')
       sel.value = 'blocks'
       sel.dispatchEvent(new Event('change', { bubbles: true }))
     })
@@ -30361,7 +30342,7 @@ await check('T309 ref 的候选域：四档切换；标签档过滤候选；手�
   const list = await page.evaluate(
     (defId) => ({
       domain: window.__qua.__editor.store.find(defId)?.props?._refDomain ?? null,
-      chips: [...document.querySelectorAll('.prop-ref-domain-row .props-tag')].map((e) => e.textContent ?? ''),
+      chips: [...document.querySelectorAll('#properties-body .prop-ref-domain-row .props-tag')].map((e) => e.textContent ?? ''),
     }),
     setup.defId,
   )
@@ -30419,7 +30400,7 @@ await check('T309 ref 的候选域：四档切换；标签档过滤候选；手�
   assert(journalId !== '', '前置：库里应有一个日记块')
   await page.waitForTimeout(300)
   const dayChip = await page.evaluate(() =>
-    [...document.querySelectorAll('.prop-ref-domain-row .props-tag')].map((e) => e.textContent ?? ''),
+    [...document.querySelectorAll('#properties-body .prop-ref-domain-row .props-tag')].map((e) => e.textContent ?? ''),
   )
   assert(dayChip.length === 1, '日记块应画成一枚 chip：' + JSON.stringify(dayChip))
   assert(/\d{4}/.test(dayChip[0]), '日记块应显示日期投影（不是「无标题」也不是 id）：' + JSON.stringify(dayChip[0]))

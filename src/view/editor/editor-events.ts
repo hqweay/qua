@@ -384,6 +384,11 @@ export interface EditorBridge {
    */
   caretAtAtomEdge: (blockId: string, tx: HTMLElement, x: number, y: number) => string | null
   /**
+   * **点击落在原子内部 ⇒ 收光标到最近的原子边**（显示名可选中后的补丁；判据见实现）。
+   * 返回收到的原子 id；null ⇒ 点击不在原子盒里，照常走原生放置。
+   */
+  caretInsideAtom: (blockId: string, tx: HTMLElement, x: number, y: number) => string | null
+  /**
    * **跨块拖选**：在 `.tx` 内按下 / 移动 / 松开。
    * 事件层只报坐标；「是否切成块选区」的判定在编辑器里（单块内仍是原生文本选择）。
    */
@@ -638,6 +643,12 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     if (claimed) {
       e.preventDefault()
       atomEdgeClaim = { runId: claimed, at: performance.now() }
+      return
+    }
+    // 原子内部的点击：光标收到最近的原子边（原生放置会站进不可编辑的显示名里，打字从此丢）
+    const inside = br.caretInsideAtom(blk.dataset.blockId, tx, e.clientX, e.clientY)
+    if (inside) {
+      e.preventDefault()
       return
     }
     atomEdgeClaim = null

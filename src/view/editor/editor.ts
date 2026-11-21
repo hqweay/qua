@@ -1952,6 +1952,45 @@ export class BlockEditor {
   }
 
   /**
+   * **点击落在原子内部 ⇒ 光标收到原子边**（显示名放开选中之后的补丁）。
+   *
+   * `.atom-label` 放开 `user-select:text`（划选要带上显示名）之后，原生放置会把
+   * 选区落进 label 的文本节点——那是 `contenteditable=false` 盒子里的**不可编辑区**：
+   * 焦点在编辑器上、选区却站不到可写槽里 ⇒ 之后打字既不走原生（Chrome 对不可编辑
+   * 锚点丢弃输入）也不走接管（没有 beforeinput 可拦），静默丢字。
+   * 吸附带（左右各 4px）只盖住边缘，点在原子**中间**（长显示名的日常落点）不受它保。
+   * ⇒ mousedown 落进原子盒内部时收光标到**最近的原子边**：点哪半边收哪一侧，
+   *   光标总在可写槽里；拖选起手不在这里判（mousemove 的选区更新自会接手）。
+   *
+   * @returns 收了 ⇒ 那枚原子的 id；没落在原子内部 ⇒ null（原生放置照旧）
+   */
+  caretInsideAtom(blockId: string, tx: HTMLElement, x: number, y: number): string | null {
+    const atoms = [...tx.querySelectorAll<HTMLElement>('[data-atom-id]')]
+    if (atoms.length === 0) return null
+    /**
+     * 落点在原子盒内 ⇒ 那一枚；落在行间 gap ⇒ y 距离最近的那枚——
+     * 原生放置对 gap 的落点是「旁边行里最近的文本节点」，而显示名可选中后那
+     * 正是 label 的不可编辑文本 ⇒ 打字从此丢。y 距离用「盒外的纵向距离」比。
+     */
+    let best: { atom: HTMLElement; r: DOMRect; d: number } | null = null
+    for (const atom of atoms) {
+      const r = atom.getBoundingClientRect()
+      const insideY = y >= r.top && y <= r.bottom
+      const dy = insideY ? 0 : y < r.top ? r.top - y : y - r.bottom
+      if (!best || dy < best.d) best = { atom, r, d: dy }
+    }
+    if (!best) return null
+    const r = best.r
+    // x 在盒外横向太远 ⇒ 不是这行的原子（点击在空白天花板），交给原生路径
+    if (x < r.left - 24 || x > r.right + 24) return null
+    const before = this.offsetIn(tx, best.atom, 0)
+    const off = x < r.left + r.width / 2 ? before : before + 1
+    this.container.focus()
+    this.placeCaret(blockId, off)
+    return best.atom.dataset.atomId ?? null
+  }
+
+  /**
    * **⌘A：全选这一屏的块**（要求的「必须接管」之一，2026-10-20 落地）。
    *
    * 为什么必须自己接管、而不是留给浏览器：
@@ -3294,6 +3333,7 @@ export class BlockEditor {
       collapseSelection: () => this.collapseSelection(),
       syncFromDom: (id, re) => this.syncFromDom(id, re),
       caretAtAtomEdge: (blockId, tx, x, y) => this.caretAtAtomEdge(blockId, tx, x, y),
+      caretInsideAtom: (blockId, tx, x, y) => this.caretInsideAtom(blockId, tx, x, y),
       beginMouseSelect: (id, x, y, shift) => this.bsel.beginMouseSelect(id, x, y, shift),
       updateMouseSelect: (x, y) => this.bsel.updateMouseSelect(x, y),
       endMouseSelect: () => this.bsel.endMouseSelect(),
