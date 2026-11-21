@@ -700,6 +700,9 @@ export function mergeIntoPrev(doc: Doc, id: string): { kept: string; removed: st
   if (movedAnnos.length) prev.annos = [...(prev.annos ?? []), ...movedAnnos]
   // 被并块**原位标记**（不摘树，与 `removeBlock` 同一条口径）：内容已搬走，壳清空——
   // 留着内容就是库里有两份同一句话。annos 已搬走，同样先摘掉再写，别让映射层白重定位一次
+  // 值属性**不搬进保留块**：合并把两行捏成一行，属性袋只有一个，保留块保自己的那份，
+  // 被并块的随壳软删（⌘Z／回收站可回）。与拆块的「下半不继承值属性」是同一条答案——
+  // 值属性只描述写它的那一行；被并块那句的属性没有可落的新行。
   loc.block.annos = undefined
   writeBlockContent(loc.block, [])
   loc.block.props = { ...(loc.block.props ?? {}), [DELETED_AT_PROP]: Date.now() }
