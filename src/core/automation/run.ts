@@ -13,7 +13,7 @@
  * ⚠️ 失败的报错是**开发者面**的英文（console/throw 不走 msg）；调用方（app 层）
  *    负责把它变成 toast 与撤销记账。
  */
-import { isAutomationBlock, isJournalBlock, isPropDefBlock, mkBlock, type Block } from '../model/model.ts'
+import { isAutomationBlock, isDeleted, isJournalBlock, isPropDefBlock, mkBlock, type Block } from '../model/model.ts'
 import { writeBlockContent } from '../model/model.ts'
 import { dateOfMs } from '../identity/journal.ts'
 import { hasTag, tagIdsOf } from '../identity/tags.ts'
@@ -106,6 +106,22 @@ function stepTarget(kb: AutomationKb, targetId: string, raw: unknown): string {
   const id = String(raw)
   if (id === '' || id === targetId) return targetId
   if (!kb.get(id)) throw new Error(`automation step: no such block "${id}"`)
+  return id
+}
+
+/**
+ * **统一 present 守卫**：写入对象必须 present——**显式判删除标记**，不止查「在不在」。
+ * 为什么要显式：`kb.get` 的过滤发生在索引可见性，而索引在事务**出口**才修补——
+ * 同一笔事务里刚删的块（删除标记已在活对象上）仍查得到，只查在不在会给死目标写入。
+ * 所有原语的写入对象（主目标／insert 父／move 源与目的地／add-tag 的标签）共用这一份；
+ * remove-tag 的标签**不走它**——清理旧引用是合法路径（按 id 直接摘）。
+ */
+function presentStepTarget(kb: AutomationKb, targetId: string, raw: unknown, what = 'block'): string {
+  const rawId = raw === undefined || raw === null ? targetId : String(raw)
+  const id = rawId === '' || rawId === targetId ? targetId : rawId
+  const b = kb.get(id)
+  if (!b) throw new Error(`automation step: no such ${what} "${id}"`)
+  if (isDeleted(b)) throw new Error(`automation step: ${what} "${id}" is not present (deleted)`)
   return id
 }
 
@@ -254,19 +270,19 @@ function stepGuard(
             (formatOf(def!) ? ` (format "${formatOf(def!)}")` : ''),
         )
       }
-      stepTarget(kb, targetId, a.blockId)
+      presentStepTarget(kb, targetId, a.blockId)
       return
     }
     case 'core.props/clear-value': {
       requirePropDef(String(resolveArg(a.propId, ctx) ?? ''))
-      stepTarget(kb, targetId, a.blockId)
+      presentStepTarget(kb, targetId, a.blockId)
       return
     }
     case 'core.tags/add': {
-      stepTarget(kb, targetId, a.blockId)
+      presentStepTarget(kb, targetId, a.blockId)
       const rawTagId = a.tagId !== undefined ? String(resolveArg(a.tagId, ctx)) : ''
       if (rawTagId !== '') {
-        if (!kb.get(rawTagId)) throw new Error(`automation step: tag "${rawTagId}" does not exist`)
+        presentStepTarget(kb, targetId, a.tagId, 'tag')
         return
       }
       const name = String(resolveArg(a.name, ctx) ?? '').trim()
@@ -281,23 +297,23 @@ function stepGuard(
       return
     }
     case 'core.tags/remove': {
-      stepTarget(kb, targetId, a.blockId)
+      presentStepTarget(kb, targetId, a.blockId)
       if (String(resolveArg(a.tagId, ctx) ?? '') === '') {
         throw new Error('automation step: tags/remove needs tagId')
       }
       return
     }
     case 'core.tree/insert-child': {
-      stepTarget(kb, targetId, a.parentId)
+      presentStepTarget(kb, targetId, a.parentId)
       return
     }
     case 'core.tree/move': {
-      const blockId = String(resolveArg(a.blockId, ctx) ?? '')
-      if (blockId === '') throw new Error('automation step: move needs blockId')
-      if (!kb.get(blockId)) throw new Error(`automation step: no such block "${blockId}"`)
+      const rawBlock = resolveArg(a.blockId, ctx)
+      if (rawBlock === undefined || String(rawBlock) === '') throw new Error('automation step: move needs blockId')
+      const blockId = presentStepTarget(kb, targetId, rawBlock)
       const rawParent = resolveArg(a.parentId, ctx)
       const parent = rawParent === undefined || rawParent === null || rawParent === '' ? null : String(rawParent)
-      if (parent !== null && !kb.get(parent)) throw new Error(`automation step: no such parent "${parent}"`)
+      if (parent !== null) presentStepTarget(kb, targetId, parent, 'parent')
       const why = moveIdentityConstraint(kb, blockId, parent)
       if (why) throw new Error(why)
       // 进自己子树：与 `tx.move` 同一份判据的预检（祖先链含目标即自环）

@@ -569,12 +569,12 @@ test('等式⑪：写入对象必须 present（跨笔）——显式目标／ins
   assert.match(String(run({ cmd: 'core.props/set-value', args: { propId: numDef.id, blockId: victim.id, value: 7 } })), /no such block/, '显式目标已删：拒')
   assert.match(String(run({ cmd: 'core.tree/insert-child', args: { parentId: victim.id, text: 'x' } })), /no such block/, 'insert 父已删：拒')
   assert.match(String(run({ cmd: 'core.tree/move', args: { blockId: mover.id, parentId: parent.id } })), /no such parent/, 'move 目的地父已删：拒')
-  assert.match(String(run({ cmd: 'core.tags/add', args: { tagId: tag.id } })), /does not exist/, 'add-tag 标签已删（跨笔）：拒——索引删除即摘出可见表')
+  assert.match(String(run({ cmd: 'core.tags/add', args: { tagId: tag.id } })), /no such tag/, 'add-tag 标签已删（跨笔）：拒——索引删除即摘出可见表')
   assert.equal(run({ cmd: 'core.tags/remove', args: { tagId: tag.id } }, holder.id), null, 'remove-tag 允许已删标签：清理旧引用是合法路径')
   assert.equal(kb.get(holder.id)?.props?._tags, undefined, '已删标签从归属里摘掉了')
 })
 
-test('等式⑪【有意变更⑥，U6 翻转】：同笔窗口——同一笔 tx 删标签＋触发规则，add-tag 放行（统一 present 守卫翻转）', () => {
+test('等式⑪【有意变更⑥，已翻转】：同笔窗口——同一笔 tx 删标签＋触发规则，add-tag 被统一 present 守卫拒掉', () => {
   const tag = mkTag('旧标签')
   const numDef = mkPropDef('数量', 'number')
   const victim = mkBlock('干净的块')
@@ -588,8 +588,9 @@ test('等式⑪【有意变更⑥，U6 翻转】：同笔窗口——同一笔 t
     tx.remove(tag.id)
     tx.setProp(victim.id, numDef.id, 7)
   })
-  assert.deepEqual(kb.get(victim.id)?.props?._tags, [tag.id], '现状：反应期间索引还没修补，守卫查得到刚删的标签 ⇒ 写入通过')
-  assert.equal(events.length, 0, '且不报失败——U6 统一守卫（显式判删除标记）后翻转为拒绝、_tags 不变')
+  assert.equal(kb.get(victim.id)?.props?._tags, undefined, '守卫显式判删除标记：同笔刚删的标签过不了闸，不给块挂死引用（v1 在这里写入通过）')
+  assert.equal(kb.get(victim.id)?.props?.[numDef.id], 7, '用户的写照常提交')
+  assert.equal(events.length, 1, '预检不过 ⇒ 整条反应跳过、落 onError（与预检失败同一语义）')
 })
 
 /* ------------------------------------------------------------ 等式⑫：规则块边界 */
@@ -624,4 +625,9 @@ test('等式⑫：规则块边界——set/clear 拒 _automation 与一切 _ 槽
   assert.equal(run({ cmd: 'core.props/set-value', args: { propId: numDef.id, blockId: rule.id, value: 42 } }), null, '规则块的普通属性可写（它仍是普通用户块）')
   assert.equal(kb.get(rule.id)?.props?.[numDef.id], 42)
   assert.equal(run({ cmd: 'core.props/set-value', args: { propId: iconDef.id, blockId: rule.id, value: '名字' } }), null)
+
+  const normalTag = mkTag('普通标签')
+  kb.tx((tx) => tx.insert(normalTag, null, kb.roots().length))
+  assert.equal(run({ cmd: 'core.tags/add', args: { tagId: normalTag.id, blockId: rule.id } }), null, '规则块的普通标签可写（它仍是普通用户块；身份块正文另有 canWriteText 管）')
+  assert.equal(hasTag(kb.get(rule.id)!, normalTag.id), true)
 })
