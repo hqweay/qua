@@ -24,7 +24,6 @@ import {
   findTagByName,
   hasList,
   hasTag,
-  inlineTagIdsOf,
   mkTagBlock,
   normalizeTag,
   removeTagId,
@@ -194,21 +193,6 @@ test('⑥d edgeSourceIds：引用与**行内标签**都算指向边（改名要�
   assert.deepEqual([...edgeSourceIds(blocks, 't1')], ['a'])
   assert.deepEqual([...edgeSourceIds(blocks, 't2')], ['c'], '行内标签的显示名也是解析出来的 ⇒ 改名要重画')
   assert.deepEqual([...edgeSourceIds(blocks, 'p.png')], [], '图片不指块，天然不是指向边')
-})
-
-test('⑥e inlineTagIdsOf：按出现位置排序、同块去重、只认带 # 风味的引用', () => {
-  // b 的内容：普通引用 p ＋ 露面甲 ＋ 露面乙 ＋ 第二枚甲；other 是别的块
-  const b = {
-    id: 'b',
-    content: [
-      { id: 't4', t: 'ref' as const, to: 'p', label: '页' },
-      { id: 't2', t: 'ref' as const, to: 'tag-a', flavor: '#' as const, label: '甲' },
-      { id: 't1', t: 'ref' as const, to: 'tag-b', flavor: '#' as const, label: '乙' },
-      { id: 't3', t: 'ref' as const, to: 'tag-a', flavor: '#' as const, label: '甲' },
-    ],
-    children: [],
-  } as unknown as import('../src/core/model/model.ts').Block
-  assert.deepEqual(inlineTagIdsOf(b), ['tag-a', 'tag-b'], '按位置排；同名的第二枚不重复；普通引用不算露面')
 })
 
 test('mkTagBlock：名字进 `_aliases`（不带 #），正文是描述，露面是 tag', () => {

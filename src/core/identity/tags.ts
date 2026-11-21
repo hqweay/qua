@@ -10,12 +10,13 @@
  *   · **行内 `#名`**：正文里的一枚 ref run（带 `flavor: '#'`，占 1 格，见 `core/runs.ts`），
  *     指向一个标签类或一条实例。它是一次**提及**，**不写** `_tags` ⇒ 提及不会让宿主变成实例、
  *     也不会给宿主长出字段。
- *   · 两者唯一的重叠：行内那枚提到「这块本来就已经归属的标签」时，chip **让位**不画
- *     （同一个 `#名` 不该在一行里出现两次）。
+ *   · 两个事实可同屏：正文提它是「这句话提到」，chip 是「整块归属它」——
+ *     提及不写归属，也不抑制归属的显示；chip 是归属唯一的行级信号，藏掉它
+ *     「这块归没归属」只能开属性面板才看得出。
  *
  * 这个判据推出的四件事：
- *   ① 删字不会顺手摘标签：删掉行内那一枚只是不再在正文里提它，
- *      归属仍在 ⇒ 下一次渲染 chip 落回来。摘标签是一次**显式**动作（面板 ×／命令）。
+ *   ① 删字不摘标签，也不动 chip：删掉行内那一枚只是不再在正文里提它；
+ *      归属写在 `_tags`，chip 照旧在。摘标签是一次**显式**动作（面板 ×／命令）。
  *   ② 顺序＝用户打的先后，存在数组里；正文里的提及位置与顺序无关。
  *   ③ 「哪些块打了这个标签」是**派生**的：`tagMemberIds` 扫一遍森林，
  *      或查 `IndexPort` 的 `tagMembers` 表（调用方优先用后者，扫描是 O(n)）。
@@ -183,9 +184,9 @@ export function removeTagId(block: Block, tagId: string): boolean {
 /**
  * 把「用户重排的可见子集」并回完整归属序。
  *
- * 行尾 chip 槽**不画内联的那几枚**（正文里 `#名` 提到的标签让位，见 `inlineTagIdsOf`），
- * 所以拖拽只重排了子集：子集成员按新序**依次占住它们在原序里的位次**，
- * 不在子集里的成员原地不动——拖看得见的，不动看不见的。
+ * chip 只画**找得到目标块**的归属（悬空的 id 没有可显示的名字，跳过），
+ * 所以拖拽重排的可能是子集：子集成员按新序**依次占住它们在原序里的位次**，
+ * 不在子集里的（悬空的）原地不动。
  *
  * @returns 并好的完整序；`orderedSubset` 不是 `current` 的一个无重子集 ⇒ `null`
  *          （调用方整笔拒绝——重排不是加/摘的第二入口）
@@ -307,22 +308,6 @@ export function trailingHashTag(
   const name = rest.slice(0, cut)
   if (name.length === 0) return null
   return { name, from: hash, to: hash + 1 + name.length }
-}
-
-/**
- * 这一块**在正文里露面**了哪些标签 id（按出现位置排序，去重）。
- *
- * 露面 ＝ 行内那枚带 `#` 风味的引用 run（位置跟着用户敲的地方走）。
- * ⚠️ 这是**显示**用的，不是归属：归属看 `tagIdsOf`（`props._tags`）。
- *    两者不一致时的口径见文件头 ①：露面可以比归属先少（删字不摘标签）。
- */
-export function inlineTagIdsOf(block: Block): string[] {
-  const out: string[] = []
-  for (const r of refRunsOf(block.content)) {
-    if (r.flavor !== '#' || !r.to) continue
-    if (!out.includes(r.to)) out.push(r.to)
-  }
-  return out
 }
 
 /**

@@ -12060,8 +12060,8 @@ await check(
     assert(got.chips === 1, `归属只在行尾出一个 chip：${got.chips}`)
 
     /**
-     * 同一条归属的**两种露面不重复**：再提一次（Enter）⇒ 正文里那一枚出现、chip 收起。
-     * （「删掉那一格 ⇒ 归属还在、chip 回来」由 T58 的既有断言覆盖，不在这里重复。）
+     * 两种露面可同屏：正文那枚 `#名` 是提及（不写归属），chip 是归属的显示，
+     * 指同一个标签也各画各的 —— 藏掉 chip 就等于把「这块归没归属」藏掉。
      */
     await page.keyboard.type(`#${tagName}`)
     await page.waitForTimeout(200)
@@ -12073,10 +12073,10 @@ await check(
         atoms: document.querySelector(`.blk[data-block-id="${id}"] .tx`)?.querySelectorAll('.atom-tag').length ?? -1,
       }
     }, target)
-    assert(inline.chips === 0 && inline.atoms === 1, `正文里露面了 ⇒ 不出 chip：${JSON.stringify(inline)}`)
+    assert(inline.chips === 1 && inline.atoms === 1, `正文提及与归属 chip 同屏：${JSON.stringify(inline)}`)
 
     await ctx.close()
-    return `#${tagName} + ⌥Enter ⇒ 写 _tags、0 原子、行尾 1 chip；再提一次 ⇒ 原子出现、chip 收起（两种露面不重复）`
+    return `#${tagName} + ⌥Enter ⇒ 写 _tags、0 原子、行尾 1 chip；再提一次 ⇒ 原子出现、chip 仍在（两种露面各表一件事）`
   },
 )
 

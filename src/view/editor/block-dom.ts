@@ -28,7 +28,6 @@ import {
   hasDeclaredFields,
   hasQueryBody,
   identityTags,
-  inlineTagIdsOf,
   isAutomationBlock,
   isJournal,
   isEmbedBlock,
@@ -331,10 +330,10 @@ export function fillBlockText(
  * 打出来的字 DOM 上排在 chip 后、模型里是正文末尾，重画后就「标签跳到文本后面」。
  * 槽挂在行右端（flex 布局，不悬浮不遮挡），插入点物理上进不去，错位从根上不存在。
  *
- * ⚠️ **正文里已经提过同一个标签时不再出 chip**：chip 是归属的**唯一**显示位置，
- *    而正文里那枚 `#名` 是另一件事（一次提及，不写归属）。两者指同一个标签时，
- *    用户的意图已经由正文那一枚表达了 —— 两个都画会看到两个 `#名`，
- *    删掉正文里那个还会留下一个「幽灵」chip。
+ * ⚠️ chip 只由归属决定：正文里 `#名` 是一次提及，不写归属，也不影响 chip。
+ *    两者指同一个标签时都画 —— 提及是句中的一个位置，归属是整块的一格字段；
+ *    chip 是归属**唯一**的行级可见信号，藏掉它，「这块到底归没归属」就只剩
+ *    打开属性面板才知道（两种露面靠底色／钉行尾区分，见下方视觉口径）。
  * ⚠️ 名字走 `blockLabel`（现算）：标签块改名后 chip 上的字要跟着变，
  *    所以这里不存名字、只认 id。目标块不在 ⇒ 这条归属没有可显示的名字，跳过。
  * ⚠️ **没有标签且没有额外 chip 就不生成这个节点**（同 `.fold` 的口径，不是隐藏）：空槽是纯噪声。
@@ -344,7 +343,7 @@ export function fillBlockText(
  * 排在标签之后（最右端）。渲染层不认识「引用」是什么，只知道槽里多了一枚不可编辑的 chip。
  *
  * `onReorder` 给了且标签 ≥2 枚 ⇒ chips 可**拖拽重排**：拖动中实时搬 DOM 预览落点，
- * 落下按 DOM 序并回完整归属序（`mergeTagOrder`——内联让位的那几枚保位）整笔交回调。
+ * 落下按 DOM 序并回完整归属序（`mergeTagOrder`——找不到目标块的那几枚保位）整笔交回调。
  * 顺序喂着块标的借形/借色取「第一个」，是用户可编辑的数据，不是打标先打的偶然。
  *
  * @returns 标签槽元素；无标签且无额外 chip 时返回 null
@@ -356,8 +355,7 @@ export function makeTagsEl(
   onReorder?: (orderedFull: string[]) => void,
 ): HTMLElement | null {
   if (!find) return null
-  const inline = new Set(inlineTagIdsOf(b))
-  const tags = [...tagIdsOf(b)].filter((tagId) => !inline.has(tagId) && find(tagId))
+  const tags = [...tagIdsOf(b)].filter((tagId) => find(tagId))
   if (tags.length === 0 && !extra) return null
   const el = document.createElement('span')
   el.className = 'blk-tags'
