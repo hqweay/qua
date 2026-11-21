@@ -15494,17 +15494,23 @@ await check('T152 标题列＝块本身：点文字就地进单块编辑器；En
    * （并排的后果不是「看起来乱」：两台都在跟着 store 重画，谁先失焦谁把内容写回去，
    *  撤销栈里也会多出一段没人按过的编辑。）
    */
-  // 隔几行去点：浮层贴着第 1 行，紧邻那一行的上半截会被它盖住（真人点的是字，不是那一条缝）
-  const secondTitle = page.locator('.tv-row .tv-title-inner').nth(4)
-  await secondTitle.click()
+  // 隔几行去点：浮层贴着第 1 行，紧邻那一行的上半截会被它盖住（真人点的是字，不是那一条缝）。
+  // ⚠️ 挑**纯文本**的标题行：行里带原子时，点下去会开大图或导航走人（那是原子的正常行为），
+  //   量到的就不再是「换行编辑」。按内容挑行，不按固定序号——序号会随种子与行高变化。
+  const plainRows = page.locator('.tv-row').filter({ hasNot: page.locator('.tv-title-inner .atom') })
+  const secondRow = plainRows.nth(5)
+  const secondId = await secondRow.getAttribute('data-block-id')
+  assert(secondId, `应有足够多的纯文本行可点：${await plainRows.count()}`)
+  await secondRow.locator('.tv-title-inner').click()
   await page.waitForTimeout(220)
-  const swapped = await page.evaluate(() => ({
+  const swapped = await page.evaluate((target) => ({
     editors: document.querySelectorAll('.inline-editor').length,
     row: document.querySelector('.tv-row[data-editing="1"]')?.dataset.blockId ?? '',
+    target,
     rows: [...document.querySelectorAll('.tv-row')].map((r) => r.dataset.blockId ?? ''),
-  }))
+  }), secondId)
   assert(swapped.editors === 1, `换一行编辑不该并排开出第二台：${JSON.stringify(swapped)}`)
-  assert(swapped.row === swapped.rows[4], `编辑器应装在刚点的那一行里：${JSON.stringify(swapped)}`)
+  assert(swapped.row === swapped.target, `编辑器应装在刚点的那一行里：${JSON.stringify(swapped)}`)
 
   // 回到第一行继续（后面几条断言都针对第一行）
   await page.locator('.tv-row .tv-title-inner').first().click()
