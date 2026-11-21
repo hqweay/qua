@@ -32668,6 +32668,58 @@ await check('T343 露面卡片成员实时刷新：给源块新增子块，投�
   await ctx.close()
   return `源加子块 ⇒ 投影卡片 2→3 当场刷新（无聚焦/重开/手动刷新）`
 })
+
+await check('T344 镜像岛里按 ⌘⇧D＝摘这一次露面，源不动；从源自己的位置按仍删源（与菜单同一判据）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const fx = await buildListTree(page)
+
+  // 镜像一个普通块：岛的根＝源
+  await page.evaluate(
+    ({ rid, sid }) => window.__qua.invoke('core.embed/insert', { blockId: rid, targetId: sid, view: 'mirror' }),
+    { rid: fx.root, sid: fx.rows[1] },
+  )
+  await page.waitForTimeout(450)
+  const embedId = await page.evaluate(
+    () => [...document.querySelectorAll('.blk[data-embed="1"]')].map((el) => el.dataset.blockId).pop() ?? '',
+  )
+  assert(embedId !== '', `前置：镜像已插入：${embedId}`)
+
+  // 真点击把光标放进岛里的源行，再按 ⌘⇧D（与菜单走同一条删除判据）
+  await page.locator(`.blk-embed-body .blk[data-block-id="${fx.rows[1]}"] > .tx`).click()
+  await page.waitForTimeout(150)
+  const focused = await page.evaluate(() => window.__qua.snapshot().selection.aBlock)
+  assert(focused === fx.rows[1], `前置：光标在镜像岛的源行上：${focused}`)
+  await page.keyboard.press('Meta+Shift+D')
+  await page.waitForTimeout(350)
+  const after = await page.evaluate(
+    ({ sid, eid }) => ({
+      srcIntact: Boolean(window.__qua.__editor.store.find(sid)),
+      embedGone: !window.__qua.__editor.store.find(eid),
+      toasts: [...document.querySelectorAll('.toast')].map((t) => t.textContent ?? ''),
+    }),
+    { sid: fx.rows[1], eid: embedId },
+  )
+  assert(after.srcIntact, `⌘⇧D 在镜像上不删源：${JSON.stringify(after)}`)
+  assert(after.embedGone, `⌘⇧D 在镜像上摘的是露面：${JSON.stringify(after)}`)
+  assert(
+    !after.toasts.some((t) => t?.includes('已删除块')),
+    `摘露面不说「已删除块」（与菜单同口径）：${JSON.stringify(after.toasts)}`,
+  )
+
+  // 反向：从正文里源自己的那一行按 ⌘⇧D，仍要能删源（不因判据收紧而丢能力）
+  await page.evaluate((sid) => window.__qua.focusBlock(sid, 0), fx.rows[2])
+  await page.waitForTimeout(150)
+  const beforeDel = await page.evaluate((sid) => Boolean(window.__qua.__editor.store.find(sid)), fx.rows[2])
+  assert(beforeDel, '前置：另一个源块还在')
+  await page.keyboard.press('Meta+Shift+D')
+  await page.waitForTimeout(350)
+  const srcGone = await page.evaluate((sid) => !window.__qua.__editor.store.find(sid), fx.rows[2])
+  assert(srcGone, '正文里对自己的块按 ⌘⇧D 仍删源（正常删除能力没丢）')
+
+  await ctx.close()
+  return `镜像岛里 ⌘⇧D＝摘露面（源不动、不谎报）；正文对自己 ⌘⇧D 仍删源`
+})
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

@@ -675,6 +675,7 @@ export class ViewHost {
         // 抬头画的是**源块**（拥有者）：露面块自己没有名字
         block: () => this.ownerBlock(),
         placeholder: t('ui.query.untitled'),
+        ...(this.embedHostId ? { embedHostId: this.embedHostId } : {}),
       })
     }
 
@@ -989,6 +990,12 @@ export class ViewHost {
   private ownerBlock(): Block | undefined {
     const { owner } = this.bound
     return owner.kind === 'block' ? this.deps.kb.get(owner.blockId) : undefined
+  }
+
+  /** 这一次露面的宿主块 id（非 embed 绑定为空）；删除落点判据认它 */
+  private get embedHostId(): string | undefined {
+    const binding = this.deps.binding
+    return binding?.kind === 'embed' ? binding.blockId : undefined
   }
 
   /* ---------------------------------------------------------- 装载 */
@@ -1913,6 +1920,7 @@ export class ViewHost {
         area: this.els.root,
         // 查询结果的行是命中，不是「这一栏能长出块」：根只能往下长，不能并/搬出结果集
         structuralScope: 'roots',
+        ...(this.embedHostId ? { embedHostId: this.embedHostId } : {}),
         // 与结果无关的变化不重装：别处敲字不该重排这一列（本视图对无关 ids 的
         // 可见回应只有「可能已过期」提示，由外层订阅点亮）。动到屏幕上的行时只换那几行，
         // 成员增减等刷新/条件变化路径负责。拿不到 ids（结构欠账补做）照旧整片装。

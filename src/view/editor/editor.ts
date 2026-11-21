@@ -274,6 +274,14 @@ export interface ViewOpts {
    */
   embedBodies?: boolean
   /**
+   * 这一台编辑器是不是「某一次露面的岛」：是则值为**露面宿主块 id**。
+   *
+   * 删除的落点判据读它：光标在露面岛里时，用户要删的是这一次露面，
+   * 不是岛里那棵源子树——键位路径没有菜单的 `appearanceHost`，只能认编辑器自带的身份。
+   * 只由装配层在露面编辑器的构造处注入；普通正文编辑器没有这一格。
+   */
+  embedHostId?: string
+  /**
    * **这一面是不是「一屏就是这一块」的聚焦面**（缺省 `false`）。
    *
    * 只有中心槽是：那里「装载只剩一个根」意味着**整屏**就是这一块，
@@ -551,6 +559,8 @@ export class BlockEditor {
   store: BlockStore
   /** 本视图装载的 root id（reload 时按 id 从 store 重新取；不持有拷贝） */
   viewRootIds: string[] = []
+  /** 露面岛的宿主块 id（普通编辑器为空）；删除落点判据读它 */
+  embedHostId?: string
   log = new CommandLog()
   probe: Probe = {
     isComposing: false,
@@ -803,6 +813,7 @@ export class BlockEditor {
     this.embeds = new EmbedBodies(this, o.embedBodies !== false)
     this.focusSurface = o.focusSurface === true
     this.emptyPlaceholder = o.emptyPlaceholder
+    this.embedHostId = o.embedHostId
     this.doc = o.doc
     this.setLayout(o.layout ?? 'column')
     /**

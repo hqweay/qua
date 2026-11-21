@@ -81,6 +81,16 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     return true
   },
   'core.editor/delete-block': (a, app) => {
+    /**
+     * 删除落点只有一条判据：这一下站在**露面岛**里 ⇒ 删的是这一次露面，不是岛里的源。
+     * 菜单把宿主 id 放在 `embedHost`（键位没有菜单上下文，编辑器自带 `embedHostId`）；
+     * 两条入口都汇聚到这里，源自己的位置照旧删源。
+     */
+    const embedHost = S(a.embedHost) || app.ed.embedHostId
+    if (embedHost) {
+      // 摘露面不发「已删除块」——删的是这一次的露面，源与其正文一个字节没动
+      return app.removeEmbed(embedHost)
+    }
     const id = S(a.blockId) || curBlock(app)
     if (!id) return false
     // 守卫会静默拒绝（身份块／不能删的装载根）——没删就不说「已删除」
@@ -320,7 +330,11 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     })
     return true
   },
-  'core.editor/delete-selected-blocks': (_a, app) => app.ed.bsel.deleteSelectedBlocks(),
+  'core.editor/delete-selected-blocks': (_a, app) => {
+    // 与单块 ⌘⇧D 同一条判据：站在露面岛里 ⇒ 摘露面，不删岛里的源子树
+    if (app.ed.embedHostId) return app.removeEmbed(app.ed.embedHostId)
+    return app.ed.bsel.deleteSelectedBlocks()
+  },
   'core.editor/indent-selected-blocks': (_a, app) => app.ed.bsel.indentSelectedBlocks(),
   'core.editor/outdent-selected-blocks': (_a, app) => app.ed.bsel.outdentSelectedBlocks(),
   'core.editor/toggle-closure-selected-blocks': (_a, app) => app.ed.bsel.toggleClosureSelectedBlocks(),

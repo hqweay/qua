@@ -539,14 +539,18 @@ function viewEvents(
             if (embed) viewMenus.openEmbedViewMenu(embed)
             return
           }
-          // **露面行上的「删除块」＝移除这一次露面**：这一行的光标块是源，
-          // 直接删会把源整棵删掉（真实踩过：镜像里的源行选「删除块」，源没了）。
-          // 露面行的删除语义只有一种——摘露面；删源请去源自己的位置。
+          if (!row.command) return
+          const args = (row.args as Record<string, unknown> | undefined) ?? {}
+          /**
+           * 露面行的删除语义只有一种——摘这一次露面（源请去它自己的位置删）。
+           * 判据住在 `delete-block` handler：菜单只把「我在露面行上」这份上下文
+           * 交给它（`embedHost`），不在这里改派命令——键位路径也吃同一个判据。
+           */
           if (row.command === 'core.editor/delete-block' && appearanceHost) {
-            void getRegistry().invoke('core.embed/remove', { blockId: appearanceHost }, 'menu')
+            void getRegistry().invoke(row.command, { ...args, embedHost: appearanceHost }, 'menu')
             return
           }
-          if (row.command) getRegistry().invoke(row.command, (row.args as Record<string, unknown>) ?? {}, 'menu')
+          void getRegistry().invoke(row.command, args, 'menu')
         },
       })
     },

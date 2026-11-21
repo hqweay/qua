@@ -88,6 +88,11 @@ export interface EditableBlockDeps {
   /** 外部变化到重载的防抖窗口。挂载区重查更贵（要跑查询），给 200 */
   debounceMs?: number
   /**
+   * 这一份装载是「某次露面的岛」时填**露面宿主块 id**：透传给编辑器，
+   * 删除判据据此把「删岛里的源」改判成「摘这一次露面」（键位路径没有菜单上下文）。
+   */
+  embedHostId?: string
+  /**
    * **这份装载里要不要展开露面块的身体**。默认 `true`。
    *
    * 镜像的身体本身是一份装载：它里面的露面块只画占位（深度 1 的构造性截断），
@@ -239,6 +244,7 @@ export class EditableBlock {
         ...(this.deps.displayProps !== undefined ? { displayProps: [...this.deps.displayProps] } : {}),
       },
       ...(this.deps.embedBodies === false ? { embedBodies: false } : {}),
+      ...(this.deps.embedHostId ? { embedHostId: this.deps.embedHostId } : {}),
       ...(this.deps.structuralScope ? { structuralScope: this.deps.structuralScope } : {}),
       ...(this.deps.emptyPlaceholder !== undefined ? { emptyPlaceholder: this.deps.emptyPlaceholder } : {}),
       onExpandContext: this.deps.onExpandContext,

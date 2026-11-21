@@ -88,7 +88,7 @@ export function mountEmbedBody(host: Block, into: HTMLElement, deps: EmbedBodyDe
 
   const kind = embedBodyOf(host, find)
   const body =
-    kind === 'view' ? mountProjection(host, target, into, deps) : mountMirror(target, into, deps)
+    kind === 'view' ? mountProjection(host, target, into, deps) : mountMirror(host, target, into, deps)
 
   /**
    * **判据会翻**：`_embed.view === ''` 是「跟随源」，源自己换到某张视图之后，
@@ -152,7 +152,7 @@ function mountProjection(host: Block, target: Block, into: HTMLElement, deps: Em
 }
 
 /** 镜像：源自己那一行 ＋ 它的子树，装进一台岛编辑器（能就地改） */
-function mountMirror(target: Block, into: HTMLElement, deps: EmbedBodyDeps): () => void {
+function mountMirror(host: Block, target: Block, into: HTMLElement, deps: EmbedBodyDeps): () => void {
   const hostEl = document.createElement('div')
   hostEl.className = 'embed-mirror'
   const load = (ed: BlockEditor | null): void => {
@@ -164,6 +164,8 @@ function mountMirror(target: Block, into: HTMLElement, deps: EmbedBodyDeps): () 
     store: deps.store,
     write: (fn) => deps.run(fn),
     initialRoots: [target],
+    // 键位路径没有菜单的 appearanceHost：编辑器自带宿主身份，删除判据认它
+    embedHostId: host.id,
     // 深度 1：这一份装载里不再展开露面块（构造性截断）
     embedBodies: false,
     // 镜像的根是源块：根不能搬/并出这棵子树（外层兄弟不在这一屏里）

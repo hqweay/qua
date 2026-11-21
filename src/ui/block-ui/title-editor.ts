@@ -37,6 +37,8 @@ export interface TitleEditorDeps {
   block: () => Block | undefined
   /** 名字为空时的占位（走字典，不在这里写字面量） */
   placeholder: string
+  /** 露面岛的宿主块 id（只由投影抬头传）：删除判据认它，把删源改判成摘露面 */
+  embedHostId?: string
 }
 
 export interface TitleEditor {
@@ -66,6 +68,7 @@ export function mountTitleEditor(deps: TitleEditorDeps): TitleEditor {
     structuralScope: 'roots',
     // 深度 1：抬头里再出现露面块也只画占位
     embedBodies: false,
+    ...(deps.embedHostId ? { embedHostId: deps.embedHostId } : {}),
     emptyPlaceholder: deps.placeholder,
     load: (ed, ids) => {
       if (!ed) return
