@@ -144,9 +144,10 @@ export class StructOps {
 
     // 块中 ⇒ 同级拆：左半进**上方新块**；原块保 id、右半、子树。
     // **值属性随前半走**（判据在 core 的 `splitPropsForEnter`）：任务标记这类
-    // 属性说的是前半那句话，下半是续文，不继承。
+    // 属性说的是前半那句话，下半是续文，不继承。块首（offset = 0）前半没有字，
+    // 属性原地不动 —— 不然原块的方框会飞进上方空块。
     const [left, right] = splitRuns(content, offset)
-    const { moved, kept } = splitPropsForEnter(loc.block.props)
+    const { moved, kept } = splitPropsForEnter(loc.block.props, offset === 0)
     const leftBlock = mkBlock(left, moved ? { props: moved } : {})
     tx.insert(leftBlock, parent.id, loc.index)
     tx.patch(id, (b) => {

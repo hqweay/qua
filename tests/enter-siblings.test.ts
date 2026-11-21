@@ -9,6 +9,7 @@
  * 规则：
  *   · 折叠 ⇒ 同级；无子块 ⇒ 同级；有子块且展开 ⇒ **子块**（插成首个）。
  *   · 块中 ⇒ **同级拆**：左半进上方新块，原块保 id／右半／子树；值属性随前半走（身份留原块）。
+ *   · 块首（offset=0，前半没有字）⇒ 同级拆的退化形：上方**空**块不带属性，值属性原地不动。
  *   · 块尾 + 展开有子块 ⇒ 首个子块；块尾 + 无子块 ⇒ 同级。
  *
  * 隐式不变量：**子块永远留在原 id**。旧实现把子树搬给右半（新 id），已纠正。
@@ -130,6 +131,18 @@ test('Enter（值属性随前半）split：值属性与自有槽搬进上方新�
   const kept = locate(doc, 'a')!.block
   assert.deepEqual(front.props, { 'p-task': 'choice-done', _ownProps: ['p-task'] }, '值属性与槽随前半走')
   assert.deepEqual(kept.props, { _aliases: ['foo'] }, '身份属性留在原块')
+})
+
+test('Enter 块首拆：前半没有字 ⇒ 属性原地不动，上方空块不带任何属性', () => {
+  // 块首 Enter 只是想在上方补一行空块；没有「前半那句话」，值属性就没有可指的句子。
+  // 若照搬「随前半走」，原块的方框／字段会飞进上方空块，留下一个带任务状态的幽灵行。
+  const doc = fixture()
+  doc.roots[0]!.props = { 'p-task': 'choice-done', _ownProps: ['p-task'], _aliases: ['foo'] }
+  const r = splitBlockBefore(doc, 'a', 0)!
+  const front = locate(doc, r.inserted)!.block
+  const kept = locate(doc, 'a')!.block
+  assert.equal(front.props, undefined, '上方新块是空块，不带属性')
+  assert.deepEqual(kept.props, { 'p-task': 'choice-done', _ownProps: ['p-task'], _aliases: ['foo'] }, '属性原地不动，全部留在原块')
 })
 
 test('Enter（第四次修订）空块 + 缩进 ≥ 2 层 ⇒ outdent（Enter 反缩进，不建块）', () => {

@@ -1546,14 +1546,19 @@ export function hasAnyFieldOf(block: Block, find: (id: string) => Block | undefi
  * 「后半莫名其妙带了个方框」。自有槽（`_ownProps`）跟着值一起走：
  * 槽是值的声明，两者分开会让「这一栏在不在」在两块上各答一半。
  *
+ * 前半没有字（`leftEmpty`，块首 Enter 只是想在上方补一行空块）就没有「那句话」
+ * 可指 ⇒ 值属性与自有槽**原地不动**，否则原块的方框／字段会飞进上方那行空块，
+ * 留下一个带着任务状态却一字不写的幽灵行。
+ *
  * `_` 开头的系统属性（地址、露面、日期、查询…）是**块身份**，不属于内容 ——
  * 原块保 id，身份也保在原块；标签声明（`_tags`／`_fieldDefs`）同理不搬，
  * 所以靠标签拿到这一栏的块拆开后两半都还带着声明，这是分类的本义，不是 bug。
  */
 export function splitPropsForEnter(
   props: BlockProps | undefined,
+  leftEmpty: boolean,
 ): { moved: BlockProps | undefined; kept: BlockProps | undefined } {
-  if (!props) return { moved: undefined, kept: undefined }
+  if (!props || leftEmpty) return { moved: undefined, kept: props }
   const moved: BlockProps = {}
   const kept: BlockProps = {}
   for (const [k, v] of Object.entries(props)) {
