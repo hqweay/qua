@@ -10,6 +10,7 @@
  */
 import type { Block } from '../model/model.ts'
 import { canDeleteBlock, hasList, hasLiveChildren, isPropDefBlock, isQueryBlock } from '../model/model.ts'
+import { typeDeclOf } from '../model/types.ts'
 import type { CtxKeys } from '../model/undo.ts'
 import { isJournal, journalDate, todayISO } from './journal.ts'
 import { isEmbedBlock } from '../views/embed.ts'
@@ -59,6 +60,8 @@ export function blockMenuCtxOf(
     blockCanHaveView: Boolean(
       isQueryBlock(b) || isEmbedBlock(b) || hasLiveChildren(b) || activeView(b) !== null,
     ),
+    /** 「往这块下面新建子块」的准入：问类型声明（与插入落点判据同源），不问有没有 children 数组 */
+    blockCanTakeChildren: typeDeclOf(b).children !== 'none',
     blockHasPageRole: page,
     blockHasTagRole: tag,
     blockType: closureOf(b, table) ? 'closure' : 'paragraph',

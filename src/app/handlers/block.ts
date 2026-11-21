@@ -183,6 +183,11 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     if (!id) return false
     return app.ed.insert.insertBlockBefore(id) !== null
   },
+  'core.editor/insert-child': (_a, app) => {
+    const id = curBlock(app)
+    if (!id) return false
+    return app.ed.insert.insertChild(id) !== null
+  },
   'core.editor/clear-block': (_a, app) => {
     const id = curBlock(app)
     if (!id) return false

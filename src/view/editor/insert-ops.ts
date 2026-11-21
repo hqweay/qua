@@ -20,6 +20,7 @@ import {
   setBlockType,
   isEmbedBlock,
   closureOf,
+  typeDeclOf,
   TASK_STATUS_PROP_ID,
   TASK_STATUS_TODO_ID,
   TASK_STATUS_DONE_ID,
@@ -199,6 +200,38 @@ export class InsertOps {
       this.ed.abortUndoEntry()
       return null
     }
+    this.ed.structTail({ id: b.id, off: 0 })
+    return b.id
+  }
+
+  /**
+   * 在 `id` 块的**首个子位**插一个空正文块（⇧↵「新建子块」），返回新块 id；
+   * 目标类型声明容不下子块 ⇒ null。
+   *
+   * 与块尾 Enter 的 child 支同形（同一个意图：「在这一行下面开始写一层」——两个交互入口
+   * 必须落在同一处，否则就是「同一动作不同落点」的漂移）；与 `core.tree/insert-child`
+   * 步骤原语**不同形也不共用**：那是规则动作「往组里加一项」（绑 id、append 尾位、无光标），
+   * 这是编辑意图（缺省取光标块、首子位、光标进新块）。
+   *
+   * 「插进这一块里面」不是 `insertSiteOf` 的问题形状（它回答「相对这一行插哪」），
+   * 但守卫与它根分支同源：同一条 `typeDeclOf(b).children` 判据。空块目标不特判——
+   * 空行变容器，无害、零新判据。
+   */
+  insertChild(id: string): string | null {
+    const loc = locate(this.ed.doc, id)
+    if (!loc) return null
+    if (typeDeclOf(loc.block).children === 'none') return null
+    const b = mkBlock('')
+    this.ed.beginUndoEntry()
+    const ok = this.ed.write((tx) => {
+      tx.insert(b, id, 0)
+      return true
+    })
+    if (!ok) {
+      this.ed.abortUndoEntry()
+      return null
+    }
+    unfoldBlock(this.ed.doc, id)
     this.ed.structTail({ id: b.id, off: 0 })
     return b.id
   }

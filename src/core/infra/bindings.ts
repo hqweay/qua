@@ -62,9 +62,10 @@ export interface Binding {
 export const BINDINGS: Binding[] = [
   /* ================= 键位（打字键不绑：未绑定 ⇒ 文本输入） ================= */
   { command: 'core.editor/split-block', kind: 'keymap', key: 'enter', when: 'editorTextFocus', layer: 'core' },
-  // v1 **不做软换行**：Shift+Enter 刻意等同 Enter。
-  // 不要改成"插 \n"或直接解绑（后者会让浏览器插 <br>，DOM 文本与模型偏移错位）。
-  { command: 'core.editor/split-block', kind: 'keymap', key: 'shift+enter', when: 'editorTextFocus', layer: 'core' },
+  // v1 不做软换行。⇧↵ 原刻意等同 Enter——怕的是**解绑**（浏览器会插 <br>，DOM 文本与模型偏移错位）；
+  // 现改绑「新建子块」，仍是绑定，派发层照常 preventDefault，默认动作不会漏出来。
+  // 与 ⇧⌘↵（上方插入）成对：⇧ 系在 Enter 上＝结构插入，方向由剩下的修饰键区分。
+  { command: 'core.editor/insert-child', kind: 'keymap', key: 'shift+enter', when: 'editorTextFocus', layer: 'core' },
   // ⌘A **必须接管**：Chrome 在「编辑区含 contenteditable=false 子树」时
   // 原生全选会退化成空选区（把 journal 行标成只读后实测到）⇒ 自己拼跨块 Range
   { command: 'core.editor/select-all', kind: 'keymap', key: 'mod+a', when: 'editorTextFocus', layer: 'core' },
@@ -136,8 +137,8 @@ export const BINDINGS: Binding[] = [
   // 三槽开关：`⌘⌥1` / `⌘⌥2` ——中心槽没有独立快捷键
   { command: 'core.dock/toggle-left', kind: 'keymap', key: 'mod+alt+1', when: '', layer: 'core' },
   { command: 'core.dock/toggle-right', kind: 'keymap', key: 'mod+alt+2', when: '', layer: 'core' },
-  // 上方插入：⇧⌘↵。Enter 家族三键各归其位——↵/⇧↵ 是拆块（下方语义），⌘↵ 是切换待办，
-  // 「上方」这个方向落在剩下的 ⇧⌘↵ 上。原占用者档位轴进档退到命令面板
+  // 上方插入：⇧⌘↵。Enter 家族四键各归其位——↵ 拆块（下方续）、⇧↵ 新建子块（下方进一层）、
+  // ⌘↵ 切换待办、⇧⌘↵ 上方插入；⇧ 系都是结构插入，方向由剩余修饰键区分。原占用者档位轴进档退到命令面板
   // （键位只是加速器，面板照常可达）；退档不受影响（Esc 的绑定在键位段末尾——
   // 它要让位给块选区清空（选区在场先清选区）；浮层在场时派发层不派发，浮层自己收，浮层天然优先）。
   { command: 'core.editor/insert-block-before', kind: 'keymap', key: 'mod+shift+enter', when: 'editorTextFocus', layer: 'core' },
@@ -190,6 +191,8 @@ export const BINDINGS: Binding[] = [
   { command: 'core.editor/toggle-collapse', kind: 'menu', when: 'blockMenuTarget && blockFoldable', group: 'block/2-structure', order: 20, layer: 'core', label: t('menu.label.toggleCollapse') },
   { command: 'core.editor/move-block-up', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 30, layer: 'core' },
   { command: 'core.editor/move-block-down', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 40, layer: 'core' },
+  // 「新建子块」与缩进相邻：两者是「让这块有子块」仅有的两条路径，菜单里也放一起
+  { command: 'core.editor/insert-child', kind: 'menu', when: 'blockMenuTarget && blockCanTakeChildren', group: 'block/2-structure', order: 45, layer: 'core' },
   { command: 'core.editor/indent-block', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 50, layer: 'core' },
   { command: 'core.editor/outdent-block', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 60, layer: 'core' },
   /**

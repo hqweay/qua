@@ -32576,6 +32576,43 @@ await check('T341 引用继承的源级默认：目标页关 ⇒ 所有引用停
   await ctx.close()
   return `源块关 ⇒ 引用子块停；引用块强制开 ⇒ 回来；O(1) 配置在源块`
 })
+
+/* -------------------------------------------------------------------------- */
+
+await check(
+  'T342 ⇧↵ 新建子块：出生在首个子位、光标进新块、原块不动（「新建子块」触发器只认出生 ⇒ 第一个子块唯一能被接住的入口）',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await openFirstPage(page)
+    await page.evaluate(() => window.__qua.quiet(true))
+    const before = await page.evaluate(() => {
+      const b = window.__qua.blocks()[0]
+      window.__qua.focusBlock(b.id, 0)
+      return { id: b.id, text: b.text, count: window.__qua.blocks().length }
+    })
+    await page.keyboard.press('Shift+Enter')
+    await page.waitForTimeout(150)
+    const after = await page.evaluate((id) => {
+      const rows = [...document.querySelectorAll('#editor .blk')]
+      const i = rows.findIndex((r) => r.dataset.blockId === id)
+      const child = rows[i + 1]
+      return {
+        parentDepth: Number(rows[i]?.dataset.depth ?? -1),
+        childId: child?.dataset.blockId ?? '',
+        childDepth: Number(child?.dataset.depth ?? -1),
+        caret: window.__qua.snapshot().selection.aBlock,
+        count: window.__qua.blocks().length,
+        parentText: window.__qua.blocks().find((b) => b.id === id)?.text,
+      }
+    }, before.id)
+    assert(after.count === before.count + 1, `应多一块：${before.count} → ${after.count}`)
+    assert(after.childDepth === after.parentDepth + 1, `新块应是子块（父 depth ${after.parentDepth}+1），实际 ${after.childDepth}`)
+    assert(after.childId !== '' && after.caret === after.childId, `光标应落进新子块（caret=${after.caret}，child=${after.childId}）`)
+    assert(after.parentText === before.text, `原块文本不应被改写：${JSON.stringify(after.parentText)}`)
+    await ctx.close()
+    return `块 ${before.count}→${after.count}；子位 depth=${after.childDepth}（父 ${after.parentDepth}）；光标=新块；原块文本不动`
+  },
+)
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 
