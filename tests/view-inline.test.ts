@@ -23,7 +23,7 @@ import {
   toggleCollapsed,
   type VisibleRow,
 } from '../src/core/index.ts'
-import { VIEW_BODY_GAP, VIEW_BODY_H, hasInlineBody, rowHasInlineViewBody, visibleRowHeight } from '../src/view/editor/block-dom.ts'
+import { VIEW_BODY_GAP, VIEW_BODY_H, VIEW_BODY_INSET, hasInlineBody, rowHasInlineViewBody, visibleRowHeight } from '../src/view/editor/block-dom.ts'
 
 const query = (): ReturnType<typeof mkBlock> => mkBlock('本页的待办', { props: { _query: { where: { any: [] } } } })
 
@@ -85,8 +85,13 @@ test('visibleRowHeight：带身体的行占位多算「典型身体高 ＋ 缝�
   const q = query()
   assert.equal(
     visibleRowHeight(q, 0, true) - visibleRowHeight(q, 0, false),
-    VIEW_BODY_H + VIEW_BODY_GAP,
-    '占位必须比纯名字行多出「估算身体高 ＋ 身体与名字之间的缝」',
+    VIEW_BODY_H + VIEW_BODY_GAP + VIEW_BODY_INSET,
+    '占位必须比纯名字行多出「估算身体高 ＋ 身体与名字之间的缝 ＋ 身体与下一行之间的底缝」',
   )
   assert.ok(VIEW_BODY_H > 0, '估算是正数：身体行至少要给出一行的量')
+  /**
+   * 底缝是**真几何**的一部分（`styles/blocks.css` 里那条共享规则的 `margin-block-end`），
+   * 不是估算的余量：少算它，带身体的行越多、长文档的滚动条就偏得越多。
+   */
+  assert.ok(VIEW_BODY_INSET > 0, '底缝是正数：身体的面与下一行的面之间必须有缝')
 })

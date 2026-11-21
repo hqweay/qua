@@ -815,6 +815,107 @@ await check('A16 每一行的块标与正文首行共中线（含子块；跨字
   return `${rows.length} 行 × ${fontSizes.length} 档字号（${fontSizes.join('/')}px），最大偏差 ${worst}px；压缩密度 ${worstCompact}px`
 })
 
+/* ---------------------------------------------------------------- A29 */
+
+await check('A29 行首旁注件与首行共中线，且「行下身体的面」与下一行的面之间有可读的缝', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+  /**
+   * 场景：面板块（自动化体／查询体／定义体／露面投影）后面紧跟一行带行尾标签 chip 的行。
+   * 这是**两个填充面挨在一起**的唯一常见组合（面 → chip），也是用户报的那一处。
+   */
+  await page.evaluate(() => {
+    const at = Date.now()
+    const mk = (id, text, props, children = []) => ({ id, content: [{ t: 'text', v: text }], children, created: at, modified: at, ...(props ? { props } : {}) })
+    const autoDef = { enabled: true, triggers: ['manual'], steps: [{ cmd: 'core.tree/move', args: { blockId: { ref: 'target' }, parentId: 'pg' } }] }
+    window.__qua.forceForest((forest) => {
+      forest.length = 0
+      forest.push(
+        mk('a29-tag', 'Book', { _aliases: ['Book'], _lists: ['tag'] }),
+        mk('a29-def', '任务状态', { _kind: 'select' }),
+        mk('a29-q', '源查询', { _query: { where: { role: 'tag' } } }),
+        mk('a29-pg', 'A29 页', { _aliases: ['A29 页'], _lists: ['page'] }, [
+          mk('a29-auto', '自动化', { _automation: autoDef }),
+          mk('a29-c1', '面板下一行', { _tags: ['a29-tag'] }),
+          mk('a29-qrow', '查询', { _query: { where: { role: 'tag' } } }),
+          mk('a29-c2', '查询下一行', { _tags: ['a29-tag'] }),
+          mk('a29-defrow', '任务状态', { _kind: 'select' }),
+          mk('a29-c3', '定义下一行', { _tags: ['a29-tag'] }),
+          mk('a29-embed', '露面', { _embed: { block: 'a29-q', view: '' } }),
+          mk('a29-c4', '露面下一行', { _tags: ['a29-tag'] }),
+          mk('a29-kind', '带 kind 徽章的行', { _kind: 'select' }),
+        ]),
+      )
+    })
+    window.__qua.invoke('core.page/open', { pageId: 'a29-pg' })
+  })
+  await page.waitForFunction(() => document.querySelectorAll('#editor .blk').length >= 8, null, { timeout: 8000 })
+  await page.waitForTimeout(300)
+
+  const m = await page.evaluate(() => {
+    const row = (id) => document.querySelector(`#editor .blk[data-block-id="${id}"]`)
+    const bx = (el) => {
+      if (!el) return null
+      const r = el.getBoundingClientRect()
+      return { top: +r.top.toFixed(2), bottom: +r.bottom.toFixed(2), h: +r.height.toFixed(2), center: +((r.top + r.bottom) / 2).toFixed(2) }
+    }
+    /**
+     * ⚠️ **只量文档自己的行**：同一个块 id 会在**嵌套装载**里再出现一次
+     * （查询结果、露面镜像都各自渲染一份），而那里行的几何与这一屏无关。
+     * 按 `closest` 排掉，否则会量到镜像里那一份的偏移（实测差 756px）。
+     */
+    const ownRows = [...document.querySelectorAll('#editor .blk')].filter(
+      (el) => !el.closest('.queryview, .blk-embed-body'),
+    )
+
+    /** ① 旁注件的中心 vs 首行行盒中心（chip / kind 徽章） */
+    const offs = []
+    for (const el of ownRows) {
+      const line = bx(el.querySelector(':scope > .left'))
+      if (!line) continue
+      const chip = bx(el.querySelector(':scope > .blk-tags .tag-chip'))
+      const kind = bx(el.querySelector(':scope > .blk-kind'))
+      const id = el.dataset.blockId
+      if (chip) offs.push({ id, part: 'chip', off: +(chip.center - line.center).toFixed(2) })
+      if (kind) offs.push({ id, part: 'kind', off: +(kind.center - line.center).toFixed(2) })
+    }
+
+    const own = (id) => ownRows.find((el) => el.dataset.blockId === id) ?? null
+
+    /** ② 面板底 → 下一行行尾 chip 顶 的缝 */
+    const gaps = []
+    for (const [host, hostSel, next] of [
+      ['a29-auto', '.blk-auto', 'a29-c1'],
+      ['a29-qrow', '.blk-view-body .queryview', 'a29-c2'],
+      ['a29-defrow', '.blk-view-body .blk-def-body', 'a29-c3'],
+      ['a29-embed', '.embed-panel', 'a29-c4'],
+    ]) {
+      const face = bx(own(host)?.querySelector(hostSel))
+      const chip = bx(own(next)?.querySelector(':scope > .blk-tags .tag-chip'))
+      if (!face || !chip) {
+        gaps.push({ host, gap: null, missing: true })
+        continue
+      }
+      gaps.push({ host, gap: +(chip.top - face.bottom).toFixed(2) })
+    }
+    return { offs, gaps }
+  })
+
+  assert(m.offs.length >= 5, `应有足够多的行首旁注件可测：${JSON.stringify(m.offs)}`)
+  const badOffs = m.offs.filter((o) => Math.abs(o.off) > 0.6)
+  assert(badOffs.length === 0, `旁注件（chip／kind 徽章）应与首行行盒共中线（差 ≤0.6px）：${JSON.stringify(badOffs.slice(0, 4))}`)
+
+  const missing = m.gaps.filter((g) => g.missing)
+  assert(missing.length === 0, `场景前置缺失（面板或 chip 没画出来）：${JSON.stringify(missing)}`)
+  const badGaps = m.gaps.filter((g) => g.gap < 4)
+  assert(badGaps.length === 0, `行下身体的面与下一行的面之间应有 ≥4px 的缝（缝读不出来就读成咬在一起）：${JSON.stringify(badGaps)}`)
+
+  await ctx.close()
+  const minGap = Math.min(...m.gaps.map((g) => g.gap))
+  const worstOff = Math.max(...m.offs.map((o) => Math.abs(o.off)))
+  return `${m.offs.length} 处旁注件共中线（最大偏差 ${worstOff}px）；4 类面板 → chip 的缝最小 ${minGap}px`
+})
+
 /* ---------------------------------------------------------------- A17 */
 
 await check('A17 父块的竖线在本行换行后不断：自身延续段 ＋ 子行段拼成一条连续线', async () => {

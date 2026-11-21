@@ -94,6 +94,18 @@ export const VIEW_BODY_H = 168
 export const VIEW_BODY_GAP = 2
 
 /**
+ * 行下身体与**下一行**之间的底缝（＝`--ui-gap-2`，4px）。
+ *
+ * 身体是「面」，下一行的行尾 chip 也是「面」；两者之间没有缝时读作咬在一起
+ * （见 `styles/blocks.css` 里那条共享规则的说明）。视觉走 token，虚拟化走这个数：
+ * 占位在没有挂 DOM 的行上算，读不到 computed style。
+ *
+ * ⚠️ 与 `VIEW_BODY_GAP` 一样是**同一件事的两份数值**：CSS 改了这里也要改，
+ *    否则长文档的占位会系统性地少 4px／行（带身体的行越多，偏得越多）。
+ */
+export const VIEW_BODY_INSET = 4
+
+/**
  * **块下属性区每行**额外占的高度（近似值，只给虚拟化的占位滚动条用）。
  *
  * 一行小字（`--ui-fs-xs` × `--ui-lh-tight` ≈ 18）＋ `.blk` 的 `row-gap`
@@ -139,7 +151,7 @@ export function rowHasInlineViewBody(r: VisibleRow): boolean {
  */
 export function visibleRowHeight(b: Block, extraHeads = 0, viewBody = false, propRows = 0): number {
   const aliasHead = aliasesOf(b).length > 0 && prop<string>(b, DISPLAY_PROP) !== 'text' ? 1 : 0
-  const extra = viewBody ? VIEW_BODY_H + VIEW_BODY_GAP : 0
+  const extra = viewBody ? VIEW_BODY_H + VIEW_BODY_GAP + VIEW_BODY_INSET : 0
   return LINE_H + extra + (aliasHead + extraHeads) * ALIAS_HEAD_H + propRows * PROP_LINE_H
 }
 

@@ -8,6 +8,17 @@
   font-size: var(--ui-fs-md);
   line-height: var(--ui-lh-relaxed);
   /*
+   * **这一行首行行盒的高度**（`--blk-lh`）：字号 × 行高，与上面两行同源。
+   *
+   * 为什么要有这一格：行里的旁注件（标签槽、kind 徽章）自己会改 `font-size`，
+   * 而 `1lh` 在**元素自己**上求值 ⇒ 徽章里的 `1lh` 是 11px × 1.85 ＝ 20.35，
+   * 不是这一行的 26.8。用 `1lh` 给它们补行盒高度，等于按它们自己的字号补 ——
+   * 补不满，仍然浮高（实测：`.blk-kind` 用 `1lh` 后依旧高 3.3px）。
+   * ⇒ 行盒高度在**决定字号的那一处**算一次，旁注件读同一个 token。
+   *    `.left` 的 `height: 1lh` 之所以对，正是因为它不改自己的字号。
+   */
+  --blk-lh: calc(var(--ui-fs-md) * var(--ui-lh-relaxed));
+  /*
    * ⚠️ **通用块样式里不许有 padding-block / margin**（S2／：间距所有权归容器）。
    *    块的垂直留白只来自「渲染器的 inset」与容器的 gap ——
    *    这里曾经写 `padding: var(--ui-blk-pad-y) 0`，甲皮那 1px 会把每块撑高 2px，
@@ -23,6 +34,8 @@
 }
 .blk[data-depth='0'] {
   font-size: var(--ui-fs-lg);
+  /* 与上一行的字号同源：根行大字，行盒跟着大 */
+  --blk-lh: calc(var(--ui-fs-lg) * var(--ui-lh-relaxed));
 }
 /*
  * **别名头**（有名字且这一行选择「显示别名」时）。
@@ -606,9 +619,18 @@
   color: var(--ui-text-secondary);
 }
 /* kind 是定义块身份的另一半（判据见 block-dom.ts 徽章处）：2xs 三级灰，
-   与「· 未声明」后缀同一档的旁注角色 */
+   与「· 未声明」后缀同一档的旁注角色。
+   ⚠️ **它也得补满首行行盒再居中**：`.blk` 是 `align-items: flex-start`，一个
+      `flex:none` 的文字件默认顶对齐 ⇒ 徽章的文字基线比正文基线高 3.3px（实测），
+      一行「名字 ＋ 属性」读起来是两截错开的字。与 `.blk-tags` 同一条机制：
+      贴首行（`align-self: flex-start`）＋ 补满行盒（`--blk-lh`）＋ 内部居中。
+      不能用 `align-self: center`：正文折行时徽章会掉到整行中间。 */
 .blk .blk-kind {
   flex: none;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--blk-lh);
   font-size: var(--ui-fs-2xs);
   color: var(--ui-text-tertiary);
   white-space: nowrap;
@@ -1648,6 +1670,8 @@
 .mount .blk[data-depth='0'],
 .queryview .blk[data-depth='0'] {
   font-size: var(--ui-fs-md);
+  /* 字号收档时行盒 token 跟着收：旁注件（标签槽／kind 徽章）按它补行盒，不同步就重新浮高 */
+  --blk-lh: calc(var(--ui-fs-md) * var(--ui-lh-relaxed));
 }
 .queryview-head {
   display: flex;
@@ -1704,6 +1728,12 @@
   line-height: inherit;
   font-weight: inherit;
   color: inherit;
+  /*
+   * 行盒 token 跟着一起继承：这一档的 `.blk` 字号/行高都承宿主，
+   * 不继承 `--blk-lh` 就会用 `.blk` 默认档（md × relaxed）给旁注件补行盒，
+   * 宿主若是另一档字号，chip／徽章又浮起来半档。
+   */
+  --blk-lh: 1lh;
 }
 .title-editor .blk > .left,
 .inline-editor .blk > .left {
@@ -2019,6 +2049,30 @@
   height: auto;
   min-width: 0;
   overflow: hidden;
+}
+/*
+ * **一切「行下身体」的底缝**：行内体、定义体、露面投影。
+ *
+ * 这三族在屏幕上就是同一种东西（这一行下面挂的一块面），而下一行可能是任何东西
+ * （带标签的行、另一块面、普通文字）。不补这条底缝时，面板的圆角底边就落在这一行的
+ * 行底上，而下一行行尾的标签 chip 也在自己的行顶附近 —— 两者之间只剩 chip 在行盒里
+ * 那点内缩（实测 3.3px），两块填充色读作「咬在一起」。
+ *
+ * 判据不是「两个盒子的间距」而是**两种材质的间距**：面与文字之间 4px 就够
+ * （正文墨迹顶距行顶就是 4px），面与面之间要更大 —— 4px 的底内缩给出 7.2px。
+ *
+ * ⚠️ 这是**渲染器的 inset**，不是块的 margin/padding：`A2` 断言量的是 `.blk`
+ *    自己的 padding-block/margin（必须为 0），这一格长在身体容器上；行间距仍是
+ *    容器那 1px（`A1` 量的就是它）。
+ * ⚠️ 只挂在**最外那层身体容器**上：`.blk-def-body`／`.blk-auto`／`.queryview` 都住在
+ *    `.blk-view-body` 里，给它们也加一条就得到 8px（实测），与「一条缝」的口径不符。
+ *    三族合成一条选择器是必要的（分三处写必有一处漏），但**祖先与后代不能都算**。
+ * ⚠️ 与 `VIEW_BODY_GAP`／`VIEW_BODY_INSET` 同源：视觉走 token，虚拟化走那个常量，
+ *    改这里要一起改（`visibleRowHeight` 的 `extra`）。
+ */
+.blk-view-body,
+.blk-embed-body[data-embed-body='view'] {
+  margin-block-end: var(--ui-gap-2);
 }
 /* 折叠态：只藏，不卸载（所有位置的查询身体都折这一格） */
 .blk-view-body[data-folded='1'] {
@@ -2609,6 +2663,16 @@
   槽不在正文槽里 ⇒ 插入点进不去，「光标落到标签后面打字」从根上不存在。
   名字 `blk-tags` 与 `tag-chip` 同属渲染契约：主题按它们上色，探针按它们找标签。
   颜色只用语义槽（主题换肤才改得动）。
+
+  ⚠️ **`min-height: var(--blk-lh)` 是这个槽对齐的唯一出处**：槽自身的高度只有 chip 那么高
+     （20px 级），而这一行的行盒是 26.8px。不补满行盒，槽就贴着行顶，
+     chip 的中心比正文中线**高 3.3px**——扫一列时每枚 chip 都浮起来半档，
+     而且行顶就是上一行的行底 ⇒ chip 与上一块的身体面板之间一个像素的缝都没有。
+     `align-self: flex-start` ＋ 补满行盒 ＋ 内部居中＝「贴首行，且在首行里居中」；
+     换行成多行时槽跟着长，chip 仍在各自那一行里居中（不改成 `center`：
+     那样多行正文的 chip 会掉到整行的中间）。
+     ⚠️ 用 `var(--blk-lh)` 而不是 `1lh`：`1lh` 在**本元素**上求值，而槽里是 0.93em 的字，
+     算出来比行盒矮（`--blk-lh` 在 `.blk` 上按行字号算一次，见那里的说明）。
 */
 .blk-tags {
   flex: 0 0 auto;
@@ -2617,6 +2681,7 @@
   flex-wrap: wrap;
   justify-content: flex-end;
   align-items: center;
+  min-height: var(--blk-lh);
   gap: var(--ui-gap-1);
   max-width: 40%;
   margin-inline-start: var(--ui-gap-2);
@@ -2781,6 +2846,8 @@
  */
 .blk[data-embed='1'] .blk-embed-body .blk[data-depth='0'] {
   font-size: inherit;
+  /* 字号跟着宿主行走 ⇒ 行盒 token 也得跟着（否则岛内旁注件按 lg 补行盒） */
+  --blk-lh: inherit;
 }
 /*
  * **露面行的块标是空心的**：两处——投影行的绑源块标（宿主行自己的 chrome）、

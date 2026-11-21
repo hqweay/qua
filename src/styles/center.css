@@ -353,6 +353,8 @@
 */
 .search-face-preview-editor .blk[data-depth='0'] {
   font-size: var(--ui-fs-md);
+  /* 与字号同源：行盒 token 跟着收（见 blocks.css 的 `--blk-lh`） */
+  --blk-lh: calc(var(--ui-fs-md) * var(--ui-lh-relaxed));
 }
 
 /* 窄屏：单列堆叠（列表在上、预览在下）。不把预览藏掉，否则「点了没反应」 */
