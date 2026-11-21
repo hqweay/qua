@@ -448,6 +448,14 @@ export function rowWritesFor(
     if (op.e === 'block' && op.op === 'upsert' && op.value.parent !== undefined) structural.add(op.id)
     else if (op.e === 'anno') annoBlocks.add(op.block)
   }
+  /**
+   * 一批里同一块可能有多次位置写（先建兄弟、紧接着缩进）——只有**最后一次**是这一批的终点。
+   * 取第一次会把缩进吃掉，盘上停在建块时的位置，重开就回到兄弟（真机实测）。
+   */
+  const lastPos = new Map<string, Op>()
+  for (const op of ops) {
+    if (op.e === 'block' && op.op === 'upsert' && op.value.parent !== undefined) lastPos.set(op.id, op)
+  }
   const look = probeOf(ws.blocks, [...structural, ...annoBlocks])
 
   const done = new Set<string>()
@@ -475,8 +483,7 @@ export function rowWritesFor(
           out.push({ table: 'Block', op: 'update', key: { id: op.id }, values: { created: op.value.created } })
         }
         if (op.value.parent !== undefined) {
-          if (done.has(op.id)) break
-          done.add(op.id)
+          if (lastPos.get(op.id) !== op) break
           const b = look.get(op.id)
           if (!b) {
             /**

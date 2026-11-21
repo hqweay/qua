@@ -240,6 +240,49 @@ test('投影：结构写入按 op 的 `prev` 落 `left`（不重新算一遍，�
   assert.equal(row!.values?.left, a.id, '`prev` 直接就是 `left`')
 })
 
+test('同一批先建兄弟再缩进：最后一次位置写胜出（缩进不能落盘成兄弟）', () => {
+  const day = mkBlock('天')
+  const one = mkBlock('1')
+  const two = mkBlock('2')
+  day.children = [one]
+  one.children = [two] // 事务后的最终模型：2 是 1 的子块
+  const writes = rowWritesFor(ws([day]), [
+    { e: 'block', id: two.id, op: 'upsert', value: { parent: day.id, prev: one.id }, at: 1 },
+    { e: 'block', id: two.id, op: 'upsert', value: { parent: one.id, prev: null }, at: 2 },
+  ])
+  const row = writes.find((w) => w.table === 'Block' && w.op === 'upsert' && w.key.id === two.id)
+  assert.ok(row)
+  assert.equal(row!.values?.parent, one.id, '缩进（最后一笔）必须落盘')
+  assert.equal(row!.values?.left, null)
+  const at = writes.findIndex((x) => x.op === 'relink' && x.key.id === two.id)
+  assert.ok(at >= 0 && at < writes.indexOf(row!), 'relink 仍排在整块写之前')
+})
+
+test('真库往返：同一批先建兄弟再缩进，重载后仍是子块（不是兄弟）', () => {
+  const day = mkBlock('天')
+  const one = mkBlock('1')
+  day.children = [one]
+  const w = ws([day])
+  const db = freshDb(w)
+  // 同一批：先建兄弟 2，再缩进成 1 的子块；事务后的最终模型＝后者
+  const two = mkBlock('2')
+  one.children = [two]
+  applyRowWrites(
+    db,
+    rowWritesFor(w, [
+      { e: 'block', id: two.id, op: 'upsert', value: { parent: day.id, prev: one.id, created: 1, content: [] }, at: 1 },
+      { e: 'block', id: two.id, op: 'upsert', value: { parent: one.id, prev: null }, at: 2 },
+    ]),
+  )
+  const back = rowsToWorkspace(readContentRows(db))
+  db.close()
+  const dayBack = back.blocks.find((b) => b.id === day.id)!
+  const oneBack = dayBack.children.find((b) => b.id === one.id)!
+  assert.equal(oneBack.children.length, 1, `缩进必须落盘：${JSON.stringify(dayBack.children.map((b) => b.id))}`)
+  assert.equal(oneBack.children[0]!.id, two.id)
+  assert.equal(dayBack.children.length, 1, '天块下只应有 1，不应多出兄弟 2')
+})
+
 /* ------------------------------------------------------------ ④ 兄弟链维护（真库往返） */
 
 /**
