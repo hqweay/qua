@@ -1065,10 +1065,11 @@ export class RenderOps {
          * 「哪一行画」由 `block-dom` 的 `rowHasInlineViewBody` 判（按源分派，
          * 段根同此——聚焦后身体仍贴着自己那一行，不再让位段尾宿主）。
          */
-        ...(this.ed.events.viewBody || this.ed.events.automationBody
+        ...(this.ed.events.viewBody || this.ed.events.automationBody || this.ed.events.defBody
           ? {
               viewBody: (b: Block, into: HTMLElement) => this.ed.embeds.attachViewBody(b, into),
               automationBody: (b: Block, into: HTMLElement) => this.ed.embeds.attachAutomationBody(b, into),
+              defBody: (b: Block, into: HTMLElement) => this.ed.embeds.attachDefBody(b, into),
             }
           : {}),
         // 块下属性行：值文本与点击都在装配层；`view` 只给位置与定高
@@ -1244,7 +1245,7 @@ export class RenderOps {
       visibleRowHeight(
       r.block,
       this.extraHeads(r),
-      (Boolean(this.ed.events.viewBody || this.ed.events.automationBody) &&
+      (Boolean(this.ed.events.viewBody || this.ed.events.automationBody || this.ed.events.defBody) &&
         rowHasInlineViewBody(r) &&
         !isFolded(this.ed.doc, r.block.id)) ||
         (Boolean(this.ed.events.embedBody) &&

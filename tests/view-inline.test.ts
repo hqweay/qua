@@ -4,9 +4,9 @@
  * 两件事分开，各有唯一一份答案：
  *   · `hasQueryBody` —— 这一块有没有「结果身体」（只有查询源有；命中不是 children，
  *     所以就地画不会与正文重复）；
- *   · `rowHasInlineViewBody` —— 这一行画不画它：**按源分派**，有身体就画，
- *     段根同此（聚焦后身体仍贴着自己那一行；段尾/窗口根宿主只接 children/items 源，
- *     再建一台就是同一块挂两台）。
+ *   · `hasInlineBody` ／ `rowHasInlineViewBody` —— 这一行画不画它：**按源分派**，
+ *     有身体就画，段根同此（聚焦后身体仍贴着自己那一行；段尾/窗口根宿主只接
+ *     children/items 源，再建一台就是同一块挂两台）。
  *
  * 高度也要在这里钉：身体是**自然高**（紧凑性归折叠），占位只在虚拟化档用
  * `VIEW_BODY_H` 估「一份普通查询结果」的典型高 —— 这一条钉的是「带身体的行
@@ -23,7 +23,7 @@ import {
   toggleCollapsed,
   type VisibleRow,
 } from '../src/core/index.ts'
-import { VIEW_BODY_GAP, VIEW_BODY_H, rowHasInlineViewBody, visibleRowHeight } from '../src/view/editor/block-dom.ts'
+import { VIEW_BODY_GAP, VIEW_BODY_H, hasInlineBody, rowHasInlineViewBody, visibleRowHeight } from '../src/view/editor/block-dom.ts'
 
 const query = (): ReturnType<typeof mkBlock> => mkBlock('本页的待办', { props: { _query: { where: { any: [] } } } })
 
@@ -46,6 +46,21 @@ test('rowHasInlineViewBody：按源分派——查询块就画，段根同此（
   assert.equal(rowHasInlineViewBody(row(1)), true)
   assert.equal(rowHasInlineViewBody(row(2)), true)
   assert.equal(rowHasInlineViewBody(row(1, mkBlock('普通块'))), false, '只有查询块有身体')
+})
+
+test('hasInlineBody：定义块画值配置；标签声明非空才画；页的声明不投影', () => {
+  const def = mkBlock('状态', { props: { _kind: 'select' } })
+  assert.equal(hasInlineBody(def), true, '定义拿掉只剩名字 ⇒ 名字下面画定义（值配置）')
+  assert.equal(hasInlineBody(mkBlock('普通块')), false)
+
+  const tagWith = mkBlock('任务', { props: { _lists: ['tag'], _fieldDefs: ['p1'] } })
+  assert.equal(hasInlineBody(tagWith), true, '有声明的标签：画字段声明')
+  assert.equal(hasInlineBody(mkBlock('空标签', { props: { _lists: ['tag'] } })), false, '声明非空才画')
+  assert.equal(
+    hasInlineBody(mkBlock('页', { props: { _lists: ['page'], _fieldDefs: ['p1'] } })),
+    false,
+    '页的声明没有消费方，画出来是一个写进去却不生效的入口（与 declareField 同一条判据）',
+  )
 })
 
 test('hasFoldable：子块或身体（查询结果／露面）；纯叶子不能', () => {

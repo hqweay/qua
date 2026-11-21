@@ -1267,6 +1267,16 @@ export function declaredFieldIds(owner: Block): string[] {
 }
 
 /**
+ * 这一块**有可画的字段声明**（`_fieldDefs` 非空且限标签）：声明投影「非空才画」的判据。
+ *
+ * 限标签：声明必须有自动获得方（成员）才值得画；页的声明没有消费方，画出来
+ * 是「一个写进去却永远不会生效的入口」，比没有更糟（与 declareField 的同一条判据）。
+ */
+export function hasDeclaredFields(b: Block): boolean {
+  return hasList(b, 'tag') && declaredFieldIds(b).length > 0
+}
+
+/**
  * 把一条属性声明到标签/页上，从此成为它的标签属性（幂等；追加到末尾 ＝ 显示顺序）。
  *
  * **只有标签能声明属性**：声明必须有自动获得方 —— 标签的成员。

@@ -25,6 +25,7 @@ import {
   displayNameOf,
   embedBodyOf,
   hasChildrenViewBody,
+  hasDeclaredFields,
   hasQueryBody,
   identityTags,
   inlineTagIdsOf,
@@ -106,24 +107,31 @@ export const VIEW_BODY_GAP = 2
 export const PROP_LINE_H = 20
 
 /**
- * 这一行要不要把视图身体画在自己下面。
+ * **这一块的「定义身体」要不要画在行下**（唯一一份源清单）。
  *
  * **按源分派**：查询块有结果身体（`hasQueryBody`）；children 源的激活视图
- * （`hasChildrenViewBody`——身体替换子块行）也算。段根也不例外 —— 聚焦后它是
- * 这一屏唯一的根，身体仍贴着它自己那一行，与它在正文里子行时是同一种画法
- * （同一个 ViewHost、同一套折叠与高度档）。
+ * （`hasChildrenViewBody`——身体替换子块行）也算；自动化块画三段式定义体；
+ * 属性定义块画值配置、标签画字段声明（非空才画——定义拿掉只剩名字的块，
+ * 名字下面就画定义）。段根也不例外 —— 聚焦后它是这一屏唯一的根，身体仍贴着
+ * 它自己那一行，与它在正文里子行时是同一种画法。
  *
  * 递归的**构造性截断**不在这条判据上：结果里的查询块由**里层编辑器**画，
- * 而那一层（挂载区／镜像／查询结果／单元格）在构造上没有 `viewBody` 回调。
+ * 而那一层（挂载区／镜像／查询结果／单元格）在构造上没有身体回调。
  */
+export function hasInlineBody(b: Block): boolean {
+  return hasQueryBody(b) || hasChildrenViewBody(b) || isAutomationBlock(b) || isPropDefBlock(b) || hasDeclaredFields(b)
+}
+
+/** 同上，按行问（虚拟化占位与渲染共用这一份答案） */
 export function rowHasInlineViewBody(r: VisibleRow): boolean {
-  return hasQueryBody(r.block) || hasChildrenViewBody(r.block) || isAutomationBlock(r.block)
+  return hasInlineBody(r.block)
 }
 
 /**
  * 这一行在虚拟化里占多高：有别名头（且不是显示文本）或面包屑就是两行以上。
  *
- * ⚠️ **查询体／露面体要算进来**：它们不占正文，高度由声明给。
+ * ⚠️ **定义身体（查询体／露面体／自动化体／定义值配置／字段声明）要算进来**：
+ *    它们不占正文，高度由声明给。
  *    按 `LINE_H` 算会让带这些行的文档滚动条系统性偏小。
  *    这里只读**静止档的封顶值**：身体多数时候比它矮（内容高），占位因此是**上限估计**
  *    （宁可高估留白，也别低估让滚动条偏小）；聚焦档只发生在窗口里的那一行上，
@@ -542,6 +550,12 @@ export function makeBlockEl(
      */
     automationBody?: (b: Block, into: HTMLElement) => void
     /**
+     * **正文里属性定义块／标签的身体**（定义值配置／字段声明的就地投影）。
+     * 与 `automationBody` 同一条分工；「哪一行画」同走 `rowHasInlineViewBody`
+     * （属性定义块／有声明的标签是身体的源）。不接 ⇒ 定义块只剩名字一行。
+     */
+    defBody?: (b: Block, into: HTMLElement) => void
+    /**
      * **块下属性行**：有值、且没画在块标后的属性（派生见 `belowFieldsFor`）。
      *
      * `view` 只交代「这一行有这一格」并把它算进高度；值文本与点击（开属性面板）
@@ -573,11 +587,14 @@ export function makeBlockEl(
    * 查询结果列表里的命中行也是查询块，但那一层画的是**结果行**，不是它自己的位置；
    * 给它一个折叠三角就是死控件。
    */
-  const bodyFoldable =
-    Boolean(opts.viewBody || opts.automationBody) && (hasQueryBody(b) || hasChildrenViewBody(b) || isAutomationBlock(b))
+  /**
+   * **行身体**（查询结果／children 视图／自动化定义／定义值配置／字段声明）：
+   * 源清单唯一一份（`hasInlineBody`），折叠三角与身体挂载吃同一个答案——
+   * 有身体的行可折（折的是身体这一格），没有回调的表面构造上不画。
+   */
+  const inlineBody = Boolean(opts.viewBody || opts.automationBody || opts.defBody) && rowHasInlineViewBody(r)
   const embedBodyFoldable = Boolean(opts.embedBody) && embedKind === 'view'
-  const foldable = r.hasChildren || bodyFoldable || embedBodyFoldable
-  const inlineBody = Boolean(opts.viewBody || opts.automationBody) && rowHasInlineViewBody(r)
+  const foldable = r.hasChildren || inlineBody || embedBodyFoldable
   /**
    * gutter 上那个**关闭态开关**：只认 `_use: 'closure'` 的字段（＋合法 `_check`）。
    *
@@ -844,7 +861,7 @@ export function makeBlockEl(
    * ⚠️ 纵向范围由 CSS 定（`top: 块标中心 ＋ gap`、`bottom: 0`），不在这里算像素：
    *    `1lh` 与 `--ui-bullet-size` 是 token，DOM 层不该知道它们的数值。
    */
-  const bodyRow = !r.hasChildren && (bodyFoldable || embedBodyFoldable)
+  const bodyRow = !r.hasChildren && (inlineBody || embedBodyFoldable)
   if ((r.hasChildren || bodyRow) && (!folded || bodyRow)) {
     const self = document.createElement('span')
     self.className = 'rail-self'
@@ -1213,8 +1230,9 @@ export function makeBlockEl(
      */
     if (folded) body.dataset.folded = '1'
     el.appendChild(body)
-    // 按源分派：自动化块画三段式定义体，其余（查询／children 源）画视图宿主
+    // 按源分派：自动化块画三段式定义体；定义块/标签画属性定义投影；其余（查询／children 源）画视图宿主
     if (isAutomationBlock(b)) opts.automationBody?.(b, body)
+    else if (isPropDefBlock(b) || hasDeclaredFields(b)) opts.defBody?.(b, body)
     else opts.viewBody?.(b, body)
   }
   return el

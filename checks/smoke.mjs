@@ -7332,10 +7332,11 @@ await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 
    */
   const declared = await page.evaluate(() => ({
     visible: !document.getElementById('inspect-card').hidden,
-    declaredRows: [...document.querySelectorAll('.prop-declared [data-declared-prop-id]')].map(
+    // 按面取：正文里标签的投影身体现在也画同一套声明段（一套段两个壳），检视卡的读数归检视卡
+    declaredRows: [...document.querySelectorAll('#properties-body .prop-declared [data-declared-prop-id]')].map(
       (x) => x.dataset.declaredPropId,
     ),
-    ownEntry: document.querySelectorAll('[data-declare-add]').length,
+    ownEntry: document.querySelectorAll('#properties-body [data-declare-add]').length,
   }))
   assert(declared.visible, '标签页应显示属性区')
   assert(
@@ -13148,8 +13149,8 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
   assert(pagePeek !== '', '假数据里应有页')
   await page.waitForTimeout(250)
   const pageSect = await page.evaluate(() => ({
-    declared: document.querySelectorAll('[data-declared-prop-id]').length,
-    add: document.querySelectorAll('[data-declare-add]').length,
+    declared: document.querySelectorAll('#properties-body [data-declared-prop-id]').length,
+    add: document.querySelectorAll('#properties-body [data-declare-add]').length,
     section: document.querySelectorAll('.props-declared').length,
   }))
   assert(
@@ -13167,7 +13168,7 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
   await page.waitForTimeout(250)
 
   const pageBefore = await page.evaluate(() => ({
-    declared: [...document.querySelectorAll('[data-declared-prop-id]')].length,
+    declared: [...document.querySelectorAll('#properties-body [data-declared-prop-id]')].length,
     rows: [...document.querySelectorAll('.prop-row[data-prop-id]')].length,
     text: document.querySelector('#properties-body')?.innerText ?? '',
   }))
@@ -13188,7 +13189,7 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
 
   const pageOwn = await page.evaluate(() => ({
     rows: [...document.querySelectorAll('.prop-row[data-prop-id]')].map((x) => x.dataset.propId),
-    declared: [...document.querySelectorAll('[data-declared-prop-id]')].length,
+    declared: [...document.querySelectorAll('#properties-body [data-declared-prop-id]')].length,
   }))
   assert(pageOwn.rows.includes(pickId), `自己的入口要加「这一块自己的」属性行：${JSON.stringify(pageOwn)}`)
   assert(
@@ -13215,7 +13216,7 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
   await page.waitForTimeout(300)
 
   const pageAfter = await page.evaluate(() => ({
-    declared: [...document.querySelectorAll('[data-declared-prop-id]')].map((x) => x.dataset.declaredPropId),
+    declared: [...document.querySelectorAll('#properties-body [data-declared-prop-id]')].map((x) => x.dataset.declaredPropId),
     text: document.querySelector('#properties-body')?.innerText ?? '',
     section: document.querySelector('.props-declared')?.dataset.declaredSection,
   }))
@@ -13236,7 +13237,7 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
   )
   await page.waitForTimeout(300)
   const undeclared = await page.evaluate((id) => ({
-    declared: [...document.querySelectorAll('[data-declared-prop-id]')].length,
+    declared: [...document.querySelectorAll('#properties-body [data-declared-prop-id]')].length,
     defStillThere: window.__qua.propDefs().some((d) => d.id === id),
   }), pickId)
   assert(undeclared.declared === pageBefore.declared, `解除后回到基线：${JSON.stringify(undeclared)}`)
@@ -13266,7 +13267,7 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
     return {
       ownProps: Array.isArray(raw?.props?._ownProps) ? raw.props._ownProps : [],
       fieldDefs: Array.isArray(raw?.props?._fieldDefs) ? raw.props._fieldDefs : [],
-      declared: [...document.querySelectorAll('[data-declared-prop-id]')].map((x) => x.dataset.declaredPropId),
+      declared: [...document.querySelectorAll('#properties-body [data-declared-prop-id]')].map((x) => x.dataset.declaredPropId),
     }
   }, pageId)
   assert(reverseAfter.fieldDefs.includes(pickId), `声明应写进 _fieldDefs：${JSON.stringify(reverseAfter)}`)
@@ -13296,7 +13297,7 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
     role: document.querySelector('.props-declared')?.dataset.declaredSection,
     title: document.querySelector('.props-declared .props-section-title')?.textContent ?? '',
     hint: document.querySelector('.props-declared .ui-info')?.getAttribute('aria-label') ?? '',
-    declaredRows: [...document.querySelectorAll('.prop-declared [data-declared-prop-id]')].length,
+    declaredRows: [...document.querySelectorAll('#properties-body .prop-declared [data-declared-prop-id]')].length,
   }))
   assert(tagSection.role === 'tag', `标签块上的声明段应标成 tag：${JSON.stringify(tagSection)}`)
   assert(tagSection.title === '标签属性', `标签块上的这一段要叫「标签属性」：${JSON.stringify(tagSection)}`)
@@ -13307,7 +13308,7 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
   await page.waitForSelector('.props-form--own')
   const ownPlacement = await page.evaluate(() => {
     const form = document.querySelector('.props-form--own')
-    const section = document.querySelector('.props-declared')
+    const section = document.querySelector('#properties-body .props-declared')
     return {
       formBeforeSection: Boolean(
         form && section && (form.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING),
@@ -13335,7 +13336,7 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
       ownProps: Array.isArray(raw?.props?._ownProps) ? raw.props._ownProps : [],
       fieldDefs: Array.isArray(raw?.props?._fieldDefs) ? raw.props._fieldDefs : [],
       rows: [...document.querySelectorAll('.prop-row[data-prop-id]')].map((x) => x.dataset.propId),
-      declared: [...document.querySelectorAll('[data-declared-prop-id]')].map((x) => x.dataset.declaredPropId),
+      declared: [...document.querySelectorAll('#properties-body [data-declared-prop-id]')].map((x) => x.dataset.declaredPropId),
     }
   }, tagId)
   assert(tagOwn.ownProps.includes(ownDefId), `标签块点自己的入口要写进 _ownProps：${JSON.stringify(tagOwn)}`)
@@ -13354,7 +13355,7 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
   assert(declaredChip.found, `声明 chip 的名字要带可点命中区（props-tag-name）：${JSON.stringify(declaredChip)}`)
   assert(declaredChip.refTo === ownDefId, `声明 chip 的名字要走同一条导航契约（data-ref-to 指向定义块）：${JSON.stringify(declaredChip)}`)
   assert(declaredChip.title !== '', `可点就要看得出来能点（title 要说去哪）：${JSON.stringify(declaredChip)}`)
-  await page.locator(`[data-declared-prop-id="${ownDefId}"] .props-tag-name`).click()
+  await page.locator('#properties-body ' + `[data-declared-prop-id="${ownDefId}"] .props-tag-name`).click()
   await page.waitForTimeout(200)
   const afterChip = await page.evaluate(() => window.__qua.snapshot().activeId)
   assert(afterChip === ownDefId, `点声明 chip 的名字应打开定义块：${afterChip} ≠ ${ownDefId}`)
@@ -17248,8 +17249,8 @@ await check(
     await page.waitForSelector('.choices-editor')
     const empty = await page.evaluate(() => ({
       target: document.getElementById('inspect-card')?.dataset.targetBlockId ?? '',
-      rows: document.querySelectorAll('.choices-editor .choice-row').length,
-      note: document.querySelector('.choices-editor .props-empty')?.textContent ?? '',
+      rows: document.querySelectorAll('#properties-body .choices-editor .choice-row').length,
+      note: document.querySelector('#properties-body .choices-editor .props-empty')?.textContent ?? '',
     }))
     assert(empty.target === setup.defId, `属性卡此刻的主体应是要编辑的定义块：${JSON.stringify(empty)}`)
     assert(empty.rows === 0 && empty.note.length > 0, `没有选项时给空态，而不是空下拉：${JSON.stringify(empty)}`)
@@ -17279,8 +17280,8 @@ await check(
       const def = window.__qua.propDefs().find((d) => d.label === '冒烟状态')
       const block = window.__qua.__editor.store.blocks.find((b) => b.id === def?.id)
       return {
-        rows: document.querySelectorAll('.choices-editor .choice-row').length,
-        names: [...document.querySelectorAll('.choices-editor .choice-name')].map((e) => e.value),
+        rows: document.querySelectorAll('#properties-body .choices-editor .choice-row').length,
+        names: [...document.querySelectorAll('#properties-body .choices-editor .choice-name')].map((e) => e.value),
         kids: block?.children.length ?? -1,
         records: Array.isArray(block?.props?._choices) ? block.props._choices.length : -1,
       }
@@ -17570,18 +17571,18 @@ await check(
 
     // 图标选择器：点第一行的图标 → 网格选择器搜 flag → 写回 `_icon`
     //（选择器已网格化——弹窗＋搜索格，不再是 layer 菜单；交互同 T304）
-    await page.locator('.choices-editor .choice-icon').first().click()
+    await page.locator('#properties-body .choices-editor .choice-icon').first().click()
     await page.waitForSelector('.icon-picker .icon-picker-cell', { timeout: 3000 })
     // 选择器默认 emoji tab（T305）——lucide 的 flag 在图标 tab 里
     await page.click('.icon-picker-tabs .icon-picker-tab:nth-child(2)')
     await page.fill('.icon-picker .icon-picker-search', 'flag')
     await page.click('.icon-picker .icon-picker-cell[data-icon="lucide:flag"]')
     await page.waitForFunction(
-      () => document.querySelector('.choices-editor .choice-icon')?.getAttribute('data-icon') === 'lucide:flag',
+      () => document.querySelector('#properties-body .choices-editor .choice-icon')?.getAttribute('data-icon') === 'lucide:flag',
     )
 
     // 勾选框映射：勾上「显示为勾选框」→ 出现 on/off 两个下拉（默认前两个选项）
-    await page.locator('[data-choice-check]').check()
+    await page.locator('#properties-body [data-choice-check]').check()
     await page.waitForSelector('[data-choice-check-which="on"]')
     const checkState = await page.evaluate(() => {
       const on = document.querySelector('[data-choice-check-which="on"]')
@@ -17602,7 +17603,7 @@ await check(
     assert(checkState.hasStatus, '还应给出「勾选表示完成（任务型）」')
 
     // 先在 gutter 上显示出来（默认 panel，不会画占位）；重画后仍勾着
-    await page.locator('[data-choice-gutter]').check()
+    await page.locator('#properties-body [data-choice-gutter]').check()
     await page.waitForTimeout(150)
     const gutterChecked = await page.evaluate(
       () => document.querySelector('[data-choice-gutter]')?.checked ?? null,
@@ -32745,6 +32746,75 @@ await check('T344 镜像岛里按 ⌘⇧D＝摘这一次露面，源不动；从
   await ctx.close()
   return `镜像岛里 ⌘⇧D＝摘露面（源不动、不谎报）；正文对自己 ⌘⇧D 仍删源`
 })
+
+await check('T345 定义投影：定义块名字下面画值配置；标签声明非空才画；正文身体与检视卡同写径', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await openFirstPage(page)
+
+  // ① 建一枚空标签：此刻无声明 ⇒ 行下没有身体（声明非空才画）
+  const emptyTagId = await page.evaluate(() => {
+    const b = window.__qua.blocks().find((x) => x.roles.length === 0 && x.children === 0 && x.text.length > 2)
+    window.__qua.focusBlock(b.id, 0)
+    window.__qua.invoke('core.editor/insert-tag', { tag: ' 空投 ' })
+    return window.__qua.allBlocks().find((x) => x.roles.includes('tag') && x.text === '空投')?.id
+  })
+  assert(emptyTagId, '标签块应建出来')
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), emptyTagId)
+  await page.waitForTimeout(150)
+  const emptyBody = await page.evaluate((id) => Boolean(document.querySelector(`.blk[data-block-id="${id}"] .blk-view-body`)), emptyTagId)
+  assert(!emptyBody, '空声明标签不画身体（写进去没人读的入口比没有更糟）')
+
+  // ② 声明一条 text 定义 ⇒ 身体当场出现，chips 列出声明（行重画后挂载、订阅就地重画）
+  await page.evaluate(
+    (tagId) =>
+      window.__qua.invoke('core.props/create-def', { blockId: tagId, label: '投影字段', kind: 'text', target: 'declared' }),
+    emptyTagId,
+  )
+  await page.waitForTimeout(250)
+  const tagBody = await page.evaluate((id) => {
+    const body = document.querySelector(`.blk[data-block-id="${id}"] .blk-def-body`)
+    return {
+      present: Boolean(body),
+      chips: [...(body?.querySelectorAll('[data-declared-prop-id]') ?? [])].map((x) => x.dataset.declaredPropId),
+    }
+  }, emptyTagId)
+  assert(tagBody.present, `声明后身体当场出现：${JSON.stringify(tagBody)}`)
+  assert(tagBody.chips.length === 1, `身体里列出刚声明的字段：${JSON.stringify(tagBody.chips)}`)
+
+  // ③ 定义块的身体：值配置段（text 定义有格式轴）。正文与检视卡是同一套段的两个壳：
+  //    从身体改格式走同一条命令，重画后两边都读模型——控件不许比存储先说。
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), tagBody.chips[0])
+  await page.waitForTimeout(200)
+  const defBody = await page.evaluate((id) => {
+    const body = document.querySelector(`.blk[data-block-id="${id}"] .blk-def-body`)
+    return {
+      present: Boolean(body),
+      hasFormat: Boolean(body?.querySelector('[data-def-format]')),
+      panelFormat: document.querySelector('#inspect-card [data-def-format]')?.value ?? '',
+    }
+  }, tagBody.chips[0])
+  assert(defBody.present && defBody.hasFormat, `定义块身体画值配置（格式轴在场）：${JSON.stringify(defBody)}`)
+
+  await page.evaluate((id) => {
+    const sel = document.querySelector(`.blk[data-block-id="${id}"] .blk-def-body [data-def-format]`)
+    sel.value = 'url'
+    sel.dispatchEvent(new Event('change', { bubbles: true }))
+  }, tagBody.chips[0])
+  await page.waitForTimeout(300)
+  const after = await page.evaluate(
+    (id) => ({
+      body: document.querySelector(`.blk[data-block-id="${id}"] .blk-def-body [data-def-format]`)?.value ?? '',
+      panel: document.querySelector('#inspect-card [data-def-format]')?.value ?? '',
+    }),
+    tagBody.chips[0],
+  )
+  assert(after.body === 'url', `身体改格式写进模型并重画回来（不是停在点出来的状态）：${JSON.stringify(after)}`)
+  assert(after.panel === 'url', `检视卡同一份段读同一个模型（一套段两个壳同写径）：${JSON.stringify(after)}`)
+
+  await ctx.close()
+  return `空标签不画身体；声明后当场出现；定义身体改格式 ⇒ 模型与检视卡同步`
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

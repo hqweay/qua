@@ -1818,5 +1818,12 @@ export function setupPanels(deps: PanelsDeps) {
     mountBlockView,
     mountEmbedView,
     viewShown,
+    /**
+     * **属性段的读写能力包工厂**（检视卡/抽屉与正文里的定义投影同源）：给一个
+     * 主体取值函数，返回同一套 picker／命令接线（写完重画跟着那个主体走）。
+     * 行内投影宿主用它把能力钉在身体自己的块上——判据与写路径只有一份，
+     * 壳各自包 chrome 与「写完谁重画」。
+     */
+    propDeps: makePropertiesDeps,
   }
 }

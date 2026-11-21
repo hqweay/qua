@@ -20,6 +20,7 @@ import {
   embedBodyOf,
   iconOf,
   isDeleted,
+  isPropDef,
   openAxisOf,
   readEmbed,
   resolveEmbed,
@@ -34,6 +35,9 @@ import { takenWhere } from '../../app/commands-impl.ts'
 import { openChoicePicker } from '../../app/choice-picker.ts'
 import { renderPropsLine } from '../../ui/block-ui/props-line.ts'
 import { createAutomationBody } from '../../ui/automation/automation-body.ts'
+import { DefConfigSection } from '../../ui/block-ui/def-config-section.ts'
+import { DeclaredFieldsSection } from '../../ui/block-ui/declared-fields-section.ts'
+import { PropsDraftState } from '../../ui/block-ui/props-add-form.ts'
 import { runTargetRows } from '../../app/retrieval/run-target-rows.ts'
 import { readAutomation } from '../../core/automation/automation.ts'
 import { type Registry, type MenuRequest } from '../../core/commands/index.ts'
@@ -67,7 +71,7 @@ export interface EditorEventsDeps {
     openAutomationParentBuilder(automationId: string, triggerIndex: number): void
   }
   shortId: (id: string) => string
-  getPanels: () => Pick<ReturnType<typeof import('../../app/wiring/panels.ts').setupPanels>, 'mountBlockView' | 'mountEmbedView'>
+  getPanels: () => Pick<ReturnType<typeof import('../../app/wiring/panels.ts').setupPanels>, 'mountBlockView' | 'mountEmbedView' | 'propDeps'>
   getApp: () => import('../../core/infra/ports.ts').App
   focusSourceInMain: (blockId: string) => void
   /** 打开/挂载一块前补子树（工作集：裸块的 children 还没读） */
@@ -214,6 +218,95 @@ function viewEvents(
     into.appendChild(body.root)
     return { root: body.root, dispose: () => body.dispose() }
   })
+  /**
+   * **定义块／标签的正文投影**（与查询体／自动化体同一条判据）：
+   * 把「它是什么」的定义拿掉只剩名字 ⇒ 名字下面画定义——定义块挂值配置段
+   * （格式／基数／候选域／选项），标签挂字段声明段（非空才画，行判据不画就没身体）。
+   *
+   * 身体是缓存实例（行重画搬家不重建），内容**每次模型变化后现画**：段组件的
+   * render() 返回新鲜元素，与检视卡同一条新鲜度契约（面板也是每次 store 变化
+   * 整卡重建）。订阅**不按 id 过滤**：段的内容读跨块派生（选项是定义块的子块、
+   * chip 名字与选项名是别的块的投影），只认本块 id 会漏外部改动 ⇒ 防抖到与
+   * 检视卡同一档（60ms）再画。能力包（picker／命令接线）与面板同源
+   * （`panels.propDeps`），写完重画跟着身体自己的块走。
+   */
+  const defBodies = createRowBodyCache(
+    (block, into) => {
+      // 缓存键编形状（定义块／标签）：判据翻转 ⇒ 新键 ⇒ 拆旧挂新（露面体的镜像⇄投影同一条纪律）
+      const caps = getPanels().propDeps(() => kb.get(block.id) ?? undefined)
+      const holder = document.createElement('div')
+      holder.className = 'blk-def-body'
+      into.appendChild(holder)
+      const section: { render(): HTMLElement | null } = isPropDef(block)
+        ? new DefConfigSection({
+            def: () => kb.get(block.id) ?? undefined,
+            repaint: () => render(),
+            choices: caps.choices,
+            setFormat: caps.setFormat,
+            setRefDomain: caps.setRefDomain,
+            pickRefTag: caps.pickRefTag,
+            pickRefAnchor: caps.pickRefAnchor,
+            pickRefQuery: caps.pickRefQuery,
+            blockById: (id) => kb.get(id),
+            shortId: caps.shortId,
+            openRef: caps.openRef,
+            tags: () => [...kb.tags()],
+            tagName: caps.tagName,
+            pickIcon: caps.pickIcon,
+          })
+        : (() => {
+            const declared = new DeclaredFieldsSection({
+              owner: () => kb.get(block.id) ?? undefined,
+              repaint: () => render(),
+              // 投影宿主没有「这一块自己的值」段，草稿行互斥不存在 ⇒ 一具身体一份开合状态
+              draft: new PropsDraftState(),
+              declaredFields: caps.declaredFields,
+              undeclareField: caps.undeclareField,
+              declareProp: caps.declareProp,
+              createDeclaredDef: caps.createDeclaredDef,
+              form: {
+                defs: caps.defs,
+                rows: caps.rows,
+                tags: caps.tags,
+                fieldDeclarations: caps.fieldDeclarations,
+                toast: caps.toast,
+              },
+              openRef: caps.openRef,
+              choices: caps.choices,
+              blockById: (id) => kb.get(id),
+              tags: () => [...kb.tags()],
+              tagName: caps.tagName,
+              pickIcon: caps.pickIcon,
+            })
+            return { render: () => declared.render(caps.propLabels()) }
+          })()
+      const render = (): void => {
+        const el = section.render()
+        holder.replaceChildren()
+        if (el) holder.appendChild(el)
+        // 声明清空的一拍：身体还没被行重画摘掉，先藏自己（不留一个空壳）
+        holder.hidden = el === null
+      }
+      let timer: number | null = null
+      const off = blocks.subscribe(() => {
+        if (timer !== null) window.clearTimeout(timer)
+        timer = window.setTimeout(() => {
+          timer = null
+          render()
+        }, 60)
+      })
+      render()
+      return {
+        root: holder,
+        dispose: () => {
+          off()
+          if (timer !== null) window.clearTimeout(timer)
+          timer = null
+        },
+      }
+    },
+    (b) => `${b.id}\u0000${isPropDef(b) ? 'def' : 'declared'}`,
+  )
   /**
    * **露面身体的实例缓存**（与查询体同一条判据）：镜像的岛编辑器里住着这份装载
    * **自己的折叠表**（视图实例态），投影的 ViewHost 有订阅与冻结结果——
@@ -394,6 +487,8 @@ function viewEvents(
           viewBody: (block: Block, into: HTMLElement) => viewBodies(block, into),
           /** **自动化块的三段式身体**：与查询体同一扇门（只给「块的真实位置」），同一缓存纪律 */
           automationBody: (block: Block, into: HTMLElement) => automationBodies(block, into),
+          /** **定义块／标签的正文投影**：与查询体同一扇门、同一缓存纪律（见上面 `defBodies`） */
+          defBody: (block: Block, into: HTMLElement) => defBodies(block, into),
         }
       : {}),
     /**

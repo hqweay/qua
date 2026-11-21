@@ -3440,3 +3440,28 @@ button.blk-auto-chip {
 .blk-auto-chip[data-severity='warn'] {
   border-color: var(--ui-sev-border);
 }
+
+/* ---------------------------------------------------------- 定义块／标签的身体
+   定义值配置／字段声明的就地投影：与自动化体同一张脸（纸面上的一块面板——
+   底色抬一层、结构线收边），让「这一块的定义」与它的名字分成两层。
+   ⚠️ 整组限定 `.blk-def-body` 前缀：段组件的样式（`.props-section` 族）长在
+   检视卡/抽屉的列布局里，投影宿主自己收紧段 chrome——首段的分隔线与上边距
+   是「卡内分段」的语言，身体里只有一段，不吃那条线。 */
+.blk-def-body {
+  padding: var(--ui-gap-2) var(--ui-gap-3);
+  background: var(--ui-surface-sunken);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-md);
+  display: flex;
+  flex-direction: column;
+  font-size: var(--ui-fs-xs);
+}
+/* 声明清空的那一拍身体先藏自己（class 的 display 压过 UA 的 [hidden]，要显式写回） */
+.blk-def-body[hidden] {
+  display: none;
+}
+.blk-def-body > .props-section:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}

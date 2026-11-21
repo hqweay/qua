@@ -23,6 +23,8 @@ import {
   hasChildrenViewBody,
   hasQueryBody,
   isAutomationBlock,
+  hasDeclaredFields,
+  isPropDefBlock,
   locate,
   runAtCell,
   blockSpanPlan,
@@ -463,6 +465,14 @@ export interface ViewEvents {
    */
   automationBody?: (block: Block, into: HTMLElement) => (() => void) | void
   /**
+   * **正文里属性定义块／标签的身体**（定义值配置／字段声明的就地投影）。
+   *
+   * 自描述判据：把「它是什么」的定义拿掉只剩名字 ⇒ 名字下面就该画定义——
+   * 定义块画自己的值配置（格式／基数／候选域／选项），标签画自己的字段声明
+   * （声明非空才画）。与 `viewBody` 同一条分工与同一条生命周期纪律。
+   */
+  defBody?: (block: Block, into: HTMLElement) => (() => void) | void
+  /**
    * **块下属性区**：值文本、排布与「点值开属性面板」都在装配层。
    *
    * `view` 只负责「这一行有这一格」与高度；这里不返回卸载函数（行里没有订阅）。
@@ -608,7 +618,8 @@ export class BlockEditor {
     revisions: () => this.store,
     filter: () => this.rowFilter?.() ?? null,
     caret: () => this.caretBlock(),
-    withBody: () => this.events.viewBody !== undefined || this.events.automationBody !== undefined,
+    withBody: () =>
+      this.events.viewBody !== undefined || this.events.automationBody !== undefined || this.events.defBody !== undefined,
     probe: this.perfProbe,
   })
 
@@ -2589,7 +2600,8 @@ export class BlockEditor {
    */
   private bodyFoldable(b: Block): boolean {
     return (
-      (Boolean(this.events.viewBody || this.events.automationBody) && (hasQueryBody(b) || hasChildrenViewBody(b) || isAutomationBlock(b))) ||
+      (Boolean(this.events.viewBody || this.events.automationBody || this.events.defBody) &&
+        (hasQueryBody(b) || hasChildrenViewBody(b) || isAutomationBlock(b) || isPropDefBlock(b) || hasDeclaredFields(b))) ||
       (Boolean(this.events.embedBody) && rowHasEmbedViewBody(b, (id) => this.store.find(id)))
     )
   }
