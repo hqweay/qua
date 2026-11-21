@@ -201,11 +201,23 @@ app 的绑定表里**也**有 `core.history/undo`（自己的撤销栈：按事�
 `os.homedir()` 和 `env-paths` 都读 `HOME`，所以 electron-builder 与 `@electron/get` 的默认缓存会**一起**落到仓里，
 不用去分别找各自的 env 开关。**普通机器上这段是空转**（探测成功就直接用真实 HOME）。
 
-**坑 C｜镜像也会 `fetch failed`（一次，未定论）**
+**坑 C｜`fetch failed`：`.npmrc` 的小写镜像键不够，打包要显式 env（2026-11-22 定论）**
 
-- 冷缓存那次，`.npmrc` 里的 npmmirror 镜像走到 **progress=100%** 之后报 `⨯ fetch failed`（undici 的 TypeError）。
-- 绕开 pnpm（因而不带 `npm_config_electron_mirror`）改走 **GitHub 直连，成功**，约 4 分钟。
-- **未能确定镜像是不是稳定失败**（很可能是瞬时）。逃生口：把 `.npmrc` 里的 `electron_mirror` 注释掉再 `pnpm build:mac`。
+- 症状：`packaging` 之后 `⨯ fetch failed`（TypeError），日志上一行是
+  `no custom electronDist provided, unpacking default Electron distribution`——死在下 Electron 包那一步。
+- 实测（2026-11-22 晨）：`.npmrc` 里 `electron_mirror`／`electron_builder_binaries_mirror` 两个小写键都在，
+  **仍然红**；同一时刻 `curl -I` GitHub release CDN **20s 超时**、`api.github.com` 403、
+  npmmirror 302 ⇒ 这台机器此刻只能走镜像。
+- 处置：构建时显式给两个大写 env，`build:mac`／`build:win` 都一次通过（electron 包会按 mirror 的
+  缓存键重下一次，所以「缓存里有 zip」不代表不走网络）：
+  ```bash
+  ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ \
+  ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ \
+  pnpm build:mac
+  ```
+- 机制（**推断，未读 @electron/get v5 源码**）：它只认大写 env，不吃 `.npmrc` 转出来的小写配置。
+  早先那条「镜像在 100% 报错、GitHub 直连反而成功」的观察，是**网络侧当时能连 GitHub**，
+  不是镜像坏——两个方向都遇到过，别把任一侧当定论；判据永远是当场 `curl -I` 一下。
 
 **坑 D｜`ELECTRON_RUN_AS_NODE=1`（**某些 agent 宿主环境特有，但值得记一辈子**）**
 
