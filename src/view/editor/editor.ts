@@ -20,11 +20,6 @@ import {
   blockMenuCtxOf,
   ensurePageInTx,
   flatten,
-  hasChildrenViewBody,
-  hasQueryBody,
-  isAutomationBlock,
-  hasDeclaredFields,
-  isPropDefBlock,
   locate,
   runAtCell,
   blockSpanPlan,
@@ -135,7 +130,7 @@ import { AliasClaimError } from '../../core/kb/unsupported.ts'
 import { ensureTaskStatusInTx } from '../../core/kb/ensure-task.ts'
 // 用户可见文案一律走 t
 import { t } from '../../core/infra/msg.ts'
-import { ALLOWED_ROW_CHILDREN, EDIT_ISLAND_ATTR, isReadonlyBlock, rowHasEmbedViewBody } from './block-dom.ts'
+import { ALLOWED_ROW_CHILDREN, EDIT_ISLAND_ATTR, inlineBodyKind, isReadonlyBlock, rowHasEmbedViewBody } from './block-dom.ts'
 import { ReloadPolicy } from './reload-policy.ts'
 import { spanAt, type PlainSpan } from './hit-paint.ts'
 import { AnnoHover, type AnnoHitSpan } from './anno-hover.ts'
@@ -2636,11 +2631,11 @@ export class BlockEditor {
    *
    * 折/展身体的所有入口（三角、导轨、菜单）都认这一份判据——查询结果列表里的
    * 命中行也是查询块，但那一层画的是结果行，给它折一下没有任何可见效果。
+   * 「有身体」与「身体归谁画」同一份答案（`inlineBodyKind`），别再抄一遍源清单。
    */
   private bodyFoldable(b: Block): boolean {
     return (
-      (Boolean(this.events.viewBody || this.events.automationBody || this.events.defBody) &&
-        (hasQueryBody(b) || hasChildrenViewBody(b) || isAutomationBlock(b) || isPropDefBlock(b) || hasDeclaredFields(b))) ||
+      (Boolean(this.events.viewBody || this.events.automationBody || this.events.defBody) && inlineBodyKind(b) !== null) ||
       (Boolean(this.events.embedBody) && rowHasEmbedViewBody(b, (id) => this.store.find(id)))
     )
   }

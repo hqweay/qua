@@ -45,7 +45,7 @@ import { HeightCache } from './height-cache.ts'
 import { RowHeightIndex } from './height-index.ts'
 import { t } from '../../core/infra/msg.ts'
 import { assetViewOf, markAssetMissing } from '../asset-views.ts'
-import { LINE_H, fillBlockText, makeBlockEl, makeRefBadgeEl, rowHasEmbedViewBody, rowHasInlineViewBody, visibleRowHeight } from './block-dom.ts'
+import { LINE_H, fillBlockText, inlineBodyKind, makeBlockEl, makeRefBadgeEl, rowHasEmbedViewBody, rowHasInlineViewBody, visibleRowHeight } from './block-dom.ts'
 import { spanAt, offsetAtPoint, rangeAtSpan, paintHits, clearHits } from './hit-paint.ts'
 import type { AnnoHitSpan } from './anno-hover.ts'
 import { inputSession } from './input-session.ts'
@@ -511,9 +511,9 @@ export class RenderOps {
     }
     /**
      * **把保留行的身体接回去**。`renderAll` 开头的 `disposeAll` 对身体是「延后一拍拆」：
-     * 全量重建靠 `makeBlockEl` 的 `embedBody`／`viewBody` 回调**在同一任务里重新 open**
-     * 取消拆卸；保留行走占位捷径、没人 open ⇒ 下一拍真拆——查询体／嵌入体整片消失，
-     * 只剩空壳（折叠后查询面板不见、刷新后条件树空白都是它）。照同一套回调接回：
+     * 全量重建靠 `makeBlockEl` 的身体回调**在同一任务里重新 open** 取消拆卸；保留行走
+     * 占位捷径、没人 open ⇒ 下一拍真拆——查询体／属性投影／嵌入体整片失联（折叠后查询面板
+     * 不见、刷新后条件树空白、标签属性卡不再跟着 store 刷新都是它）。照同一套回调接回：
      * 缓存型的身体原样搬回（冻结结果与滚动位置还在），非缓存型的重挂一份新的。
      * 只碰归位成功的保留行（新画的行已经由 `renderRows` 挂过，再挂就是双份）。
      */
@@ -522,8 +522,7 @@ export class RenderOps {
       if (this.ed.embeds.isPinned(id)) continue
       const block = this.ed.store.find(id)
       if (!block) continue
-      const viewShell = el.querySelector<HTMLElement>(':scope > .blk-view-body[data-view-body-for]')
-      if (viewShell && this.ed.events.viewBody) this.ed.embeds.attachViewBody(block, viewShell)
+      this.attachInlineBody(block, el)
       const embedShell = el.querySelector<HTMLElement>('.blk-embed-body[data-embed-body-for]')
       if (embedShell && this.ed.events.embedBody) this.ed.embeds.attach(block, embedShell)
     }
@@ -538,6 +537,25 @@ export class RenderOps {
 
   /** `rebuildWith` 给 `renderRows` 的占位钩子：返回 `null` ＝ 按普通行画 */
   private makePlaceholderFor: ((r: VisibleRow) => HTMLElement | null) | null = null
+
+  /**
+   * **保留行的行内身体接回原位**（按 `inlineBodyKind` 分派，与新画的行同一份判据）。
+   *
+   * ⚠️ 为什么不是「看见 `.blk-view-body` 就挂视图体」：这一格装的是三种身体
+   * （视图／自动化定义体／属性投影），壳是同一个。按壳判会把视图宿主挂进一个装着
+   * 属性投影的壳里——同一格两张卡，标签上还会冒出只属于看法视图的
+   * 「N 项 · 大纲 · 新建一行」抬头（它没有激活看法，抬头既不能切也不能数）。
+   * 反过来，属性投影／自动化体的回收器只在**重新 open** 时才取消「延后一拍拆」，
+   * 跳过它们会让这两种身体在保留行重画后静默失联（内容不再跟着 store 刷新）。
+   */
+  private attachInlineBody(block: Block, el: HTMLElement): void {
+    const shell = el.querySelector<HTMLElement>(':scope > .blk-view-body[data-view-body-for]')
+    if (!shell) return
+    const kind = inlineBodyKind(block)
+    if (kind === 'automation') this.ed.embeds.attachAutomationBody(block, shell)
+    else if (kind === 'def') this.ed.embeds.attachDefBody(block, shell)
+    else if (kind === 'view' && this.ed.events.viewBody) this.ed.embeds.attachViewBody(block, shell)
+  }
 
   /**
    * **整页重画，但把输入锚点的那一行原样换回去。**

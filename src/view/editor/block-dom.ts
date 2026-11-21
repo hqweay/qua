@@ -117,7 +117,16 @@ export const VIEW_BODY_INSET = 4
 export const PROP_LINE_H = 20
 
 /**
- * **这一块的「定义身体」要不要画在行下**（唯一一份源清单）。
+ * 行下身体由谁画：自动化块的三段式定义体／定义块与标签的属性投影／查询或 children 源的视图。
+ *
+ * 三种身体**共用一个壳**（`.blk-view-body`），所以「这一格归谁」必须由一份判据回答，
+ * 新画的行与保留行接回都吃它——按壳判（看见 `.blk-view-body` 就挂视图）会让同一格
+ * 叠两张卡：属性投影上面再冒一台只属于看法视图的「N 项 · 大纲 · 新建一行」抬头。
+ */
+export type InlineBodyKind = 'automation' | 'def' | 'view'
+
+/**
+ * **这一块的行下身体归谁画**（唯一一份源清单 ＋ 分派顺序）。
  *
  * **按源分派**：查询块有结果身体（`hasQueryBody`）；children 源的激活视图
  * （`hasChildrenViewBody`——身体替换子块行）也算；自动化块画三段式定义体；
@@ -128,8 +137,23 @@ export const PROP_LINE_H = 20
  * 递归的**构造性截断**不在这条判据上：结果里的查询块由**里层编辑器**画，
  * 而那一层（挂载区／镜像／查询结果／单元格）在构造上没有身体回调。
  */
+export function inlineBodyKind(b: Block): InlineBodyKind | null {
+  if (isAutomationBlock(b)) return 'automation'
+  /**
+   * **children 源的激活视图优先于属性投影**：激活看法时正文的子块行会**让位**
+   * （`Doc.viewRootId` 只认 `activeView`），身体若仍画属性投影，两样都落空——
+   * 子块行没了、看法也没画（实测：给带「标签属性」的标签建一张表格看法，
+   * 子块当场消失且表格不出现）。反过来不成立：没有激活看法时属性投影照画。
+   */
+  if (hasChildrenViewBody(b)) return 'view'
+  if (isPropDefBlock(b) || hasDeclaredFields(b)) return 'def'
+  if (hasQueryBody(b)) return 'view'
+  return null
+}
+
+/** 这一块在行下有没有身体（来源见 `inlineBodyKind`；「有」与「归谁画」同一份答案） */
 export function hasInlineBody(b: Block): boolean {
-  return hasQueryBody(b) || hasChildrenViewBody(b) || isAutomationBlock(b) || isPropDefBlock(b) || hasDeclaredFields(b)
+  return inlineBodyKind(b) !== null
 }
 
 /** 同上，按行问（虚拟化占位与渲染共用这一份答案） */
@@ -1223,10 +1247,12 @@ export function makeBlockEl(
      */
     if (folded) body.dataset.folded = '1'
     el.appendChild(body)
-    // 按源分派：自动化块画三段式定义体；定义块/标签画属性定义投影；其余（查询／children 源）画视图宿主
-    if (isAutomationBlock(b)) opts.automationBody?.(b, body)
-    else if (isPropDefBlock(b) || hasDeclaredFields(b)) opts.defBody?.(b, body)
-    else opts.viewBody?.(b, body)
+    // 按源分派（`inlineBodyKind`：与保留行接回共用一份答案）：自动化块画三段式定义体；
+    // 定义块/标签画属性定义投影；其余（查询／children 源）画视图宿主
+    const bodyKind = inlineBodyKind(b)
+    if (bodyKind === 'automation') opts.automationBody?.(b, body)
+    else if (bodyKind === 'def') opts.defBody?.(b, body)
+    else if (bodyKind === 'view') opts.viewBody?.(b, body)
   }
   return el
 }
