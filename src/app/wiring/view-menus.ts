@@ -59,6 +59,7 @@ import {
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import { readAutomation, type AutomationDef, type AutomationTrigger } from '../../core/automation/automation.ts'
+import { topUpOf, triggerQueryFromWhen, validateTriggerQuery, withUp } from '../../core/automation/trigger-query.ts'
 import type { App } from '../../core/infra/ports.ts'
 import type { BlockEditor } from '../../view/editor/editor.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
@@ -842,9 +843,35 @@ function deleteTag(blockId: string): boolean {
         if (!def) return
         // 合成根被清空 ＝ 用户要「无条件」：摘掉 when，不存一个恒假/恒真的空组
         const empty = JSON.stringify(canonicalNode(spec.where)) === JSON.stringify({ any: [] })
-        const next: AutomationDef = empty
-          ? { enabled: def.enabled, triggers: def.triggers, steps: def.steps }
-          : { ...def, when: spec.where }
+        // 「任意父块」的诞生触发器（父块槽空态）条件跟着「如果」走——这里是唯一的同步点
+        const emptySlotBirth = def.triggers.some(
+          (tr) => tr !== 'manual' && tr.birth === true && topUpOf(tr.query) === undefined,
+        )
+        if (empty) {
+          if (emptySlotBirth) {
+            toast(t('ui.automation.whenGuardEmptySlots'), 'warn')
+            return
+          }
+          const next: AutomationDef = { enabled: def.enabled, triggers: def.triggers, steps: def.steps }
+          void getRegistry().invoke('core.automation/set-def', { automationId, def: next }, 'builder')
+          layers.closePopover()
+          return
+        }
+        const newWhen = canonicalNode(spec.where)
+        if (emptySlotBirth) {
+          const violation = validateTriggerQuery('entered', newWhen, true)
+          if (violation) {
+            toast(t('ui.automation.whenGuardNotTriggerable', { reason: violation }), 'warn')
+            return
+          }
+        }
+        const next: AutomationDef = {
+          ...def,
+          when: newWhen,
+          triggers: def.triggers.map((tr) =>
+            tr !== 'manual' && tr.birth === true && topUpOf(tr.query) === undefined ? { ...tr, query: newWhen } : tr,
+          ),
+        }
         void getRegistry().invoke('core.automation/set-def', { automationId, def: next }, 'builder')
         layers.closePopover()
       },
@@ -854,8 +881,8 @@ function deleteTag(blockId: string): boolean {
   /**
    * **诞生触发器的父块筛选编辑**：与「如果」同一台条件树，落点是 `trigger.query` 里的
    * `{up}`（**作用在容纳链上**——「父块是某块的传递型引用」这类语义只有这里表达得了）。
-   * 清空草稿 ＝ 拆掉这条触发器（没有父条件也没有「如果」条件的诞生触发＝每笔新建都
-   * 触发，语言层保护性拒绝——收纳重排时父块槽空态与「如果」合并）。
+   * 清空草稿 ＝ 槽空态（任意父块）：条件即「如果」——「如果」没有能当触发条件的原子
+   * 就拒（「任意父块＋无条件」＝每笔新建都触发，语言层保护性拒绝）。
    */
   function openAutomationParentBuilder(automationId: string, triggerIndex: number): void {
     const readTrigger = (): Exclude<AutomationTrigger, 'manual'> | null => {
@@ -863,14 +890,6 @@ function deleteTag(blockId: string): boolean {
       const def = block ? readAutomation(block) : null
       const tr = def?.triggers[triggerIndex]
       return !tr || tr === 'manual' ? null : tr
-    }
-    const topUpOf = (query: QueryNode): QueryNode | undefined => {
-      if ('up' in query) return query.up
-      if ('all' in query) {
-        const member = query.all.find((m) => 'up' in m)
-        return member && 'up' in member ? member.up : undefined
-      }
-      return undefined
     }
     const readParent = (): QueryNode | undefined => {
       const tr = readTrigger()
@@ -889,20 +908,27 @@ function deleteTag(blockId: string): boolean {
         const current = readTrigger()
         if (!def || !current || current.birth !== true) return
         const empty = JSON.stringify(canonicalNode(spec.where)) === JSON.stringify({ any: [] })
+        let query: QueryNode
+        if (empty) {
+          // 清空父块条件 ＝ 槽空态（任意父块）：条件即「如果」——「如果」没有能当触发
+          // 条件的原子就拒（「任意父块＋无条件」＝每笔新建都触发，保护性拒绝）
+          const whenQuery = def.when !== undefined ? triggerQueryFromWhen(def.when) : null
+          if (!whenQuery) {
+            toast(t('ui.automation.anyParentNeedsWhen'), 'warn')
+            return
+          }
+          query = whenQuery
+        } else {
+          query = withUp(current.query, canonicalNode(spec.where))
+          const violation = validateTriggerQuery('entered', query, true)
+          if (violation) {
+            toast(t('ui.automation.triggerQueryRejected', { reason: violation }), 'warn')
+            return
+          }
+        }
         const next: AutomationDef = {
           ...def,
-          triggers: def.triggers.flatMap((tr, i): AutomationTrigger[] => {
-            if (i !== triggerIndex || tr !== current) return [tr]
-            // 清空父条件 ⇒ 这条触发器没有合法形状（≥1 引用原子），拆掉不猜
-            if (empty) return []
-            const parent = canonicalNode(spec.where)
-            // 保留复合条件里的 self 成员（{all:[{up},{prop}]} 的 prop 半边），只换 up 位
-            if ('all' in current.query) {
-              const rest = current.query.all.filter((m) => !('up' in m))
-              return [{ on: 'entered', query: { all: [...rest, { up: parent }] }, birth: true }]
-            }
-            return [{ on: 'entered', query: { up: parent }, birth: true }]
-          }),
+          triggers: def.triggers.map((tr, i) => (i === triggerIndex && tr !== 'manual' ? { ...tr, query } : tr)),
         }
         void getRegistry().invoke('core.automation/set-def', { automationId, def: next }, 'builder')
         layers.closePopover()

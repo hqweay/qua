@@ -115,6 +115,18 @@ test('校验器：up 子层除嵌套 up 全开放——一次性判定，观测�
   assert.equal(up({ not: { tag: 't1' } }), null)
 })
 
+test('校验器：birth 触发器的 self 半边与 up 子层同宽——一次性判定，观测约束不适用', () => {
+  const q = { text: '会议' } as never
+  assert.equal(validateTriggerQuery('entered', q, true), null, '诞生触发器的正文条件：诞生时求值一次')
+  assert.match(String(validateTriggerQuery('entered', q, false)), /content atoms/, '边沿触发照旧拒（逐键挥发无索引）')
+  assert.match(String(validateTriggerQuery('entered', { up: { any: [] } } as never, true)), /at least one atom/, 'birth 也逃不过 ≥1 引用原子')
+  assert.match(
+    String(validateTriggerQuery('entered', { tag: { id: 't1', desc: true } } as never, true)),
+    /direct membership/,
+    'desc 标签要闭包，触发器用直读形态',
+  )
+})
+
 test('校验器：≥1 引用原子——零原子拒（挡「每笔变化都触发」的热路径危害）', () => {
   assert.match(String(validateTriggerQuery('entered', { all: [] }, false)), /at least one atom/)
   assert.match(String(validateTriggerQuery('changed', { not: { all: [] } }, false)), /at least one atom/, 'not 只翻转，救不了零原子')

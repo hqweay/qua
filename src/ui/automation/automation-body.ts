@@ -31,6 +31,7 @@ import { STEP_COMMANDS } from '../../core/automation/run.ts'
 import { mentionsContentAtoms } from '../../core/automation/automation.ts'
 import { renderIcon } from '../../view/icons.ts'
 import { canonicalAutomation, readAutomation } from '../../core/automation/automation.ts'
+import { topUpOf, triggerQueryFromWhen, withUp } from '../../core/automation/trigger-query.ts'
 import { displayNameOf } from '../../core/identity/alias.ts'
 import type { QueryNode, QuerySpec } from '../../core/query/query.ts'
 import { queryChips } from '../query/query-builder.ts'
@@ -207,16 +208,6 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
     return t(key, { cond: cond() })
   }
 
-  /** 诞生触发器 query 里顶层的 `{up}` 内部条件（{up:P} 或顶层 all 的直接成员位；没有给 undefined） */
-  const topUpOf = (query: QueryNode): QueryNode | undefined => {
-    if ('up' in query) return query.up
-    if ('all' in query) {
-      const member = query.all.find((m) => 'up' in m)
-      return member && 'up' in member ? member.up : undefined
-    }
-    return undefined
-  }
-
   /** 父块筛选条件的人话（与「如果」同一份投影，fields/choices 同源） */
   const parentCondChips = (when: QueryNode): string[] => {
     try {
@@ -262,9 +253,14 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
     const tr = def.triggers[at]
     if (tr === undefined || tr === 'manual') return
     const rows: Row[] = [{ id: 'trigger/remove', label: t('ui.automation.removeTrigger'), group: 'trigger/1' }]
-    // 「改父块筛选」只对诞生触发器（query 里带 {up}）有意义；容纳链透明不再有开关
+    // 父块条件槽：一个槽，三种填法是它的编辑动作（点名／条件筛／清空＝任意父块）——不是并列模式
     if (tr.birth === true && topUpOf(tr.query) !== undefined) {
       rows.push({ id: 'trigger/reparent', label: t('ui.automation.reparent'), group: 'trigger/1' })
+      rows.push({ id: 'trigger/pickparent', label: t('ui.automation.trigger.pickParent'), group: 'trigger/1' })
+      const whenQuery = def.when !== undefined ? triggerQueryFromWhen(def.when) : null
+      if (whenQuery) {
+        rows.push({ id: 'trigger/clearparent', label: t('ui.automation.trigger.clearParent'), hint: t('ui.automation.trigger.anyParentWhenHint'), group: 'trigger/1' })
+      }
     }
     deps.openMenu(rows, (row) => {
       if (row.id === 'trigger/remove') {
@@ -273,6 +269,18 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
       }
       if (row.id === 'trigger/reparent') {
         deps.editParentFilter(at)
+        return
+      }
+      if (row.id === 'trigger/pickparent') {
+        deps.pickBlock(t('ui.automation.trigger.pickParentTitle'), (parentId) => {
+          write({ ...def, triggers: def.triggers.map((x, i) => (i === at && x !== 'manual' && x.birth === true ? { ...x, query: withUp(x.query, { is: parentId }) } : x)) })
+        })
+        return
+      }
+      if (row.id === 'trigger/clearparent') {
+        const whenQuery = def.when !== undefined ? triggerQueryFromWhen(def.when) : null
+        if (!whenQuery) return
+        write({ ...def, triggers: def.triggers.map((x, i) => (i === at && x !== 'manual' && x.birth === true ? { ...x, query: whenQuery } : x)) })
         return
       }
     }, triggerText(tr))
@@ -369,17 +377,25 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
     )
   }
 
-  /** 新建子块触发器：点名一个父块，或用条件筛（容纳链透明；「任意父块＋无条件」＝每笔新建都触发，保护性拒绝） */
+  /** 新建子块触发器：一个父块条件槽的三种填法——空（＝任意父块，条件即「如果」）／点名／条件筛 */
   const pickParentForTrigger = (def: AutomationDef): void => {
+    const whenQuery = def.when !== undefined ? triggerQueryFromWhen(def.when) : null
     deps.openMenu(
       [
+        ...(whenQuery
+          ? [{ id: '', label: t('ui.automation.trigger.anyParent'), hint: t('ui.automation.trigger.anyParentWhenHint'), group: 'trigger/parent' }]
+          : []),
         { id: 'pick', label: t('ui.automation.trigger.pickParent'), group: 'trigger/parent' },
         { id: 'query', label: t('ui.automation.trigger.queryParent'), hint: t('ui.automation.trigger.queryParentHint'), group: 'trigger/parent' },
       ],
       (row) => {
+        if (row.id === '') {
+          // 槽空态＝任意父块：条件跟着「如果」走（「任意父块＋无条件」＝每笔新建都触发，保护性拒绝）
+          write({ ...def, triggers: [...def.triggers, { on: 'entered', query: whenQuery!, birth: true }] })
+          return
+        }
         if (row.id === 'query') {
-          // 加触发器时还没有下标：先落一条占位父条件，随即开条件树改它（不筛父块的诞生触发
-          // 由「如果」条件承载——收纳重排时合并）
+          // 加触发器时还没有下标：先落一条占位父条件，随即开条件树改它
           write({ ...def, triggers: [...def.triggers, { on: 'entered', query: { up: { any: [] } }, birth: true }] })
           deps.editParentFilter(def.triggers.length)
           return

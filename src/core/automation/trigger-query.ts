@@ -13,12 +13,15 @@
  *
  * **叶子合法 ⇔ 引擎在该触发器语义要求的那一刻，观测得到它读的事实。**
  *
- * - **self 层**（引擎对 touched 块持续观测 before/after）：只许 `prop`/`tag` ＋组合器。
- *   每条禁令各有独立理由——`is` 恒惰（块 id 在可见事件里不变，永远开不了火）；
- *   正文原子逐键挥发且**没有原子索引**（＝每键全量求值所有正文规则）；`children`/`down`/`near`
- *   的变化 touch 的是别的块（子块诞生不会 touch 父块），self 层观测不到；`today` 是
- *   时间依赖原子（等于要求每天重算，level-triggered 后门）；`role` 可由系统槽 prop 拼出，
- *   是第二种拼法。
+ * - **边沿触发的 self 层**（entered/left/changed 在数据变化沿逐次求值）：只许
+ *   `prop`/`tag` ＋组合器。每条禁令各有独立理由——`is` 恒惰（块 id 在可见事件里不变，
+ *   永远开不了火）；正文原子逐键挥发且**没有原子索引**（＝每键全量求值所有正文规则）；
+ *   `children`/`down`/`near` 的变化 touch 的是别的块（子块诞生不会 touch 父块），
+ *   self 层观测不到；`today` 是时间依赖原子（等于要求每天重算，level-triggered 后门）；
+ *   `role` 可由系统槽 prop 拼出，是第二种拼法。
+ * - **birth 触发器整体都是诞生那一刻的一次性判定**——self 半边与 up 子层同宽
+ *   （除嵌套 up／desc 标签）：正文原子、`today`、`role` 在那一刻都观测得到，
+ *   无逐键路径（「任意父块＋when(Q)」的映射因此成立）。
  * - **up 子层**（birth 触发器，**诞生那一刻对容纳链的一次性判定**，不是被追踪的依赖）：
  *   求值一次、不重算、无逐键路径——观测约束不适用 ⇒ 除嵌套 up 的全条件语言。
  *   `is`（「父块是块A」＝picker 核心写法）、正文原子、`today`（「今天的日记页下新建」
@@ -26,7 +29,7 @@
  * - 未来新增叶子两边**默认禁止、显式开放**——白名单防的是「QueryNode 扩张静默扩大
  *   事件能力」，这条动机对两个作用域同样成立。
  */
-import type { QueryNode } from '../query/query.ts'
+import { canonicalNode, type QueryNode } from '../query/query.ts'
 
 /** 事件轴：成员迁移的三个方向（manual 与它并列，是触发器不是事件） */
 export type TriggerOn = 'entered' | 'left' | 'changed'
@@ -87,13 +90,16 @@ export function validateTriggerQuery(on: TriggerOn, query: QueryNode, birth: boo
       }
       return
     }
-    if (ctx.scope === 'self') {
-      if ('tag' in node && typeof node.tag !== 'string') {
-        // 含子标签（desc）要标签树闭包——before 侧主体不在索引里，闭包无从注入；
-        // 触发器的标签原子用直读形态（真用例出现再把闭包接进主体适配）
-        violation = 'tag conditions in triggers use direct membership (string form)'
-        return false
-      }
+    if (ctx.scope === 'self' && 'tag' in node && typeof node.tag !== 'string') {
+      // 含子标签（desc）要标签树闭包——触发器主体适配走直读（before 侧不在索引里，
+      // 闭包无从注入；真用例出现再把闭包接进来），desc 形态在触发器里不成形状
+      violation = 'tag conditions in triggers use direct membership (string form)'
+      return false
+    }
+    if (ctx.scope === 'self' && !birth) {
+      // 严格白名单只管**边沿触发**（enter/left/changed 在数据变化沿逐次求值）。
+      // birth 触发器整体都是诞生那一刻的一次性判定——正文／结构／today 在那一刻
+      // 都观测得到（打字新建的块多半没有正文，那层错配由界面提示管，不归校验器拦）。
       if ('text' in node || 'mark' in node || 'link' in node || 'ref' in node) {
         violation = 'content atoms cannot trigger events (per-keystroke transactions, no atom index)'
         return false
@@ -115,13 +121,43 @@ export function validateTriggerQuery(on: TriggerOn, query: QueryNode, birth: boo
         return false
       }
     }
-    // up 子层：除嵌套 up（上面已拒）全开放
+    // birth 触发器的 self 半边与 up 子层同宽（除嵌套 up／desc 标签，上面已拒）
   })
   if (violation) return violation
   // 结构检查之后才答 birth 的轴问题：{up} 在 left 上的具体理由优先于泛化的 birth 拒形
   if (birth && on !== 'entered') return 'birth only applies to entered triggers'
   if (atoms === 0) return 'a trigger query must reference at least one atom (an atom-less trigger fires on every change)'
   return null
+}
+
+/* ------------------------------------------------------------ 形状助手（父块槽的共用读写面） */
+
+/** 诞生触发器 query 里顶层的 `{up}` 内部条件（{up:P} 或顶层 all 的直接成员位；没有给 undefined） */
+export function topUpOf(query: QueryNode): QueryNode | undefined {
+  if ('up' in query) return query.up
+  if ('all' in query) {
+    const member = query.all.find((m) => 'up' in m)
+    return member && 'up' in member ? member.up : undefined
+  }
+  return undefined
+}
+
+/** 换掉 query 里顶层的 `{up}`，保留复合条件的其余成员（self 半边不动） */
+export function withUp(query: QueryNode, up: QueryNode): QueryNode {
+  if ('all' in query) {
+    const rest = query.all.filter((m) => !('up' in m))
+    return { all: [...rest, { up }] }
+  }
+  return { up }
+}
+
+/**
+ * 「如果」条件能不能直接当诞生触发器的条件（**任意父块＝槽空态**的原子来源）。
+ * 能 ⇒ 返回 canonical 形状；不能 ⇒ null（「如果」是全语言，触发器不是）。
+ */
+export function triggerQueryFromWhen(when: QueryNode): QueryNode | null {
+  const q = canonicalNode(when)
+  return validateTriggerQuery('entered', q, true) === null ? q : null
 }
 
 /* ------------------------------------------------------------ 依赖提取 */
