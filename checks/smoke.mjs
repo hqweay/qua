@@ -33196,6 +33196,72 @@ await check('T351 日记流滚到昨天删块：视口外的今天空面板不�
   return `视口外面板重画后 minHeight 为空、身体 ${after.bodyH}px`
 })
 
+/**
+ * T352：三种行下身体（查询／children 视图、自动化定义体、属性投影）共用一个壳
+ * （`.blk-view-body`）。保留行接回若按壳判（看见壳就挂视图体），标签的属性投影上面
+ * 会再叠一台视图宿主——抬头是只属于激活看法的「N 项 · 大纲 · 新建一行」，而这块
+ * 从没有激活看法；同一路径还会跳过属性投影的 open，让它的订阅被「延后一拍拆」收掉
+ * （DOM 在、不再跟着库刷新、不报错）。
+ * 触发路径：中心筛选的应用只改这一屏的瞬态、不写库 ⇒ 整页重画走保留行（holdRows）。
+ */
+await check('T352 保留行重画不把视图宿主塞进属性投影的壳：标签行不冒「N 项·新建一行」', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const tag = await page.evaluate(() => window.__qua.allBlocks().find((b) => b.roles?.includes('tag') && b.text === '任务')?.id ?? '')
+  assert(tag, '假数据里应有 #任务（带「标签属性」声明）')
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), tag)
+  await page.waitForTimeout(400)
+
+  const before = await page.evaluate((id) => {
+    const w = window
+    w.__t352row = document.querySelector(`#editor .blk[data-block-id="${id}"]`)
+    const shell = w.__t352row?.querySelector(':scope > .blk-view-body')
+    return {
+      row: Boolean(w.__t352row),
+      def: Boolean(shell?.querySelector('.blk-def-body')),
+      qv: document.querySelectorAll('#editor .blk-view-body .queryview').length,
+    }
+  }, tag)
+  assert(before.row && before.def, `标签行应画属性投影（标签属性卡）：${JSON.stringify(before)}`)
+  assert(before.qv === 0, `没激活看法时行下不该有视图宿主：${JSON.stringify(before)}`)
+
+  // 与抬头筛选键的「应用」同一个入口：只改瞬态（不写库）⇒ 保留行重画
+  const after = await page.evaluate((id) => {
+    window.__qua.__editor.renderAll()
+    const row = document.querySelector(`#editor .blk[data-block-id="${id}"]`)
+    const shell = row?.querySelector(':scope > .blk-view-body')
+    return {
+      kept: row === window.__t352row,
+      def: Boolean(shell?.querySelector('.blk-def-body')),
+      kinds: shell ? [...shell.children].map((e) => e.className) : [],
+      newRow: (shell?.textContent ?? '').includes('新建一行'),
+      qv: document.querySelectorAll('#editor .blk-view-body .queryview').length,
+    }
+  }, tag)
+  assert(after.kept, `前置：这一轮要走保留行重画（行元素原样换回）：${JSON.stringify(after)}`)
+  assert(after.qv === 0 && !after.newRow, `保留行重画后不该长出视图宿主：${JSON.stringify(after)}`)
+  assert(after.def, `属性投影要在保留行重画后仍挂着（订阅不能断）：${JSON.stringify(after)}`)
+  assert(JSON.stringify(after.kinds) === JSON.stringify(['blk-def-body']), `一个壳只装一种身体：${JSON.stringify(after.kinds)}`)
+
+  // 同一判据的另一半：**激活看法时视图必须赢**——子块行已经让位（`Doc.viewRootId`），
+  // 身体若仍画属性投影，两边都落空（子块没了、表格也不出现）。
+  await page.evaluate((id) => window.__qua.invoke('core.view/add', { owner: { kind: 'block', blockId: id }, kind: 'table' }), tag)
+  await page.waitForTimeout(450)
+  const withView = await page.evaluate((id) => {
+    const row = document.querySelector(`#editor .blk[data-block-id="${id}"]`)
+    const shell = row?.querySelector(':scope > .blk-view-body')
+    return {
+      kinds: shell ? [...shell.children].map((e) => e.className) : [],
+      table: shell?.querySelectorAll('.tv').length ?? 0,
+      def: Boolean(shell?.querySelector('.blk-def-body')),
+    }
+  }, tag)
+  assert(withView.table >= 1 && !withView.def, `激活看法后身体要切到视图（子块行已让位）：${JSON.stringify(withView)}`)
+
+  await ctx.close()
+  return `标签行只有属性投影；重画（保留行路径）后不叠「新建一行」抬头；激活看法后切到表格`
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 
