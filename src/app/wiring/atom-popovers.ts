@@ -24,6 +24,7 @@ import type { Workspace } from '../../core/infra/workspace.ts'
 import { assetClickActionOf } from '../../view/asset-views.ts'
 import type { BlockEditor } from '../../view/editor/editor.ts'
 import type { AtomMenuHit, RefClickHit, RefClickMods } from '../../view/editor/editor-events.ts'
+import { clearOpenTagFields, setOpenTagFields } from '../../view/editor/tag-fields-open.ts'
 import type { RunWithId } from '../../core/model/runs.ts'
 import { openImageLightbox } from '../../ui/overlay/lightbox.ts'
 import {
@@ -95,7 +96,7 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
     // 把这一枚引用摊开成块：与「粘贴为镜像／表格」同一条命令（看法写在露面块自己身上）
     embedAtom: (atomId, view) => void deps.getRegistry().invoke('core.embed/from-atom', { atomId, view }, 'popover'),
     closePopover: () => deps.layers.closePopover(),
-    openPopover: (render, anchor, trigger) => deps.layers.openPopover(render, anchor, undefined, trigger),
+    openPopover: (render, anchor, trigger, onClose) => deps.layers.openPopover(render, anchor, onClose, trigger),
     openDrawer: (title, render) => deps.layers.openDrawer(title, render),
   }
 
@@ -253,10 +254,30 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
   const handleTagFields = (hostId: string, tagId: string, el: HTMLElement): void => {
     const fields = deps.objFieldDeps()
     if (!fields) return
-    panelTagFields(panelDeps, hostId, tagId, anchorOf(el), fields, {
-      el,
-      key: `tag-fields:${hostId}:${tagId}`,
-    })
+    // 卡片只画得出「宿主 × 标签」都还在的那一对；目标已经没了就别把三角翻起来
+    if (!panelDeps.findBlock(hostId) || !panelDeps.findBlock(tagId)) return
+    /**
+     * 三角的开合状态：打开即 `aria-expanded=true`（CSS 把 `›` 转到 `⌄`），
+     * 关闭回调里复位。状态按宿主+标签记一份（`tag-fields-open`）：卡片写值会重画
+     * 宿主行，三角是重建的 —— 只写在元素上会丢；重建时按这份渲染输入补回朝向。
+     * 关闭时还要复位**所有仍在 DOM 里的同款三角**（镜像/嵌入会各有一枚）。
+     */
+    el.setAttribute('aria-expanded', 'true')
+    setOpenTagFields(hostId, tagId)
+    panelTagFields(
+      panelDeps,
+      hostId,
+      tagId,
+      anchorOf(el),
+      fields,
+      { el, key: `tag-fields:${hostId}:${tagId}` },
+      () => {
+        clearOpenTagFields(hostId, tagId)
+        document
+          .querySelectorAll<HTMLElement>(`[data-tag-fields-for="${hostId}"][data-tag-fields-tag="${tagId}"]`)
+          .forEach((caret) => caret.setAttribute('aria-expanded', 'false'))
+      },
+    )
   }
 
   /**

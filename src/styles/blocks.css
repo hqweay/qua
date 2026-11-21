@@ -2549,14 +2549,36 @@
   border-radius: 3px;
   vertical-align: baseline;
 }
+/*
+  **行内三项（标签／实例／页引用）共用正文的排版度量**。
+  页引用此前已从胶囊几何（inline-flex 居中、0.93em 缩字、内外边距）改回正文度量；
+  标签与实例还留着那套旧几何：同一行里它们比正文小一档，基线由首个子元素（图标）
+  决定 —— 扫过去是三截高低不齐的字。三枚替身是「正文里的一格」，不是贴在正文上的
+  chip；字号／行高／基线必须与正文同源。
+  `display:inline` 同时让 `.atom .atom-ico` 的 `vertical-align` 生效（inline-flex
+  里它被忽略），图标与 `.atom-page` 落在同一条基线上。
+  ⚠️ inline 没有 flex `gap`，图标间距改由 margin 补（见下面那条共用规则）。
+*/
 .atom-tag {
+  display: inline;
   padding: 0 2px;
   margin: 0;
   background: transparent;
   border-radius: var(--ui-radius-sm);
+  font-size: inherit;
+  line-height: inherit;
+  /* 未配色的标签随正文（「无颜色」是合法态，色只是身份叠加通道）——
+     `#` 与悬停底已经说了「这是标签」那句话。
+     块级 chip 不跟这条：chip 是行尾的分类 chrome，accent 是它的类型色。 */
+  color: inherit;
 }
 .atom-tag:hover {
   background: var(--ui-accent-soft);
+}
+/* inline 布局没有 flex `gap`：图标与名字的间距用 margin 补，值与原 `gap` 同档 */
+.atom-tag .atom-ico,
+.atom-obj .atom-ico {
+  margin-inline-end: 4px;
 }
 /*
   **实例**：`#名` 指向一条记录（不是标签类）。它和行内标签一样占正文 1 格，
@@ -2566,11 +2588,16 @@
   ⚠️ 不加前置小方块：那是待办勾选框的形状，会被误读成「点它能打勾」。
 */
 .atom-obj {
+  display: inline;
   padding: 0 5px;
   margin: 0 1px;
   background: transparent;
   border: var(--ui-sep) solid var(--ui-border);
   border-radius: var(--ui-radius-pill);
+  font-size: inherit;
+  line-height: inherit;
+  /* 未配色同样随正文（与标签、页引用同一条回落口径） */
+  color: inherit;
 }
 .atom-obj:hover {
   background: var(--ui-accent-soft);
@@ -2645,9 +2672,6 @@
   color: inherit;
   font-size: inherit;
   line-height: inherit;
-}
-.atom-page .atom-ico {
-  margin-inline-end: 3px;
 }
 .atom-page .atom-label {
   text-decoration: underline;
@@ -2746,6 +2770,17 @@
 .tag-chip-caret .ico {
   inline-size: 1em;
   block-size: 1em;
+  /* 开合状态：字段卡打开时 `›` 转到 `⌄`。三角在名字右侧，「面板/更多」的语法位，
+     不冒充左侧的树折叠；状态由 `aria-expanded` 带过来（浮层开→true，关→false）。 */
+  transition: transform 120ms ease;
+}
+.tag-chip-caret[aria-expanded='true'] .ico {
+  transform: rotate(90deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tag-chip-caret .ico {
+    transition: none;
+  }
 }
 .tag-chip:hover .tag-chip-caret {
   color: var(--ui-text-secondary);

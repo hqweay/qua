@@ -57,6 +57,7 @@ import { t } from '../../core/infra/msg.ts'
 import { blockLabel, danglingView, resolveRefs } from '../../core/relations/ref.ts'
 import { createIcon, renderIcon } from '../icons.ts'
 import { buildMarker } from './marker.ts'
+import { isTagFieldsOpen } from './tag-fields-open.ts'
 
 /** 行高：与 CSS 的 `--ui-line-h` 必须一致（虚拟化算占位高度要用） */
 export const LINE_H = 30
@@ -375,6 +376,8 @@ export function makeTagsEl(
       caret.dataset.tagFieldsFor = b.id
       caret.dataset.tagFieldsTag = tagId
       caret.dataset.tip = t('ui.chip.fieldsTitle', { label: blockLabel(tag, find) })
+      // 卡片开着时宿主行可能刚被重画（写值就会）；三角是重建的，开合朝向按渲染输入补回来
+      if (isTagFieldsOpen(b.id, tagId)) caret.setAttribute('aria-expanded', 'true')
       renderIcon(caret, 'lucide:chevron-right', 'chevron-right', 'sm')
       // 按下不挪光标、不起拖；click 冒到容器走 tagFields 分支（chip 本体仍走导航）
       caret.addEventListener('mousedown', (e) => {
@@ -382,7 +385,9 @@ export function makeTagsEl(
         e.stopPropagation()
       })
       caret.addEventListener('dragstart', (e) => e.preventDefault())
-      chip.prepend(caret)
+      // 三角在**名字右侧**：左侧 chevron 是树折叠的语法位，而这里打开的是浮层
+      // （字段卡），不是行下展开——位置先把语义说对，开合状态再由 `aria-expanded` 补。
+      chip.append(caret)
     }
     if (draggable) {
       chip.draggable = true

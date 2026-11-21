@@ -13487,6 +13487,97 @@ await check('T126 行尾 chip / 属性区标签名点名字 ⇒ 打开标签块�
   return `行尾 chip 与属性区标签名都打开了标签块；Shift 走右槽且中心/历史不动；× 只摘不导航`
 })
 
+/**
+ * T350｜块标签 chip 的字段三角：**右侧是「面板」语法位，开合有朝向**。
+ *
+ * 判据落三件事：
+ *   ① 三角在名字右侧（左侧 chevron 是树折叠的语法位，会读成「行下展开」）；
+ *   ② 打开字段卡 ⇒ `aria-expanded=true`、图标转 90°；再点 ⇒ 复位、卡片关；
+ *   ③ 卡片写值会重画宿主行、三角是重建的 —— 新三角仍须朝下（状态按宿主+标签记着）。
+ */
+await check('T350 块标签字段三角在右侧、开合翻转；写值重画后朝向不丢', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+
+  const tagName = `三角标签${Date.now().toString(36).slice(-4)}`
+  const tagId = await seedTag(page, tagName)
+  assert(tagId !== '', '应能建出一个标签块')
+  const hostId = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    const b = ed.rows().map((r) => r.block).find((x) => !x.roles?.length && !x.props?._tags?.length)
+    return b?.id ?? ''
+  })
+  assert(hostId !== '', '应能找到一个没有标签的内容块')
+  await page.evaluate(
+    ({ id, tag }) => window.__qua.invoke('core.tags/add', { blockId: id, name: tag }),
+    { id: hostId, tag: tagName },
+  )
+  // 声明一个字段 ⇒ chip 才长出三角
+  await page.evaluate(
+    (tagId) => window.__qua.invoke('core.props/create-def', { blockId: tagId, label: '时长', kind: 'number', target: 'declared' }),
+    tagId,
+  )
+  await page.waitForTimeout(320)
+
+  const chipSel = `.blk[data-block-id="${hostId}"] .blk-tags .tag-chip[data-tag-id="${tagId}"]`
+  const rest = await page.evaluate((sel) => {
+    const chip = document.querySelector(sel)
+    const caret = chip?.querySelector('.tag-chip-caret')
+    return {
+      chip: Boolean(chip),
+      caret: Boolean(caret),
+      caretLast: chip ? chip.lastElementChild === caret : false,
+      expanded: caret?.getAttribute('aria-expanded') ?? null,
+      transform: caret ? getComputedStyle(caret.querySelector('.ico')).transform : '',
+    }
+  }, chipSel)
+  assert(rest.chip && rest.caret, `前置：声明了字段的标签 chip 要有字段三角：${JSON.stringify(rest)}`)
+  assert(rest.caretLast, `三角应在名字右侧（左侧 chevron 会读成树折叠）：${JSON.stringify(rest)}`)
+  assert(!rest.expanded || rest.expanded === 'false', `静息态不是展开：${JSON.stringify(rest)}`)
+
+  await page.locator(`${chipSel} .tag-chip-caret`).click()
+  await page.waitForTimeout(260)
+  const opened = await page.evaluate((sel) => {
+    const caret = document.querySelector(`${sel} .tag-chip-caret`)
+    return {
+      pop: Boolean(document.querySelector('.popover')),
+      expanded: caret?.getAttribute('aria-expanded') ?? null,
+      rotated: caret ? getComputedStyle(caret.querySelector('.ico')).transform !== 'none' : false,
+    }
+  }, chipSel)
+  assert(opened.pop, `点三角应打开字段卡：${JSON.stringify(opened)}`)
+  assert(opened.expanded === 'true' && opened.rotated, `打开后三角应朝下（aria-expanded=true ＋ rotate）：${JSON.stringify(opened)}`)
+
+  // 写值 ⇒ 宿主行重画（三角是重建的）；朝向必须还在
+  const input = page.locator('.popover-fields .prop-row input').first()
+  if (await input.count()) {
+    await input.fill('7')
+    await input.blur()
+    await page.waitForTimeout(320)
+  }
+  const afterWrite = await page.evaluate((sel) => {
+    const caret = document.querySelector(`${sel} .tag-chip-caret`)
+    return {
+      expanded: caret?.getAttribute('aria-expanded') ?? null,
+      rotated: caret ? getComputedStyle(caret.querySelector('.ico')).transform !== 'none' : false,
+    }
+  }, chipSel)
+  assert(afterWrite.expanded === 'true' && afterWrite.rotated, `写值重画后三角仍应朝下：${JSON.stringify(afterWrite)}`)
+
+  await page.locator(`${chipSel} .tag-chip-caret`).click()
+  await page.waitForTimeout(260)
+  const closed = await page.evaluate((sel) => {
+    const caret = document.querySelector(`${sel} .tag-chip-caret`)
+    return { pop: Boolean(document.querySelector('.popover')), expanded: caret?.getAttribute('aria-expanded') ?? null }
+  }, chipSel)
+  assert(!closed.pop, `再点三角应收起字段卡：${JSON.stringify(closed)}`)
+  assert(!closed.expanded || closed.expanded === 'false', `收起后三角应复位：${JSON.stringify(closed)}`)
+
+  await ctx.close()
+  return `三角在名字右侧；点开 aria-expanded=true＋旋转，再点收起复位；写值重画后朝向不丢`
+})
+
 
 /* ================================================================ 块底的挂载区 */
 
@@ -30113,21 +30204,21 @@ await check('T329 行内替身染目标身份色：有色 #名 染字；无色�
   assert(!inked.identityLeft, `身份色应退出（inline style 清空）：${JSON.stringify(inked)}`)
   assert(inked.wrapColor && inked.atomColor === inked.wrapColor && inked.atomColor !== dyed.color, `字色归 ink（继承包装层的槽色）：${JSON.stringify(inked)}`)
 
-  // ⑤ 前置目标图标走 renderIcon 分发：字面脸（emoji）显示字面本身，
-  //    不允许出现「塞着 undefined 的隐形 SVG」占位把名字顶歪（真机实测过的错法）
+  // ⑤ 前置脸退场：目标**配了脸**（这里给字面 emoji）也不进正文——
+  //    脸属于被指的对象，不属于每一次指向；行内只留名字＋种类标记＋色。
+  //    同时钉住「不许出现塞着 undefined 的隐形 SVG 占位」这条旧错法。
   await page.evaluate((tagId) => window.__qua.invoke('core.block/set-icon', { blockId: tagId, icon: '🚀' }), info.tag)
   await page.waitForTimeout(150)
   const faced = await page.evaluate((blockId) => {
     const tx = document.querySelector(`.blk[data-block-id="${blockId}"] > .tx`)
     const atom = [...tx.querySelectorAll('.atom')].find((a) => a.textContent.includes('染字签'))
-    const ico = atom.querySelector('.atom-ico')
-    return { icoText: ico?.textContent ?? '', bodyHasUndefined: (tx.textContent ?? '').includes('undefined') }
+    return { icoCount: atom.querySelectorAll('.atom-ico').length, bodyHasUndefined: (tx.textContent ?? '').includes('undefined') }
   }, info.blockId)
-  assert(faced.icoText === '🚀', `字面脸应显示字面本身：${JSON.stringify(faced)}`)
+  assert(faced.icoCount === 0, `行内替身不带目标的脸（配了脸也不进正文）：${JSON.stringify(faced)}`)
   assert(!faced.bodyHasUndefined, `正文里不许有 undefined 残字：${JSON.stringify(faced)}`)
 
   await ctx.close()
-  return '有色 #名 染字、无色中性、`[[ ]]` 同判据、显式 ink 赢字且身份色退出、字面脸显示字面本身'
+  return '有色 #名 染字、无色中性、`[[ ]]` 同判据、显式 ink 赢字且身份色退出、行内不带脸（配了脸也不进正文）'
 })
 
 /**

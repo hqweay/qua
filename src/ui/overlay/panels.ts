@@ -73,6 +73,8 @@ export interface PanelDeps {
     anchor: DOMRect | null | (() => DOMRect | null),
     /** 这次打开的触发者；给了它，同一触发者再点一次＝收起（toggle，见 `layers.openPopover`） */
     trigger?: { el?: HTMLElement; key?: string },
+    /** 浮层关闭时的回调（开关型触发者用它回写 `aria-expanded` 之类的开合状态） */
+    onClose?: () => void,
   ) => void
   openDrawer: (title: string, render: (host: HTMLElement) => void) => void
 }
@@ -253,6 +255,7 @@ export function showTagFieldsPopover(
   anchor: DOMRect | null | (() => DOMRect | null),
   fields: ObjFieldDeps,
   trigger?: { el?: HTMLElement; key?: string },
+  onClose?: () => void,
 ): void {
   const target = deps.findBlock(hostId)
   const tag = deps.findBlock(tagId)
@@ -281,6 +284,7 @@ export function showTagFieldsPopover(
     },
     anchor,
     trigger,
+    onClose,
   )
 }
 

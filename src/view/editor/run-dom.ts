@@ -155,15 +155,19 @@ export function makeRunEl(r: RunWithId, view?: RefView, asset?: AssetView, onAss
      * **实例的两个专属入口**（都只占那个已有的图标槽，不另加宽度）：
      *   · 有 closure 字段 ⇒ 状态标记：图标＝当前选项，点击翻转/⌥ 选状态；
      *   · 有普通字段 ⇒ 脸槽 hover 换手：静止是目标的脸，指上去变 chevron，点击开字段卡。
-     * 两者互斥（一个胶囊只留一个控件）；没有字段 ⇒ 只剩脸，不假装有 body。
+     * 两者互斥（一个胶囊只留一个控件）；没有字段 ⇒ 只剩 `#名`，不假装有 body。
      * 标签类（`tag`）不加：它没有被归类到宿主，没有「这一格的值」可编辑。
+     *
+     * ⚠️ **普通块的前置脸已退场**（`#名`／`[[ ]]`／无字段实例）：脸属于被指的对象，
+     *    不属于每一次指向——名字已经唯一确定目标，脸只在块自身与导航列表出现。
+     *    这里留下的图标槽只给**控件**（状态／字段手柄），它们不是装饰性身份。
      */
     if (kind === 'obj' && r.t === 'ref' && r.to && view?.state === 'resolved' && view.closure) {
       el.append(makeClosureMarker(r.to, view.closure), text)
     } else if (kind === 'obj' && view?.state === 'resolved' && view.fields && view.icon) {
       el.append(makeFieldsHandle(r.id, view.icon), text)
     } else {
-      el.append(...prependIcon(view), text)
+      el.append(text)
     }
   } else if (r.t === 'asset') {
     el.append(...assetAtomContent(r, asset, label, onAssetError))
@@ -184,29 +188,15 @@ export function makeRunEl(r: RunWithId, view?: RefView, asset?: AssetView, onAss
     /**
      * ⚠️ `[[ ]]` 是**显示装饰**，不进模型：run 上存的是目标 id ＋ 名字快照，
      *    否则「引用目标的正文」与「它在引用处显示的字」会变成两个要同步的东西。
+     * ⚠️ **不前置目标的脸**：脸只在块自身与导航列表出现；行内的名字＋结构线
+     *    已经够回答「这是谁、这是哪种关系」，重复同一张脸会随提及次数变成噪音。
      */
     const text = document.createElement('span')
     text.className = 'atom-label'
     text.textContent = `[[${label}]]`
-    el.append(...prependIcon(view), text)
+    el.append(text)
   }
   return el
-}
-
-/**
- * 目标块标的**前置图标**（脸的形半，与替身染色的色半同一资格）：
- * 解析不到（dangling）或目标无脸 ⇒ 不占位——图标是加分项，不是必需件。
- * 三种行内引用共用一份：`#名`／实例／`[[ ]]` 哪里都一样，不按形状再分叉。
- * ⚠️ 必须走 `renderIcon`（前缀分发：`lucide:` ⇒ SVG，**字面值（emoji 等）⇒ 字就是脸**，
- * 未知名 ⇒ help 占位）。直接调 `createIcon` 会把字面值喂进 path 表查不到，
- * 造出一枚塞着 "undefined" 的隐形 SVG——不显示但占位，把整个名字顶歪（真机实测）。
- */
-function prependIcon(view: RefView | undefined): Node[] {
-  if (view?.state !== 'resolved' || !view.icon) return []
-  const ico = document.createElement('span')
-  ico.className = 'atom-ico'
-  renderIcon(ico, view.icon, 'circle-help', 'sm')
-  return [ico]
 }
 
 /**
@@ -214,7 +204,7 @@ function prependIcon(view: RefView | undefined): Node[] {
  * `data-prop-for` / `data-prop-id`），只是住在行内原子自己的图标槽里。
  *
  * 为什么用图标槽而不是另加一格：行内原子占正文 1 格，多一枚图标就是多一份宽度；
- * 这块地方本来就要画目标的脸。状态比脸更该占这一格——它是会变的那半。
+ * 这个槽本来用于实例的状态/字段控件。状态比静态身份更该占格——它是会变的那半。
  * ⚠️ 不能把 `data-closure-for` 挂到整个原子上：那样点名字也会翻转，导航语义被
  *    状态控制吃掉。只挂在这枚 span 上，label 仍是导航。
  */
@@ -246,6 +236,10 @@ function makeClosureMarker(targetId: string, closure: NonNullable<RefView['closu
  * 为什么不是「脸 + 三角」两枚图标：一行里每多一枚实例就多 10px，正文会被读成
  * 一串工具条；这个槽本来就有，换手不增加宽度，也不改变行的排版。
  * 点击开的是实例的字段卡，不是新面板；label 仍是打开目标。
+ *
+ * ⚠️ 这是**行内唯一保留目标脸的地方**，但它是控件不是装饰：静止的脸只是这个
+ *    字段手柄的 idle 态，指针压上去就换成语义明确的 chevron。
+ *    没有字段声明就不生成手柄（`view.fields` 为假），也不会退化成「只有脸」。
  */
 function makeFieldsHandle(runId: string, icon: string): HTMLElement {
   const el = document.createElement('span')
