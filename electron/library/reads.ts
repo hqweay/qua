@@ -82,12 +82,28 @@ export function readDocWindow(
   after: string | null,
   limit: number,
 ): LibraryDocWindow | null {
-  const at = db.prepare(LIBRARY_READS.indexPathOf).get(rootId) as { path?: unknown } | undefined
+  const at = db.prepare(LIBRARY_READS.indexPathOf).get(rootId) as { path?: unknown; root?: unknown } | undefined
   const rootPath = typeof at?.path === 'string' ? at.path : ''
   if (rootPath === '') return null
+  /**
+   * 窗口 SQL 的 `root` 是 `BlockIndex` 每行自己记的**顶层祖先**，不是「被打开的块」。
+   * 被打开的块可以住在别的块下面（页能被放进任意块里），这时它自己的 id 不等于
+   * root 列的任何值 —— 拿它去比会一行都查不到，窗口看起来「空且读完」，
+   * 打开入口就会静默不动（空窗口不会让 needsDoc 转假，于是又去装一次）。
+   * ⇒ 用同一行的 root 值；区间已由 path 前缀限定，覆盖范围不变。
+   */
+  const rootKey = typeof at?.root === 'string' && at.root !== '' ? at.root : rootId
   const blocks = db
     .prepare(LIBRARY_READS.docWindow)
-    .all(rootPath, `${rootPath}~`, after ?? '', limit, rootId) as Row[]
+    .all(rootPath, `${rootPath}~`, after ?? '', limit, rootKey) as Row[]
+  /**
+   * **首窗就 0 行** ＝ 派生行没铺到（或 path 与 Block 行对不上）⇒ 交回调用方整棵读。
+   * 对着「第一窗读不到」不能给出一个「空且读完」的窗口：那会把「没读到」伪装成
+   * 「没有」，`needsDoc` 永不转假，打开入口会一直重装。
+   * ⚠️ 续窗（`after !== null`）的 0 行是**正常收尾**：上一窗恰好取满 limit 时
+   *    `next` 只能给到最后一条，下一次问到这里就是「没有更多了」。
+   */
+  if (after === null && blocks.length === 0) return null
   const ancestors: Row[] = []
   if (after === null) {
     const seen = new Set<string>()

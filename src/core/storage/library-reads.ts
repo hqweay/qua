@@ -111,11 +111,14 @@ export const LIBRARY_READS = {
     limit ?4`,
 
   /**
-   * 一块的派生路径（窗口区间的起点）。
+   * 一块的**派生位置**（窗口区间的起点 ＋ 它自己的顶层祖先）。
+   *
+   * `root` 与 `path` 一起取：被打开的块不一定是顶层（页可以住在别的块下面），
+   * 而 `root` 列记的是每行自己的顶层祖先——窗口 SQL 要按它过滤，才覆盖得到这一棵。
    *
    * 没有行 ＝ 派生表还没铺到它（重建未完成／新块）：调用方回退整棵读，不猜。
    */
-  indexPathOf: `select path from ${I} where block = ?1`,
+  indexPathOf: `select path, root from ${I} where block = ?1`,
 
   /**
    * **一批块 ＋ 它们的全部祖先链**（查询候选的装载单位）。

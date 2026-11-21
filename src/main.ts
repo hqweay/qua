@@ -572,7 +572,9 @@ async function loadDocs(ids: readonly string[], onFirst: () => void): Promise<vo
       ws.pin(w.rootIds)
       // 一窗读完 ⇒ 这棵子树的 children 全在身上；还有下一窗的根只是先序前缀，标未知，
       // 由 `finishDocWindows` 读到最后一窗后转成已知
-      if (w.next === null) ws.markChildrenKnown(blockRowIds(w.rows))
+      // 根自己也算「这一窗读过的块」：窗口可以只装根、不含任何后代（叶子），
+      // 漏了它会让 needsDoc 永远为真，打开入口在「再装一次」上死循环。
+      if (w.next === null) ws.markChildrenKnown([...w.rootIds, ...blockRowIds(w.rows)])
       else ws.markChildrenUnknown(w.rootIds)
     }
     onFirst()
@@ -583,8 +585,8 @@ async function loadDocs(ids: readonly string[], onFirst: () => void): Promise<vo
   if (r.status === 'ok') {
     ws.loadDoc(withAncestors(r.value), r.value.rootIds)
     ws.pin(r.value.rootIds)
-    // 整棵读：子树里的每一块 children 都齐了（祖先链只补名字，不算）
-    ws.markChildrenKnown(blockRowIds(r.value.rows))
+    // 整棵读：子树里的每一块 children 都齐了（祖先链只补名字，不算）；根同样要算进去
+    ws.markChildrenKnown([...r.value.rootIds, ...blockRowIds(r.value.rows)])
   } else {
     console.warn('[workset] doc load failed:', r.status === 'error' ? r.error : r.status)
   }

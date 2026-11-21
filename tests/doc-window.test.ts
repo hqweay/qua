@@ -104,6 +104,30 @@ test('没有派生路径 ⇒ null（调用方回退整棵，不猜）', () => {
   assert.equal(readDocWindow(d, 'no-such-block', null, 2), null)
 })
 
+/**
+ * 被打开的块**不一定是顶层**：页可以住在任意块下面。这时 `BlockIndex.root`
+ * 记的是它上面的顶层祖先，窗口若拿它自己的 id 去比 root 列会一行都查不到。
+ * 症状不是报错，而是「点了没反应」——空窗口被当成「读完了」，`needsDoc` 永远为真。
+ */
+test('被打开的块住在别的块下面：窗口 == 它自己的子树', () => {
+  const d = seeded()
+  const whole = readDocRows(d, ['a']).rows.blocks.map(idOfRow)
+  assert.ok(whole.length > 1, '样本本身要有后代')
+  for (const limit of [1, 2, 100]) {
+    assert.deepEqual(readAll(d, 'a', limit).ids, whole, `limit=${limit}`)
+  }
+})
+
+test('派生行在、但首窗一条也读不到 ⇒ null（空窗不允许冒充「读完」）', () => {
+  const d = db()
+  const rows: RowWrite[] = [
+    // 只有索引行、没有 Block 行 ⇒ join 不上，首窗 0 行（派生行铺到一半的形状）
+    { table: 'BlockIndex', op: 'upsert', key: { block: 'y' }, values: { root: 'y', path: '/000009/', hidden: null } },
+  ]
+  applyRowWrites(d, rows)
+  assert.equal(readDocWindow(d, 'y', null, 10), null, '首窗读不到就回退整棵，不交回空窗')
+})
+
 test('下一窗不重复上一窗给过的块', () => {
   const d = seeded()
   const w = readDocWindow(d, 'root', null, 3)
