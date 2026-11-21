@@ -588,6 +588,18 @@ export function hasIdentity(b: Block | undefined): boolean {
 }
 
 /**
+ * **这块能不能走「删除块」**（块菜单的删除行与编辑器装载根守卫**同一份判据**——
+ * 两个答案分叉过一次：守卫放行了自动化块、菜单行还被旧谓词藏着，行就不出现）。
+ *
+ * 口径：身份块各有自己的删除命令（页／标签／日记），再给「删除块」＝同一块两个
+ * 删除语义；**查询块与自动化块例外**——它们是内容对象（有名字、能进回收站），
+ * 没有专属删除命令面，块菜单的「删除块」就是唯一的删除路径（整棵软删、⌘Z 可回）。
+ */
+export function canDeleteBlock(b: Block | undefined): boolean {
+  return !hasIdentity(b) || isQueryBlock(b) || isAutomationBlock(b)
+}
+
+/**
  * **身份标记**（给外观与诊断面）：列表 ∪ 由数据派生的身份名。
  *
  * 为什么需要它，而不是直接用 `listsOf`：「日记」「定义」「查询」没有列表值，

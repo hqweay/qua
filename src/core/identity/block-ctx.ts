@@ -9,7 +9,7 @@
  * 由调用方补（编辑器补它那一份；记录面补空选区）。
  */
 import type { Block } from '../model/model.ts'
-import { hasIdentity, hasList, hasLiveChildren, isPropDefBlock, isQueryBlock } from '../model/model.ts'
+import { canDeleteBlock, hasList, hasLiveChildren, isPropDefBlock, isQueryBlock } from '../model/model.ts'
 import type { CtxKeys } from '../model/undo.ts'
 import { isJournal, journalDate, todayISO } from './journal.ts'
 import { isEmbedBlock } from '../views/embed.ts'
@@ -45,12 +45,10 @@ export function blockMenuCtxOf(
     blockIsRoot: opts.isDocRoot,
     blockIsForestRoot: opts.isForestRoot,
     /**
-     * 删除入口的准入：**按身份判**。
-     *
-     * 身份块各有自己的删除命令（页／标签／日记），再给「删除块」＝同一块两个删除语义；
-     * 非身份块（含查询块）走软删，⌘Z 可回。
+     * 删除入口的准入：判据在 model（`canDeleteBlock`）——菜单行与编辑器守卫同一份，
+     * 两个答案分叉过一次（守卫放行了自动化块、行还被旧谓词藏着）。
      */
-    blockCanDelete: !hasIdentity(b) || isQueryBlock(b),
+    blockCanDelete: canDeleteBlock(b),
     blockCanDeleteJournal: isJournal(b) && journalDate(b) !== todayISO(),
     blockCanExtractPage:
       !opts.isForestRoot &&

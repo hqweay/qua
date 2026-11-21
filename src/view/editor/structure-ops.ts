@@ -14,9 +14,8 @@ import {
   hasIdentity,
   hasLiveChildren,
   indentMove,
-  isAutomationBlock,
+  canDeleteBlock,
   isJournal,
-  isQueryBlock,
   locate,
   mergeIntoPrevPlan,
   mkBlock,
@@ -549,7 +548,7 @@ export class StructOps {
      *    收尾是关闭不是删除）与卡片格（岛与块 id 绑定，提交假定块存在）。
      *    其余面默认放行：行的删除＝软删真块，面按 store 重算收尾。
      */
-    if (loc.parent === null && hasIdentity(loc.block) && !isQueryBlock(loc.block) && !isAutomationBlock(loc.block)) return false
+    if (loc.parent === null && !canDeleteBlock(loc.block)) return false
     if (loc.parent === null && !this.ed.allowRootRemove) return false
     this.ed.beginUndoEntry()
     const idx = flatten(this.ed.doc).findIndex((b) => b.id === id)
