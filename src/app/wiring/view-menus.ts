@@ -861,7 +861,7 @@ function deleteTag(blockId: string): boolean {
       const block = kb.get(automationId)
       const def = block ? readAutomation(block) : null
       const tr = def?.triggers[triggerIndex]
-      if (!tr || tr === 'manual' || tr.kind !== 'child.added') return undefined
+      if (!tr || tr === 'manual' || !('kind' in tr) || tr.kind !== 'child.added') return undefined
       if (tr.parent === undefined) return undefined
       return tr.parent
     }
@@ -879,7 +879,7 @@ function deleteTag(blockId: string): boolean {
         const next: AutomationDef = {
           ...def,
           triggers: def.triggers.map((tr, i): AutomationTrigger => {
-            if (i !== triggerIndex || tr === 'manual' || tr.kind !== 'child.added') return tr
+            if (i !== triggerIndex || tr === 'manual' || !('kind' in tr) || tr.kind !== 'child.added') return tr
             // 显式字面量（条件展开会让推断把 followRefs 拓宽成 boolean）
             const followRefs = tr.followRefs === true
             const parent = canonicalNode(spec.where)

@@ -164,6 +164,18 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
   /** 一条触发器的人话（chip 显示；与引擎的触发键同一份形状来源） */
   const triggerText = (tr: AutomationTrigger): string => {
     if (tr === 'manual') return t('ui.automation.trigger.manual')
+    // 统一形状（{on, query, birth}）：按事件轴给同一句式；收纳重排时再按「当/如果/就」重写
+    if (!('kind' in tr)) {
+      const cond = parentCondChips(tr.query).join(' ')
+      const key = tr.birth === true
+        ? 'ui.automation.trigger.edgeBirth'
+        : tr.on === 'entered'
+          ? 'ui.automation.trigger.edgeEntered'
+          : tr.on === 'left'
+            ? 'ui.automation.trigger.edgeLeft'
+            : 'ui.automation.trigger.edgeChanged'
+      return t(key, { cond })
+    }
     if (tr.kind === 'prop') {
       const name = labelOfProp(tr.prop)
       if (tr.to === undefined) return t('ui.automation.trigger.propAny', { prop: name })
@@ -237,7 +249,7 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
     const tr = def.triggers[at]
     if (tr === undefined || tr === 'manual') return
     const rows: Row[] = [{ id: 'trigger/remove', label: t('ui.automation.removeTrigger'), group: 'trigger/1' }]
-    if (tr.kind === 'child.added') {
+    if ('kind' in tr && tr.kind === 'child.added') {
       rows.push({ id: 'trigger/reparent', label: t('ui.automation.reparent'), group: 'trigger/1' })
       rows.push({
         id: 'trigger/followrefs',
@@ -257,7 +269,7 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
       }
       if (row.id === 'trigger/followrefs') {
         const next = def.triggers.map((x, i): AutomationTrigger => {
-          if (i !== at || x === 'manual' || x.kind !== 'child.added') return x
+          if (i !== at || x === 'manual' || !('kind' in x) || x.kind !== 'child.added') return x
           // 显式字面量（条件展开会让推断把 followRefs 拓宽成 boolean）
           if (x.followRefs === true) {
             return x.parent === undefined ? { kind: 'child.added' } : { kind: 'child.added', parent: x.parent }
@@ -389,7 +401,7 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
       line.appendChild(chip(t('ui.automation.noCond'), 'is-muted', () => deps.editWhen()))
     } else {
       const warns = condWarnOf(def.when)
-      const hasFresh = def.triggers.some((tr) => tr !== 'manual' && tr.kind === 'child.added')
+      const hasFresh = def.triggers.some((tr) => tr !== 'manual' && 'kind' in tr && tr.kind === 'child.added')
       condChips(def.when).forEach((text, i) => {
         const c = chip(text, 'is-cond', () => deps.editWhen())
         // 错配提示走记号＋悬停（界面少字）：内容依赖的条件在「新建子块」触发下

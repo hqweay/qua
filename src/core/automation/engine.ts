@@ -78,6 +78,10 @@ export function createAutomationEngine(deps: AutomationEngineDeps) {
       next.rules.push(rule)
       for (const tr of def.triggers) {
         if (tr === 'manual') continue
+        // 统一形状触发器（{on, query}）：引擎切换前不执行也不进索引——
+        // 三 kind 分派靠 `kind` 认路，没有 kind 的形状误落 child.added 分支会把
+        // 每笔诞生都当成命中（保守忽略，等引擎切换接管）
+        if (!('kind' in tr)) continue
         if (tr.kind === 'prop') {
           const bucket = next.propRules.get(tr.prop)
           if (bucket) bucket.push(rule)
@@ -117,6 +121,7 @@ export function createAutomationEngine(deps: AutomationEngineDeps) {
     if (b.id === rule.id) return false // 防自改
     for (const tr of rule.def.triggers) {
       if (tr === 'manual') continue
+      if (!('kind' in tr)) continue // 统一形状：引擎切换前不执行（同索引处的守卫）
       if (tr.kind === 'prop') {
         if (entry.before === null) continue
         const beforeValue = (entry.before.cells.props as Record<string, unknown> | undefined)?.[tr.prop]
@@ -136,8 +141,8 @@ export function createAutomationEngine(deps: AutomationEngineDeps) {
         continue
       }
       // child.added：新块（before === null）按落点找直接父块；move 不算（child.entered 未立项）。
-      // 父块筛选是**作用在父块上的条件**（§8.9 原始形状）：{is} 精确到某块、{tag} 按标签、
-      // {up} 任意层——求值走与「如果」同一台求值器。
+      // 父块筛选是**作用在父块上的条件**：{is} 精确到某块、{tag} 按标签、{up} 任意层——
+      // 求值走与「如果」同一台求值器。
       if (entry.before === null && entry.afterPlacement !== undefined) {
         const parentId = entry.afterPlacement.parent
         const parent = parentId === null ? undefined : kb.get(parentId)
@@ -208,7 +213,12 @@ export function isEventTrigger(tr: AutomationTrigger): tr is Exclude<AutomationT
 /** 引擎需要的触发器上下文取值（诊断用） */
 export function triggerKey(tr: AutomationTrigger): string {
   if (tr === 'manual') return 'manual'
-  if (tr.kind === 'prop') return `prop:${tr.prop}${tr.to !== undefined ? `=${tr.to}` : ''}`
-  if (tr.kind === 'tag') return `tag:${tr.tag}:${tr.on}`
-  return 'child.added'
+  // 按 kind 先分派：旧 kind 全带 kind，统一形状没有（旧 tag 的 on:'added' 与新 on 不同轴）
+  if ('kind' in tr) {
+    if (tr.kind === 'prop') return `prop:${tr.prop}${tr.to !== undefined ? `=${tr.to}` : ''}`
+    if (tr.kind === 'tag') return `tag:${tr.tag}:${tr.on}`
+    return 'child.added'
+  }
+  const axis = tr.on === 'changed' ? 'changed' : tr.birth === true ? `${tr.on}@birth` : tr.on
+  return `${axis}:${JSON.stringify(tr.query)}`
 }
