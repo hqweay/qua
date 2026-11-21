@@ -418,6 +418,14 @@ export interface QueryEnv {
   refFroms?: RefFroms
   tags: ReadonlySet<string>
   /**
+   * **标签原子直读主体**（事件引擎的 before/after 主体适配专用）：置位时 `{tag}` 判定
+   * 读**传入块自己的标签账**，不查 `tags` 成员集。为什么要注入位：reactor 跑在索引修补
+   * **之前**，走成员集读到的成员表是事务前的（after 侧会读到旧账）；而 before 侧的主体
+   * 根本不在索引里，成员集对它永远为空。两种注入面（直读主体的账 vs 按成员集）是
+   * **同一份判据的两个读源**——成员集本身也是从各块的标签账推出来的。
+   */
+  blockLocalTags?: true
+  /**
    * **字段读取表**：判「这块有没有这一栏」要看标签声明与定义 kind，
    * 两条求值路径都必须给同一份（`core/props.ts` 的 `fieldTableOf`）。
    */
@@ -931,7 +939,12 @@ export function createMatcher(forest: readonly Block[] | undefined, env: QueryEn
      * 名字→标签块只解析一次（`collectTags`），不在逐块判定里查，
      * 否则一次查询会退化成 O(块数 × 条件数) 次森林遍历。
      */
-    if ('tag' in node) return env.tags.has(block.id)
+    if ('tag' in node) {
+      // 直读注入位：触发器主体的标签账（before 快照／刚写完的活块）是此刻的事实，
+      // 索引成员表在这两个时刻都不可信（见 QueryEnv.blockLocalTags 的说明）
+      if (env.blockLocalTags === true) return tagIdsOf(block).includes(typeof node.tag === 'string' ? node.tag : node.tag.id)
+      return env.tags.has(block.id)
+    }
     /**
      * 正文条件：字符串＝包含（投影坐标，原子不占格）；对象形态＝「有正文」——
      * `plainText` 去空白后非空。只有图没有字不算（「正文」这个词问的是字，

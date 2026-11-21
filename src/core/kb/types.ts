@@ -386,7 +386,7 @@ export interface KbClient {
   matchesSpec(
     spec: QuerySpec,
     block: Block,
-    opts?: { selfId?: string; excludeIds?: readonly string[]; today?: string },
+    opts?: { selfId?: string; excludeIds?: readonly string[]; today?: string; blockLocalTags?: boolean },
   ): boolean
   backlinksOf(id: string): readonly BackrefSource[]
   /** 引用发生处的**块**（不是按页聚合）——反链 view block 的行；同一块多处引用各算一条 */

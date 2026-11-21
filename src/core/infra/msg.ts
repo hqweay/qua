@@ -658,6 +658,8 @@ export const MSG = {
   'ui.automation.trigger.edgeChanged': '条件成立期间有变化：{cond}',
   'ui.automation.trigger.edgeBirth': '新建即满足条件：{cond}',
   'ui.automation.trigger.propAny': '{prop} 变了',
+  'ui.automation.trigger.propCleared': '{prop} 清空了',
+  'ui.automation.trigger.propChanged': '{prop} 的值变了',
   'ui.automation.trigger.propTo': '{prop} 变成 {to}',
   'ui.automation.trigger.tagOn': '打上 {tag}',
   'ui.automation.trigger.tagOff': '摘掉 {tag}',

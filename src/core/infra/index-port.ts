@@ -1422,7 +1422,7 @@ function specContextOf(
   index: Index,
   forest: readonly Block[],
   spec: QuerySpec,
-  opts: { selfId?: string; excludeIds?: readonly string[]; today?: string } = {},
+  opts: { selfId?: string; excludeIds?: readonly string[]; today?: string; blockLocalTags?: boolean } = {},
 ): { q: QuerySpec; env: QueryEnv } {
   /**
    * `'$self'` 的解析与纯函数路径**共用同一份**（`resolveSelfSpec`），
@@ -1437,6 +1437,7 @@ function specContextOf(
     refSources: usesRef(q.where) ? refSourcesByIndex(index) : () => undefined,
     ...(usesRefAny(q.where) ? { refFroms: refFromsByIndex(index) } : {}),
     tags: tagsByIndex(q.where, index),
+    ...(opts.blockLocalTags === true ? { blockLocalTags: true as const } : {}),
     fields,
     ...(opts.today ? { today: opts.today } : {}),
     ...(opts.excludeIds && opts.excludeIds.length > 0 ? { excludeIds: new Set(opts.excludeIds) } : {}),
@@ -1476,7 +1477,7 @@ export function blockMatchesSpec(
   forest: readonly Block[],
   spec: QuerySpec,
   block: Block,
-  opts: { selfId?: string; excludeIds?: readonly string[]; today?: string } = {},
+  opts: { selfId?: string; excludeIds?: readonly string[]; today?: string; blockLocalTags?: boolean } = {},
 ): boolean {
   const { q, env } = specContextOf(index, forest, spec, opts)
   return createMatcher(forest, env).matches(q.where, block)

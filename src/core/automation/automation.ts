@@ -20,26 +20,22 @@ import { visitTriggerQuery, type TriggerOn } from './trigger-query.ts'
 /* ------------------------------------------------------------ 形状 */
 
 /**
- * 触发器。**手动与事件是同一条自动化的两种触发**，不是两种东西；
- * 事件引擎接上之前，事件类触发器只是**数据**（可存、可显示、不执行）。
+ * 触发器。**手动与事件是同一条自动化的两种触发**，不是两种东西。
  *
  * `manual` 是字符串档：它没有参数，存对象反而让「有没有手动触发」多一问。
+ *
+ * ⚠️ 旧的三种 kind（prop/tag/child.added）**不是合法形状**——读判给 `broken`
+ * （灰态可跳转），不存在兼容分支；旧规则由用户在界面上按新形状重建。
  */
 export type AutomationTrigger =
   | 'manual'
   /**
-   * **统一形状**：对统一条件语言（TriggerQuery）声明一次迁移——`entered`（false→true）／
-   * `left`（true→false）／`changed`（前后均成立且引用原子变了）。`birth: true` 把开火
-   * 收窄到「块诞生（before 缺席）∧ after 匹配」——含 `up` 的条件（容纳链只在诞生时刻
-   * 求值）由校验器强制带上它；query 的合法子集见 `trigger-query.ts`（写侧校验）。
+   * 对统一条件语言（TriggerQuery）声明一次迁移——`entered`（不满足→满足）／
+   * `left`（满足→不满足）／`changed`（前后均满足且引用原子真变）。`birth: true` 把
+   * 开火收窄到「块诞生（before 缺席）∧ after 匹配」——含 `up` 的条件（容纳链只在
+   * 诞生时刻求值）由校验器强制带上它；query 的合法子集见 `trigger-query.ts`（写侧校验）。
    */
   | { on: TriggerOn; query: QueryNode; birth?: true }
-  /** 〔过渡期〕某属性变成 `to`（缺省＝任何变化）时触发——统一形状落地时由映射表换写，旧形状判定将转 broken */
-  | { kind: 'prop'; prop: string; to?: string | boolean }
-  /** 〔过渡期〕某标签被打上／摘掉时触发——同上 */
-  | { kind: 'tag'; tag: string; on: 'added' | 'removed' }
-  /** 〔过渡期〕直接父块下新建子块时触发；`followRefs`（沿传递型引用展开）由统一形状的容纳链走查吸收，开关退场 */
-  | { kind: 'child.added'; parent?: QueryNode; followRefs?: true }
 
 /** 步骤参数的值位：字面量，或一个引用（run 开始时解析） */
 export type ArgRef =
@@ -79,39 +75,15 @@ function isArgRef(v: unknown): v is ArgRef {
 export function isAutomationTrigger(v: unknown): v is AutomationTrigger {
   if (v === 'manual') return true
   if (!v || typeof v !== 'object') return false
-  // 按 kind 先分派：旧 kind 全带 kind；统一形状没有 kind（旧 tag 的 on:'added' 与新 on 不同轴）
-  if ('kind' in v) {
-    const kind = (v as { kind?: unknown }).kind
-    if (kind === 'prop') {
-      const t = v as { prop?: unknown; to?: unknown }
-      if (typeof t.prop !== 'string' || t.prop === '') return false
-      return t.to === undefined || typeof t.to === 'string' || typeof t.to === 'boolean'
-    }
-    if (kind === 'tag') {
-      const t = v as { tag?: unknown; on?: unknown }
-      return typeof t.tag === 'string' && t.tag !== '' && (t.on === 'added' || t.on === 'removed')
-    }
-    if (kind === 'child.added') {
-      const t = v as { parent?: unknown; followRefs?: unknown }
-      if (t.parent !== undefined) {
-        if (t.parent !== undefined && !(typeof t.parent === 'object' && t.parent !== null && isQueryNode(t.parent))) {
-          return false
-        }
-      }
-      return t.followRefs === undefined || t.followRefs === true
-    }
-    return false
-  }
-  if ('on' in v) {
-    const t = v as { on?: unknown; query?: unknown; birth?: unknown }
-    if (t.on !== 'entered' && t.on !== 'left' && t.on !== 'changed') return false
-    if (!(typeof t.query === 'object' && t.query !== null && isQueryNode(t.query))) return false
-    // 结构判据只答「形状」；TriggerQuery 的合法子集（白名单／位置／诞生约束）在写侧
-    // `validateTriggerQuery` 校验，运行时求值器不承担——QueryNode 是公共语言，
-    // 触发器只是更严的消费者子集
-    return t.birth === undefined || t.birth === true
-  }
-  return false
+  // 旧三种 kind（带 kind 槽）一律非法：读不出定义 ⇒ broken 灰态，不做兼容分支
+  if ('kind' in v) return false
+  const t = v as { on?: unknown; query?: unknown; birth?: unknown }
+  if (t.on !== 'entered' && t.on !== 'left' && t.on !== 'changed') return false
+  if (!(typeof t.query === 'object' && t.query !== null && isQueryNode(t.query))) return false
+  // 结构判据只答「形状」；TriggerQuery 的合法子集（白名单／位置／诞生约束）在写侧
+  // `validateTriggerQuery` 校验，运行时求值器不承担——QueryNode 是公共语言，
+  // 触发器只是更严的消费者子集
+  return t.birth === undefined || t.birth === true
 }
 
 function isStep(v: unknown): v is AutomationStep {
@@ -182,28 +154,15 @@ export function mentionsContentAtoms(node: QueryNode): boolean {
  * （`{ref}` 与字面量在 JSON 里本来就有别），只修键序。
  */
 export function canonicalAutomation(def: AutomationDef): AutomationDef {
-  const triggers: AutomationTrigger[] = def.triggers.map((tr) => {
-    if (tr === 'manual') return 'manual'
-    // 按 kind 先分派（旧 tag 的 on:'added' 与统一形状的 on 不同轴）
-    if ('kind' in tr) {
-      if (tr.kind === 'prop') {
-        return tr.to === undefined ? { kind: 'prop', prop: tr.prop } : { kind: 'prop', prop: tr.prop, to: tr.to }
-      }
-      if (tr.kind === 'tag') return { kind: 'tag', tag: tr.tag, on: tr.on }
-      return tr.parent === undefined
-        ? { kind: 'child.added', ...(tr.followRefs === true ? { followRefs: true } : {}) }
-        : {
-            kind: 'child.added',
-            parent: canonicalNode(tr.parent),
-            ...(tr.followRefs === true ? { followRefs: true } : {}),
-          }
-    }
-    return {
-      on: tr.on,
-      query: canonicalNode(tr.query),
-      ...(tr.birth === true ? { birth: true as const } : {}),
-    }
-  })
+  const triggers: AutomationTrigger[] = def.triggers.map((tr) =>
+    tr === 'manual'
+      ? 'manual'
+      : {
+          on: tr.on,
+          query: canonicalNode(tr.query),
+          ...(tr.birth === true ? { birth: true as const } : {}),
+        },
+  )
   const steps = def.steps.map((s) => ({ cmd: s.cmd, args: { ...s.args } }))
   const out: AutomationDef = { enabled: def.enabled, triggers, steps: def.steps.length === 0 ? [] : steps }
   if (def.when !== undefined) out.when = def.when

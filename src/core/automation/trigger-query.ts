@@ -88,6 +88,12 @@ export function validateTriggerQuery(on: TriggerOn, query: QueryNode, birth: boo
       return
     }
     if (ctx.scope === 'self') {
+      if ('tag' in node && typeof node.tag !== 'string') {
+        // 含子标签（desc）要标签树闭包——before 侧主体不在索引里，闭包无从注入；
+        // 触发器的标签原子用直读形态（真用例出现再把闭包接进主体适配）
+        violation = 'tag conditions in triggers use direct membership (string form)'
+        return false
+      }
       if ('text' in node || 'mark' in node || 'link' in node || 'ref' in node) {
         violation = 'content atoms cannot trigger events (per-keystroke transactions, no atom index)'
         return false

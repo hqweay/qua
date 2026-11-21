@@ -347,13 +347,14 @@ export class MemoryKb implements KbClient {
   matchesSpec(
     spec: QuerySpec,
     block: Block,
-    opts: { selfId?: string; excludeIds?: readonly string[]; today?: string } = {},
+    opts: { selfId?: string; excludeIds?: readonly string[]; today?: string; blockLocalTags?: boolean } = {},
   ): boolean {
     // 与 query 同一份环境（specContextOf）：判定不许与整库求值各漂各的
     return blockMatchesSpec(this.store.index, this.store.blocks, spec, block, {
       selfId: opts.selfId,
       excludeIds: opts.excludeIds,
       ...(opts.today ? { today: opts.today } : {}),
+      ...(opts.blockLocalTags === true ? { blockLocalTags: true } : {}),
     })
   }
 

@@ -164,44 +164,57 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
   /** 一条触发器的人话（chip 显示；与引擎的触发键同一份形状来源） */
   const triggerText = (tr: AutomationTrigger): string => {
     if (tr === 'manual') return t('ui.automation.trigger.manual')
-    // 统一形状（{on, query, birth}）：按事件轴给同一句式；收纳重排时再按「当/如果/就」重写
-    if (!('kind' in tr)) {
-      const cond = parentCondChips(tr.query).join(' ')
-      const key = tr.birth === true
-        ? 'ui.automation.trigger.edgeBirth'
-        : tr.on === 'entered'
-          ? 'ui.automation.trigger.edgeEntered'
-          : tr.on === 'left'
-            ? 'ui.automation.trigger.edgeLeft'
-            : 'ui.automation.trigger.edgeChanged'
-      return t(key, { cond })
-    }
-    if (tr.kind === 'prop') {
-      const name = labelOfProp(tr.prop)
-      if (tr.to === undefined) return t('ui.automation.trigger.propAny', { prop: name })
-      // checkbox 的值位是布尔：人话用勾选两态，不走选项名解析
-      if (typeof tr.to === 'boolean') {
-        return t('ui.automation.trigger.propTo', { prop: name, to: t(tr.to ? 'ui.automation.valueChecked' : 'ui.automation.valueUnchecked') })
+    // 常见形状给专句；其余按事件轴走通用句式（收纳重排时再按「当/如果/就」统一）
+    const cond = (): string => parentCondChips(tr.query).join(' ')
+    // 「在 X 下新建子块时」：容纳链上的 {is} 保持点名句式，其余条件走人话投影
+    if (tr.birth === true) {
+      const inner = topUpOf(tr.query)
+      if (inner !== undefined) {
+        if ('is' in inner && typeof inner.is === 'string') {
+          return t('ui.automation.trigger.childAddedUnder', { parent: labelOfBlock(inner.is) })
+        }
+        return t('ui.automation.trigger.childAddedQuery', { cond: parentCondChips(inner).join(' ') })
       }
-      return t('ui.automation.trigger.propTo', { prop: name, to: choiceLabelOf(tr.prop, tr.to) })
     }
-    if (tr.kind === 'tag') {
-      return t(tr.on === 'added' ? 'ui.automation.trigger.tagOn' : 'ui.automation.trigger.tagOff', { tag: labelOfTag(tr.tag) })
+    if (tr.on === 'entered' || tr.on === 'left' || tr.on === 'changed') {
+      const q = tr.query
+      if ('prop' in q && 'exists' in q.prop && q.prop.exists === true) {
+        const name = labelOfProp(q.prop.id)
+        if (tr.on === 'entered') return t('ui.automation.trigger.propAny', { prop: name })
+        if (tr.on === 'left') return t('ui.automation.trigger.propCleared', { prop: name })
+        return t('ui.automation.trigger.propChanged', { prop: name })
+      }
+      if ('prop' in q && 'eq' in q.prop) {
+        const name = labelOfProp(q.prop.id)
+        const to = q.prop.eq
+        // checkbox 的值位是布尔：人话用勾选两态，不走选项名解析
+        const toText = typeof to === 'boolean' ? t(to ? 'ui.automation.valueChecked' : 'ui.automation.valueUnchecked') : choiceLabelOf(q.prop.id, to as string)
+        return t('ui.automation.trigger.propTo', { prop: name, to: toText })
+      }
+      if ('tag' in q) {
+        const tag = typeof q.tag === 'string' ? q.tag : q.tag.id
+        if (tr.on === 'entered') return t('ui.automation.trigger.tagOn', { tag: labelOfTag(tag) })
+        if (tr.on === 'left') return t('ui.automation.trigger.tagOff', { tag: labelOfTag(tag) })
+      }
     }
-    if (tr.parent === undefined) {
-      return tr.followRefs === true
-        ? t('ui.automation.trigger.childAddedRefs')
-        : t('ui.automation.trigger.childAdded')
+    const key = tr.birth === true
+      ? 'ui.automation.trigger.edgeBirth'
+      : tr.on === 'entered'
+        ? 'ui.automation.trigger.edgeEntered'
+        : tr.on === 'left'
+          ? 'ui.automation.trigger.edgeLeft'
+          : 'ui.automation.trigger.edgeChanged'
+    return t(key, { cond: cond() })
+  }
+
+  /** 诞生触发器 query 里顶层的 `{up}` 内部条件（{up:P} 或顶层 all 的直接成员位；没有给 undefined） */
+  const topUpOf = (query: QueryNode): QueryNode | undefined => {
+    if ('up' in query) return query.up
+    if ('all' in query) {
+      const member = query.all.find((m) => 'up' in m)
+      return member && 'up' in member ? member.up : undefined
     }
-    // {is} 精确到某块保持「在 X 下新建子块时」；其余条件走人话投影
-    const isNode = tr.parent as { is?: unknown }
-    if ('is' in tr.parent && typeof isNode.is === 'string') {
-      const base = t('ui.automation.trigger.childAddedUnder', { parent: labelOfBlock(isNode.is) })
-      return tr.followRefs === true ? `${base}${t('ui.automation.trigger.refsSuffix')}` : base
-    }
-    const chips = parentCondChips(tr.parent)
-    const base = t('ui.automation.trigger.childAddedQuery', { cond: chips.join(' ') })
-    return tr.followRefs === true ? `${base}${t('ui.automation.trigger.refsSuffix')}` : base
+    return undefined
   }
 
   /** 父块筛选条件的人话（与「如果」同一份投影，fields/choices 同源） */
@@ -249,14 +262,9 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
     const tr = def.triggers[at]
     if (tr === undefined || tr === 'manual') return
     const rows: Row[] = [{ id: 'trigger/remove', label: t('ui.automation.removeTrigger'), group: 'trigger/1' }]
-    if ('kind' in tr && tr.kind === 'child.added') {
+    // 「改父块筛选」只对诞生触发器（query 里带 {up}）有意义；容纳链透明不再有开关
+    if (tr.birth === true && topUpOf(tr.query) !== undefined) {
       rows.push({ id: 'trigger/reparent', label: t('ui.automation.reparent'), group: 'trigger/1' })
-      rows.push({
-        id: 'trigger/followrefs',
-        label: t('ui.automation.trigger.followRefsToggle', { on: tr.followRefs === true ? t('ui.automation.on') : t('ui.automation.off') }),
-        hint: t('ui.automation.trigger.followRefsHint'),
-        group: 'trigger/1',
-      })
     }
     deps.openMenu(rows, (row) => {
       if (row.id === 'trigger/remove') {
@@ -266,19 +274,6 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
       if (row.id === 'trigger/reparent') {
         deps.editParentFilter(at)
         return
-      }
-      if (row.id === 'trigger/followrefs') {
-        const next = def.triggers.map((x, i): AutomationTrigger => {
-          if (i !== at || x === 'manual' || !('kind' in x) || x.kind !== 'child.added') return x
-          // 显式字面量（条件展开会让推断把 followRefs 拓宽成 boolean）
-          if (x.followRefs === true) {
-            return x.parent === undefined ? { kind: 'child.added' } : { kind: 'child.added', parent: x.parent }
-          }
-          return x.parent === undefined
-            ? { kind: 'child.added', followRefs: true }
-            : { kind: 'child.added', followRefs: true, parent: x.parent }
-        })
-        write({ ...def, triggers: next })
       }
     }, triggerText(tr))
   }
@@ -320,7 +315,8 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
           deps.openMenu(
             [{ id: '', label: t('ui.automation.trigger.propAnyValue'), group: 'trigger/val' }, ...choicesOf(defBlock!).map((c) => ({ id: c.id, label: c.label, group: 'trigger/val' }))],
             (vrow) => {
-              const triggers: AutomationTrigger[] = [...def.triggers, vrow.id === '' ? { kind: 'prop', prop: propId } : { kind: 'prop', prop: propId, to: vrow.id }]
+              // 「任何变化」＝三支边沿（进入／离开／期间有变）——同规则去重使同笔变更只跑一次
+              const triggers: AutomationTrigger[] = [...def.triggers, ...(vrow.id === '' ? propAnyTriggers(propId) : [propToTrigger(propId, vrow.id)])]
               write({ ...def, triggers })
             },
             t('ui.automation.pickValueTitle'),
@@ -335,51 +331,61 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
               { id: 'off', label: t('ui.automation.valueUnchecked'), group: 'trigger/val' },
             ],
             (vrow) => {
-              const to = vrow.id === 'any' ? undefined : vrow.id === 'on'
-              const triggers: AutomationTrigger[] = [...def.triggers, to === undefined ? { kind: 'prop', prop: propId } : { kind: 'prop', prop: propId, to }]
+              const triggers: AutomationTrigger[] = [
+                ...def.triggers,
+                ...(vrow.id === 'any' ? propAnyTriggers(propId) : [propToTrigger(propId, vrow.id === 'on')]),
+              ]
               write({ ...def, triggers })
             },
             t('ui.automation.pickValueTitle'),
           )
           return
         }
-        write({ ...def, triggers: [...def.triggers, { kind: 'prop', prop: propId }] })
+        write({ ...def, triggers: [...def.triggers, ...propAnyTriggers(propId)] })
       },
       t('ui.automation.trigger.addPropTitle'),
     )
   }
 
+  /** 「{prop} 变了」的统一形状：三支边沿各一条，同笔变更靠 (规则,目标) 去重只跑一次 */
+  const propAnyTriggers = (propId: string): AutomationTrigger[] => [
+    { on: 'entered', query: { prop: { id: propId, exists: true } } },
+    { on: 'left', query: { prop: { id: propId, exists: true } } },
+    { on: 'changed', query: { prop: { id: propId, exists: true } } },
+  ]
+
+  const propToTrigger = (propId: string, to: string | boolean): AutomationTrigger => ({
+    on: 'entered',
+    query: { prop: { id: propId, eq: to } },
+  })
+
   const pickTagForTrigger = (def: AutomationDef, on: 'added' | 'removed'): void => {
     deps.openMenu(
       deps.kb.tags().map((tag) => ({ id: tag.id, label: `#${displayNameOf(tag)}`, group: 'trigger/tag' })),
       (row) => {
-        write({ ...def, triggers: [...def.triggers, { kind: 'tag', tag: row.id, on }] })
+        write({ ...def, triggers: [...def.triggers, { on: on === 'added' ? 'entered' : 'left', query: { tag: row.id } }] })
       },
       t('ui.automation.pickTagTitle'),
     )
   }
 
-  /** 新建子块触发器：任意父块，或点名一个，或用条件筛（父块是 Qua 的传递型引用这类语义） */
+  /** 新建子块触发器：点名一个父块，或用条件筛（容纳链透明；「任意父块＋无条件」＝每笔新建都触发，保护性拒绝） */
   const pickParentForTrigger = (def: AutomationDef): void => {
     deps.openMenu(
       [
-        { id: '', label: t('ui.automation.trigger.anyParent'), group: 'trigger/parent' },
         { id: 'pick', label: t('ui.automation.trigger.pickParent'), group: 'trigger/parent' },
         { id: 'query', label: t('ui.automation.trigger.queryParent'), hint: t('ui.automation.trigger.queryParentHint'), group: 'trigger/parent' },
       ],
       (row) => {
-        if (row.id === '') {
-          write({ ...def, triggers: [...def.triggers, { kind: 'child.added' }] })
-          return
-        }
         if (row.id === 'query') {
-          // 加触发器时还没有下标：先落一条无筛选的，随即开条件树改它的父块筛选
-          write({ ...def, triggers: [...def.triggers, { kind: 'child.added' }] })
+          // 加触发器时还没有下标：先落一条占位父条件，随即开条件树改它（不筛父块的诞生触发
+          // 由「如果」条件承载——收纳重排时合并）
+          write({ ...def, triggers: [...def.triggers, { on: 'entered', query: { up: { any: [] } }, birth: true }] })
           deps.editParentFilter(def.triggers.length)
           return
         }
         pickParent((parentId) => {
-          write({ ...def, triggers: [...def.triggers, parentId === '' ? { kind: 'child.added' } : { kind: 'child.added', parent: { is: parentId } }] })
+          write({ ...def, triggers: [...def.triggers, { on: 'entered', query: { up: { is: parentId } }, birth: true }] })
         })
       },
       t('ui.automation.trigger.addChildTitle'),
@@ -401,7 +407,7 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
       line.appendChild(chip(t('ui.automation.noCond'), 'is-muted', () => deps.editWhen()))
     } else {
       const warns = condWarnOf(def.when)
-      const hasFresh = def.triggers.some((tr) => tr !== 'manual' && 'kind' in tr && tr.kind === 'child.added')
+      const hasFresh = def.triggers.some((tr) => tr !== 'manual' && tr.birth === true)
       condChips(def.when).forEach((text, i) => {
         const c = chip(text, 'is-cond', () => deps.editWhen())
         // 错配提示走记号＋悬停（界面少字）：内容依赖的条件在「新建子块」触发下

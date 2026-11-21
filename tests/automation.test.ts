@@ -150,7 +150,7 @@ test('guards：禁用／事件-only／没有步骤／没有目标／自改／条
     '停用的先于一切（面板根本不列它，这是运行前的最后闸）',
   )
   assert.equal(
-    manualRunGuards({ ...MANUAL_DEF, triggers: [{ kind: 'prop', prop: 'p1' }] }, aid, tid, true).reason,
+    manualRunGuards({ ...MANUAL_DEF, triggers: [{ on: 'entered', query: { prop: { id: 'p1', exists: true } } }] }, aid, tid, true).reason,
     'noManual',
   )
   assert.equal(manualRunGuards({ ...MANUAL_DEF, steps: [] }, aid, tid, true).reason, 'noSteps')
@@ -290,7 +290,7 @@ function projFixture(): { kb: MemoryKb; target: Block; rules: Record<string, Blo
   })
   const eventOnly = mkAutomationBlock({
     name: '事件规则',
-    def: { ...MANUAL_DEF, triggers: [{ kind: 'prop', prop: 'p1', to: 'x' }] },
+    def: { ...MANUAL_DEF, triggers: [{ on: 'entered', query: { prop: { id: 'p1', eq: 'x' } } }] },
   })
   const noSteps = mkAutomationBlock({ name: '空步骤', def: { ...MANUAL_DEF, steps: [] } })
   const broken = mkBlock('坏规则')
@@ -415,7 +415,7 @@ test('事件①：属性触发器——值真变才跑，规则写入并入同�
     name: '状态变完成就归档',
     def: {
       enabled: true,
-      triggers: [{ kind: 'prop', prop: state.id, to: 'c-done' }],
+      triggers: [{ on: 'entered', query: { prop: { id: state.id, eq: 'c-done' } } }],
       steps: [{ cmd: 'core.tags/add', args: { tagId: doneTag.id } }],
     },
   })
@@ -444,7 +444,7 @@ test('事件②：child.added——A 之下新建子块自动打标；重放与�
     name: 'A 下新建就打 AI',
     def: {
       enabled: true,
-      triggers: [{ kind: 'child.added', parent: { is: parentA.id } }],
+      triggers: [{ on: 'entered', query: { up: { is: parentA.id } }, birth: true }],
       steps: [{ cmd: 'core.tags/add', args: { tagId: aiTag.id } }],
     },
   })
@@ -482,7 +482,7 @@ test('事件③：规则失败不牵连用户的写（reactor 不许抛）', () 
     name: '会失败的规则',
     def: {
       enabled: true,
-      triggers: [{ kind: 'prop', prop: numDef.id }],
+      triggers: [{ on: 'entered', query: { prop: { id: numDef.id, exists: true } } }],
       steps: [{ cmd: 'core.props/set-value', args: { propId: numDef.id, value: '不是数字' } }],
     },
   })
@@ -500,13 +500,13 @@ test('事件④：停用的规则不跑；条件不满足不跑；条件按刚�
   tag.props = { _aliases: ['有标记'], _lists: ['tag'] }
   const disabled = mkAutomationBlock({
     name: '停用规则',
-    def: { enabled: false, triggers: [{ kind: 'prop', prop: flag.id }], steps: [{ cmd: 'core.tags/add', args: { tagId: tag.id } }] },
+    def: { enabled: false, triggers: [{ on: 'entered', query: { prop: { id: flag.id, exists: true } } }], steps: [{ cmd: 'core.tags/add', args: { tagId: tag.id } }] },
   })
   const withWhen = mkAutomationBlock({
     name: '只对有正文的',
     def: {
       enabled: true,
-      triggers: [{ kind: 'prop', prop: flag.id }],
+      triggers: [{ on: 'entered', query: { prop: { id: flag.id, exists: true } } }],
       when: { text: '有正文' },
       steps: [{ cmd: 'core.tags/add', args: { tagId: tag.id } }],
     },
@@ -525,7 +525,7 @@ test('事件④：停用的规则不跑；条件不满足不跑；条件按刚�
   assert.equal(hasTag(kb2.get(withWhenTarget.id)!, tag.id), true, '条件满足 ⇒ 打标')
 })
 
-test('事件⑤：followRefs——传递型引用的父块沿目标展开（默认关）', () => {
+test('事件⑤：容纳链——传递型引用行透明（引用开关被链吸收退场）', () => {
   const aiTag = mkBlock('AI')
   aiTag.props = { _aliases: ['AI'], _lists: ['tag'] }
   const realParent = mkBlock('真父块')
@@ -536,7 +536,7 @@ test('事件⑤：followRefs——传递型引用的父块沿目标展开（默�
     name: '沿引用打标',
     def: {
       enabled: true,
-      triggers: [{ kind: 'child.added', parent: { is: realParent.id }, followRefs: true }],
+      triggers: [{ on: 'entered', query: { up: { is: realParent.id } }, birth: true }],
       steps: [{ cmd: 'core.tags/add', args: { tagId: aiTag.id } }],
     },
   })
@@ -544,7 +544,7 @@ test('事件⑤：followRefs——传递型引用的父块沿目标展开（默�
 
   const fresh = mkBlock('透过引用进来的子块')
   kb.tx((tx) => tx.insert(fresh, passThrough.id, Number.MAX_SAFE_INTEGER))
-  assert.equal(hasTag(kb.get(fresh.id)!, aiTag.id), true, '父块是传递型引用 ⇒ 沿目标匹配（followRefs 开）')
+  assert.equal(hasTag(kb.get(fresh.id)!, aiTag.id), true, '父块是传递型引用行 ⇒ 容纳链穿过它命中目标（引用行透明）')
 })
 
 test('mentionsContentAtoms：内容原子才算错配；{up} 子树说的是祖先，不算', () => {
@@ -567,7 +567,7 @@ test('事件⑥：父块筛选是条件——{tag} 按标签、{is} 按块', () 
     name: '收件箱之子打 AI',
     def: {
       enabled: true,
-      triggers: [{ kind: 'child.added', parent: { tag: inboxTag.id } }],
+      triggers: [{ on: 'entered', query: { up: { tag: inboxTag.id } }, birth: true }],
       steps: [{ cmd: 'core.tags/add', args: { tagId: aiTag.id } }],
     },
   })
@@ -587,7 +587,7 @@ test('事件⑥：父块筛选是条件——{tag} 按标签、{is} 按块', () 
     name: '点名规则',
     def: {
       enabled: true,
-      triggers: [{ kind: 'child.added', parent: { is: named.id } }],
+      triggers: [{ on: 'entered', query: { up: { is: named.id } }, birth: true }],
       steps: [{ cmd: 'core.tags/add', args: { tagId: aiTag.id } }],
     },
   })

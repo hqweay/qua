@@ -1,41 +1,39 @@
 /**
- * **触发器统一的等式测试**：触发器从三种硬编码 kind 换成「查询 × 迁移」统一形状时，
- * 行为契约逐条钉在这里——统一引擎落地后同一批断言改用统一形状表达，
- * 除有记号的「有意变更」外必须逐字节等价。改动语义而不改这里的断言＝白改。
+ * **触发器统一的等式测试**：触发器已从三种硬编码 kind 换成「查询 × 迁移」统一形状
+ * `{on, query, birth?}`。这批断言就是统一形状的表达——与旧引擎逐字节对照后，除下列
+ * 「有意变更」外行为等价（断言清单沿用文件头编号，作追溯；「v1」＝三种 kind 的旧引擎）。
  *
- * ## 断言清单（spec→test 追溯；「v1」＝三种 kind 的现行引擎）
+ * ## 断言清单（spec→test 追溯）
  *
- * 1. `prop(P,to=v)`：已有块 P→v 开火；P→其他值不开火；同值写不开火；创建即 P=v——
- *    v1 不开火，统一后开火【有意变更①，显式断言】
- * 2. `prop(P)`（任意变化）≡ `changed({has P})`：值变开火（含置空）；同值写不开火；创建不开火（等价点）
+ * 1. `prop(P,to=v)` ≡ `entered({prop P = v})`：已有块 P→v 开火；P→其他值不开火；同值写不开火；
+ *    创建即 P=v——v1 不开火，统一后开火【有意变更①：诞生＝进入一切集合，已拍板】
+ * 2. `prop(P)`（任意变化）≡ 三支边沿 `entered/left/changed({prop P 存在})`：值变开火
+ *    （changed 腿）、置空开火（left 腿）、同值写不开火；创建开火一次（entered 腿，
+ *    有意变更①；changed 腿在诞生侧不开火＝等价点）
  * 3. `tag(T,added/removed)` ≡ `entered/left({tag T})`：边沿开火；创建即带标签——v1 不开火，
  *    统一后开火【有意变更①】；块删除不触发（原子没变）
- * 4. `child.added(父条件)` ≡ `entered({up:父条件}, birth)`：仅诞生开火；移动已有块进匹配父级不开火；
- *    `followRefs=true` 的传递引用父匹配必须等价；无父条件的 `child.added()`＝任意父块诞生开火
- * 5. when 时态：一律对 after 求值（统一形状的 `left`＋`when` 永不开火边界随 left 落地时补断言）
- * 6. 去重与序：同 tx 同规则同目标一次（两支触发器同时命中也只跑一次）；规则按森林先序——
+ * 4. `child.added(父条件)` ≡ `entered({up:父条件}, birth)`：仅诞生开火；移动已有块进匹配
+ *    父级不开火；`followRefs` 开关退场——容纳链走查（真父链，传递型引用行透明）吸收其能力，
+ *    v1 的两变体都是容纳链的子集【有意变更④：直接父块 → 容纳链】；「任意父块＋无条件」
+ *    被 ≥1 引用原子保护性拒绝
+ * 5. when 时态：一律对 after 求值；`left({X})`＋`when({X})` 永不开火（边界随本条断言）
+ * 6. 去重与序：同 tx 同规则同目标一次（多支触发器同时命中也只跑一次）；规则按森林先序——
  *    两条规则写同一格，后写的赢、结果确定
- * 7. 事务语义：规则写入并入触发事务（同一批 op、一次撤销全退）；预检失败跳过该反应、用户写照常提交
+ * 7. 事务语义：规则写入并入触发事务（同一批 op、一次撤销全退）；预检失败跳过该反应、
+ *    用户写照常提交
  * 8. 重放／撤销不触发：撤销走 `store.undo`→`applyOps`，重放与同步同样不经过 reactor
- * 9. 形状闸（v1：`isAutomationDef` 拒未知 kind → 读不出定义 → 投影 broken）；
- *    统一形状的 TriggerQuery 校验器（叶子白名单／up 位置约束／含 up 强制诞生／≥1 原子／
- *    birth 仅限 entered）随校验器落地补进本文件
+ * 9. 形状闸：旧三种 kind 不是合法形状（读不出定义 → 投影 broken，无兼容分支）；
+ *    TriggerQuery 校验器（作用域白名单／up 位置约束／含 up 强制诞生／≥1 原子／birth 仅限
+ *    entered）在 trigger-query 测试文件逐条钉
  * 10. 生命周期：纯删除／纯恢复静默（exist 不是查询原子，原子没变即静默）；恢复＋同笔修改按
- *     真实原子判定；**删除＋同笔修改：v1 开火并把反应写进死目标【有意变更②：统一后预检跳过】**
- * 11. present 守卫：写入对象（显式目标／insert 父／move 源与目的地父／add-tag 的标签）必须 present、
- *     remove-tag 允许已删标签（有意清理路径）。v1 实测（本文件钉住）：**跨笔**已删一律已拒
- *     （索引在删除时把块摘出可见表，`kb.get` 天然滤掉）；**同笔窗口**放行（索引在事务出口才修补，
- *     反应期间查得到刚删的块）——同笔窗口由统一 present 守卫翻转（显式判删除标记）【有意变更③】
+ *     真实原子判定；**删除＋同笔修改：v1 开火并把反应写进死目标，统一引擎预检跳过
+ *     【有意变更⑤：对死目标的反应】**
+ * 11. present 守卫：写入对象（显式目标／insert 父／move 源与目的地父／add-tag 的标签）必须
+ *     present、remove-tag 允许已删标签（有意清理路径）。跨笔已删一律已拒（索引删除即摘出
+ *     可见表）；**同笔窗口仍放行**（索引在事务出口才修补）——统一 present 守卫翻转
+ *     【有意变更⑥，U6 落地】
  * 12. 规则块边界：set/clear 拒 `_automation` 与一切 `_` 槽；insert-child 造普通块；
- *     move 拒搬规则块；规则块的普通属性与标签可写（它仍是普通用户块）
- *
- * ## v1 行为账（探针实测过的事实，勿凭印象改断言）
- *
- * - 「删除＋同笔修改」v1 **不是**失败路径：reactor 跑在索引修补之前，反应里的读检查全部通过，
- *   写入成功落进死目标。统一引擎的「after 已删 ⇒ 跳过」改掉的是这个。
- * - 「add-tag 已删标签」跨笔已被拒——「kb.get 不滤软删」的旧说法与现状不符：过滤发生在
- *   索引可见性（删除时摘表），不在 get 的字面代码里；真缺口只剩同笔窗口。
- * - 撤销把规则写入一并退掉且不重触发：撤销条目含 touched 全部块（含规则写的）。
+ *     move 搬规则块被拒；规则块的普通属性与标签可写（它仍是普通用户块）
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -48,10 +46,13 @@ import {
   mkAutomationBlock,
   readAutomation,
   type AutomationDef,
+  type AutomationStep,
+  type AutomationTrigger,
 } from '../src/core/automation/automation.ts'
 import { createAutomationEngine } from '../src/core/automation/engine.ts'
 import { runAutomationSteps } from '../src/core/automation/run.ts'
 import { projectManualAutomations } from '../src/core/automation/projection.ts'
+import { validateTriggerQuery } from '../src/core/automation/trigger-query.ts'
 
 /* ------------------------------------------------------------ 夹具 */
 
@@ -102,7 +103,7 @@ function findIncludingDeleted(kb: MemoryKb, id: string): Block | undefined {
 }
 
 /** 事件链规则的最小形状：一支触发器 ＋ 一个 insert-child（跑没跑数子块） */
-function birthRule(trigger: AutomationDef['triggers'][number]): AutomationDef {
+function birthRule(trigger: AutomationTrigger): AutomationDef {
   return {
     enabled: true,
     triggers: [trigger],
@@ -115,19 +116,29 @@ function reactionCount(target: Block): number {
   return target.children.filter((c) => c.children.length === 0 && c.content.some((r) => 'v' in r && r.v === '反应')).length
 }
 
-/* ------------------------------------------------------------ 等式①：prop(P, to=v) */
+/** 「{prop} 存在」的原子 */
+const hasProp = (id: string) => ({ prop: { id, exists: true as const } })
+
+/** v1 `prop(P)`（任意变化）的统一形状：三支边沿各一条，同笔变更靠 (规则,目标) 去重只跑一次 */
+const propAny = (id: string): AutomationTrigger[] => [
+  { on: 'entered', query: hasProp(id) },
+  { on: 'left', query: hasProp(id) },
+  { on: 'changed', query: hasProp(id) },
+]
+
+/* ------------------------------------------------------------ 等式①：prop(P, to=v) ≡ entered({prop P = v}) */
 
 test('等式①：已有块 P→v 开火；P→其他值不开火；同值写不开火', () => {
   const state = selectDefWithChoices()
   const target = mkBlock('一块任务')
   const rule = mkAutomationBlock({
     name: '状态变完成就数一次',
-    def: birthRule({ kind: 'prop', prop: state.id, to: 'c-done' }),
+    def: birthRule({ on: 'entered', query: { prop: { id: state.id, eq: 'c-done' } } }),
   })
   const { kb } = engineFixture([state, target, rule])
 
   kb.tx((tx) => tx.setProp(target.id, state.id, 'c-doing'))
-  assert.equal(reactionCount(target), 0, 'to 之外的值不开火')
+  assert.equal(reactionCount(target), 0, 'eq 之外的值不开火')
 
   kb.tx((tx) => tx.setProp(target.id, state.id, 'c-doing'))
   assert.equal(reactionCount(target), 0, '同值写：值没真变不算变化')
@@ -136,84 +147,109 @@ test('等式①：已有块 P→v 开火；P→其他值不开火；同值写不
   assert.equal(reactionCount(target), 1, 'P→v 开火一次')
 })
 
-test('等式①【有意变更①】：创建即 P=v——v1 不开火（统一后 entered 对出生即满足开火）', () => {
+test('等式①【有意变更①，已翻转】：创建即 P=v——统一后 entered 开火（v1 不开火）', () => {
   const state = selectDefWithChoices()
-  const rule = mkAutomationBlock({ name: '规则', def: birthRule({ kind: 'prop', prop: state.id, to: 'c-done' }) })
+  const rule = mkAutomationBlock({
+    name: '规则',
+    def: birthRule({ on: 'entered', query: { prop: { id: state.id, eq: 'c-done' } } }),
+  })
   const { kb } = engineFixture([state, rule])
 
   const fresh = mkBlock('出生即完成')
   fresh.props = { [state.id]: 'c-done' }
   kb.tx((tx) => tx.insert(fresh, null, 0))
-  assert.equal(reactionCount(fresh), 0, 'v1：before===null 跳过；统一后此断言翻转为 1（已拍板）')
+  assert.equal(reactionCount(fresh), 1, '诞生按「不匹配」参与 entered 判定 ⇒ 出生即满足开火（模板／批量连发是接受的新注意点）')
 })
 
-/* ------------------------------------------------------------ 等式②：prop(P) ≡ changed({has P}) */
+test('等式①补：birth 修饰位把 entered 收窄到诞生——已有块 P→v 不开火', () => {
+  const state = selectDefWithChoices()
+  const target = mkBlock('一块任务')
+  const rule = mkAutomationBlock({
+    name: '只对诞生开火',
+    def: birthRule({ on: 'entered', query: { prop: { id: state.id, eq: 'c-done' } }, birth: true }),
+  })
+  const { kb } = engineFixture([state, target, rule])
 
-test('等式②：值变开火（含置空）；同值写不开火；创建不开火（与 changed({has P}) 的等价点）', () => {
+  kb.tx((tx) => tx.setProp(target.id, state.id, 'c-done'))
+  assert.equal(reactionCount(target), 0, 'birth 闸：已有块的属性变化不开火')
+
+  const fresh = mkBlock('出生即完成')
+  fresh.props = { [state.id]: 'c-done' }
+  kb.tx((tx) => tx.insert(fresh, null, 0))
+  assert.equal(reactionCount(fresh), 1, '诞生且 after 匹配：开火')
+})
+
+/* ------------------------------------------------------------ 等式②：prop(P) ≡ 三支边沿 */
+
+test('等式②：值变开火（changed 腿）；置空开火（left 腿）；同值写不开火；创建开火一次（entered 腿）', () => {
   const numDef = mkPropDef('数量', 'number')
   const fresh = mkBlock('目标')
-  const rule = mkAutomationBlock({ name: '数量动一次数一次', def: birthRule({ kind: 'prop', prop: numDef.id }) })
-  const { kb } = engineFixture([numDef, fresh, rule])
+  const rule = mkAutomationBlock({ name: '数量动一次数一次', def: birthRule({ on: 'changed', query: hasProp(numDef.id) }) })
+  const edgeRule = mkAutomationBlock({
+    name: '进入与离开',
+    def: { enabled: true, triggers: [{ on: 'entered', query: hasProp(numDef.id) }, { on: 'left', query: hasProp(numDef.id) }], steps: [{ cmd: 'core.tree/insert-child', args: { text: '反应' } }] },
+  })
+  const { kb } = engineFixture([numDef, fresh, rule, edgeRule])
 
-  // 创建即带值：不开火（changed 在诞生侧天然不满足——before 侧查不为真）
+  // 创建即带值：changed 腿不开火（before 侧查不为真＝等价点）；entered 腿开火（有意变更①）
   fresh.props = { [numDef.id]: 1 }
   kb.tx((tx) => tx.insert(fresh, null, 0))
-  assert.equal(reactionCount(fresh), 0, '创建不开火')
+  assert.equal(reactionCount(fresh), 1, '创建：entered 腿开火一次（changed/left 腿静默）')
 
   kb.tx((tx) => tx.setProp(fresh.id, numDef.id, 2))
-  assert.equal(reactionCount(fresh), 1, '值变开火')
+  assert.equal(reactionCount(fresh), 2, '值变：changed 腿开火（entered 在 before 侧已满足，无边沿）')
 
   kb.tx((tx) => tx.setProp(fresh.id, numDef.id, 2))
-  assert.equal(reactionCount(fresh), 1, '同值写不开火')
+  assert.equal(reactionCount(fresh), 2, '同值写不开火')
 
   kb.tx((tx) => tx.clearProp(fresh.id, numDef.id))
-  assert.equal(reactionCount(fresh), 2, '置空也是值变（统一后由 left({has P}) 这条腿开火，去重后同 tx 一次）')
+  assert.equal(reactionCount(fresh), 3, '置空：left 腿开火')
 })
 
-/* ------------------------------------------------------------ 等式③：tag(T, added/removed) */
+/* ------------------------------------------------------------ 等式③：tag(T, added/removed) ≡ entered/left({tag T}) */
 
 test('等式③：added／removed 各自的边沿开火', () => {
   const t = mkTag('归档')
   const target = mkBlock('任务')
-  const rule = mkAutomationBlock({ name: '打上归档数一次', def: birthRule({ kind: 'tag', tag: t.id, on: 'added' }) })
+  const rule = mkAutomationBlock({ name: '打上归档数一次', def: birthRule({ on: 'entered', query: { tag: t.id } }) })
   const { kb } = engineFixture([t, target, rule])
 
   kb.tx((tx) => tx.setTags(target.id, [t.id]))
   assert.equal(reactionCount(target), 1, 'added 边沿：没有→有')
   kb.tx((tx) => tx.setTags(target.id, []))
-  assert.equal(reactionCount(target), 1, '摘掉不触发 added')
+  assert.equal(reactionCount(target), 1, '摘掉不触发 entered')
   kb.tx((tx) => tx.setTags(target.id, [t.id]))
   assert.equal(reactionCount(target), 2, '再次打上再开火（边沿，不是电平）')
 
   const target2 = mkBlock('另一块')
-  const rule2 = mkAutomationBlock({ name: '摘掉归档数一次', def: birthRule({ kind: 'tag', tag: t.id, on: 'removed' }) })
+  const rule2 = mkAutomationBlock({ name: '摘掉归档数一次', def: birthRule({ on: 'left', query: { tag: t.id } }) })
   const { kb: kb2 } = engineFixture([t, target2, rule2])
   kb2.tx((tx) => tx.setTags(target2.id, [t.id]))
-  assert.equal(reactionCount(target2), 0, '打上不触发 removed')
+  assert.equal(reactionCount(target2), 0, '打上不触发 left')
   kb2.tx((tx) => tx.setTags(target2.id, []))
   assert.equal(reactionCount(target2), 1, 'removed 边沿：有→没有')
 })
 
-test('等式③【有意变更①】＋删除不触发：创建即带标签——v1 不开火；块软删（原子没变）不触发', () => {
+test('等式③【有意变更①，已翻转】＋删除不触发：创建即带标签——统一后开火；块软删（原子没变）不触发', () => {
   const t = mkTag('归档')
-  const rule = mkAutomationBlock({ name: '规则', def: birthRule({ kind: 'tag', tag: t.id, on: 'added' }) })
+  const rule = mkAutomationBlock({ name: '规则', def: birthRule({ on: 'entered', query: { tag: t.id } }) })
   const { kb } = engineFixture([t, rule])
 
   const fresh = mkBlock('出生即带标签')
   fresh.props = { _tags: [t.id] }
   kb.tx((tx) => tx.insert(fresh, null, 0))
-  assert.equal(reactionCount(fresh), 0, 'v1：创建不开火；统一后此断言翻转为 1（已拍板）')
+  assert.equal(reactionCount(fresh), 1, '诞生即满足 ⇒ entered 开火（v1 静默）')
 
-  // 软删：_tags 原子没变 ⇒ removed 边沿不成立、added 也不成立
+  // 软删：_tags 原子没变 ⇒ 边沿不成立
   const holder = mkBlock('带标签的块')
   holder.props = { _tags: [t.id] }
-  const ruleRemoved = mkAutomationBlock({ name: '摘掉规则', def: birthRule({ kind: 'tag', tag: t.id, on: 'removed' }) })
+  const ruleRemoved = mkAutomationBlock({ name: '摘掉规则', def: birthRule({ on: 'left', query: { tag: t.id } }) })
   const { kb: kb2 } = engineFixture([t, holder, ruleRemoved])
   kb2.tx((tx) => tx.remove(holder.id))
   assert.equal(reactionCount(holder), 0, '块删除不触发（exist 不是查询原子）')
 })
 
-/* ------------------------------------------------------------ 等式④：child.added ≡ entered({up:父条件}, birth) */
+/* ------------------------------------------------------------ 等式④：child.added(父条件) ≡ entered({up:父条件}, birth) */
 
 test('等式④：仅诞生开火——匹配父块下新建开火；移动已有块进匹配父级不开火', () => {
   const parentA = mkBlock('块A')
@@ -224,7 +260,7 @@ test('等式④：仅诞生开火——匹配父块下新建开火；移动已�
     name: 'A 下新建就打 AI',
     def: {
       enabled: true,
-      triggers: [{ kind: 'child.added', parent: { is: parentA.id } }],
+      triggers: [{ on: 'entered', query: { up: { is: parentA.id } }, birth: true }],
       steps: [{ cmd: 'core.tags/add', args: { tagId: aiTag.id } }],
     },
   })
@@ -239,33 +275,79 @@ test('等式④：仅诞生开火——匹配父块下新建开火；移动已�
   assert.equal(hasTag(kb.get(stray.id)!, aiTag.id), false, '不匹配父块下诞生：不开火')
 
   kb.tx((tx) => tx.move(stray.id, parentA.id, Number.MAX_SAFE_INTEGER))
-  assert.equal(hasTag(kb.get(stray.id)!, aiTag.id), false, '移动已有块进匹配父级：不开火（移入不立项，统一后 birth 语义严格对齐）')
+  assert.equal(hasTag(kb.get(stray.id)!, aiTag.id), false, '移动已有块进匹配父级：不开火（birth 闸；移入不立项严格对齐）')
 })
 
-test('等式④补：followRefs=true 沿传递型引用展开（等价点）；无父条件＝任意父块诞生开火', () => {
+test('等式④【有意变更④】：容纳链——真父链任一层命中即开火；传递型引用行透明（followRefs 开关被链吸收）', () => {
   const aiTag = mkTag('AI')
-  const realParent = mkBlock('真父块')
-  const passThrough = mkBlock('')
-  passThrough.content = [{ id: 'ref-1', t: 'ref', to: realParent.id }] as typeof passThrough.content
+  const deepParent = mkBlock('深层父块')
+  const topPage = mkBlock('顶页')
+  topPage.props = { _lists: ['page'] }
+  topPage.children.push(deepParent)
   const rule = mkAutomationBlock({
-    name: '沿引用打标',
+    name: '顶页之下新建就打 AI',
     def: {
       enabled: true,
-      triggers: [{ kind: 'child.added', parent: { is: realParent.id }, followRefs: true }],
+      triggers: [{ on: 'entered', query: { up: { is: topPage.id } }, birth: true }],
       steps: [{ cmd: 'core.tags/add', args: { tagId: aiTag.id } }],
     },
   })
-  const { kb } = engineFixture([aiTag, realParent, passThrough, rule])
-  const fresh = mkBlock('透过引用进来的子块')
-  kb.tx((tx) => tx.insert(fresh, passThrough.id, Number.MAX_SAFE_INTEGER))
-  assert.equal(hasTag(kb.get(fresh.id)!, aiTag.id), true, 'followRefs=true：传递型引用的父匹配等价')
+  const { kb } = engineFixture([topPage, aiTag, rule])
 
-  const anyParent = mkBlock('任意父块')
-  const rule2 = mkAutomationBlock({ name: '任意诞生打标', def: { enabled: true, triggers: [{ kind: 'child.added' }], steps: [{ cmd: 'core.tags/add', args: { tagId: aiTag.id } }] } })
-  const { kb: kb2 } = engineFixture([anyParent, aiTag, rule2])
-  const fresh2 = mkBlock('任意父块的子块')
-  kb2.tx((tx) => tx.insert(fresh2, anyParent.id, Number.MAX_SAFE_INTEGER))
-  assert.equal(hasTag(kb2.get(fresh2.id)!, aiTag.id), true, '无父条件：任意父块诞生开火（统一形状＝entered(Q, birth)，Q 由「如果」承载）')
+  const fresh = mkBlock('深层的子块')
+  kb.tx((tx) => tx.insert(fresh, deepParent.id, Number.MAX_SAFE_INTEGER))
+  assert.equal(hasTag(kb.get(fresh.id)!, aiTag.id), true, '生在顶页的更深层：容纳链命中（v1 直接父块读法不开火）')
+
+  // 传递型引用行：容纳链穿过它命中目标（v1 需要显式开 followRefs，统一后开关退场）
+  const realParent = mkBlock('真父块')
+  const passThrough = mkBlock('')
+  passThrough.content = [{ id: 'ref-1', t: 'ref', to: realParent.id }] as typeof passThrough.content
+  const rule2 = mkAutomationBlock({
+    name: '沿容纳链打标',
+    def: {
+      enabled: true,
+      triggers: [{ on: 'entered', query: { up: { is: realParent.id } }, birth: true }],
+      steps: [{ cmd: 'core.tags/add', args: { tagId: aiTag.id } }],
+    },
+  })
+  const { kb: kb2 } = engineFixture([aiTag, realParent, passThrough, rule2])
+  const fresh2 = mkBlock('透过引用进来的子块')
+  kb2.tx((tx) => tx.insert(fresh2, passThrough.id, Number.MAX_SAFE_INTEGER))
+  assert.equal(hasTag(kb2.get(fresh2.id)!, aiTag.id), true, '父块是传递型引用行 ⇒ 容纳链穿过它命中目标')
+})
+
+test('等式④补：容纳链上的复合条件——self 半边照常求值（all 的其余成员对新块）', () => {
+  const tag = mkTag('紧急')
+  const parentA = mkBlock('块A')
+  const aiTag = mkTag('AI')
+  const rule = mkAutomationBlock({
+    name: 'A 下带紧急标签的新块打 AI',
+    def: {
+      enabled: true,
+      triggers: [{ on: 'entered', query: { all: [{ up: { is: parentA.id } }, { tag: tag.id }] }, birth: true }],
+      steps: [{ cmd: 'core.tags/add', args: { tagId: aiTag.id } }],
+    },
+  })
+  const { kb } = engineFixture([tag, parentA, aiTag, rule])
+
+  const hit = mkBlock('带紧急标签的子块')
+  hit.props = { _tags: [tag.id] }
+  kb.tx((tx) => tx.insert(hit, parentA.id, Number.MAX_SAFE_INTEGER))
+  assert.equal(hasTag(kb.get(hit.id)!, aiTag.id), true, 'placement 命中 ＋ self 命中：开火')
+
+  const miss = mkBlock('没标签的子块')
+  kb.tx((tx) => tx.insert(miss, parentA.id, Number.MAX_SAFE_INTEGER))
+  assert.equal(hasTag(kb.get(miss.id)!, aiTag.id), false, 'self 半边不满足：不开火')
+})
+
+test('等式④补：「任意父块＋无条件」保护性拒绝——没有引用原子的诞生触发不成形状', () => {
+  // 每笔新建都触发＝打字逐键新建的热路径危害；真用例（带「如果」条件）走 entered(Q, birth)
+  assert.match(
+    String(validateTriggerQuery('entered', { up: { children: true } }, true)),
+    /at least one atom/,
+    '结构外壳不算引用原子',
+  )
+  assert.equal(validateTriggerQuery('entered', { up: { is: 'a1' } }, true), null, '点名父块（picker 写法）合法')
 })
 
 /* ------------------------------------------------------------ 等式⑤：when 一律对 after 求值 */
@@ -278,7 +360,7 @@ test('等式⑤：when 对 after 求值——触发器命中但条件看的是�
     name: '开关翻转且状态是进行中才跑',
     def: {
       enabled: true,
-      triggers: [{ kind: 'prop', prop: flag.id }],
+      triggers: propAny(flag.id),
       when: { prop: { id: state.id, eq: 'c-doing' } },
       steps: [{ cmd: 'core.tree/insert-child', args: { text: '反应' } }],
     },
@@ -300,21 +382,24 @@ test('等式⑤：when 对 after 求值——触发器命中但条件看的是�
 
 /* ------------------------------------------------------------ 等式⑥：去重与序 */
 
-test('等式⑥：同 tx 同规则同目标一次——两支触发器同时命中也只跑一次', () => {
+test('等式⑥：同 tx 同规则同目标一次——多支触发器同时命中也只跑一次', () => {
   const state = selectDefWithChoices()
   const target = mkBlock('目标')
   const rule = mkAutomationBlock({
-    name: '双触发器规则',
+    name: '多触发器规则',
     def: {
       enabled: true,
-      // v1 的 to 槽只收 string/boolean（数字档的「等于某值」统一形状才表达得了）
-      triggers: [{ kind: 'prop', prop: state.id }, { kind: 'prop', prop: state.id, to: 'c-done' }],
+      triggers: [
+        { on: 'entered', query: hasProp(state.id) },
+        { on: 'changed', query: hasProp(state.id) },
+        { on: 'entered', query: { prop: { id: state.id, eq: 'c-done' } } },
+      ],
       steps: [{ cmd: 'core.tree/insert-child', args: { text: '反应' } }],
     },
   })
   const { kb } = engineFixture([state, target, rule])
   kb.tx((tx) => tx.setProp(target.id, state.id, 'c-done'))
-  assert.equal(reactionCount(target), 1, '两支触发器都命中同一目标：去重后一次')
+  assert.equal(reactionCount(target), 1, '三支触发器都命中同一目标：去重后一次')
 })
 
 test('等式⑥补：规则按森林先序——两条规则写同一格，后写的赢、结果确定', () => {
@@ -323,11 +408,11 @@ test('等式⑥补：规则按森林先序——两条规则写同一格，后�
   const target = mkBlock('目标')
   const first = mkAutomationBlock({
     name: '先写的规则',
-    def: { enabled: true, triggers: [{ kind: 'prop', prop: numDef.id }], steps: [{ cmd: 'core.props/set-value', args: { propId: outDef.id, value: '先' } }] },
+    def: { enabled: true, triggers: [{ on: 'entered', query: hasProp(numDef.id) }], steps: [{ cmd: 'core.props/set-value', args: { propId: outDef.id, value: '先' } }] },
   })
   const second = mkAutomationBlock({
     name: '后写的规则',
-    def: { enabled: true, triggers: [{ kind: 'prop', prop: numDef.id }], steps: [{ cmd: 'core.props/set-value', args: { propId: outDef.id, value: '后' } }] },
+    def: { enabled: true, triggers: [{ on: 'entered', query: hasProp(numDef.id) }], steps: [{ cmd: 'core.props/set-value', args: { propId: outDef.id, value: '后' } }] },
   })
   const { kb } = engineFixture([numDef, outDef, target, first, second])
   kb.tx((tx) => tx.setProp(target.id, numDef.id, 7))
@@ -342,7 +427,7 @@ test('等式⑦：规则写入并入触发事务——同一批 op、一次撤�
   const target = mkBlock('目标')
   const rule = mkAutomationBlock({
     name: '数量变了就归档',
-    def: { enabled: true, triggers: [{ kind: 'prop', prop: numDef.id }], steps: [{ cmd: 'core.tags/add', args: { tagId: doneTag.id } }] },
+    def: { enabled: true, triggers: [{ on: 'entered', query: hasProp(numDef.id) }], steps: [{ cmd: 'core.tags/add', args: { tagId: doneTag.id } }] },
   })
   const { kb, store } = engineFixture([numDef, doneTag, target, rule])
 
@@ -366,7 +451,7 @@ test('等式⑦补：预检失败跳过该反应，用户的写照常提交', ()
     name: '会失败的规则',
     def: {
       enabled: true,
-      triggers: [{ kind: 'prop', prop: numDef.id }],
+      triggers: [{ on: 'entered', query: hasProp(numDef.id) }],
       steps: [{ cmd: 'core.props/set-value', args: { propId: numDef.id, value: '不是数字' } }, { cmd: 'core.tags/add', args: { tagId: doneTag.id } }],
     },
   })
@@ -388,7 +473,7 @@ test('等式⑧：撤销不触发——撤销写入不经过 reactor（若触发
   const target = mkBlock('目标')
   const rule = mkAutomationBlock({
     name: '数量变了就归档',
-    def: { enabled: true, triggers: [{ kind: 'prop', prop: numDef.id }], steps: [{ cmd: 'core.tags/add', args: { tagId: doneTag.id } }] },
+    def: { enabled: true, triggers: [{ on: 'entered', query: hasProp(numDef.id) }], steps: [{ cmd: 'core.tags/add', args: { tagId: doneTag.id } }] },
   })
   const { kb, store } = engineFixture([numDef, doneTag, target, rule])
 
@@ -400,20 +485,20 @@ test('等式⑧：撤销不触发——撤销写入不经过 reactor（若触发
   assert.equal(hasTag(kb.get(target.id)!, doneTag.id), false, '撤销的反向原子变化（7→没有）没有再开火：重放／撤销路径不经过 reactor')
 })
 
-/* ------------------------------------------------------------ 等式⑨：形状闸（TriggerQuery 校验器随统一形状落地补进本文件） */
+/* ------------------------------------------------------------ 等式⑨：形状闸（旧 kind 已非法） */
 
-test('等式⑨：v1 形状闸——未知触发器 kind 拒形 → 读不出定义 → 投影 broken（灰态＋可跳转）', () => {
-  const bad = mkBlock('坏规则')
-  bad.props = { _automation: { enabled: true, triggers: [{ kind: 'timer' }], steps: [] } }
-  assert.equal(readAutomation(bad), null, '未知 kind：读不出定义')
+test('等式⑨：旧三种 kind 不是合法形状——读不出定义 → 投影 broken（灰态＋可跳转，无兼容分支）', () => {
+  const legacy = mkBlock('旧规则')
+  legacy.props = { _automation: { enabled: true, triggers: [{ kind: 'prop', prop: 'p1' }], steps: [] } }
+  assert.equal(readAutomation(legacy), null, '旧 kind：读不出定义')
 
   const target = mkBlock('随便一块')
-  const { kb } = fixture([target, bad])
+  const { kb } = fixture([target, legacy])
   const rows = projectManualAutomations(kb, target.id)
-  const row = rows.find((r) => r.id === `automation/${bad.id}`)
-  assert.ok(row, '坏规则不静默消失')
+  const row = rows.find((r) => r.id === `automation/${legacy.id}`)
+  assert.ok(row, '旧规则不静默消失')
   assert.equal(row!.runnable, false)
-  assert.equal(row!.reason, 'broken', '灰态说明 broken')
+  assert.equal(row!.reason, 'broken', '灰态说明 broken，用户按新形状重建')
 })
 
 /* ------------------------------------------------------------ 等式⑩：生命周期 */
@@ -421,11 +506,11 @@ test('等式⑨：v1 形状闸——未知触发器 kind 拒形 → 读不出定
 test('等式⑩：纯删除／纯恢复静默；恢复＋同笔修改按真实原子判定', () => {
   const numDef = mkPropDef('数量', 'number')
   const target = mkBlock('目标')
-  const rule = mkAutomationBlock({ name: '规则', def: birthRule({ kind: 'prop', prop: numDef.id }) })
+  const rule = mkAutomationBlock({ name: '规则', def: { enabled: true, triggers: propAny(numDef.id), steps: [{ cmd: 'core.tree/insert-child', args: { text: '反应' } }] } })
   const { kb } = engineFixture([numDef, target, rule])
 
   kb.tx((tx) => tx.setProp(target.id, numDef.id, 1))
-  assert.equal(reactionCount(target), 1, '基线：开火一次')
+  assert.equal(reactionCount(target), 1, '基线：开火一次（missing→1 走 entered 腿）')
 
   kb.tx((tx) => tx.remove(target.id))
   assert.equal(reactionCount(target), 1, '纯删除：原子没变，静默')
@@ -438,13 +523,13 @@ test('等式⑩：纯删除／纯恢复静默；恢复＋同笔修改按真实�
     tx.restore(target.id)
     tx.setProp(target.id, numDef.id, 2)
   })
-  assert.equal(reactionCount(target), 2, '恢复＋同笔修改：按真实 before/after 原子判定（快照不把 deleted 映射成不存在）')
+  assert.equal(reactionCount(target), 2, '恢复＋同笔修改：按真实 before/after 原子判定（P 1→2 走 changed 腿，快照不把 deleted 映射成不存在）')
 })
 
-test('等式⑩【有意变更②】：删除＋同笔修改——v1 开火并把反应写进死目标（统一后预检跳过）', () => {
+test('等式⑩【有意变更⑤，已翻转】：删除＋同笔修改——统一引擎跳过，不写死目标（v1 写进去了）', () => {
   const numDef = mkPropDef('数量', 'number')
   const target = mkBlock('目标')
-  const rule = mkAutomationBlock({ name: '规则', def: birthRule({ kind: 'prop', prop: numDef.id }) })
+  const rule = mkAutomationBlock({ name: '规则', def: birthRule({ on: 'entered', query: hasProp(numDef.id) }) })
   const { kb, events } = engineFixture([numDef, target, rule])
 
   kb.tx((tx) => {
@@ -452,8 +537,8 @@ test('等式⑩【有意变更②】：删除＋同笔修改——v1 开火并�
     tx.setProp(target.id, numDef.id, 2)
   })
   const dead = findIncludingDeleted(kb, target.id)!
-  assert.equal(reactionCount(dead), 1, 'v1 现状：反应写进了已删的块（reactor 跑在索引修补之前，读检查全部通过）')
-  assert.equal(events.length, 0, 'v1 连失败都不报——正是统一引擎「after 已删 ⇒ 跳过」要改掉的；U3 此断言翻转为 0 次反应')
+  assert.equal(reactionCount(dead), 0, 'after 已删 ⇒ 整条跳过：对死目标零反应（v1 在这里写进去了）')
+  assert.equal(events.length, 0, '跳过不是失败：不落 onError')
 })
 
 /* ------------------------------------------------------------ 等式⑪：present 守卫 */
@@ -484,18 +569,18 @@ test('等式⑪：写入对象必须 present（跨笔）——显式目标／ins
   assert.match(String(run({ cmd: 'core.props/set-value', args: { propId: numDef.id, blockId: victim.id, value: 7 } })), /no such block/, '显式目标已删：拒')
   assert.match(String(run({ cmd: 'core.tree/insert-child', args: { parentId: victim.id, text: 'x' } })), /no such block/, 'insert 父已删：拒')
   assert.match(String(run({ cmd: 'core.tree/move', args: { blockId: mover.id, parentId: parent.id } })), /no such parent/, 'move 目的地父已删：拒')
-  assert.match(String(run({ cmd: 'core.tags/add', args: { tagId: tag.id } })), /does not exist/, 'add-tag 标签已删（跨笔）：拒——现状已闭（索引删除即摘出可见表）')
+  assert.match(String(run({ cmd: 'core.tags/add', args: { tagId: tag.id } })), /does not exist/, 'add-tag 标签已删（跨笔）：拒——索引删除即摘出可见表')
   assert.equal(run({ cmd: 'core.tags/remove', args: { tagId: tag.id } }, holder.id), null, 'remove-tag 允许已删标签：清理旧引用是合法路径')
   assert.equal(kb.get(holder.id)?.props?._tags, undefined, '已删标签从归属里摘掉了')
 })
 
-test('等式⑪【有意变更③】：同笔窗口——同一笔 tx 删标签＋触发规则，add-tag 放行（统一 present 守卫翻转）', () => {
+test('等式⑪【有意变更⑥，U6 翻转】：同笔窗口——同一笔 tx 删标签＋触发规则，add-tag 放行（统一 present 守卫翻转）', () => {
   const tag = mkTag('旧标签')
   const numDef = mkPropDef('数量', 'number')
   const victim = mkBlock('干净的块')
   const rule = mkAutomationBlock({
     name: '改属性就加旧标签',
-    def: { enabled: true, triggers: [{ kind: 'prop', prop: numDef.id }], steps: [{ cmd: 'core.tags/add', args: { tagId: tag.id } }] },
+    def: { enabled: true, triggers: [{ on: 'entered', query: hasProp(numDef.id) }], steps: [{ cmd: 'core.tags/add', args: { tagId: tag.id } }] },
   })
   const { kb, events } = engineFixture([tag, numDef, victim, rule])
 
@@ -503,15 +588,13 @@ test('等式⑪【有意变更③】：同笔窗口——同一笔 tx 删标签�
     tx.remove(tag.id)
     tx.setProp(victim.id, numDef.id, 7)
   })
-  assert.deepEqual(kb.get(victim.id)?.props?._tags, [tag.id], 'v1 现状：反应期间索引还没修补，守卫查得到刚删的标签 ⇒ 写入通过')
+  assert.deepEqual(kb.get(victim.id)?.props?._tags, [tag.id], '现状：反应期间索引还没修补，守卫查得到刚删的标签 ⇒ 写入通过')
   assert.equal(events.length, 0, '且不报失败——U6 统一守卫（显式判删除标记）后翻转为拒绝、_tags 不变')
 })
 
 /* ------------------------------------------------------------ 等式⑫：规则块边界 */
 
-import type { AutomationStep } from '../src/core/automation/automation.ts'
-
-test('等式⑫：规则块边界——set/clear 拒 _automation 与一切 _ 槽；insert-child 造普通块；move 拒搬规则块；规则块普通属性可写', () => {
+test('等式⑫：规则块边界——set/clear 拒 _automation 与一切 _ 槽；insert-child 造普通块；move 搬规则块被拒；规则块普通属性可写', () => {
   const numDef = mkPropDef('数量', 'number')
   const iconDef = mkPropDef('图标名', 'text')
   const target = mkBlock('目标')

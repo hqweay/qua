@@ -852,18 +852,30 @@ function deleteTag(blockId: string): boolean {
   }
 
   /**
-   * **「新建子块」触发器的父块筛选编辑**：与「如果」同一台条件树，落点是
-   * `trigger.parent`（**作用在父块上**——「父块是 Qua 的传递型引用」这类语义
-   * 只有这里表达得了）。清空草稿 ＝ 任意父块；`followRefs` 在触发器菜单里开关。
+   * **诞生触发器的父块筛选编辑**：与「如果」同一台条件树，落点是 `trigger.query` 里的
+   * `{up}`（**作用在容纳链上**——「父块是某块的传递型引用」这类语义只有这里表达得了）。
+   * 清空草稿 ＝ 拆掉这条触发器（没有父条件也没有「如果」条件的诞生触发＝每笔新建都
+   * 触发，语言层保护性拒绝——收纳重排时父块槽空态与「如果」合并）。
    */
   function openAutomationParentBuilder(automationId: string, triggerIndex: number): void {
-    const readParent = (): QueryNode | undefined => {
+    const readTrigger = (): Exclude<AutomationTrigger, 'manual'> | null => {
       const block = kb.get(automationId)
       const def = block ? readAutomation(block) : null
       const tr = def?.triggers[triggerIndex]
-      if (!tr || tr === 'manual' || !('kind' in tr) || tr.kind !== 'child.added') return undefined
-      if (tr.parent === undefined) return undefined
-      return tr.parent
+      return !tr || tr === 'manual' ? null : tr
+    }
+    const topUpOf = (query: QueryNode): QueryNode | undefined => {
+      if ('up' in query) return query.up
+      if ('all' in query) {
+        const member = query.all.find((m) => 'up' in m)
+        return member && 'up' in member ? member.up : undefined
+      }
+      return undefined
+    }
+    const readParent = (): QueryNode | undefined => {
+      const tr = readTrigger()
+      if (!tr || tr.birth !== true) return undefined
+      return topUpOf(tr.query)
     }
     const anchor = getEd().blockEl(automationId)?.getBoundingClientRect() ?? getEd().caretRect()
     openSpecPopover({
@@ -874,19 +886,22 @@ function deleteTag(blockId: string): boolean {
       onApply: (spec) => {
         const block = kb.get(automationId)
         const def = block ? readAutomation(block) : null
-        if (!def) return
+        const current = readTrigger()
+        if (!def || !current || current.birth !== true) return
         const empty = JSON.stringify(canonicalNode(spec.where)) === JSON.stringify({ any: [] })
         const next: AutomationDef = {
           ...def,
-          triggers: def.triggers.map((tr, i): AutomationTrigger => {
-            if (i !== triggerIndex || tr === 'manual' || !('kind' in tr) || tr.kind !== 'child.added') return tr
-            // 显式字面量（条件展开会让推断把 followRefs 拓宽成 boolean）
-            const followRefs = tr.followRefs === true
+          triggers: def.triggers.flatMap((tr, i): AutomationTrigger[] => {
+            if (i !== triggerIndex || tr !== current) return [tr]
+            // 清空父条件 ⇒ 这条触发器没有合法形状（≥1 引用原子），拆掉不猜
+            if (empty) return []
             const parent = canonicalNode(spec.where)
-            if (empty && !followRefs) return { kind: 'child.added' }
-            if (empty) return { kind: 'child.added', followRefs: true }
-            if (followRefs) return { kind: 'child.added', followRefs: true, parent }
-            return { kind: 'child.added', parent }
+            // 保留复合条件里的 self 成员（{all:[{up},{prop}]} 的 prop 半边），只换 up 位
+            if ('all' in current.query) {
+              const rest = current.query.all.filter((m) => !('up' in m))
+              return [{ on: 'entered', query: { all: [...rest, { up: parent }] }, birth: true }]
+            }
+            return [{ on: 'entered', query: { up: parent }, birth: true }]
           }),
         }
         void getRegistry().invoke('core.automation/set-def', { automationId, def: next }, 'builder')

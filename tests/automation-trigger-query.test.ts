@@ -10,13 +10,13 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { canonicalAutomation, isAutomationDef, type AutomationDef } from '../src/core/automation/automation.ts'
+import { canonicalAutomation, isAutomationDef, mkAutomationBlock, type AutomationDef } from '../src/core/automation/automation.ts'
 import { triggerDeps, validateTriggerQuery } from '../src/core/automation/trigger-query.ts'
 import { createAutomationEngine } from '../src/core/automation/engine.ts'
-import { mkAutomationBlock } from '../src/core/automation/automation.ts'
-import { mkBlock, mkPropDef, type Block } from '../src/core/index.ts'
+import { mkBlock, mkPropDef } from '../src/core/index.ts'
 import { BlockStore } from '../src/core/model/store.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
+import { hasTag } from '../src/core/identity/tags.ts'
 
 /* ------------------------------------------------------------ 形状 */
 
@@ -29,9 +29,10 @@ test('形状：{on, query, birth?} 是合法触发器——birth 可省、birth 
   assert.equal(isAutomationDef(def([{ on: 'frobnicate', query: { tag: 't1' } }])), false, '未知事件轴拒绝')
   assert.equal(isAutomationDef(def([{ on: 'entered', query: { nonsense: true } }])), false, 'query 必须是 QueryNode')
   assert.equal(isAutomationDef(def([{ on: 'entered', query: { tag: 't1' }, birth: false }])), false, 'birth 缺省＝不带；显式 false 是第二种形状，拒')
-  // 过渡期：三种 kind 仍被判合法（引擎切换那笔转 broken）
-  assert.equal(isAutomationDef(def([{ kind: 'prop', prop: 'p1' }])), true)
-  assert.equal(isAutomationDef(def([{ kind: 'child.added', parent: { is: 'a1' } }])), true)
+  // 旧三种 kind 不是合法形状：读不出定义 ⇒ broken 灰态（无兼容分支）
+  assert.equal(isAutomationDef(def([{ kind: 'prop', prop: 'p1' }])), false)
+  assert.equal(isAutomationDef(def([{ kind: 'tag', tag: 't1', on: 'added' }])), false)
+  assert.equal(isAutomationDef(def([{ kind: 'child.added', parent: { is: 'a1' } }])), false)
 })
 
 test('canonicalAutomation：统一形状键序固定（on/query/birth）、query 走 canonicalNode、birth 缺省不落键', () => {
@@ -137,11 +138,9 @@ test('依赖提取：self 层 prop/tag 进集合；{not} 仍引用其子树；up
   assert.equal(dup.props.size, 1, '重复原子只算一次')
 })
 
-/* ------------------------------------------------------------ 过渡期守卫 */
+/* ------------------------------------------------------------ 引擎接线（行为断言在等式测试文件） */
 
-test('过渡期：统一形状触发器在引擎切换前不被执行——新块诞生不误落 child.added 分支', () => {
-  // 三 kind 分派靠 `kind` 认路；没有 kind 的形状若无守卫会误落 child.added 分支，
-  // 把每笔诞生都当成命中。切换前保守忽略，本用例在引擎切换后由等式测试接替。
+test('引擎已认统一形状：entered 对「出生即满足」开火（数据边沿的诞生半边）', () => {
   const tag = mkBlock('标签')
   tag.props = { _aliases: ['标签'], _lists: ['tag'] }
   const numDef = mkPropDef('数量', 'number')
@@ -158,6 +157,8 @@ test('过渡期：统一形状触发器在引擎切换前不被执行——新�
   const kb = new MemoryKb(store, { now: () => 1000 })
   const engine = createAutomationEngine({ kb, lookup: kb })
   kb.setReactor((ctx) => engine.react(ctx))
-  kb.tx((tx) => tx.setProp(target.id, numDef.id, 7))
-  assert.equal(kb.get(target.id)?.props?._tags, undefined, '切换前：统一形状规则不执行（引擎切换那笔翻面）')
+  const fresh = mkBlock('出生即带值')
+  fresh.props = { [numDef.id]: 7 }
+  kb.tx((tx) => tx.insert(fresh, null, 0))
+  assert.equal(hasTag(kb.get(fresh.id)!, tag.id), true, 'birth 按「不匹配」参与 entered 判定 ⇒ 出生即满足开火')
 })
