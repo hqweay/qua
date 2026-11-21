@@ -853,7 +853,6 @@ await check('A29 行首旁注件与首行共中线，且「行下身体的面」
   await page.waitForTimeout(300)
 
   const m = await page.evaluate(() => {
-    const row = (id) => document.querySelector(`#editor .blk[data-block-id="${id}"]`)
     const bx = (el) => {
       if (!el) return null
       const r = el.getBoundingClientRect()

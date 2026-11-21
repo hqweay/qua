@@ -32879,6 +32879,10 @@ await check('T347 菜单建卡片：身体与子块行同一帧切换，不留�
   const flick = await page.evaluate(() => window.__flick)
   assert(flick.frames > 30, `帧采样足够：${flick.frames}`)
   assert(flick.bad === 0, `身体出现时子块行已让位（没有两遍的中间帧）：${flick.bad}`)
+  /**
+   * **终态也要断言**，不能只靠返回文案声称：帧采样只证明「中间没有同屏」，
+   * 它看不到「最后压根没建出来」。两条读数必须与文案同源，否则文案是一句没人验的保证。
+   */
   const final = await page.evaluate(
     ({ id, kid }) => ({
       cards: document.querySelectorAll(`#editor .blk[data-block-id="${id}"] > .blk-view-body .vcard`).length,
@@ -32886,9 +32890,11 @@ await check('T347 菜单建卡片：身体与子块行同一帧切换，不留�
     }),
     { id: fx.rows[0], kid: fx.cells.c11 },
   )
+  assert(final.cards === 2, `终态应有 2 张卡片：${JSON.stringify(final)}`)
+  assert(final.outs === 0, `终态大纲里不该还留着子块行：${JSON.stringify(final)}`)
 
   await ctx.close()
-  return `菜单建卡片：${flick.frames} 帧里 0 帧同屏两遍；终态卡片 2 张、大纲 0 行`
+  return `菜单建卡片：${flick.frames} 帧里 0 帧同屏两遍；终态卡片 ${final.cards} 张、大纲 ${final.outs} 行`
 })
 
 const known = results.filter((r) => !r.ok && r.known)
