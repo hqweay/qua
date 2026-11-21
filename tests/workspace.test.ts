@@ -232,3 +232,19 @@ test('blankWorkspace: 只有今天一行 —— 一个日记根 ＋ 一个可写
   })
   assert.deepEqual(withIdentity, [], '空库不该有页/标签露面')
 })
+
+test('parseWorkspace: 旧形状的自动化定义原样在场（遗留值不作废，读路径灰态）', () => {
+  // 桌面真机旧库不吃版本号：装载不走 expired 重 seed，旧 kind 的 `_automation` 会留在块上。
+  // 装载路径不许剥掉它（「遗留值在场」）——灰态与否由读判（readAutomation）回答，
+  // 剥掉 = 用户数据静默消失，正是这份文件头说的那类事故。
+  const legacy = blk({
+    id: 'legacy-rule',
+    content: [{ t: 'text', v: '旧规则' }],
+    props: { _automation: { enabled: true, triggers: [{ kind: 'prop', prop: 'p1' }], steps: [] } },
+  })
+  const r = parseWorkspace(JSON.stringify({ version: WORKSPACE_VERSION, blocks: [legacy], activeId: 'legacy-rule', savedAt: 0 }))
+  assert.equal(r.status, 'ok')
+  if (r.status !== 'ok') return
+  const b = r.ws.blocks[0] as Block
+  assert.deepEqual(b.props?._automation, { enabled: true, triggers: [{ kind: 'prop', prop: 'p1' }], steps: [] }, '遗留定义原样在场')
+})
