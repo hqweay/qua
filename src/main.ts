@@ -499,6 +499,15 @@ function dockShortcutIds(device: DeviceState): string[] {
   return out
 }
 
+/** 槽里窗口卡指向的块：重开时要把它们的**子树**装齐，卡里才不是只有根行 */
+function dockWindowIds(device: DeviceState): string[] {
+  const out = new Set<string>()
+  for (const side of ['left', 'right'] as const) {
+    for (const card of device.prefs.dock[side].cards) if (card.kind === 'block') out.add(card.block)
+  }
+  return [...out]
+}
+
 const pendingDocs = new Map<string, Promise<void>>()
 
 /**
@@ -832,6 +841,8 @@ const { renderDocks, openWindow, closeCard, addTile, addDerived, addUtility, add
     }),
   // 左槽行／日历日期的「打开」都经这一条；具体落点策略只在 App.openBlock 一份
   openBlock: (id, place, opts) => app.openBlock(id, place, opts),
+  // 窗口卡里是那一块的真实编辑器：裸块先补子树，否则卡里只有根行
+  ensureDoc: (ids, then) => ensureDocsLoaded(ids, then),
 })
 
 const { chrome, editorEl, applyChrome, paintTopbarNav, resolvedTheme, dockMinWidth, dockMaxWidth, badge, scheduleBadge, markBooted } = setupChrome({
@@ -1444,6 +1455,7 @@ const { viewEvents, wireViewEditor } = createEditorEvents({
   setEd: (e) => {
     ed = e
   },
+  loadDocThen: (ids, then) => ensureDocsLoaded(ids, then),
   openTrigger,
   refreshSelectionBar,
   triggers,
@@ -2287,8 +2299,8 @@ const {
    * **派生栏的候选装载**（反链/备注/成员/同类/提及/谁在用）：与查询视图同一条管道。
    * 读库归这里（装配层），视图只报「哪一格的哪个来源」。
    */
-  ensureDerivedLoaded: (host, source) =>
-    ensureDerivedLoaded({ client: libraryClient, workset, store: blocks }, host, source),
+  ensureDerivedLoaded: (host, source, withChildren) =>
+    ensureDerivedLoaded({ client: libraryClient, workset, store: blocks }, host, source, withChildren),
   journalMounts: () => prefs().journalMounts,
   prefs,
   scheduleDeviceSave: () => scheduleDeviceSave(),
@@ -2599,6 +2611,11 @@ installTooltips()
 applyChrome()
 chrome.renderDebugState()
 renderDocks()
+// 常驻窗口卡：首帧只按 id 拿到块（裸块）时先补子树，装完重画一次卡身
+{
+  const ids = dockWindowIds(device)
+  if (ids.length > 0) ensureDocsLoaded(ids, () => renderDocks())
+}
 chrome.renderTitle(activeBlock(), activeTrail())
 chrome.renderEmptyHint(activeBlock().children)
 if (prefs().virtualize) mainEd.setVirtualize(true, prefs().radius)

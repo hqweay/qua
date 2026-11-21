@@ -87,7 +87,7 @@ export function readDocWindow(
   if (rootPath === '') return null
   const blocks = db
     .prepare(LIBRARY_READS.docWindow)
-    .all(rootPath, `${rootPath}~`, after ?? '', limit) as Row[]
+    .all(rootPath, `${rootPath}~`, after ?? '', limit, rootId) as Row[]
   const ancestors: Row[] = []
   if (after === null) {
     const seen = new Set<string>()

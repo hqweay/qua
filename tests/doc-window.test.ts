@@ -146,6 +146,17 @@ test('**逐窗**装进工作集 == 整棵装进去（形状／兄弟序／索引
   }
 })
 
+test('窗口只收自己的 root：顶层段值撞车（坏派生表）时也不把兄弟根读进来', () => {
+  const d = seeded()
+  // 模拟「派生重建按单根写路径」留下的坏形状：两个顶层根同段
+  d.prepare(`update BlockIndex set path = ?`).run('/1000000001024/')
+  const w = readDocWindow(d, 'root', null, 100)
+  assert.ok(w)
+  const ids = w.rows.blocks.map(idOfRow).sort()
+  assert.deepEqual(ids, ['a', 'g1', 'g2', 'g3', 'g4', 'g5', 'root'].sort(), '只收 root 这一棵')
+  assert.equal(ids.includes('next'), false, '兄弟根即使路径区间重合也不进窗')
+})
+
 test('启动/导航共用的窗口装载：首窗 ＋ pendingOf ＋ finishDocWindows == 整棵（跨窗的大 Doc）', async () => {
   /** 比一窗多一点：2100 块 ⇒ 首窗 2000 ＋ 余下 100，正好走到 `pending` 那一支 */
   const bigTree = (): Block => {

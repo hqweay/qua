@@ -160,7 +160,7 @@ export type PanelsDeps = {
    * **派生栏的候选先装载**（引用／备注／成员／同类／提及／谁在用）：与查询视图同一条管道。
    * 省略 ＝ 不装（整库模式求值天然完整）。
    */
-  ensureDerivedLoaded?: (host: Block, source: DerivedSource) => Promise<boolean>
+  ensureDerivedLoaded?: (host: Block, source: DerivedSource, withChildren?: boolean) => Promise<boolean>
 }
 
 export function setupPanels(deps: PanelsDeps) {

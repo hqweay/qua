@@ -147,7 +147,7 @@ export interface MountAreaDeps {
    * 「现在显示的是哪一栏」。返回 `true` ＝ 真装进了新块 ⇒ 装载完成后重画一次；
    * 没装（已齐 / 派生表没建好 / 没有库面）⇒ 不重画。
    */
-  ensureDerivedLoaded?: (host: Block, source: DerivedSource) => Promise<boolean>
+  ensureDerivedLoaded?: (host: Block, source: DerivedSource, withChildren?: boolean) => Promise<boolean>
   /**
    * **双击改名**（只有 local 栏有名字；派生栏的名字由来源字典给）。
    *
@@ -1364,8 +1364,9 @@ export class MountArea {
     const key = `${host.id}\u0000${entry.id}`
     if (this.kickedDerived.has(key)) return
     this.kickedDerived.add(key)
+    const kind = this.deps.derivedKind?.(host, entry.source) ?? 'outline'
     const before = derivedIdsOf(host, this.deps.kb, entry.source)
-    void load(host, entry.source)
+    void load(host, entry.source, kind === 'outline')
       .then((loaded) => {
         if (!loaded || this.hostId !== host.id) return
         if (derivedIdsOf(host, this.deps.kb, entry.source) === before) return

@@ -106,8 +106,12 @@ export async function loadCandidatePage(
      * `tree(missing, children=true)` 读的是**候选根的一层子级** ⇒ 这些根的 children 齐了；
      * 子级自己被装进来时没有自己的子级（仍按裸块记）。`children=false` 则全是裸块。
      */
-    if (children) workset.markChildrenKnown(missing)
-    else workset.markChildrenUnknown(missing)
+    if (children) {
+      // 根的一层子级齐了；**子级自己没有子级**（同一批 rows 里只带了一层）⇒ 标未知
+      const roots = new Set(missing)
+      workset.markChildrenKnown(missing)
+      workset.markChildrenUnknown(idsOfRows(rows.value).filter((id) => !roots.has(id)))
+    } else workset.markChildrenUnknown(idsOfRows(rows.value))
     loaded = true
   }
 

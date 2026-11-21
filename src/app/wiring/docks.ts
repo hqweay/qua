@@ -29,6 +29,7 @@ import {
   type DerivedCardId,
   type DockEntry,
   type OpenAction,
+  type OpenOpts,
   type UtilityFaceId,
   type WindowEntryAction,
 } from '../../core/index.ts'
@@ -124,11 +125,12 @@ export type DocksDeps = {
    *
    * 槽不自己判断「右槽／新 tab」：那套策略只有 `App.openBlock` 一份；这里只转交。
    */
-  openBlock: (
-    id: string,
-    place: import('../../core/index.ts').OpenAction,
-    opts?: import('../../core/index.ts').OpenOpts,
-  ) => void
+  openBlock: (id: string, place: OpenAction, opts?: OpenOpts) => void
+  /**
+   * **打开窗口前补子树**（工作集）：按 id 预取进来的裸块 `children` 还空着，
+   * 直接建卡会得到只有根行的一列。整库模式同步 `then`。
+   */
+  ensureDoc: (ids: readonly string[], then: () => void) => void
 }
 
 /** 卡片落点：插到哪一张之前/之后；`null` ＝ 末尾 */
@@ -333,6 +335,11 @@ export function setupDocks(deps: DocksDeps) {
    */
   function openWindow(side: 'left' | 'right', blockId: string, action: WindowEntryAction = 'view', at?: CardDrop, solo?: boolean): void {
     if (!findInForest(deps.getWs().blocks, blockId)) return
+    // 裸块先补子树：窗口卡里是那一块的真实编辑器，children 空着就只剩根行
+    if (deps.kb.needsDoc(blockId)) {
+      deps.ensureDoc([blockId], () => openWindow(side, blockId, action, at, solo))
+      return
+    }
     const dock = deps.prefs().dock
     const other = side === 'left' ? 'right' : 'left'
     const entry: DockEntry = { kind: 'block', block: blockId }

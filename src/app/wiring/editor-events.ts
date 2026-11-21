@@ -70,6 +70,8 @@ export interface EditorEventsDeps {
   getPanels: () => Pick<ReturnType<typeof import('../../app/wiring/panels.ts').setupPanels>, 'mountBlockView' | 'mountEmbedView'>
   getApp: () => import('../../core/infra/ports.ts').App
   focusSourceInMain: (blockId: string) => void
+  /** 打开/挂载一块前补子树（工作集：裸块的 children 还没读） */
+  loadDocThen: (ids: readonly string[], then: () => void) => void
 }
 
 export function createEditorEvents(deps: EditorEventsDeps) {
@@ -220,8 +222,29 @@ function viewEvents(
    * 改指针、判据翻转（镜像 ⇄ 投影、跟随源换看法）、源被删（身体要换成一句实话）
    * ⇒ 新钥匙 ⇒ 按缓存的延后一拍语义拆旧挂新。
    */
+  /** 已经为「这张露面 → 这个目标」请求过子树读（失败不重试；成功由标记判） */
+  const embedSubtreeLoads = new Set<string>()
   const embedBodyCache = createRowBodyCache(
     (block, into) => {
+      /**
+       * **露面身体要的是目标的子树**：工作集下 `_embed` 目标常是按 id 预取进来的裸块，
+       * 直接挂镜像就只剩根行。先补子树，装完重画这一行让身体按完整树重建。
+       * 失败（目标读不到）不重试：否则每次重画都发一批同样的请求。
+       */
+      const pointer = readEmbed(block)
+      const target = pointer ? blocks.find(pointer.block) : undefined
+      const targetId = pointer?.block
+      // 目标还不在内存（或只是裸块）⇒ 先补子树/补块；已删的目标不读
+      if (targetId && !(target && isDeleted(target)) && (!target || !blocks.childrenKnown(targetId))) {
+        const key = `${block.id}\u0000${targetId}`
+        if (!embedSubtreeLoads.has(key)) {
+          embedSubtreeLoads.add(key)
+          deps.loadDocThen([targetId], () => {
+            if (blocks.childrenKnown(targetId)) embedSubtreeLoads.delete(key)
+            repaintBlock(block.id)
+          })
+        }
+      }
       const holder = document.createElement('div')
       holder.className = 'blk-embed-holder'
       into.appendChild(holder)
@@ -258,6 +281,8 @@ function viewEvents(
         target && isDeleted(target) ? 'deleted' : '',
         embedBodyOf(block, find),
         pointer?.view ?? '',
+        // 子树读全了没有：裸块挂出来的身体是「只有根行」的，装完必须换一把钥匙重建
+        target ? (blocks.childrenKnown(target.id) ? 'k' : 'u') : 'm',
       ].join(':')
     },
   )

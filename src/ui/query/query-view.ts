@@ -47,6 +47,7 @@ import {
   isJournal,
   defaultDisplayPropsFor,
   TAGS_COLUMN,
+  CHILDREN_COLUMN,
   PAGE_COLUMN,
   pageGroupsOf,
   mergeContextPlans,
@@ -1114,6 +1115,21 @@ export class ViewHost {
     return (this.defaultView()?.kind ?? 'outline') === 'outline'
   }
 
+  /**
+   * **候选要不要连一层子级一起装**：大纲摊子树要看；表格/卡片里只要出现「子块数」这一列
+   * （显示或显示排序）也要——否则工作集下那一列恒为 0、排序也按 0 排。
+   *
+   * 传 `undefined`（而不是 false）给装载器：条件里有 `{children}` 时由它自己要求子级，
+   * 不能在这里用假值把它盖掉。
+   */
+  private loadsChildren(): boolean | undefined {
+    if (this.outlineKind()) return true
+    const view = this.defaultView()
+    if (!view) return undefined
+    const keys = [...(view.displayProps ?? []), ...(view.sort?.map((s) => s.by) ?? [])]
+    return keys.includes(CHILDREN_COLUMN) ? true : undefined
+  }
+
   private ensureFrozen(): void {
     const spec = this.effective
     if (!spec) return
@@ -1207,7 +1223,7 @@ export class ViewHost {
             if (this.pendingRefresh !== null) return
             this.sync(true)
           },
-        }, this.outlineKind())
+        }, this.loadsChildren())
         this.cursor = step.next
         if (step.next === null) this.streamDone = true
         // 到底了就重算一次：整库／web 的流是「立即到底」的空流——首帧按空域冻结会把

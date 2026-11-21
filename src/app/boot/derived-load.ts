@@ -55,6 +55,8 @@ export async function ensureDerivedLoaded(
   deps: DerivedLoadDeps,
   host: Block,
   source: DerivedSource,
+  /** 这一栏是不是大纲（要摊记录的子级）；省略 ＝ 沿用旧口径（引用栏要一层） */
+  withChildren?: boolean,
 ): Promise<boolean> {
   const { client, workset, store } = deps
   if (!client || !workset || !store.partial) return false
@@ -79,7 +81,7 @@ export async function ensureDerivedLoaded(
       after: null,
       target: Number.POSITIVE_INFINITY,
     },
-    source === 'refs',
+    withChildren ?? source === 'refs',
   )
   return step.loaded
 }

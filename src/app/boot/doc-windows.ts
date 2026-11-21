@@ -101,7 +101,7 @@ export async function finishDocWindows(
      * 中途失败停在先序前缀上，标记已知会让之后打开这一块跳过补读（正文永远少一截）。
      */
     // 根在**首窗**里读到，续装窗口不再包含它 ⇒ 根要单独带上
-    if (after === null && seen.length > 0) workset.markChildrenKnown([job.id, ...seen])
+    if (after === null) workset.markChildrenKnown([job.id, ...seen])
     workset.pin([job.id])
     grew = true
   }

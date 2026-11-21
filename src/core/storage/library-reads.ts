@@ -98,8 +98,15 @@ export const LIBRARY_READS = {
    *
    * 多带一列 `path`：它是下一窗的游标，`rowsToWorkspace` 不认这列、会忽略它。
    */
+  /**
+   * **一窗 Doc**：路径区间 ＋ **root 列**双重限定。
+   *
+   * 只按路径前缀取会信任「顶层根的段值互不相同」；派生表一旦被重建/迁移写坏
+   * （所有顶层根同段），一次打开任何页都会把整库读回来。`root` 是每行自己记的
+   * 顶层祖先，加了它，窗口在任何索引状态下都不会跨根。
+   */
   docWindow: `select ${BLOCK_COLUMNS}, i.path as path from ${B} b join ${I} i on i.block = b.id
-    where i.path >= ?1 and i.path < ?2 and i.path > ?3
+    where i.path >= ?1 and i.path < ?2 and i.path > ?3 and i.root = ?5
     order by i.path
     limit ?4`,
 

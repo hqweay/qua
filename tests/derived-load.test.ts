@@ -178,6 +178,12 @@ test('引用栏候选连一层子级：透传块的 children 装进来（reload 
     true,
     '透传块的直接子级随候选一起装载——否则 reload 后引用栏只剩一枚孤引用',
   )
+  assert.equal(view.store.childrenKnown('b1'), true, '候选根的一层子级已读全')
+  assert.equal(
+    view.store.childrenKnown('b1-child'),
+    false,
+    '同一批装进来的子级自己没有子级 ⇒ 标未知（打开/展开前会补读）',
+  )
   close()
 })
 
