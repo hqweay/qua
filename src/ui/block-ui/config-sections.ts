@@ -17,9 +17,11 @@ import {
   aliasesOf,
   canRemoveAlias,
   clickModsOf,
+  COLOR_PROP,
   DISPLAY_PROP,
   displayNameOf,
   hasList,
+  identityColorCss,
   normalizeAlias,
   primaryAliasOf,
   prop,
@@ -305,6 +307,12 @@ export function tagsContent(ctx: ConfigSectionsCtx): HTMLElement {
     const chip = document.createElement('span')
     chip.className = 'props-tag'
     chip.dataset.panelTagId = tag.id
+    // 与行尾 chip 同一口径：显式配色才染色，未配色回落中性（见 blocks.css 的 `[data-panel-tag-id]`）
+    const tagColor = prop<string>(tag, COLOR_PROP)
+    if (tagColor !== undefined && tagColor !== '') {
+      chip.style.setProperty('--chip-c', identityColorCss(tagColor))
+      chip.style.setProperty('--chip-bg', identityColorCss(tagColor, 'soft'))
+    }
     if (draggable) {
       chip.draggable = true
       chip.addEventListener('dragstart', (e) => {

@@ -12414,6 +12414,7 @@ await check(
         const tx = document.querySelector(`.blk[data-block-id="${t}"]`)
         return {
           atoms: atoms.map((a) => a.target?.id ?? ''),
+          atomText: tx?.querySelector('.atom-obj')?.textContent ?? '',
           dom: { tag: tx?.querySelectorAll('.atom-tag').length ?? -1, obj: tx?.querySelectorAll('.atom-obj').length ?? -1 },
           tags: ed.store.find(t)?.props?._tags ?? [],
           recordTags: record?.props?._tags ?? [],
@@ -12431,6 +12432,8 @@ await check(
     assert(obj.recordTags.length === 1 && obj.recordTags[0] === tagId, `记录应自带标签归属：${JSON.stringify(obj.recordTags)}`)
     assert(obj.recordText === obj.newName, `记录的正文应是**输入文本**，不是标签名：${JSON.stringify(obj.recordText)}`)
     assert(obj.dom.tag === 0 && obj.dom.obj === 1, `新建的样式应是实例（空心胶囊），不是行内标签：${JSON.stringify(obj.dom)}`)
+    // `#` 是标签的书写标记，不替实例发言：胶囊里的字只有名字
+    assert(obj.atomText === obj.newName, `行内实例只显示名字、不带 #：${JSON.stringify(obj.atomText)} ≠ ${JSON.stringify(obj.newName)}`)
     assert(obj.isRoot, '记录应落在森林顶层')
     assert(obj.tags.length === 0, `落点不该把宿主归类：${JSON.stringify(obj.tags)}`)
     assert(obj.tagCount === tagCountBefore, `复用已有标签，不新建第二个：${tagCountBefore} → ${obj.tagCount}`)
@@ -13488,14 +13491,14 @@ await check('T126 行尾 chip / 属性区标签名点名字 ⇒ 打开标签块�
 })
 
 /**
- * T350｜块标签 chip 的字段三角：**右侧是「面板」语法位，开合有朝向**。
+ * T350｜块标签 chip 的字段三角：**披露控件在起点，开合有朝向**。
  *
  * 判据落三件事：
- *   ① 三角在名字右侧（左侧 chevron 是树折叠的语法位，会读成「行下展开」）；
+ *   ① 三角在名字**左侧**（与块折叠同一语法位：披露它自己的 body）；
  *   ② 打开字段卡 ⇒ `aria-expanded=true`、图标转 90°；再点 ⇒ 复位、卡片关；
  *   ③ 卡片写值会重画宿主行、三角是重建的 —— 新三角仍须朝下（状态按宿主+标签记着）。
  */
-await check('T350 块标签字段三角在右侧、开合翻转；写值重画后朝向不丢', async () => {
+await check('T350 块标签字段三角在左侧、开合翻转；写值重画后朝向不丢', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
@@ -13524,16 +13527,30 @@ await check('T350 块标签字段三角在右侧、开合翻转；写值重画�
   const rest = await page.evaluate((sel) => {
     const chip = document.querySelector(sel)
     const caret = chip?.querySelector('.tag-chip-caret')
+    const probe = (v) => {
+      const p = document.createElement('span')
+      p.style.color = `var(${v})`
+      document.body.appendChild(p)
+      const c = getComputedStyle(p).color
+      p.remove()
+      return c
+    }
     return {
       chip: Boolean(chip),
       caret: Boolean(caret),
-      caretLast: chip ? chip.lastElementChild === caret : false,
+      caretFirst: chip ? chip.firstElementChild === caret : false,
       expanded: caret?.getAttribute('aria-expanded') ?? null,
       transform: caret ? getComputedStyle(caret.querySelector('.ico')).transform : '',
+      color: chip ? getComputedStyle(chip).color : '',
+      secondary: probe('--ui-text-secondary'),
+      accent: probe('--ui-accent'),
+      chipC: chip?.style.getPropertyValue('--chip-c') ?? '',
     }
   }, chipSel)
   assert(rest.chip && rest.caret, `前置：声明了字段的标签 chip 要有字段三角：${JSON.stringify(rest)}`)
-  assert(rest.caretLast, `三角应在名字右侧（左侧 chevron 会读成树折叠）：${JSON.stringify(rest)}`)
+  assert(rest.caretFirst, `三角应在名字左侧（披露控件统一在起点）：${JSON.stringify(rest)}`)
+  // 未配色的标签默认中性：不是 accent，也没有行上的 `--chip-c`
+  assert(rest.chipC === '' && rest.color === rest.secondary && rest.color !== rest.accent, `未配色 chip 应回落中性：${JSON.stringify(rest)}`)
   assert(!rest.expanded || rest.expanded === 'false', `静息态不是展开：${JSON.stringify(rest)}`)
 
   await page.locator(`${chipSel} .tag-chip-caret`).click()
@@ -13575,7 +13592,7 @@ await check('T350 块标签字段三角在右侧、开合翻转；写值重画�
   assert(!closed.expanded || closed.expanded === 'false', `收起后三角应复位：${JSON.stringify(closed)}`)
 
   await ctx.close()
-  return `三角在名字右侧；点开 aria-expanded=true＋旋转，再点收起复位；写值重画后朝向不丢`
+  return `三角在名字左侧；点开 aria-expanded=true＋旋转，再点收起复位；未配色中性；写值重画后朝向不丢`
 })
 
 
@@ -30156,6 +30173,30 @@ await check('T329 行内替身染目标身份色：有色 #名 染字；无色�
   // 基线：两枚 #名 都中性（同色）
   const baseColor = await atomEl({ blockId: info.blockId, text: '染字签' })
   assert(baseColor.color && baseColor.color !== '', `行内标签应画出来：${JSON.stringify(baseColor)}`)
+
+  /**
+   * 形状语言：页引用＝`[[ ]]`＋粗体、常态无下划线、**默认随正文色**；
+   * 标签＝粗体＋中性 token 底。三者靠形状分，不靠默认色。
+   */
+  const shapes = await page.evaluate((blockId) => {
+    const tx = document.querySelector(`.blk[data-block-id="${blockId}"] > .tx`)
+    const ref = [...tx.querySelectorAll('.atom-page')].find((a) => a.textContent.includes('染字引用页'))
+    const tag = [...tx.querySelectorAll('.atom-tag')].find((a) => a.textContent.includes('染字签'))
+    const weight = (el) => (el ? Number(getComputedStyle(el).fontWeight) : 0)
+    return {
+      refText: ref?.textContent ?? '',
+      refBrackets: ref?.querySelectorAll('.atom-bracket').length ?? 0,
+      refWeight: weight(ref?.querySelector('.atom-name')),
+      refUnderline: ref?.querySelector('.atom-name') ? getComputedStyle(ref.querySelector('.atom-name')).textDecorationLine : '',
+      refColor: ref ? getComputedStyle(ref).color : '',
+      tagWeight: weight(tag?.querySelector('.atom-label')),
+      tagBg: tag ? getComputedStyle(tag).backgroundColor : '',
+    }
+  }, info.blockId)
+  assert(shapes.refText === '[[染字引用页]]' && shapes.refBrackets === 2, `页引用应显示 [[名]]（括号是种类标记）：${JSON.stringify(shapes)}`)
+  assert(shapes.refWeight >= 600 && shapes.refUnderline === 'none', `页引用应为粗体、常态无下划线：${JSON.stringify(shapes)}`)
+  assert(shapes.refColor === baseColor.color, `未配色页引用随正文，不默认上色：${JSON.stringify(shapes)}`)
+  assert(shapes.tagWeight >= 600 && shapes.tagBg !== 'rgba(0, 0, 0, 0)', `行内标签应为粗体＋中性 token 底：${JSON.stringify(shapes)}`)
 
   // ① 目标配色 ⇒ #名 染字（solid），另一枚维持中性
   await page.evaluate((tagId) => window.__qua.invoke('core.block/set-color', { blockId: tagId, color: 'red' }), info.tag)

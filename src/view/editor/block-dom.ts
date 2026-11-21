@@ -383,9 +383,10 @@ export function makeTagsEl(
         e.stopPropagation()
       })
       caret.addEventListener('dragstart', (e) => e.preventDefault())
-      // 三角在**名字右侧**：左侧 chevron 是树折叠的语法位，而这里打开的是浮层
-      // （字段卡），不是行下展开——位置先把语义说对，开合状态再由 `aria-expanded` 补。
-      chip.append(caret)
+      // 披露控件统一在**起点**：块折叠在块首，标签字段披露在 chip 首——
+      // 位置跟「它披露的是谁的 body」走，不跟内容最终浮在卡里还是行下走。
+      // 开合状态由 `aria-expanded` 驱动翻转（打开 `›→⌄`，关闭复位）。
+      chip.prepend(caret)
     }
     if (draggable) {
       chip.draggable = true

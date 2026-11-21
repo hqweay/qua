@@ -1245,6 +1245,14 @@
   font-size: var(--ui-fs-xs);
   white-space: nowrap;
 }
+/* 块标签在属性区的露面：与行尾 `.tag-chip` 同一口径——未配色回落中性，
+   显式配色才染色（`--chip-c/--chip-bg` 由构建方写在行上）。别的 `props-tag`
+   （ref 域、声明属性、归属）仍是元数据 chip，不跟标签的色轴。 */
+.props-tag[data-panel-tag-id] {
+  background: var(--chip-bg, var(--ui-bg-hover));
+  color: var(--chip-c, var(--ui-text-secondary));
+  font-weight: 600;
+}
 /* 拖拽重排的进行中态：拖动的那枚压暗（落点预览由 DOM 实时搬位表达，不再加线） */
 .props-tag[data-dragging] {
   opacity: var(--ui-faint);
@@ -2567,19 +2575,17 @@
 */
 .atom-tag {
   display: inline;
-  padding: 0 2px;
+  padding: 0 3px;
   margin: 0;
-  background: transparent;
+  /* **标签＝token**：中性实底（与行尾 chip 同族），粗体＋`#` 已经足够区分；
+     只有显式 `_color` 才把 token 底换成该色的 soft 版（渲染层写 `--chip-bg`）。 */
+  background: var(--chip-bg, var(--ui-bg-hover));
   border-radius: var(--ui-radius-sm);
   font-size: inherit;
   line-height: inherit;
-  /* 未配色的标签随正文（「无颜色」是合法态，色只是身份叠加通道）——
-     `#` 与悬停底已经说了「这是标签」那句话。
-     块级 chip 不跟这条：chip 是行尾的分类 chrome，accent 是它的类型色。 */
+  font-weight: 600;
+  /* 未配色的标签随正文（「无颜色」是合法态，色只是身份叠加通道） */
   color: inherit;
-}
-.atom-tag:hover {
-  background: var(--ui-accent-soft);
 }
 /* inline 布局没有 flex `gap`：图标与名字的间距用 margin 补，值与原 `gap` 同档 */
 .atom-tag .atom-ico,
@@ -2587,10 +2593,10 @@
   margin-inline-end: 4px;
 }
 /*
-  **实例**：`#名` 指向一条记录（不是标签类）。它和行内标签一样占正文 1 格，
-  但用户要能一眼分出「这是某一次」——所以给它一枚**空心胶囊**（细边框）。
-  行内标签保持纯文字，块级 chip 仍是行尾的实底胶囊。三者不靠颜色深浅区分
-  （暗色主题下那不可靠），靠**形状**：无框 / 空心 / 实底。
+  **实例**：名字指向一条记录（不是标签类）。它和行内标签一样占正文 1 格，
+  但用户要能一眼分出「这是某一次」——所以给它一枚**空心胶囊**（细边框），不带 `#`。
+  三种行内替身靠**形状**分清（不靠颜色深浅，暗色主题下那不可靠）：
+  粗体＋下划线（页引用）/ 实底 token（标签）/ 空心胶囊（实例）。
   ⚠️ 不加前置小方块：那是待办勾选框的形状，会被误读成「点它能打勾」。
 */
 .atom-obj {
@@ -2602,12 +2608,12 @@
   border-radius: var(--ui-radius-pill);
   font-size: inherit;
   line-height: inherit;
+  font-weight: 600;
   /* 未配色同样随正文（与标签、页引用同一条回落口径） */
   color: inherit;
 }
 .atom-obj:hover {
-  background: var(--ui-accent-soft);
-  border-color: transparent;
+  background: var(--ui-bg-hover);
 }
 /*
   **实例的字段手柄**：占原来就有的图标槽，不另加一格。
@@ -2662,12 +2668,14 @@
   color: var(--ui-ok);
 }
 /*
-  **页引用**：`[[名]]` 指向普通块。结构线款——无底无胶囊，`[[ ]]` 装饰 ＋ 一条低强度
-  下划线说「这是链接」，悬停把线加重。**排版度量与正文同一套**（display:inline、字号
-  行高继承、零边距）：它是正文里最轻的替身，任何独立的盒几何（inline-flex 居中、
-  0.93em 缩字、内外边距）都会读成「没对齐／有缝」——三条真机反馈同一根。
-  下划线留在 `.atom-label` 上（图标不带线）；图标间距用 margin 补（inline 没有 flex gap）。
-  行内露面靠形状分清：纯文字（标签）/ 空心（实例）/ 结构线（页引用）/ 实底胶囊（外链、文件）。
+  **页引用**：`[[名]]` 指向普通块。**种类标记＝括号**（与标签的 `#` 同一条语法），
+  名字粗体、默认跟随正文色——颜色只留给用户显式配置的身份色，不再用 accent 替所有引用发言。
+  常态不画下划线（括号已经说「这是引用」，下划线还会和用户的 underline mark 撞），
+  悬停才在名字上补一道线。**排版度量与正文同一套**（display:inline、字号行高继承、
+  零边距）：任何独立的盒几何（inline-flex 居中、0.93em 缩字、内外边距）都会读成
+  「没对齐／有缝」——三条真机反馈同一根。
+  行内露面靠形状分清：括号＋粗体（页引用）/ 实底 token（标签）/ 空心胶囊（实例）/
+  实底胶囊（外链、文件）。
 */
 .atom-page {
   display: inline;
@@ -2675,17 +2683,24 @@
   margin: 0;
   background: transparent;
   border-radius: 0;
+  /* 默认随正文；目标配了 `_color` 时渲染层写 inline style，后者赢 */
   color: inherit;
   font-size: inherit;
   line-height: inherit;
+  font-weight: 600;
 }
-.atom-page .atom-label {
+/* 括号是名字的淡框：不抢字，但在任何身份色下自动跟上 */
+.atom-page .atom-bracket {
+  opacity: 0.55;
+  font-weight: 400;
+}
+.atom-page:hover .atom-name {
   text-decoration: underline;
-  text-decoration-color: var(--ui-sep);
+  text-decoration-thickness: 1px;
   text-underline-offset: 2px;
 }
-.atom-page:hover .atom-label {
-  text-decoration-color: var(--ui-accent);
+.atom-page:hover .atom-bracket {
+  opacity: 0.8;
 }
 .atom.dangling {
   background: transparent;
@@ -2741,11 +2756,13 @@
   padding: 0 5px;
   border-radius: var(--ui-radius-sm);
   /* chip 染各染各的标签色：soft 底＋solid 字，渲染层把 token 引用写进行上的局部槽；
-     未配色的标签不吃这套槽，维持 accent 现状——色是叠加通道，不是唯一载体 */
-  background: var(--chip-bg, var(--ui-accent-soft));
-  color: var(--chip-c, var(--ui-accent));
+     未配色的标签回落**中性**（与正文里那枚 `#名` 同一口径）——色只在用户显式配色时
+     出现，蓝/紫默认色不再替所有标签发言。 */
+  background: var(--chip-bg, var(--ui-bg-hover));
+  color: var(--chip-c, var(--ui-text-secondary));
   opacity: var(--ui-soft);
   font-size: 0.93em;
+  font-weight: 600;
   line-height: 1.5;
   vertical-align: baseline;
   white-space: nowrap;
@@ -2755,6 +2772,8 @@
 }
 .tag-chip:hover {
   opacity: 1;
+  /* 未配色时加深到正文级；配色时保持它自己的色（`--chip-c` 已写进行上） */
+  color: var(--chip-c, var(--ui-text));
   text-decoration: underline;
   text-underline-offset: 2px;
 }

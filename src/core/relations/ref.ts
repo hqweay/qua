@@ -121,7 +121,8 @@ export function summaryText(content: Content, find?: FindBlock, budget = 2): str
  * **划选复制投影**：一段 run 读成「贴到外部应用该出现的字」。
  *
  * 与 `summaryText` 的差别是有意的：复制要让**选中的首尾空格原样保留**（那是用户选的内容），
- * `#` 行内标签带 `#`（屏幕上那一格就是 `#名`），引用读成现解析目标名（改名要传播）。
+ * `#` 行内标签带 `#`（屏幕上那一格就是 `#名`）；**行内实例不带 `#`**（屏幕上它只有名字，
+ * 空心胶囊是种类标记，`#` 是标签的书写标记）；引用读成现解析目标名（改名要传播）。
  * 名字的优先级仍只有 `resolveRef` 那一份，这里不另写一套。
  */
 export function copyTextOf(content: Content, find?: FindBlock, budget = 2): string {
@@ -130,8 +131,10 @@ export function copyTextOf(content: Content, find?: FindBlock, budget = 2): stri
     if (r.t === 'text' || r.t === 'link') out += r.v
     else if (r.t === 'asset') out += r.label ?? t('ui.atom.image')
     else if (r.t === 'ref') {
-      const name = find && budget > 0 ? resolveRef(find, r, budget - 1).label : refSnapshot(r)
-      out += r.flavor === '#' ? `#${name}` : name
+      const view = find && budget > 0 ? resolveRef(find, r, budget - 1) : null
+      const name = view?.label ?? refSnapshot(r)
+      // `#` 只属于标签类；实例（`kind === 'obj'`）在屏幕上没有它，复制也不该多出来
+      out += r.flavor === '#' && view?.kind !== 'obj' ? `#${name}` : name
     }
   }
   return out

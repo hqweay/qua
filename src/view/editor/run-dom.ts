@@ -112,16 +112,18 @@ export function makeRunEl(r: RunWithId, view?: RefView, asset?: AssetView, onAss
   if (r.t === 'ref' && r.to) el.dataset.refTo = r.to
   /**
    * **替身染目标的身份色**（solid，字）：chip 染目标色是同一信号在块级替身上的发言，
-   * 行内替身同一资格——色跟着块走，不跟着露面位置走。染字不染底／边框：三种行内
-   * 露面靠形状分清（无框／空心／`[[ ]]`），色是叠加维度不抢形状。
+   * 行内替身同一资格——色跟着块走，不跟着露面位置走。染字不染形状：三种行内
+   * 露面靠形状分清（粗体下划线／实底 token／空心胶囊），色是叠加维度不抢形状。
+   * 标签的 token 底一并换成该色的 soft 版（与行尾 chip 同一套），实例保持空心。
    * **用户对这一格的显式 ink 让位**（显式 > 派生）：run 带 ink mark 时不染，
    * 字色归 marks 的包装层。dangling 目标没有色，自然回落中性。
    */
   if (r.t === 'ref' && view?.state === 'resolved' && view.color && !r.marks?.ink) {
     el.style.color = identityColorCss(view.color)
+    if (kind === 'tag') el.style.setProperty('--chip-bg', identityColorCss(view.color, 'soft'))
   }
-  // ⚠️ 解析后的显示名**另存一份到 `data-ref-label`**：`.atom-label` 里带 `[[ ]]`／`#` 装饰，
-  //    而 run 上的名字快照是过期的 —— 给探针一个「此刻真的在显示什么」的读点。
+  // ⚠️ 解析后的显示名**另存一份到 `data-ref-label`**：标签的 `.atom-label` 带 `#` 装饰
+  //    （页引用是纯名字），而 run 上的名字快照是过期的 —— 给探针一个「此刻真的在显示什么」的读点。
   if (r.t === 'ref' || r.t === 'link' || r.t === 'asset') el.dataset.refLabel = label
   el.dataset.tip =
     r.t === 'asset'
@@ -140,8 +142,8 @@ export function makeRunEl(r: RunWithId, view?: RefView, asset?: AssetView, onAss
           : t(view?.state === 'dangling' ? 'ui.atom.pageDanglingTitle' : 'ui.atom.pageTitle', { label })
   if (kind === 'tag' || kind === 'obj') {
     /**
-     * 实例与标签类都用 `#名字` 停在正文里；区分靠**外观**（实例是一枚空心胶囊，标签类是纯文字），
-     * 不靠改显示文字 —— 文字是用户的正文，不能为了区分身份改它。
+     * **行内标签**保留 `#名`；**行内实例只显示名字**（空心胶囊就是它的种类标记）。
+     * `#` 是「标签」的书写标记，不该替记录发言——记录的容器形状已经在说「这是一条实例」。
      * ⚠️ 不要给实例加前置小方块：那是待办勾选框的形状，用户会以为点它能打勾。
      *
      * ⚠️ 它占正文 1 格（`data-atom-id`），但**不是** chip（不设 `data-tag-id`）：
@@ -150,15 +152,15 @@ export function makeRunEl(r: RunWithId, view?: RefView, asset?: AssetView, onAss
      */
     const text = document.createElement('span')
     text.className = 'atom-label'
-    text.textContent = `#${label}`
+    text.textContent = kind === 'obj' ? label : `#${label}`
     /**
      * **实例的两个专属入口**（都只占那个已有的图标槽，不另加宽度）：
      *   · 有 closure 字段 ⇒ 状态标记：图标＝当前选项，点击翻转/⌥ 选状态；
      *   · 有普通字段 ⇒ 脸槽 hover 换手：静止是目标的脸，指上去变 chevron，点击开字段卡。
-     * 两者互斥（一个胶囊只留一个控件）；没有字段 ⇒ 只剩 `#名`，不假装有 body。
+     * 两者互斥（一个胶囊只留一个控件）；没有字段 ⇒ 只剩名字，不假装有 body。
      * 标签类（`tag`）不加：它没有被归类到宿主，没有「这一格的值」可编辑。
      *
-     * ⚠️ **普通块的前置脸已退场**（`#名`／`[[ ]]`／无字段实例）：脸属于被指的对象，
+     * ⚠️ **普通块的前置脸已退场**（三种行内替身都不前置目标图标）：脸属于被指的对象，
      *    不属于每一次指向——名字已经唯一确定目标，脸只在块自身与导航列表出现。
      *    这里留下的图标槽只给**控件**（状态／字段手柄），它们不是装饰性身份。
      */
@@ -186,14 +188,24 @@ export function makeRunEl(r: RunWithId, view?: RefView, asset?: AssetView, onAss
     el.append(text)
   } else {
     /**
-     * ⚠️ `[[ ]]` 是**显示装饰**，不进模型：run 上存的是目标 id ＋ 名字快照，
-     *    否则「引用目标的正文」与「它在引用处显示的字」会变成两个要同步的东西。
-     * ⚠️ **不前置目标的脸**：脸只在块自身与导航列表出现；行内的名字＋结构线
-     *    已经够回答「这是谁、这是哪种关系」，重复同一张脸会随提及次数变成噪音。
+     * **页引用＝`[[名]]`**：括号是**种类标记**（与标签的 `#` 同一条语法），不是目标的脸——
+     * 所以它按关系统一、不随对象的脸变。名字粗体、默认跟随正文色；下划线只在悬停时出现。
+     * ⚠️ 括号留在显示里：它是引用自己的词法记号，划选/复制到外部也还认得出这是引用；
+     *    粗体让它从正文里立起来，色只留给用户显式配置的身份色。
+     * ⚠️ **不前置目标的脸**：脸只在块自身与导航列表出现；名字已经唯一确定目标。
      */
     const text = document.createElement('span')
     text.className = 'atom-label'
-    text.textContent = `[[${label}]]`
+    const open = document.createElement('span')
+    open.className = 'atom-bracket'
+    open.textContent = '[['
+    const name = document.createElement('span')
+    name.className = 'atom-name'
+    name.textContent = label
+    const close = document.createElement('span')
+    close.className = 'atom-bracket'
+    close.textContent = ']]'
+    text.append(open, name, close)
     el.append(text)
   }
   return el

@@ -284,19 +284,26 @@ test('S1 呈现摘要逐 run 读法：文本连成流、链接读文本、图片
   assert.equal(summaryText([{ id: 'a2', t: 'asset', asset: 'cd34' }]), '图片')
 })
 
-test('S1b 复制投影：引用出现解析目标名、#标签带 #、不吞选区首尾空格（与 summaryText 的三点差别）', () => {
+test('S1b 复制投影：引用出现解析目标名、#标签带 #、实例不带 #、不吞选区首尾空格（与 summaryText 的差别）', () => {
   const runs: Run[] = [
     { t: 'text', v: '  括号：' },
     { id: 'r1', t: 'ref', label: '旧快照', to: 'p1' },
     { t: 'text', v: '。用完 ' },
     { id: 'r2', t: 'ref', label: '旧标签', to: 'tag1', flavor: '#' },
+    { t: 'text', v: ' 与 ' },
+    { id: 'r3', t: 'ref', label: '旧记录', to: 'rec1', flavor: '#' },
   ]
-  const find = finder([named('p1', '写作示范', '目标描述'), named('tag1', '标签名', '', { props: { _lists: ['tag'] } })])
+  const find = finder([
+    named('p1', '写作示范', '目标描述'),
+    named('tag1', '标签名', '', { props: { _lists: ['tag'] } }),
+    named('rec1', '记录名', '', { props: { _tags: ['tag1'] } }),
+  ])
   // 首尾空格是用户划进去的内容，不能像 summaryText 那样 trim（输入开头的两个空格必须留下）；
-  // `#` 带上（屏幕那一格就是 `#标签名`），引用读现名而不是插入时的快照。
-  assert.equal(copyTextOf(runs, find), '  括号：写作示范。用完 #标签名')
-  // 没有 find ⇒ 退回快照，同样不 trim
-  assert.equal(copyTextOf(runs), '  括号：旧快照。用完 #旧标签')
+  // `#` 只属于标签（屏幕那一格就是 `#标签名`）；实例屏幕上只有名字，复制不多带 `#`；
+  // 引用读现名而不是插入时的快照。
+  assert.equal(copyTextOf(runs, find), '  括号：写作示范。用完 #标签名 与 记录名')
+  // 没有 find ⇒ 退回快照，同样不 trim；这也包括判不出身份的那一格（按 hash 味带 #）
+  assert.equal(copyTextOf(runs), '  括号：旧快照。用完 #旧标签 与 #旧记录')
 })
 
 test('S2 一行只有一个块引用 ⇒ 呈现摘要就是目标的名字（面包屑的「无标题」由此修掉）', () => {
