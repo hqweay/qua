@@ -14,6 +14,7 @@ import {
   hasIdentity,
   hasLiveChildren,
   indentMove,
+  isAutomationBlock,
   isJournal,
   isQueryBlock,
   locate,
@@ -539,13 +540,16 @@ export class StructOps {
      *     删掉就是删掉这块内容，应当放行。
      *   · **查询块根**：晋升出来的查询是内容，又没有自己的删除命令面——
      *     也按内容放行（整棵软删、⌘Z 可回）。
+     *   · **自动化块根**：与查询块同一支——规则是内容对象（有名字、能进回收站），
+     *     没有专属删除命令面，块菜单的「删除块」就是它的删除路径；删掉后规则
+     *     停止执行（automations 派生列表退场），回收站可恢复、恢复不触发。
      *
      * ⚠️ `allowRootRemove: false` 是另一条更严的线（实例显式关掉才生效），只服务
      *    **绑定单一块的岛**：侧槽窗口（根是钉住的锚块，删掉窗口就没有对象——
      *    收尾是关闭不是删除）与卡片格（岛与块 id 绑定，提交假定块存在）。
      *    其余面默认放行：行的删除＝软删真块，面按 store 重算收尾。
      */
-    if (loc.parent === null && hasIdentity(loc.block) && !isQueryBlock(loc.block)) return false
+    if (loc.parent === null && hasIdentity(loc.block) && !isQueryBlock(loc.block) && !isAutomationBlock(loc.block)) return false
     if (loc.parent === null && !this.ed.allowRootRemove) return false
     this.ed.beginUndoEntry()
     const idx = flatten(this.ed.doc).findIndex((b) => b.id === id)
