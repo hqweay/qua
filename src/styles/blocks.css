@@ -2482,9 +2482,15 @@
  * ⇒ 只放开文字节点那一层：原子的盒仍不可选（拖拽把手／边缘吸附／块选区契约不动），
  *   显示的 `[[名]]`／`#名` 随原生选区一起染色。复制的正文味由模型投影另给（不带装饰），
  *   与这里看到的装饰字是两件事。
+ * 长名字不顶破正文列：`.atom` 的 `nowrap` 让长引用／标签一路顶到行尾，被卡片或
+ * 正文列裁掉，名字读不全。显示名是正文里可读的字，就该像正文一样折行——只放开
+ * 文字这一层：原子仍是 inline、占 1 格、不可编辑（模型与光标口径都不变），全名
+ * 仍在 `data-tip`／`data-ref-label` 里，折行显示不算少报。
  */
 .atom .atom-label {
   user-select: text;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .atom:hover {
   filter: var(--atom-hover);

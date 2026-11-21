@@ -32897,6 +32897,50 @@ await check('T347 菜单建卡片：身体与子块行同一帧切换，不留�
   return `菜单建卡片：${flick.frames} 帧里 0 帧同屏两遍；终态卡片 ${final.cards} 张、大纲 ${final.outs} 行`
 })
 
+/**
+ * T348｜**长块引不顶破正文列**：目标名字很长时，`[[...]]` 显示名随正文折行，
+ * 不超出正文列被卡片裁掉；仍是 inline、占 1 格、可选，全名在 data-tip／data-ref-label。
+ */
+await check('T348 长块引折行不溢出：显示名守住正文列，inline 度量与全名都在', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  await page.waitForTimeout(200)
+  const LONG = '这是一段非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常长的名字用来量溢出'
+  const g = await page.evaluate((name) => {
+    const ed = window.__qua.__editor
+    const host = ed.insert.insertBlockAfter(ed.rows()[0].block.id, '')
+    const target = ed.insert.insertBlockAfter(host, '')
+    ed.write((tx) => {
+      tx.patch(target, (b) => { b.props = { ...b.props, _aliases: [name] } })
+      tx.patch(host, (b) => { b.content = [{ id: 't348-r', t: 'ref', to: target.id, label: name }] })
+    })
+    ed.renderAll()
+    const atom = document.querySelector(`.blk[data-block-id="${host}"] .atom-page`)
+    const label = atom?.querySelector('.atom-label')
+    const txEl = document.querySelector(`.blk[data-block-id="${host}"] .tx`)
+    if (!atom || !label || !txEl) return { error: '前置失败：找不到原子/正文槽' }
+    const r = (e) => e.getBoundingClientRect()
+    return {
+      overflowPx: r(label).right - r(txEl).right,
+      ws: getComputedStyle(label).whiteSpace,
+      display: getComputedStyle(atom).display,
+      userSelect: getComputedStyle(label).userSelect,
+      fullInDom: label.textContent.includes(name),
+      fullInTip: (atom.dataset.tip ?? '').includes(name),
+      fullInRef: (atom.dataset.refLabel ?? '').includes(name),
+    }
+  }, LONG)
+  assert(!g.error, `前置：${JSON.stringify(g)}`)
+  assert(g.overflowPx <= 0, `长引用显示名不该溢出正文列：${JSON.stringify(g)}`)
+  assert(g.display === 'inline' && g.ws === 'normal', `仍是 inline＋折行（守住正文度量）：${JSON.stringify(g)}`)
+  assert(g.userSelect === 'text', `显示名仍可随原生选区选中：${JSON.stringify(g)}`)
+  assert(g.fullInDom && g.fullInTip && g.fullInRef, `全名在 DOM／tip／refLabel 里，折行不是少报：${JSON.stringify(g)}`)
+
+  await ctx.close()
+  return `长块引折行：溢出 ${Math.round(g.overflowPx)}px；inline＋可选；全名三处都在`
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 
