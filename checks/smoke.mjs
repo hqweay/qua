@@ -19611,6 +19611,22 @@ await check('T190 卡片两副面孔（看板／画廊）：就地编辑；换�
   }))
   assert(gallery.layout === 'grid', `卡片默认排成网格（画廊）：${JSON.stringify(gallery)}`)
   assert(gallery.cards > 0, `画廊要画出卡：${JSON.stringify(gallery)}`)
+  // 卡片标签 chip 与正文行同一口径：声明了字段的标签带三角，没声明的不硬造（回归：以前卡片 chip 全是裸的）
+  const cardChips = await page.evaluate(() => {
+    const out = []
+    document.querySelectorAll('.vcard .vcard-tags .tag-chip').forEach((chip) => {
+      const caret = chip.querySelector('.tag-chip-caret')
+      out.push({ caret: !!caret, host: caret?.dataset.tagFieldsFor ?? '', tag: caret?.dataset.tagFieldsTag ?? '' })
+    })
+    return out
+  })
+  if (cardChips.length > 0) {
+    assert(cardChips.some((c) => c.caret), `带字段的标签在卡片上也该出三角：${JSON.stringify(cardChips)}`)
+    assert(
+      cardChips.every((c) => !c.caret || (c.host && c.tag)),
+      `卡片三角要带宿主/标签两格才能分派字段卡：${JSON.stringify(cardChips)}`,
+    )
+  }
   assert(
     gallery.cover === 0,
     `没有图的卡不该有封面位（不拿首字占位充数）：${JSON.stringify(gallery)}`,

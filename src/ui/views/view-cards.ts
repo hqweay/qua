@@ -17,13 +17,11 @@ import {
   cardLayoutOf,
   clickModsOf,
   blockLabel,
-  COLOR_PROP,
   constrainBelowFields,
   displayRowPropIds,
   groupsByStructure,
   isDerivedGroupKey,
   openActionOf,
-  prop,
   sortRecords,
   TAGS_COLUMN,
   type BelowFields,
@@ -37,7 +35,7 @@ import {
 } from '../../core/index.ts'
 import type { SurfaceEditor } from '../block-ui/surface-editor.ts'
 import { renderPropsLine } from '../block-ui/props-line.ts'
-import { makeTagChipEl } from '../../view/editor/block-dom.ts'
+import { makeTaggedChip } from '../../view/editor/field-affordance.ts'
 import { t } from '../../core/infra/msg.ts'
 import { assetViewOf } from '../../view/asset-views.ts'
 import { bucketize, bucketLabel, orderBuckets, recordsForGrouping, GROUP_UNSET, type BucketizeOptions, type GroupBucket } from './grouping.ts'
@@ -627,7 +625,7 @@ export class ViewCards {
       const tags = document.createElement('div')
       tags.className = 'vcard-tags'
       for (const tag of r.tags) {
-        tags.appendChild(makeTagChipEl(tag.id, blockLabel(tag, this.kbFind), prop<string>(tag, COLOR_PROP)))
+        tags.appendChild(makeTaggedChip(r.block.id, tag, blockLabel(tag, this.kbFind)))
       }
       meta.appendChild(tags)
     }

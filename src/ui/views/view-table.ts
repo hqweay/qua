@@ -21,7 +21,7 @@
  * 标题列钉在左侧（CSS），滚到多右都知道这一行是谁。不替用户换视图——他在选择器里点的是「表格」。
  */
 import type { Block, BlockStore, OpenAction, ViewConfig, ViewRecord } from '../../core/index.ts'
-import { clickModsOf, COLOR_PROP, openActionOf } from '../../core/index.ts'
+import { clickModsOf, openActionOf } from '../../core/index.ts'
 import {
   cardinalityOf,
   choicesOf,
@@ -29,14 +29,13 @@ import {
   displayNameOf,
   hasValue,
   liveChildren,
-  prop,
   propDisplayLabels,
   propKindOf,
   propLabel,
 } from '../../core/index.ts'
 import { choiceCells, ChoiceLookupIndex, type ChoiceLookup, type FieldRow } from '../../core/props/props.ts'
 import { t } from '../../core/infra/msg.ts'
-import { makeTagChipEl } from '../../view/editor/block-dom.ts'
+import { makeTaggedChip } from '../../view/editor/field-affordance.ts'
 import type { SurfaceEditor } from '../block-ui/surface-editor.ts'
 import { makeCellEditor } from '../block-ui/properties.ts'
 import { mentionDerivedOf, renderMentionField } from './mention-field.ts'
@@ -636,7 +635,7 @@ export class ViewTable {
       const box = document.createElement('div')
       box.className = 'tv-tags'
       for (const tag of r.tags) {
-        box.appendChild(makeTagChipEl(tag.id, displayNameOf(tag), prop<string>(tag, COLOR_PROP)))
+        box.appendChild(makeTaggedChip(r.block.id, tag, displayNameOf(tag)))
       }
       if (r.tags.length === 0) box.dataset.empty = '1'
       return box

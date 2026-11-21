@@ -13,7 +13,16 @@
  *   · **字段表随写作废、懒重建**：逐格现建要扫整片森林（`fieldTableOf` 两趟），
  *     一屏几十格就是 O(n²)。与编辑器同一口径：任何一次模型写之后作废，下一次问到再建。
  */
-import { fieldTableOf, closureOf, type Block, type BlockStore, type FieldTable } from '../../core/index.ts'
+import {
+  closureMarkOf,
+  closureOf,
+  fieldTableOf,
+  hasAnyFieldOf,
+  type Block,
+  type BlockStore,
+  type FieldTable,
+  type RefView,
+} from '../../core/index.ts'
 
 /**
  * 造一个「把关闭态盖到投影上」的函数。
@@ -31,5 +40,30 @@ export function createClosureStamp(store: BlockStore): (block: Block, into: HTML
     const closure = closureOf(block, table)
     if (closure === undefined) delete into.dataset.closure
     else into.dataset.closure = closure
+  }
+}
+
+/**
+ * 投影用的**行内元信息**：目标有没有字段、有没有 closure 状态。
+ *
+ * 与编辑器 `render-ops.ts` 的 `refMetaOf` 同一份判据、同一条失效轴（写一次作废、下次现建）。
+ * 差别只是它住在装配层：投影入口 `main.ts` 的 `project` 是卡片／表格／列表／导图共用的那一处，
+ * 在这里补上 refMeta，投影里的实例才长得与正文行一样（有字段手柄／状态标记），
+ * 而不是「点进编辑才有、读的时候没有」。
+ */
+export function createProjectionRefMeta(store: BlockStore): (id: string) => Pick<RefView, 'fields' | 'closure'> | undefined {
+  let table: FieldTable | null = null
+  store.subscribe(() => {
+    table = null
+  })
+  const find = (id: string) => store.find(id)
+  return (id) => {
+    const target = find(id)
+    if (!target) return undefined
+    table ??= fieldTableOf(store.blocks)
+    const fields = hasAnyFieldOf(target, find)
+    if (!fields) return { fields: false }
+    const closure = closureMarkOf(target, table, find)
+    return { fields: true, ...(closure ? { closure } : {}) }
   }
 }

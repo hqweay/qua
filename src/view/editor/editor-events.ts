@@ -23,6 +23,7 @@ import type { Content } from '../../core/model/runs.ts'
 import { isCommittedTextInput } from '../../core/infra/ime.ts'
 import { clickModsOf, openActionOf, type ClickMods, type OpenAction } from '../../core/views/open.ts'
 
+import { routeFieldAffordance } from './field-affordance.ts'
 /**
  * **「按下期间不换 DOM」的指针接线**：按下 → 冻结；放开 → 延迟一拍。
  *
@@ -1030,20 +1031,14 @@ export function bindEditorEvents(br: EditorBridge): () => void {
      * **实例的字段手柄**：脸槽 hover 换手后的那一枚。它住在带 `data-ref-to` 的原子
      * 里面，所以这一支必须排在导航之前——语义是「就地改字段」，不是「去目标」。
      */
-    const refFieldsEl = path.find((n): n is HTMLElement => n instanceof HTMLElement && n.dataset.refFields !== undefined)
-    if (refFieldsEl?.dataset.refFields) {
-      br.onRefFields?.(refFieldsEl.dataset.refFields, refFieldsEl)
-      e.preventDefault()
-      return
-    }
-
-    /**
-     * **块标签 chip 的三角**：同理，chip 本体带 `data-ref-to`（打开标签类），
-     * 三角是它内部独立的命中区；两个动作必须在同一枚 chip 上分开接。
-     */
-    const tagFieldsEl = path.find((n): n is HTMLElement => n instanceof HTMLElement && n.dataset.tagFieldsFor !== undefined)
-    if (tagFieldsEl?.dataset.tagFieldsFor && tagFieldsEl.dataset.tagFieldsTag) {
-      br.onTagFields?.(tagFieldsEl.dataset.tagFieldsFor, tagFieldsEl.dataset.tagFieldsTag, tagFieldsEl)
+    // 字段入口与「去目标」是两件事：先用同一份判据分派，命中就不再走下面的导航。
+    // `commitLeavingLine` 包在 br 的回调里（contenteditable=false 不派 focusout）。
+    if (
+      routeFieldAffordance(path, {
+        onRefFields: (runId, el) => br.onRefFields?.(runId, el),
+        onTagFields: (hostId, tagId, el) => br.onTagFields?.(hostId, tagId, el),
+      })
+    ) {
       e.preventDefault()
       return
     }

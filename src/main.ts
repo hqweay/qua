@@ -50,9 +50,10 @@ import { setupSurface } from './app/wiring/surface.ts'
 import { setupDocks } from './app/wiring/docks.ts'
 import { setupCardMenus } from './app/wiring/dock-menus.ts'
 import { setupPanels } from './app/wiring/panels.ts'
-import { createClosureStamp } from './app/wiring/closure-stamp.ts'
+import { createClosureStamp, createProjectionRefMeta } from './app/wiring/closure-stamp.ts'
 import { setupAtomPopovers } from './app/wiring/atom-popovers.ts'
 import { createRefPeek } from './ui/block-refs/popover.ts'
+import { routeFieldAffordance } from './view/editor/field-affordance.ts'
 import { setupFeed } from './app/wiring/feed.ts'
 import { installDispatch, setupKeys } from './app/wiring/keys.ts'
 import { dispatchKey } from './core/infra/dispatch.ts'
@@ -2206,6 +2207,7 @@ let panels: ReturnType<typeof setupPanels>
  * 字段表随写作废、懒重建，见 `app/wiring/closure-stamp.ts`。
  */
 const stampClosure = createClosureStamp(blocks)
+const projectionRefMeta = createProjectionRefMeta(blocks)
 
 /**
  * tab 标题的刷新是**去抖**的：正文每敲一个字都会 `change`，而 tab 条重建会
@@ -2326,7 +2328,7 @@ const {
   refClick: popovers.handleRefClick,
   // 表格标题列画的是**块的样子**：投影与正文同一条路（run/marks/引用/图片）
   project: (b, into) => {
-    fillBlockText(into, b, (id) => blocks.find(id), assetViewOf, markAssetMissing)
+    fillBlockText(into, b, (id) => blocks.find(id), assetViewOf, markAssetMissing, projectionRefMeta)
     // 投影也要看得出「关闭了」：判据与大纲同一份（`closureOf`），住在装配层的唯一投影入口
     stampClosure(b, into)
   },
@@ -2460,6 +2462,30 @@ document.addEventListener('click', (e) => {
   if (action.dataset.aliasAction === 'props') panels.openPropertiesDrawer(blockId)
   else panels.openBlockConfig(blockId, { anchor: action })
 })
+
+/**
+ * 投影面（卡片／表格标签列／只读格）的字段入口委托点。
+ *
+ * 正文行自己有编辑器事件表，三角与手柄在那条路上分派（含 `commitLeavingLine`）；
+ * 投影没有编辑器，点击会先被格子的委托吃掉（进编辑/打开块），所以这一支挂在
+ * **document 的 capture 阶段**：先把字段入口认走，没命中才让格子照常处理。
+ * 判据与正文共用 `routeFieldAffordance`，回调就是正文那一套 popover 处理器。
+ */
+document.addEventListener(
+  'click',
+  (e) => {
+    if (
+      routeFieldAffordance(e.composedPath(), {
+        onRefFields: (runId, el) => popovers.handleRefFields(runId, el),
+        onTagFields: (hostId, tagId, el) => popovers.handleTagFields(hostId, tagId, el),
+      })
+    ) {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+  },
+  true,
+)
 
 window.addEventListener('beforeunload', () => {
   saveNow()

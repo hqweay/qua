@@ -17,11 +17,9 @@ import {
   CLOSURE_USE,
   DEFAULT_BLOCK_TYPE,
   DIVIDER_TYPE,
-  COLOR_PROP,
   DISPLAY_PROP,
   aliasesOf,
   blockTypeOf,
-  declaredFieldIds,
   displayNameOf,
   embedBodyOf,
   hasChildrenViewBody,
@@ -56,7 +54,7 @@ import { t } from '../../core/infra/msg.ts'
 import { blockLabel, danglingView, resolveRefs } from '../../core/relations/ref.ts'
 import { createIcon, renderIcon } from '../icons.ts'
 import { buildMarker } from './marker.ts'
-import { isTagFieldsOpen } from './tag-fields-open.ts'
+import { makeTaggedChip } from './field-affordance.ts'
 
 /** 行高：与 CSS 的 `--ui-line-h` 必须一致（虚拟化算占位高度要用） */
 export const LINE_H = 30
@@ -178,7 +176,7 @@ export {
   makeTagChipEl,
   tagForMark,
 } from './run-dom.ts'
-import { applyMarkColor, makeRunEl, makeTagChipEl, tagForMark } from './run-dom.ts'
+import { applyMarkColor, makeRunEl, tagForMark } from './run-dom.ts'
 
 /**
  * **这一行是不是只读的**：不给编辑、不给落光标。
@@ -364,30 +362,9 @@ export function makeTagsEl(
   const draggingOf = (): HTMLElement | null => el.querySelector<HTMLElement>('.tag-chip[data-dragging]')
   for (const tagId of tags) {
     const tag = find(tagId)!
-    const chip = makeTagChipEl(tagId, blockLabel(tag, find), prop<string>(tag, COLOR_PROP))
-    /** 只有「这枚标签声明了字段」才有 body 可披露；没有字段就不给三角 */
-    if (declaredFieldIds(tag).length > 0) {
-      const caret = document.createElement('span')
-      caret.className = 'tag-chip-caret'
-      caret.contentEditable = 'false'
-      caret.draggable = false
-      caret.dataset.tagFieldsFor = b.id
-      caret.dataset.tagFieldsTag = tagId
-      caret.dataset.tip = t('ui.chip.fieldsTitle', { label: blockLabel(tag, find) })
-      // 卡片开着时宿主行可能刚被重画（写值就会）；三角是重建的，开合朝向按渲染输入补回来
-      if (isTagFieldsOpen(b.id, tagId)) caret.setAttribute('aria-expanded', 'true')
-      renderIcon(caret, 'lucide:chevron-right', 'chevron-right', 'sm')
-      // 按下不挪光标、不起拖；click 冒到容器走 tagFields 分支（chip 本体仍走导航）
-      caret.addEventListener('mousedown', (e) => {
-        e.preventDefault()
-        e.stopPropagation()
-      })
-      caret.addEventListener('dragstart', (e) => e.preventDefault())
-      // 披露控件统一在**起点**：块折叠在块首，标签字段披露在 chip 首——
-      // 位置跟「它披露的是谁的 body」走，不跟内容最终浮在卡里还是行下走。
-      // 开合状态由 `aria-expanded` 驱动翻转（打开 `›→⌄`，关闭复位）。
-      chip.prepend(caret)
-    }
+    const chip = makeTaggedChip(b.id, tag, blockLabel(tag, find))
+    // 披露控件统一在**起点**：块折叠在块首，标签字段披露在 chip 首——
+    // 位置跟「它披露的是谁的 body」走，不跟内容最终浮在卡里还是行下走。
     if (draggable) {
       chip.draggable = true
       chip.addEventListener('dragstart', (e) => {
