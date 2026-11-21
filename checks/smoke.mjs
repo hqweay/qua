@@ -32839,6 +32839,57 @@ await check('T346 行内块新建看法：子块行当场让位，卡片与大�
   await ctx.close()
   return `行内块建卡片：卡 2 张、正文大纲 0 行（与刷新后一致）`
 })
+await check('T347 菜单建卡片：身体与子块行同一帧切换，不留「卡片和大纲同屏」的中间帧', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const fx = await buildListTree(page)
+  await page.waitForTimeout(300)
+
+  await page.evaluate(
+    ({ owner, kids }) => {
+      const w = window
+      w.__flick = { bad: 0, frames: 0 }
+      const sample = () => {
+        const ids = [...document.querySelectorAll('#editor .blk')]
+          .filter((el) => !el.closest('.blk-view-body') && !el.closest('.mount-editor'))
+          .map((el) => el.dataset.blockId ?? '')
+        const body = Boolean(document.querySelector(`#editor .blk[data-block-id="${owner}"] > .blk-view-body`))
+        const outside = kids.filter((id) => ids.includes(id)).length
+        if (body && outside > 0) w.__flick.bad++
+        w.__flick.frames++
+        if (w.__flick.frames < 120) requestAnimationFrame(sample)
+      }
+      requestAnimationFrame(sample)
+    },
+    { owner: fx.rows[0], kids: [fx.cells.c11, fx.cells.c12] },
+  )
+
+  await page.locator(`#editor .blk[data-block-id="${fx.rows[0]}"] [data-drag-for]`).first().click({ button: 'right' })
+  await page.waitForTimeout(300)
+  const rows = await page.evaluate(() =>
+    [...document.querySelectorAll('.layer-item')].map((e) => ({ i: e.dataset.index ?? '', label: (e.textContent ?? '').replace(/\s+/g, ' ').trim() })),
+  )
+  const at = rows.findIndex((r) => r.label.includes('视图'))
+  assert(at >= 0, `前置：块菜单里有「视图…」：${JSON.stringify(rows.map((r) => r.label))}`)
+  await page.locator(`.layer-item[data-index="${rows[at].i}"]`).click()
+  await page.waitForTimeout(260)
+  await page.locator('.layer-item', { hasText: '新建卡片' }).first().click()
+  await page.waitForTimeout(1300)
+
+  const flick = await page.evaluate(() => window.__flick)
+  assert(flick.frames > 30, `帧采样足够：${flick.frames}`)
+  assert(flick.bad === 0, `身体出现时子块行已让位（没有两遍的中间帧）：${flick.bad}`)
+  const final = await page.evaluate(
+    ({ id, kid }) => ({
+      cards: document.querySelectorAll(`#editor .blk[data-block-id="${id}"] > .blk-view-body .vcard`).length,
+      outs: [...document.querySelectorAll('#editor .blk')].filter((el) => el.dataset.blockId === kid && !el.closest('.blk-view-body')).length,
+    }),
+    { id: fx.rows[0], kid: fx.cells.c11 },
+  )
+
+  await ctx.close()
+  return `菜单建卡片：${flick.frames} 帧里 0 帧同屏两遍；终态卡片 2 张、大纲 0 行`
+})
 
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length

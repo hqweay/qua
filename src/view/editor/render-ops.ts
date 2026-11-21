@@ -953,11 +953,23 @@ export class RenderOps {
      *    它换的是 `.tx` 所在的那一行 ⇒ 输入法正持有的文本节点被换掉，预编辑串当场落成正文。
      */
     if (this.ed.deferWhileComposing()) return
+    // 先让行投影换代：rowOf 直接读上一代 rowIndex，属性写入让位后它仍报 hasChildren=true。
+    this.ed.rows()
     const row = this.ed.rowOf(id) ?? {
       block,
       depth: depthOf(this.ed.doc, id),
       hidden: false,
       hasChildren: hasLiveChildren(block),
+    }
+    /**
+     * 身体有无就是「这批子块归谁画」的开关：单行重画只能换这一行，翻开关时
+     * 身体先挂上、旧子块行还在（反向则身体先没了、子块行还没回来）——两遍或缺一遍
+     * 要等下一次整页重画才收口，肉眼就是闪一下。没有「只换一行」的答案，升级整页。
+     */
+    const hadBody = el.querySelector(':scope > .blk-view-body') !== null
+    if (hasLiveChildren(block) && hadBody === row.hasChildren) {
+      this.renderAll()
+      return
     }
     // 单行重画也是「一批」：gutter 与块下行共用一份扫库结果
     const derive = this.deriveOf()
