@@ -118,7 +118,7 @@ export class ChoicesEditor {
      * 块属性卡里**仍然**能改，三者读同一份行派生、写同一条命令。
      *
      * **「允许多个值」不在这里**：基数轴推广到全 kind 之后，那个开关搬去了定义页的
-     * 通用值配置段（`properties.ts:buildDefCardinality`），这一段只管 select 自己的版面。
+     * 通用值配置段（`def-config-section.ts`），这一段只管 select 自己的版面。
      */
     if (focusTag === '') {
       const gutter = document.createElement('label')

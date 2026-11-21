@@ -535,7 +535,7 @@ export function makeCellEditor(
    *
    * ⚠️ **单值／多值都从 `assetRefsOf` 读**：定义切成 `many` 后值是数组，
    *    这里追加／摘除都保持数组形状，绝不 `String(value)`（那会把 `a,b` 写回成一个字符串）。
-   *    基数开关在定义页的通用段（`buildDefCardinality`，asset 在注册表里 `many: true`）。
+   *    基数开关在定义页的通用段（`def-config-section.ts`，asset 在注册表里 `many: true`）。
    */
   if (kind === 'asset') {
     const refs = assetRefsOf(row.value)

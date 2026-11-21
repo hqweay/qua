@@ -10,6 +10,8 @@
  *      每行标来源：`来自 #A、#B`，没有标签声明就标「本块自有」；
  *      声明了但没填 ⇒ 仍出现，显示「待填」占位（这正是标签属性的意义）；行序由数据层给。
  *   2. **类型专属**：标签的字段声明（`_fieldDefs` 清单）／定义块的值配置（格式／基数／候选域／选项）。
+ *      这两段已抽成宿主无关段（`declared-fields-section.ts`／`def-config-section.ts`），
+ *      面板只是它们的壳之一；段序仍由这里排。
  *   3. **块配置**：脸／别名／露面／显示／标签／属于——低频的「它是谁」，与块配置弹窗共用段。
  *   4. **系统信息**：只读的创建／修改时刻。
  *
@@ -22,99 +24,34 @@
 import type { Block, ClickMods } from '../../core/index.ts'
 import { clickModsOf, COLOR_PROP, enginePropText, identityColorCss, isColorValue, isEngineProp } from '../../core/index.ts'
 import { inputSession } from '../../view/editor/input-session.ts'
-import { onCommitKeys } from './keys.ts'
 import { EDIT_ISLAND_ATTR } from '../../view/editor/block-dom.ts'
 import type { FieldRow, PropKind } from '../../core/index.ts'
-import { plainText } from '../../core/model/runs.ts'
 import type { PropCreateMode } from '../../core/infra/ports.ts'
 import {
   aliasesOf,
   allowsMany,
-  blockLabel,
-  cardinalityOf,
   clockLabel,
   displayNameOf,
-  declaredFieldIds,
-  hasList,
-  formatOf,
-  isPropDef,
-  normalizeAlias,
-  PROP_KINDS,
-  PROP_KIND_SPECS,
   prop,
-  propKindOf,
-  propLabel,
-  refDomainOf,
   refViewOf,
   valueListOf,
   type RefDomain,
-  type RefDomainMode,
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import { renderIcon } from '../../view/icons.ts'
-import { sectionInfo } from '../../view/info.ts'
-import { ChoicesEditor, type ChoiceActions } from './choices-editor.ts'
+import type { ChoiceActions } from './choices-editor.ts'
 import {
   belongsContent,
-  chipDel,
   displayContent,
   listsContent,
   namesContent,
   tagsContent,
   type ConfigSectionsCtx,
 } from './config-sections.ts'
-
-/** 格式的显示名（一张小表：格式是封闭集，翻不出去） */
-function formatLabelOf(format: string): string {
-  if (format === 'url') return t('ui.props.format.url')
-  if (format === 'email') return t('ui.props.format.email')
-  if (format === 'phone') return t('ui.props.format.phone')
-  if (format === 'date') return t('ui.props.format.date')
-  if (format === 'datetime') return t('ui.props.format.datetime')
-  if (format === 'image') return t('ui.props.format.image')
-  if (format === 'file') return t('ui.props.format.file')
-  if (format === 'any') return t('ui.props.format.any')
-  return t('ui.props.format.plain')
-}
-
-/**
- * 下拉里「这条属性装什么」的目录名：`text` 的格式轴给一等名（链接／邮箱／电话），
- * 其余按 kind。用户按内容类型认一条属性（「主页 · 链接」），不按 kind/format 的分界认。
- */
-function defCatalogLabel(def: Block): string {
-  const kind = propKindOf(def)
-  if (kind === 'text') {
-    const f = formatOf(def)
-    if (f === 'url' || f === 'email' || f === 'phone') return t(`ui.props.format.${f}`)
-  }
-  return t(`ui.props.kind.${kind}`)
-}
-
-/**
- * **段头**：图标 ＋ 名字 ＋ 可选计数。
- *
- * 段头是「分组」的唯一视觉锚点：一列表单里没有段头，读者只看到一串行；
- * 有了图标与计数，主段与次段在同一视野里各有身份（图标是形状，计数是规模）。
- */
-function sectionHead(icon: string, title: string, count?: number): HTMLElement {
-  const head = document.createElement('div')
-  head.className = 'props-section-head'
-  const ico = document.createElement('span')
-  ico.className = 'props-section-ico'
-  ico.setAttribute('aria-hidden', 'true')
-  renderIcon(ico, icon, 'list', 'md')
-  const label = document.createElement('span')
-  label.className = 'props-section-title'
-  label.textContent = title
-  head.append(ico, label)
-  if (count !== undefined && count > 0) {
-    const badge = document.createElement('span')
-    badge.className = 'props-section-count'
-    badge.textContent = String(count)
-    head.appendChild(badge)
-  }
-  return head
-}
+import { DefConfigSection } from './def-config-section.ts'
+import { DeclaredFieldsSection } from './declared-fields-section.ts'
+import { buildAddForm, PropsDraftState, toggleDraftForm, type PropsAddFormDeps } from './props-add-form.ts'
+import { labeledRow, sectionHead, stackedRow } from './props-chrome.ts'
 
 export interface PropertiesDeps {
   /**
@@ -454,21 +391,21 @@ export class PropertiesPanel {
    */
   private readonly inlineRefIsland: boolean
   /**
-   * 哪个添加表单开着：`own`（这一块自己的值）／`declared`（标签属性／字段声明）／`null`。
-   *
-   * ⚠️ 不能是一个布尔：两个入口写的是两个槽，同时开着会让「点了哪个」变得不可知。
+   * 两个添加入口共用的草稿行状态（own 表单在这里构造，声明表单在段里构造；
+   * 互斥靠同一个槽位——同时开着会让「点了哪个」不可知）。
    */
-  private formOpen: 'own' | 'declared' | null = null
+  private readonly draft = new PropsDraftState()
+  /** 草稿行需要的最小能力（own 表单与声明段各取所需，读的都是同一份 deps） */
+  private readonly formDeps: PropsAddFormDeps
   /**
-   * 选项编辑器的两个实例（各自记住「哪个作用域面板展开着」）。
+   * **抽出的段**：定义值配置／字段声明（一套内容、多宿主可挂）。
    *
-   * 状态必须**在面板里**而不是组件 DOM 里：勾一个标签会写一次模型，
-   * 卡片随后整体重画 —— 状态存在 DOM 上就会被这次重画连根拔掉。
+   * 段只长内容与交互、不认识宿主：写能力由 deps 注入，「写完谁重画」由段的
+   * `repaint` 带回这里的整卡重画。检视卡与抽屉两个壳都是本面板，
+   * 所以挂的都是同一段；将来的就地投影宿主挂同一段组件，不再抄第二份。
    */
-  private readonly choicesFull: ChoicesEditor
-  private readonly choicesTag: ChoicesEditor
-  /** 标签视角打开的是哪条属性的选项（`chip` 上的「选项」按钮切换它） */
-  private tagChoices: { def: Block; owner: Block } | null = null
+  private readonly defConfig: DefConfigSection
+  private readonly declared: DeclaredFieldsSection
 
   constructor(els: PropertiesEls, deps: PropertiesDeps, opts: { inlineRefIsland?: boolean } = {}) {
     this.els = els
@@ -491,54 +428,52 @@ export class PropertiesPanel {
       pickIcon: (anchor: DOMRect, current: string, onPick: (icon: string) => void) =>
         this.deps.pickIcon(anchor, current, onPick),
     }
-    this.choicesFull = new ChoicesEditor({
-      ...base,
-      // 全量视角：属性卡的主体**就是**那条 select 定义时才画
-      def: () => this.selectDef(),
-      focusTag: () => '',
+    this.formDeps = {
+      defs: this.deps.defs,
+      rows: this.deps.rows,
+      tags: this.deps.tags,
+      fieldDeclarations: this.deps.fieldDeclarations,
+      toast: this.deps.toast,
+    }
+    this.defConfig = new DefConfigSection({
+      def: () => this.deps.target() ?? undefined,
+      repaint: () => this.render(),
+      choices: this.deps.choices,
+      setFormat: this.deps.setFormat,
+      setRefDomain: this.deps.setRefDomain,
+      pickRefTag: this.deps.pickRefTag,
+      pickRefAnchor: this.deps.pickRefAnchor,
+      pickRefQuery: this.deps.pickRefQuery,
+      blockById: (id: string) => this.deps.blockById(id),
+      shortId: this.deps.shortId,
+      openRef: this.deps.openRef,
+      tags: base.tags,
+      tagName: base.tagName,
+      pickIcon: base.pickIcon,
     })
-    this.choicesTag = new ChoicesEditor({
-      ...base,
-      def: () => this.tagChoices?.def,
-      // 页的字段段没有「标签作用域」可言（`_fieldDefs` 在页上还没有消费方）：走全量视角
-      focusTag: () => {
-        const open = this.tagChoices
-        return open && hasList(open.owner, 'tag') ? open.owner.id : ''
-      },
+    this.declared = new DeclaredFieldsSection({
+      owner: () => this.deps.target() ?? undefined,
+      repaint: () => this.render(),
+      declaredFields: this.deps.declaredFields,
+      undeclareField: this.deps.undeclareField,
+      openRef: this.deps.openRef,
+      draft: this.draft,
+      declareProp: this.deps.declareProp,
+      createDeclaredDef: this.deps.createDeclaredDef,
+      form: this.formDeps,
+      choices: this.deps.choices,
+      blockById: base.tagById,
+      tags: base.tags,
+      tagName: base.tagName,
+      pickIcon: base.pickIcon,
     })
     this.els.add.textContent = t('ui.props.addShort')
     this.els.add.dataset.tip = t('ui.props.add')
     this.els.add.addEventListener('click', () => {
-      const opening = this.formOpen !== 'own'
-      this.formOpen = opening ? 'own' : null
+      toggleDraftForm(this.draft, 'own')
       // 只有「这一次打开」才抢焦点：别的路径触发的重画不许把焦点拽回草稿行
-      this.draftFocusPending = opening
       this.render()
     })
-  }
-
-  /** 主体是一条 `select` 定义时，属性卡里画它的选项编辑器 */
-  private selectDef(): Block | undefined {
-    const target = this.deps.target()
-    return target && isPropDef(target) && propKindOf(target) === 'select' ? target : undefined
-  }
-
-  /**
-   * 「这一次打开草稿行才聚焦」的旗：添加入口点下时置位，草稿行构造时消费
-   * （聚焦＋滚进视口），别的路径触发的重画不许抢焦点。
-   */
-  private draftFocusPending = false
-
-  /**
-   * 草稿行次级「浏览已有定义」的开合。**跨重建保留**：面板会随焦点变化整卡重建，
-   * 开合若只写在 DOM 上，一次重建就把展开的下拉收回去（用户刚点到一半）；
-   * 与 `formOpen` 同一待遇——状态住面板，重建时照着摆。
-   */
-  private browseOpen = false
-
-  /** chip 尾上的删除粒：标签/归属的粒住在段里（`config-sections.ts`）；这里只剩声明段用 */
-  private tagDel(title: string, onClick: () => void): HTMLButtonElement {
-    return chipDel(title, onClick)
   }
 
   render(): void {
@@ -613,53 +548,16 @@ export class PropertiesPanel {
     if (!islandHold) this.els.body.appendChild(this.buildFields(target, rows, labels))
 
     /**
-     * **标签属性**：只有标签有。
-     *
-     * 与上面那一段是两件事：那一段是「这一块自己的值」，这一段是「我的成员会有哪些格子」。
-     *
-     * ⚠️ **页不再有这一段**（v29）。页声明过 `_fieldDefs`，但**没有任何消费方**
-     * —— 子块不会因此获得那些字段，于是它只是「一个能写、没人读的值」。
-     * 一个写进去却永远不会生效的入口比没有入口更糟：用户会以为「声明了，
-     * 成员就有这一格了」。继承是另一个设计（需要先定「页的子块」与「标签的成员」
-     * 谁说了算），在定下来之前，这一格就不该可写。
+     * **标签属性**（字段声明）与**定义块的值配置**：两段已抽成宿主无关段
+     * （`declared-fields-section.ts`／`def-config-section.ts`）。
+     * 判据（「只有标签有声明段」「只有定义块有值配置」）与挂载条件在段里——
+     * 返回 null 宿主就不挂；这里只排段序：类型专属段跟在值段之后。
      */
-    if (hasList(target, 'tag')) {
-      this.els.body.appendChild(this.buildDeclared(target, labels))
-    }
+    const declared = this.declared.render(labels)
+    if (declared) this.els.body.appendChild(declared)
 
-    /**
-     * **select 定义的选项编辑器**：这条属性「能选什么」就是它自己的子块。
-     * 主体是定义块时画在这里（属性行之后、系统信息之前），改完立刻看得到。
-     */
-    /**
-     * **定义块的值配置归组**：格式（同值形状内的约束与画法）、`ref` 的候选域、
-     * select 的选项编辑器——三件事都是「这条属性的值」的配置，散着画就是三段断片
-     * （空属性段 → 一行格式 → 裸标题「选项」），读者拼不出它们的归属。
-     * 归组后「选项」降为组内的一个名字，组头说明这组配置管的是**成员块的值**。
-     *
-     * 只有有格式轴的 kind 才有格式段（select 的配置是选项编辑器；checkbox/ref 没有格式）；
-     * 格式改动**不动任何值**：值仍是同一个字符串，只是校验与输入框类型变了。
-     */
-    if (isPropDef(target)) {
-      const config = document.createElement('section')
-      config.className = 'props-section prop-def-config'
-      const head = sectionHead('lucide:sliders-horizontal', t('ui.props.defValuesTitle'))
-      // 同标签属性段：说明退成段头 ⓘ（解释没有操作权，不占正文宽度）
-      head.appendChild(sectionInfo(t('ui.props.defValuesHint')))
-      config.appendChild(head)
-      const card = this.buildDefCardinality(target)
-      if (card) config.appendChild(card)
-      const fmt = this.buildDefFormat(target)
-      if (fmt) config.appendChild(fmt)
-      // `ref` 的候选域：只对 ref 定义出现（别的 kind 没有「候选」这回事）
-      const refDomain = this.buildRefDomain(target)
-      if (refDomain) config.appendChild(refDomain)
-      if (this.selectDef()) {
-        this.choicesFull.render()
-        config.appendChild(this.choicesFull.root)
-      }
-      this.els.body.appendChild(config)
-    }
+    const defConfig = this.defConfig.render()
+    if (defConfig) this.els.body.appendChild(defConfig)
 
     // 块配置是低频的「它是谁」，排在值与其类型专属配置之后
     this.els.body.appendChild(this.buildConfig(target))
@@ -742,7 +640,7 @@ export class PropertiesPanel {
       fields.appendChild(makeFieldRow(row, target, rowDeps, { labelCount, labels }))
     }
     // 草稿行在行清单末尾（新行落点）与追加入口之间；收起时入口独占段尾
-    if (this.formOpen === 'own') fields.appendChild(this.buildForm(target, labels))
+    if (this.draft.formOpen === 'own') fields.appendChild(this.buildForm(target, labels))
     fields.appendChild(this.els.add)
     return fields
   }
@@ -768,77 +666,6 @@ export class PropertiesPanel {
     section.appendChild(this.buildTags(target))
     section.appendChild(this.buildBelongs(target))
     return section
-  }
-
-  /**
-   * **基数**（`_cardinality`）：一条属性在**一个块上**能有几个值。
-   *
-   * 它原来只在 `ChoicesEditor` 里（"允许多个值"），于是只有 `select` 定义做得到 ——
-   * 而基数轴早就推广到全 kind（`PROP_KIND_SPECS[kind].many`：text／number／select／ref／asset，
-   * date 先 one、checkbox 永不 many）。同一件事只有一类属性做得到，用户会以为
-   * 「引用不能是列表」；真相是**界面没给入口**。
-   *
-   * 判据与写路径同一份：显隐读 `allowsMany(propKindOf(def))`，闸门在
-   * `core.props/set-choice-cardinality`（切回 `one` 时挡住「库里仍有 >1 个值」）。
-   * 命令拒绝时把控件重画回模型里的那个值 —— 复选框不能停在用户点出来的状态上。
-   */
-  private buildDefCardinality(def: Block): HTMLElement | null {
-    const kind = propKindOf(def)
-    if (!allowsMany(kind)) return null
-    const row = document.createElement('div')
-    row.className = 'prop-row prop-def-multi prop-hug ui-row'
-    const label = document.createElement('label')
-    label.className = 'prop-label'
-    const name = document.createElement('span')
-    name.className = 'prop-name'
-    name.textContent = t('ui.props.cardinality.label')
-    label.append(name)
-    const value = document.createElement('span')
-    value.className = 'prop-value'
-    const box = document.createElement('input')
-    box.type = 'checkbox'
-    box.className = 'prop-check'
-    box.dataset.defMulti = '1'
-    box.checked = cardinalityOf(def) === 'many'
-    box.addEventListener('change', () => {
-      this.deps.choices.setCardinality(def.id, box.checked ? 'many' : 'one')
-      this.render()
-    })
-    const hint = document.createElement('span')
-    hint.className = 'prop-source'
-    hint.textContent = t('ui.props.cardinality.hint')
-    value.append(box, hint)
-    row.append(label, value)
-    return row
-  }
-
-  /** 定义格式的一段（没有格式轴的 kind 返回 null：不给一个点了没用的下拉） */
-  private buildDefFormat(def: Block): HTMLElement | null {
-    const kind = propKindOf(def)
-    const spec = PROP_KIND_SPECS[kind]
-    if (spec.formats.length === 0) return null
-    const row = document.createElement('div')
-    row.className = 'prop-row prop-def-format ui-row'
-    const label = document.createElement('label')
-    label.className = 'prop-label'
-    const name = document.createElement('span')
-    name.className = 'prop-name'
-    name.textContent = t('ui.props.format.label')
-    label.append(name)
-    const sel = document.createElement('select')
-    sel.className = 'prop-input'
-    sel.dataset.defFormat = '1'
-    for (const f of spec.formats) {
-      const o = document.createElement('option')
-      o.value = f
-      o.textContent = formatLabelOf(f)
-      sel.appendChild(o)
-    }
-    // 没写过 `_format` 时显示该 kind 的第一个格式（text 的 plain／asset 的 image）
-    sel.value = formatOf(def) ?? spec.formats[0] ?? ''
-    sel.addEventListener('change', () => this.deps.setFormat(def.id, sel.value))
-    row.append(label, sel)
-    return row
   }
 
   /**
@@ -870,166 +697,9 @@ export class PropertiesPanel {
     return box
   }
 
-  /**
-   * **标签属性**（标签）／**字段声明**（页）：只有页/标签有这一段。
-   *
-   * 判据：声明是「我的成员/子块会有这一格」，不是「给这一块设一个值」——
-   * 所以这一段只有清单和解除，没有值控件。值仍旧只在成员块上。
-   *
-   * ⚠️ 这一段**自带**自己的添加入口：它写的是 `_fieldDefs`，而「＋ 添加属性」写的是
-   *    `_ownProps`。两个槽两个入口，共用一个入口就必须按块类型猜意图，而标签块恰好两个都需要。
-   *
-   * ⚠️ 这一段**不是一条属性行**（`props-section`，不是 `prop-row`）：视觉上它必须和
-   *    「这一块自己的值」分开，否则用户会把声明当成另一条属性 —— 去重也就跟着混了。
-   *
-   * ⚠️ 解除声明**不动值**：成员块上已有的值落回「本块自有」，重新声明后自动回来。
-   */
-  private buildDeclared(target: Block, labels: ReadonlyMap<string, string>): HTMLElement {
-    // 走到这里只可能是标签（页那一段已移除，见 `render` 里的判据）
-    const section = document.createElement('section')
-    // `prop-declared` 是既有断言的选择器锚点（`.prop-declared [data-declared-prop-id]`），
-    // `props-declared` 是这一段自己的名字（新的断言与样式用它）
-    section.className = 'prop-declared props-declared props-section'
-    section.dataset.declaredSection = 'tag'
-
-    const defs = this.deps.declaredFields(target)
-    const head = sectionHead('lucide:tag', t('ui.props.tagPropsTitle'), defs.length)
-
-    /**
-     * 这一段的添加入口与草稿行同 own 段一条口径：长在段尾（清单的追加位），
-     * 不在段头——「往这列清单加一条」的动作跟着落点走。
-     * `data-declare-add` 是给断言认「这是声明那一个，不是自己的值那一个」的。
-     */
-    const add = document.createElement('button')
-    add.type = 'button'
-    add.className = 'props-add props-declare-add'
-    add.dataset.declareAdd = '1'
-    add.textContent = t('ui.props.addTagProp')
-    add.dataset.tip = t('ui.props.addTagPropTitle')
-    add.addEventListener('click', () => {
-      const opening = this.formOpen !== 'declared'
-      this.formOpen = opening ? 'declared' : null
-      this.draftFocusPending = opening
-      this.render()
-    })
-    // 说明退成段头上的 ⓘ：解释不占正文宽度，悬停/聚焦可读（文案同 `ui.props.tagPropsHint`）
-    head.appendChild(sectionInfo(t('ui.props.tagPropsHint')))
-
-    section.appendChild(head)
-
-    const list = document.createElement('div')
-    list.className = 'props-declared-list'
-    if (defs.length === 0) {
-      const empty = document.createElement('span')
-      empty.className = 'props-empty'
-      empty.textContent = t('ui.props.tagPropsEmpty')
-      list.appendChild(empty)
-    }
-    for (const def of defs) {
-      const chip = document.createElement('span')
-      chip.className = 'props-tag'
-      chip.dataset.declaredPropId = def.id
-      const text = document.createElement('span')
-      text.textContent = `${labels.get(def.id) ?? (plainText(def.content).trim() || def.id)} · ${t(`ui.props.kind.${propKindOf(def)}`)}`
-      /**
-       * **名字可点＝打开定义块**：与属性行的名字、标签 chip 的名字同一契约
-       * （`data-ref-to`）。一枚 chip 上「选项」「×」各有自己的命中区，
-       * 可点的只有这段名字，三个命中区互不重叠。
-       */
-      text.dataset.refTo = def.id
-      text.className = 'props-tag-name'
-      text.dataset.tip = t('ui.props.openDef')
-      text.addEventListener('click', (e) => this.deps.openRef(def.id, clickModsOf(e)))
-      /**
-       * `select` 的一条声明带「选项」入口：选项是定义块的子块，而标签视角只该看
-       * 「对本标签可见」的那几条。**就地展开**在清单下面 —— 再开一层抽屉会让
-       * 「现在在改谁」要看两处抬头才知道。
-       */
-      if (propKindOf(def) === 'select') {
-        const opt = document.createElement('button')
-        opt.type = 'button'
-        opt.className = 'props-tag-choice'
-        opt.dataset.declaredChoices = def.id
-        opt.textContent = t('ui.props.choice.open')
-        opt.dataset.tip = t('ui.props.choice.openTitle')
-        opt.addEventListener('click', () => {
-          const open = this.tagChoices
-          this.tagChoices = open && open.def.id === def.id && open.owner.id === target.id ? null : { def, owner: target }
-          this.render()
-        })
-        chip.append(opt)
-      }
-      const del = this.tagDel(t('ui.props.undeclare'), () => this.deps.undeclareField(target, def.id))
-      chip.append(text, del)
-      list.appendChild(chip)
-    }
-    section.appendChild(list)
-
-    const openChoices = this.tagChoices && this.tagChoices.owner.id === target.id ? this.tagChoices : null
-    if (openChoices) {
-      this.choicesTag.render()
-      section.appendChild(this.choicesTag.root)
-    }
-
-    // 草稿行贴着清单（新声明的落点），追加入口收段尾
-    if (this.formOpen === 'declared') section.appendChild(this.buildDeclareForm(target, labels))
-    section.appendChild(add)
-    return section
-  }
-
   /** 身份/归属段的能力包（每次现建：块与「写完谁重画」都是这一次的） */
   private cfg(target: Block): ConfigSectionsCtx {
     return this.deps.configOps(target.id, () => this.render())
-  }
-
-  /**
-   * 身份/归属段的行 chrome：左标签 ＋ 轻值贴着标签（`prop-hug`）。
-   * 这些行的值是轻动作（勾选/按钮/chips），铺满右半会把「一行一个字段」读成
-   * 「标签在左、答案在很远的右边」；铺满只属于要填的值（字段行、系统信息）。
-   * `icon` 给了就画行头小图标：给「这是哪个字段」一个可扫的形状——
-   * 与段头图标同一语言小一档（段头回答「这是哪一段」，行头回答「这是哪一行」）。
-   */
-  private labeledRow(cls: string, title: string, value: HTMLElement, icon?: string): HTMLElement {
-    const row = document.createElement('div')
-    row.className = `prop-row prop-hug ${cls} ui-row`
-    const label = document.createElement('label')
-    label.className = 'prop-label'
-    if (icon) {
-      const ico = document.createElement('span')
-      ico.className = 'prop-field-ico'
-      ico.setAttribute('aria-hidden', 'true')
-      renderIcon(ico, icon, 'list', 'sm')
-      label.appendChild(ico)
-    }
-    const name = document.createElement('span')
-    name.className = 'prop-name'
-    name.textContent = title
-    label.append(name)
-    row.append(label, value)
-    return row
-  }
-
-  /**
-   * 富值行：标签占第一行（与摘除键同排），值整宽落第二行。
-   *
-   * 判据是**值自己的形状**：一串 chips、一列别名、一张图，都不是「标签右边的一格」，
-   * 塞进半宽的值槽只会互相压。单行值（文本／日期／下拉）仍走上一条 `labeledRow`。
-   */
-  private stackedRow(
-    cls: string,
-    title: string,
-    value: HTMLElement,
-    icon?: string,
-    action?: HTMLElement,
-  ): HTMLElement {
-    const row = this.labeledRow(cls, title, value, icon)
-    row.dataset.stack = '1'
-    if (action) {
-      // 行头的动作位：与段头「动作住进段头」同一句判据，小一号——值行留给值
-      action.classList.add('prop-row-action')
-      row.appendChild(action)
-    }
-    return row
   }
 
   /**
@@ -1040,18 +710,18 @@ export class PropertiesPanel {
     const value = document.createElement('span')
     value.className = 'prop-value prop-names-value'
     value.appendChild(namesContent(this.cfg(target), this.els.body))
-    return this.stackedRow('prop-names', t('ui.alias.title'), value, 'lucide:at-sign')
+    return stackedRow('prop-names', t('ui.alias.title'), value, 'lucide:at-sign')
   }
 
   /** **露面段**（page/tag 列表位）：与弹窗共用同一份段 */
   private buildLists(target: Block): HTMLElement {
-    return this.labeledRow('prop-lists', t('ui.alias.lists'), listsContent(this.cfg(target)), 'lucide:layers')
+    return labeledRow('prop-lists', t('ui.alias.lists'), listsContent(this.cfg(target)), 'lucide:layers')
   }
 
   /** **显示模式段**：有别名才画（「这一行的头显示什么」没有名字就没有答案） */
   private buildDisplay(target: Block): HTMLElement | null {
     if (aliasesOf(target).length === 0) return null
-    return this.labeledRow('prop-display', t('ui.alias.display'), displayContent(this.cfg(target)), 'lucide:eye')
+    return labeledRow('prop-display', t('ui.alias.display'), displayContent(this.cfg(target)), 'lucide:eye')
   }
 
   /**
@@ -1068,7 +738,7 @@ export class PropertiesPanel {
     // 同标签行：「＋」住进行头；悬空清理仍跟着值走（那是值自己的动作）
     const add = value.querySelector<HTMLElement>('.props-belong-add')
     add?.remove()
-    return this.stackedRow('prop-belongs', t('ui.belongs.title'), value, 'lucide:folder-tree', add ?? undefined)
+    return stackedRow('prop-belongs', t('ui.belongs.title'), value, 'lucide:folder-tree', add ?? undefined)
   }
 
   /**
@@ -1092,7 +762,7 @@ export class PropertiesPanel {
       btn.appendChild(dot)
     }
     btn.addEventListener('click', () => this.deps.pickFace?.(target, btn.getBoundingClientRect()))
-    return this.labeledRow('prop-face', t('ui.iconPicker.faceEntry'), btn, 'lucide:palette')
+    return labeledRow('prop-face', t('ui.iconPicker.faceEntry'), btn, 'lucide:palette')
   }
 
   /**
@@ -1109,203 +779,14 @@ export class PropertiesPanel {
     // 空态时它独占一行读作「标签下面又一行字」，有 chips 时动作也总在同一个位置
     const add = value.querySelector<HTMLElement>('.props-tag-add')
     add?.remove()
-    return this.stackedRow('prop-tags', t('ui.props.tagsTitle'), value, 'lucide:tag', add ?? undefined)
-  }
-
-  /**
-   * **`ref` 定义的候选域**（`_refDomain`）：候选从哪儿来。
-   *
-   * 四档同一根轴：**不限**（键缺席）／标签成员（含下级标签闭包）／手选块清单／查询块结果。
-   * 它在定义页，不在值行上：域是**这条属性**的性质（谁可以被引用），不是某一格值的性质；
-   * 值行只画「现在指向谁」——一个字节都不动。
-   *
-   * 两个判据：
-   *   · **控件不许比存储先说**：切到某一档时先还原 `<select>` 的显示值，等「选中目标」
-   *     那一步真的写进库、面板重画，档位才变。取消选择 ⇒ 一切照旧（不丢原有配置）。
-   *   · **悬空不静默**：手选的块/查询被删了仍画出来并标「已删除」，摘掉它就是回到不限。
-   */
-  private buildRefDomain(def: Block): HTMLElement | null {
-    if (propKindOf(def) !== 'ref') return null
-    const domain = refDomainOf(def)
-    const mode: RefDomainMode = domain?.kind ?? 'any'
-
-    const value = document.createElement('div')
-    value.className = 'prop-value prop-ref-domain'
-    value.dataset.refDomain = '1'
-
-    const sel = document.createElement('select')
-    sel.className = 'prop-input prop-ref-mode'
-    sel.dataset.refDomainMode = '1'
-    const modes = [
-      ['any', 'ui.props.refDomain.any'],
-      ['tags', 'ui.props.refDomain.mode.tags'],
-      ['blocks', 'ui.props.refDomain.mode.blocks'],
-      ['query', 'ui.props.refDomain.mode.query'],
-    ] as const
-    for (const [m, key] of modes) {
-      const o = document.createElement('option')
-      o.value = m
-      o.textContent = t(key)
-      sel.appendChild(o)
-    }
-    sel.value = mode
-    sel.dataset.tip = t(
-      mode === 'tags'
-        ? 'ui.props.refDomain.hint.tags'
-        : mode === 'blocks'
-          ? 'ui.props.refDomain.hint.blocks'
-          : mode === 'query'
-            ? 'ui.props.refDomain.hint.query'
-            : 'ui.props.refDomain.any',
-    )
-    sel.addEventListener('change', () => {
-      const next = sel.value as RefDomainMode
-      // 存储没变之前控件不许先说（取消选择时这里就是全部的回滚）
-      sel.value = mode
-      const rect = sel.getBoundingClientRect()
-      if (next === 'any') {
-        this.deps.setRefDomain(def.id, null)
-        return
-      }
-      if (next === 'tags') {
-        const ids = domain?.kind === 'tags' ? [...domain.ids] : []
-        this.deps.pickRefTag(
-          [],
-          (tagId) => {
-            if (!ids.includes(tagId)) this.deps.setRefDomain(def.id, { kind: 'tags', ids: [...ids, tagId] })
-          },
-          rect,
-        )
-        return
-      }
-      if (next === 'blocks') {
-        const ids = domain?.kind === 'blocks' ? [...domain.ids] : []
-        this.deps.pickRefAnchor(
-          ids,
-          (id) => {
-            if (!ids.includes(id)) this.deps.setRefDomain(def.id, { kind: 'blocks', ids: [...ids, id] })
-          },
-          rect,
-        )
-        return
-      }
-      this.deps.pickRefQuery((id) => this.deps.setRefDomain(def.id, { kind: 'query', id }), rect)
-    })
-    value.appendChild(sel)
-
-    /**
-     * **「这一块叫什么」只有一个答案**：`blockLabel`（`relations/ref.ts` 的呈现兜底）。
-     * 不要在这里写 `displayNameOf(...) || shortId` —— 日记块与空块没有别名，
-     * `displayNameOf` 给空串，一兜就露出裸 id（用户认不出这是哪一块）。
-     */
-    const labelOf = (id: string): string => {
-      const b = this.deps.blockById(id)
-      return b
-        ? blockLabel(b, (x) => this.deps.blockById(x))
-        : t('ui.props.refMissing', { id: this.deps.shortId(id) })
-    }
-    /** 一枚约束 chip：点名字打开它；× 摘掉它（最后一个摘掉＝回到不限） */
-    const domainChip = (id: string, onRemove: () => void): HTMLElement => {
-      const live = this.deps.blockById(id)
-      const chip = document.createElement('span')
-      chip.className = 'props-tag'
-      chip.dataset.refDomainTarget = id
-      const name = document.createElement('span')
-      name.className = 'props-tag-name'
-      name.textContent = labelOf(id)
-      if (live) {
-        name.dataset.refTo = id
-        name.dataset.tip = t('ui.props.openRef')
-        name.addEventListener('click', (e) => this.deps.openRef(id, clickModsOf(e)))
-      }
-      chip.append(name, chipDel(t('ui.props.refDomain.remove'), onRemove))
-      return chip
-    }
-    /** 「＋」：往清单里补一个（标签与指定块是追加；查询是换一个） */
-    const addButton = (tip: string, onclick: (rect: DOMRect) => void): HTMLElement => {
-      const add = document.createElement('button')
-      add.type = 'button'
-      add.className = 'prop-ref-add'
-      add.dataset.refDomainAdd = '1'
-      add.dataset.tip = tip
-      add.textContent = '+'
-      add.addEventListener('click', () => onclick(add.getBoundingClientRect()))
-      return add
-    }
-
-    if (domain?.kind === 'tags') {
-      for (const id of domain.ids) {
-        const tag = this.deps.blockById(id)
-        /**
-         * 悬空标签（删了/换库了）仍画出来并标短 id：约束的失效是状态，
-         * 静默少一枚 chip 会让用户以为约束本来就是这些。
-         */
-        const chip = document.createElement('span')
-        chip.className = 'props-tag'
-        chip.dataset.refTag = id
-        const name = document.createElement('span')
-        name.className = 'props-tag-name'
-        name.textContent = tag ? `#${blockLabel(tag, (x) => this.deps.blockById(x))}` : `#${this.deps.shortId(id)}`
-        if (tag) {
-          name.dataset.refTo = id
-          name.dataset.tip = t('ui.props.openTag')
-          name.addEventListener('click', (e) => this.deps.openRef(id, clickModsOf(e)))
-        }
-        chip.append(
-          name,
-          chipDel(t('ui.props.refDomain.remove'), () =>
-            this.deps.setRefDomain(def.id, { kind: 'tags', ids: domain.ids.filter((x) => x !== id) }),
-          ),
-        )
-        value.appendChild(chip)
-      }
-      value.appendChild(
-        addButton(t('ui.props.refDomain.hint.tags'), (rect) =>
-          this.deps.pickRefTag(
-            domain.ids,
-            (tagId) => this.deps.setRefDomain(def.id, { kind: 'tags', ids: [...domain.ids, tagId] }),
-            rect,
-          ),
-        ),
-      )
-    } else if (domain?.kind === 'blocks') {
-      for (const id of domain.ids) {
-        const rest = domain.ids.filter((x) => x !== id)
-        value.appendChild(
-          domainChip(id, () =>
-            this.deps.setRefDomain(def.id, rest.length > 0 ? { kind: 'blocks', ids: rest } : null),
-          ),
-        )
-      }
-      value.appendChild(
-        addButton(t('ui.props.refDomain.pickBlock'), (rect) =>
-          this.deps.pickRefAnchor(
-            domain.ids,
-            (id) => {
-              if (!domain.ids.includes(id)) {
-                this.deps.setRefDomain(def.id, { kind: 'blocks', ids: [...domain.ids, id] })
-              }
-            },
-            rect,
-          ),
-        ),
-      )
-    } else if (domain?.kind === 'query') {
-      value.appendChild(domainChip(domain.id, () => this.deps.setRefDomain(def.id, null)))
-      value.appendChild(
-        addButton(t('ui.props.refDomain.pickQuery'), (rect) =>
-          this.deps.pickRefQuery((id) => this.deps.setRefDomain(def.id, { kind: 'query', id }), rect),
-        ),
-      )
-    }
-    return this.stackedRow('prop-ref-domain-row', t('ui.props.refDomain.label'), value)
+    return stackedRow('prop-tags', t('ui.props.tagsTitle'), value, 'lucide:tag', add ?? undefined)
   }
 
   /**
    * **添加「这一块自己的」属性**：选已有定义（默认复用）或新建一个。
    *
    * ⚠️ 这个表单只管一件事：往 `_ownProps` 里加一条。**标签属性／字段声明**有它自己的入口
-   *    （`buildDeclareForm`），因为那是写另一个槽（`_fieldDefs`）、长在另一段下面。
+   *    （`declared-fields-section.ts` 的草稿行），因为那是写另一个槽（`_fieldDefs`）、长在另一段下面。
    *    曾经这两件事共用一个表单，靠「这个块有没有 page/tag 露面」猜用户要哪个 ——
    *    于是标签块永远加不了自己的属性（真踩过）。
    *
@@ -1314,307 +795,21 @@ export class PropertiesPanel {
    *    所以两件事分两行画：第一行选/复用，第二行（只在「新建」时出现）才是名字＋类型。
    */
   private buildForm(target: Block, labels: ReadonlyMap<string, string>): HTMLElement {
-    return this.buildAddForm(target, labels, {
-      slot: 'own',
-      className: 'props-form props-form--own',
-      pick: t('ui.props.pick'),
-      use: t('ui.props.use'),
-      onUse: (propId) => this.deps.addOwnProp(target, propId),
-      onCreate: (label, kind, mode, format) => this.deps.createOwnDef(target, label, kind, mode, format),
-    })
+    return buildAddForm(
+      target,
+      labels,
+      {
+        slot: 'own',
+        className: 'props-form props-form--own',
+        pick: t('ui.props.pick'),
+        use: t('ui.props.use'),
+        onUse: (propId) => this.deps.addOwnProp(target, propId),
+        onCreate: (label, kind, mode, format) => this.deps.createOwnDef(target, label, kind, mode, format),
+      },
+      this.formDeps,
+      this.draft,
+      () => this.render(),
+    )
   }
 
-  /**
-   * **添加标签属性 / 字段声明**（只有页/标签有这个入口）。
-   *
-   * 与 `buildForm` 的差别是「挂到哪个槽」、`slot` 的去重口径和文案；形状完全共用一份 ——
-   * 两处各写一份表单迟早会长出两种键盘行为（Enter 提交 / Esc 取消 / 新建哨兵）。
-   */
-  private buildDeclareForm(target: Block, labels: ReadonlyMap<string, string>): HTMLElement {
-    const isTag = hasList(target, 'tag')
-    return this.buildAddForm(target, labels, {
-      slot: 'declared',
-      className: 'props-form props-form--declared',
-      pick: t(isTag ? 'ui.props.pickTagProp' : 'ui.props.pickPageField'),
-      use: t('ui.props.useDeclared'),
-      onUse: (propId) => this.deps.declareProp(target, propId),
-      onCreate: (label, kind, mode, format) => this.deps.createDeclaredDef(target, label, kind, mode, format),
-    })
-  }
-
-  /**
-   * 两个添加入口共用的**草稿行**形状。
-   *
-   * 差异只有四处（槽 / 外层类名 / 两条按钮文案 / 两个回调），所以收成一份：
-   * 创建是主路径（名字＋类型，Enter 提交），浏览已有定义收在次级开关后面——
-   * 分两份写就会出现「一个表单 Enter 能用、另一个不能」。
-   *
-   * **同名不是错**：输入已有同名同 kind 时，两个动作同时可见 ——
-   * 复用（默认，误复用可无损改回）与新建同名属性（另一个 `propId`，各自有值）。
-   */
-  private buildAddForm(
-    target: Block,
-    labels: ReadonlyMap<string, string>,
-    opts: {
-      /** 这个表单写哪个槽：own ＝ `_ownProps`，declared ＝ `_fieldDefs` */
-      slot: 'own' | 'declared'
-      className: string
-      pick: string
-      use: string
-      onUse: (propId: string) => void
-      onCreate: (label: string, kind: PropKind, mode?: PropCreateMode, format?: string) => void
-    },
-  ): HTMLElement {
-    const form = document.createElement('form')
-    form.className = opts.className
-    form.addEventListener('submit', (e) => e.preventDefault())
-
-    const pick = document.createElement('select')
-    pick.className = 'prop-input props-pick'
-    const placeholder = document.createElement('option')
-    placeholder.value = ''
-    placeholder.textContent = opts.pick
-    pick.appendChild(placeholder)
-    /**
-     * **每个表单只按自己写的那个槽去重，两个槽互不占位。**
-     *
-     *   · `own` 写 `_ownProps`：已经在本块的行里（`fieldRows`，含标签声明来的行）就不可再加；
-     *   · `declared` 写 `_fieldDefs`：只有已经声明过才不可再加。
-     *
-     * 所以：
-     *   · 标签把 P 声明给成员后，标签自己**仍可以**有一条 P 的值（声明不占值槽）；
-     *   · 本块已经有 P 的值/行，也**仍可以**把 P 声明给成员（值不让声明失效）。
-     *
-     * 曾经两个表单共用一套 `used = rows ∪ declared`：两个方向互相挡住，用户报的就是这个。
-     * 这些项**留在列表里但不可选**，而不是从列表里删掉：小库的下拉会变空，
-     * 用户分不清「库里没有这条属性」与「本块已经有了」。
-     */
-    const defs = this.deps.defs()
-    const declarations = this.deps.fieldDeclarations()
-    const rows = new Set(this.deps.rows(target).map((r) => r.propId))
-    const declared = hasList(target, 'page') || hasList(target, 'tag') ? new Set(declaredFieldIds(target)) : new Set<string>()
-
-    /**
-     * picker 分组：**本标签 / 未声明 / 其他标签**。
-     * 它只是 `_fieldDefs` 的分组视图，不是第二份归属；其他标签的属性**不隐藏**
-     * （藏起来会让下拉看起来是空的，用户以为库里没有那条属性）。
-     */
-    const ownTags =
-      opts.slot === 'declared' ? (hasList(target, 'page') || hasList(target, 'tag') ? [target] : []) : [...this.deps.tags(target)]
-    const ownIds = new Set(ownTags.map((tag) => tag.id))
-    const groupOf = (def: Block): 0 | 1 | 2 => {
-      const declaring = declarations.get(def.id) ?? []
-      if (declaring.some((tag) => ownIds.has(tag.id))) return 0
-      return declaring.length === 0 ? 1 : 2
-    }
-    const groupLabels = [t('ui.props.groupOwn'), t('ui.props.groupUndeclared'), t('ui.props.groupOther')]
-    const groups: HTMLOptGroupElement[] = groupLabels.map((label) => {
-      const g = document.createElement('optgroup')
-      g.label = label
-      return g
-    })
-    const shownOf = (def: Block): string => labels.get(def.id) ?? (plainText(def.content).trim() || def.id)
-
-    for (const def of defs) {
-      let mark = ''
-      let disabled = false
-      if (opts.slot === 'own') {
-        if (rows.has(def.id)) {
-          mark = t('ui.props.alreadyOn')
-          disabled = true
-        } else if (declared.has(def.id)) {
-          // 已经声明给成员，但自己的值槽还空着：这一条**可选中**（只是标出来由）
-          mark = t(hasList(target, 'tag') ? 'ui.props.isTagProp' : 'ui.props.isFieldDecl')
-        }
-      } else if (declared.has(def.id)) {
-        mark = t('ui.props.declaredOn')
-        disabled = true
-      }
-      const o = document.createElement('option')
-      o.value = def.id
-      o.textContent = `${shownOf(def)} · ${defCatalogLabel(def)}${mark ? `（${mark}）` : ''}`
-      o.disabled = disabled
-      groups[groupOf(def)]!.appendChild(o)
-    }
-    for (const g of groups) if (g.childElementCount > 0) pick.appendChild(g)
-
-    const pickBtn = document.createElement('button')
-    pickBtn.type = 'button'
-    pickBtn.className = 'props-use'
-    pickBtn.textContent = opts.use
-    pickBtn.addEventListener('click', () => {
-      if (!pick.value) return
-      opts.onUse(pick.value)
-      this.closeForm()
-    })
-
-    const label = document.createElement('input')
-    label.className = 'prop-input'
-    label.placeholder = t('ui.props.newLabel')
-    /**
-     * **新建的「装什么」目录：kind 闭集 ＋ `text` 格式轴的一等入口。**
-     *
-     * `url`/`email`/`phone` 不是 kind（kind 按**值的存储形状**分，都是字符串），
-     * 但用户按内容类型想——「我要一条链接」，不是「我要一个 text 再去配置里补格式」。
-     * 所以目录层给它们一等名，落盘仍是 `text + _format`（模型不动）；
-     * 「纯文本」就是 kind 的 text 本名，不带格式。
-     */
-    const kindOptions: { value: string; kind: PropKind; format?: 'url' | 'email' | 'phone' }[] = []
-    for (const k of PROP_KINDS) {
-      kindOptions.push({ value: k, kind: k })
-      if (k === 'text')
-        for (const f of ['url', 'email', 'phone'] as const) kindOptions.push({ value: `text:${f}`, kind: 'text', format: f })
-    }
-    const kind = document.createElement('select')
-    kind.className = 'prop-input'
-    for (const opt of kindOptions) {
-      const o = document.createElement('option')
-      o.value = opt.value
-      o.textContent = opt.format ? t(`ui.props.format.${opt.format}`) : t(`ui.props.kind.${opt.kind}`)
-      kind.appendChild(o)
-    }
-
-    /** 下拉此刻选中的那条目录项（kind ＋ 可选格式） */
-    const pickedOf = (): { kind: PropKind; format?: string } => {
-      const opt = kindOptions.find((x) => x.value === kind.value) ?? kindOptions[0]!
-      return opt.format ? { kind: opt.kind, format: opt.format } : { kind: opt.kind }
-    }
-
-    /**
-     * **AO4：同一个名字可以有两个 `propId`。**
-     *
-     * 默认复用（错了好改），但「新建同名属性」也必须当下可见 ——
-     * 藏进对话框的那一下会被当成「复用失败」，而用户真正要的是另一个定义。
-     * 匹配按 **kind ＋ 有效格式**：声明的格式不同就是两条属性（链接 ≠ 纯文本）——
-     * 复用一条纯文本定义会让「要链接」静默丢格式。
-     */
-    const matchNow = (): Block | undefined => {
-      const name = normalizeAlias(label.value.trim())
-      if (name === '') return undefined
-      const picked = pickedOf()
-      return defs.find((d) => {
-        if (propKindOf(d) !== picked.kind || normalizeAlias(propLabel(d)) !== name) return false
-        const defFormat = picked.kind === 'text' ? (formatOf(d) ?? 'plain') : undefined
-        return defFormat === (picked.format ?? (picked.kind === 'text' ? 'plain' : undefined))
-      })
-    }
-    const ao4 = document.createElement('div')
-    ao4.className = 'props-ao4'
-    ao4.hidden = true
-    ao4.dataset.ao4 = '1'
-    const reuse = document.createElement('button')
-    reuse.type = 'button'
-    reuse.className = 'props-reuse'
-    reuse.dataset.ao4Reuse = '1'
-    const fresh = document.createElement('button')
-    fresh.type = 'button'
-    fresh.className = 'props-create-new'
-    fresh.dataset.ao4New = '1'
-    fresh.textContent = t('ui.props.createSameName')
-    ao4.append(reuse, fresh)
-
-    const commit = (mode: 'auto' | 'new'): void => {
-      const name = label.value.trim()
-      if (name === '') {
-        this.deps.toast(t('ui.props.needLabel'), 'warn')
-        return
-      }
-      const picked = pickedOf()
-      const match = matchNow()
-      opts.onCreate(name, picked.kind, mode === 'new' ? 'new' : match ? 'reuse' : undefined, picked.format)
-      this.closeForm()
-    }
-
-    const create = document.createElement('button')
-    create.type = 'submit'
-    create.className = 'props-create'
-    create.textContent = t('ui.props.create')
-    form.addEventListener('submit', (e) => {
-      e.preventDefault()
-      commit('auto')
-    })
-
-    /** 名字/类型一变就重算：有同名同 kind ⇒ 两个动作，默认 Enter 走复用 */
-    const syncAo4 = (): void => {
-      const match = matchNow()
-      if (!match) {
-        ao4.hidden = true
-        create.hidden = false
-        return
-      }
-      const declaring = declarations.get(match.id) ?? []
-      const source = declaring.length > 0 ? declaring.map((tag) => `#${displayNameOf(tag)}`).join('、') : t('ui.props.own')
-      reuse.textContent = t('ui.props.reuseNamed', { label: shownOf(match), source })
-      ao4.hidden = false
-      create.hidden = true
-    }
-    reuse.addEventListener('click', () => commit('auto'))
-    fresh.addEventListener('click', () => commit('new'))
-    label.addEventListener('input', syncAo4)
-    kind.addEventListener('change', syncAo4)
-    onCommitKeys(label, { commit: () => commit('auto') })
-
-    // 新建组整块占一行：名字、类型与提交是创建的主路径，草稿行常开这一形态
-    const newGroup = document.createElement('div')
-    newGroup.className = 'props-new-group'
-    newGroup.append(label, kind, create, ao4)
-    form.appendChild(newGroup)
-
-    /**
-     * **浏览已有定义收进次级**：AO4 只做精确的同名同 kind 匹配，覆盖不了
-     * 「不记得确切名字、想翻一遍库里有什么」——分组下拉（含禁用标记）原样
-     * 保留在这道开关后面。库里一条定义都没有时次级区整个不画（空下拉是死路；
-     * 「定义都在本块上」不算——那些灰掉的项正是用户要的答案）。
-     */
-    const secondary = document.createElement('div')
-    secondary.className = 'props-secondary'
-    if (defs.length > 0) {
-      const browseToggle = document.createElement('button')
-      browseToggle.type = 'button'
-      browseToggle.className = 'props-browse-toggle'
-      browseToggle.textContent = t('ui.props.browseExisting')
-      const browse = document.createElement('div')
-      browse.className = 'props-browse'
-      browse.hidden = !this.browseOpen
-      browseToggle.addEventListener('click', () => {
-        this.browseOpen = !this.browseOpen
-        browse.hidden = !this.browseOpen
-        if (!browse.hidden) pick.focus()
-      })
-
-      const cancel = document.createElement('button')
-      cancel.type = 'button'
-      cancel.className = 'ghost'
-      cancel.textContent = t('ui.props.cancel')
-      cancel.addEventListener('click', () => this.closeForm())
-
-      browse.append(pick, pickBtn, cancel)
-      secondary.append(browseToggle, browse)
-      form.appendChild(secondary)
-    }
-
-    // Esc 收起草稿行：焦点在行内任何控件上都生效（名字输入/类型/浏览下拉）
-    form.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') this.closeForm()
-    })
-
-    syncAo4()
-
-    // 打开的那一次：名字输入聚焦＋滚进视口（构造时表单还没挂进文档，等一帧）
-    if (this.draftFocusPending) {
-      this.draftFocusPending = false
-      requestAnimationFrame(() => {
-        label.focus()
-        form.scrollIntoView({ block: 'nearest' })
-      })
-    }
-    return form
-  }
-
-  /** 关掉当前打开的那个添加表单并重画（两个入口共用一份状态） */
-  private closeForm(): void {
-    this.formOpen = null
-    this.browseOpen = false
-    this.render()
-  }
 }
