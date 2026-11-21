@@ -10,10 +10,13 @@
  *      每行标来源：`来自 #A、#B`，没有标签声明就标「本块自有」；
  *      声明了但没填 ⇒ 仍出现，显示「待填」占位（这正是标签属性的意义）；行序由数据层给。
  *   2. **类型专属**：标签的字段声明（`_fieldDefs` 清单）／定义块的值配置（格式／基数／候选域／选项）。
- *      这两段已抽成宿主无关段（`declared-fields-section.ts`／`def-config-section.ts`），
- *      面板只是它们的壳之一；段序仍由这里排。
  *   3. **块配置**：脸／别名／露面／显示／标签／属于——低频的「它是谁」，与块配置弹窗共用段。
  *   4. **系统信息**：只读的创建／修改时刻。
+ *
+ * ⚠️ 四段已全部抽成宿主无关段（`fields-section.ts`／`declared-fields-section.ts`／
+ *    `def-config-section.ts`／`system-section.ts`；身份与归属的内容在 `config-sections.ts`）——
+ *    检视卡/抽屉/正文投影挂的是同一段。本文件只剩**装配职责**：段序、岛守卫
+ *    （正被编辑的行整行保留）、宿主 chrome（行包装 ＋ 抬头 ＋ 添加入口）。
  *
  * ⚠️ 为什么块属性段内不分节：同一条属性出现在两节里会重复；只放一节又会让来源随标签顺序变化。
  *    平铺 ＋ 多来源标注两个问题都没有（顺序只影响行序）。
@@ -22,16 +25,13 @@
  * ⚠️ 组件不写模型：所有写入经注入的回调（由装配层转成命令）。
  */
 import type { Block, ClickMods } from '../../core/index.ts'
-import { clickModsOf, COLOR_PROP, enginePropText, identityColorCss, isColorValue, isEngineProp } from '../../core/index.ts'
+import { identityColorCss } from '../../core/index.ts'
 import { inputSession } from '../../view/editor/input-session.ts'
 import { EDIT_ISLAND_ATTR } from '../../view/editor/block-dom.ts'
 import type { FieldRow, PropKind } from '../../core/index.ts'
 import type { PropCreateMode } from '../../core/infra/ports.ts'
 import {
   aliasesOf,
-  allowsMany,
-  clockLabel,
-  displayNameOf,
   prop,
   refViewOf,
   valueListOf,
@@ -50,7 +50,7 @@ import {
 } from './config-sections.ts'
 import { DefConfigSection } from './def-config-section.ts'
 import { DeclaredFieldsSection } from './declared-fields-section.ts'
-import { buildAddForm, PropsDraftState, toggleDraftForm, type PropsAddFormDeps } from './props-add-form.ts'
+import { PropsDraftState, toggleDraftForm, type PropsAddFormDeps } from './props-add-form.ts'
 import { labeledRow, sectionHead, stackedRow } from './props-chrome.ts'
 
 export interface PropertiesDeps {
@@ -199,36 +199,17 @@ export interface PropertiesDeps {
 }
 
 /**
- * 一行字段编辑需要的**最小能力**：读写值、解析 / 选择 `ref` 目标。
- *
- * 单独收窄是为了让「属性区」与「行内实例浮层」共用同一个行渲染器：
- * 后者不需要标签行、归属行、系统信息，只需要这一组回调。
- */
-export type FieldRowDeps = Pick<PropertiesDeps, 'shortId' | 'setValue' | 'clearValue' | 'pickRef' | 'refLabel'> & {
-  /** ref 值 inline 岛的装配（开了岛的面才传；见 `PropertiesDeps.refIsland`） */
-  refIsland?: RefIslandDeps
-  /** 多值选择器（省略 ⇒ 多值字段只读；行内实例浮层可以不给） */
-  pickChoice?: PropertiesDeps['pickChoice']
-  /** 本地资源入库（省略 ⇒ asset 值只显示缩略图与手填链接，不给选文件按钮） */
-  pickAsset?: PropertiesDeps['pickAsset']
-  /** 标签名解析（选项显示名的 `#名`）；缺省显示短 id */
-  tagName?: (id: string) => string
-  /** 打开属性定义块（普通块的属性名可点：改选项去定义页，不在块上再开一个编辑面） */
-  openRef?: PropertiesDeps['openRef']
-  /** 值里的资产点一下：lightbox／外链／一句详情（判据与块下属性行同一份，执行归装配层） */
-  activateAsset?: (ref: string, label: string) => void
-  /** 引用目标的图标（页/标签的脸）；没有就不画 */
-  refIcon?: (id: string) => string | undefined
-}
-
-/**
  * 值控件族（按 kind 的值控件／多值 chips／ref 值 inline 岛）住 `./value-editor.ts`；
- * 本文件从那里再导出，**对外的符号名不变**（表格格子与行内浮层照旧 import 这里）。
+ * **属性值段**（行渲染器与其最小能力包）住 `./fields-section.ts`。
+ * 本文件从那里再导出，**对外的符号名不变**（表格格子、行内浮层照旧 import 这里）。
  */
 export { makeCellEditor } from './value-editor.ts'
+export { makeFieldRow, type FieldRowDeps } from './fields-section.ts'
 export type { CellEditorDeps, CellEditorSurface, RefIslandDeps } from './value-editor.ts'
-import { disposeRefIslandsIn, ensureRefIslandsIn, makeCellEditor } from './value-editor.ts'
+import { disposeRefIslandsIn, ensureRefIslandsIn } from './value-editor.ts'
 import type { RefIslandDeps } from './value-editor.ts'
+import { FieldsSection } from './fields-section.ts'
+import { systemSection } from './system-section.ts'
 
 export interface PropertiesEls {
   /** 卡片本身：`hidden` 与否表达「有没有主体」 */
@@ -240,143 +221,6 @@ export interface PropertiesEls {
   title: HTMLElement
   body: HTMLElement
   add: HTMLButtonElement
-}
-
-/**
- * **一行字段**：标签名（含来源）＋ 按 kind 的值控件 ＋ 清空。
- *
- * 属性区与行内实例浮层共用这一份：一处改了行布局，两处一起变。
- * `labelCount` 用来消歧「同名不同 propId」——两个字段都叫「状态」时，
- * 只靠 label 用户分不出改的是哪一个。
- */
-export function makeFieldRow(
-  row: FieldRow,
-  target: Block,
-  deps: FieldRowDeps,
-  opts: { labelCount?: ReadonlyMap<string, number>; showSource?: boolean; labels?: ReadonlyMap<string, string> } = {},
-): HTMLElement {
-  const el = document.createElement('div')
-  el.className = 'prop-row ui-row'
-  el.dataset.propId = row.propId
-  /**
-   * **值的形状决定行形**：图与多值不是「标签右边的一格」。半宽值槽里，
-   * 预览会贴到地址输入上、chips 会挤成一团；这时标签单占一行，值整宽落下。
-   * 单行值仍保持「标签左、值右」的紧凑形（扫一列字段时更快）。
-   */
-  if (
-    row.kind === 'asset' ||
-    (row.cardinality === 'many' && allowsMany(row.kind)) ||
-    // inline 看法的值行：岛是一台块编辑器（带块级的行 chrome），半宽槽装不下——
-    // 与图／多值同一档：标签单占一行，值整宽落下
-    (row.kind === 'ref' && row.filled && deps.refIsland !== undefined && refViewOf(row.def) === 'inline')
-  )
-    el.dataset.stack = '1'
-  if (!row.filled) el.dataset.pending = '1'
-
-  const label = document.createElement('label')
-  label.className = 'prop-label'
-  const name = document.createElement('span')
-  name.className = 'prop-name'
-  const source = t('ui.props.own')
-  const duplicated = (opts.labelCount?.get(row.label) ?? 0) > 1
-  const disambiguated = duplicated ? `${row.label}（${row.sources[0] ? displayNameOf(row.sources[0]) : t('ui.props.own')}）` : row.label
-  // 有 `labels` 就用它（同名属性带声明来源；仍重名带短 id）——只在一个地方决定「这一行叫什么」
-  const shown = opts.labels?.get(row.propId) ?? disambiguated
-  name.textContent = row.def ? shown : t('ui.props.unknown', { id: deps.shortId(row.propId) })
-  /**
-   * **属性名指向定义块**。普通块上只画值控件：要改选项/类型，点名字去定义页，
-   * 不在块上再开第三个编辑面（同一个东西三处可改＝三处都能不同步）。
-   */
-  if (row.def && deps.openRef) {
-    name.dataset.refTo = row.def.id
-    name.dataset.tip = t('ui.props.openDef')
-    name.addEventListener('click', (e) => deps.openRef!(row.def!.id, clickModsOf(e)))
-  }
-  label.appendChild(name)
-  if (opts.showSource !== false) {
-    const src = document.createElement('span')
-    src.className = 'prop-source'
-    /**
-     * **来源是一枚色点＋#名**，不是一句灰字：这条值「归谁管」（改选项去哪个标签、
-     * 摘标签会不会带走它）在聚焦编辑时也要读得出来，2xs 灰字与「本块自有」
-     * 几乎同形 ⇒ 读不出。点用标签自己的显式身份色（与块标同一套信号，
-     * 「色是涂料」——只染点这一个形状）；没配色的标签回落中性点——
-     * 「来自标签」是在场信号，色是标签之间的区分。
-     */
-    if (row.sources.length) {
-      const from = document.createElement('span')
-      from.textContent = t('ui.props.sourceFrom')
-      src.appendChild(from)
-      for (const tag of row.sources) {
-        const item = document.createElement('span')
-        item.className = 'prop-source-tag'
-        const dot = document.createElement('span')
-        dot.className = 'prop-source-dot'
-        dot.setAttribute('aria-hidden', 'true')
-        const c = prop<string>(tag, COLOR_PROP)
-        if (c !== undefined && isColorValue(c)) dot.style.setProperty('--identity-c', identityColorCss(c))
-        const nm = document.createElement('span')
-        nm.textContent = `#${displayNameOf(tag)}`
-        item.append(dot, nm)
-        if (deps.openRef) {
-          // 来源也是「指向标签的一处露面」：点它打开标签（与正文 chip 同一语义）
-          item.classList.add('prop-source-tag--link')
-          item.dataset.tip = t('ui.props.openTag')
-          item.addEventListener('click', (e) => {
-            e.stopPropagation()
-            deps.openRef!(tag.id, clickModsOf(e))
-          })
-        }
-        src.appendChild(item)
-      }
-    } else {
-      src.textContent = source
-    }
-    label.appendChild(src)
-  }
-
-  const value = document.createElement('span')
-  value.className = 'prop-value'
-  /**
-   * 引擎行（`core/created`/`core/modified`）只读：值由引擎记账，没有可编辑的值控件
-   * （合成定义的 kind 只是兜底，给它控件会把毫秒数当 date 输入框画出来），也没有清空。
-   */
-  if (isEngineProp(row.propId)) {
-    value.textContent = enginePropText(row.propId, Number(row.value))
-    el.append(label, value)
-    return el
-  }
-  value.appendChild(
-    makeCellEditor(
-      row,
-      (v) => {
-        if (v === undefined) deps.clearValue(target, row.propId)
-        else deps.setValue(target, row.propId, v)
-      },
-      deps,
-      target,
-    ),
-  )
-
-  /**
-   * **这一行的删除键**（`×`）。
-   *
-   * 语义按行的来源分：**本块自有** ⇒ 删掉这一栏（值连同自有槽）；**标签声明来的** ⇒
-   * 只清值 —— 声明在标签上，这里删不掉它，行会留着（那才是「待填」）。
-   * 两件事共用这颗按钮是因为它们对用户是同一个动作（「这条我不要了」）；
-   * 分开做成两颗按钮只会让用户在「清空」与「删除」之间猜。
-   */
-  const own = row.sources.length === 0
-  const clear = document.createElement('button')
-  clear.type = 'button'
-  clear.className = 'prop-clear ghost'
-  clear.dataset.dropField = own ? '1' : '0'
-  clear.dataset.tip = t(own ? 'ui.props.dropField' : 'ui.props.clear')
-  clear.textContent = '×'
-  clear.addEventListener('click', () => deps.clearValue(target, row.propId, own ? { drop: true } : undefined))
-
-  el.append(label, value, clear)
-  return el
 }
 
 export class PropertiesPanel {
@@ -397,15 +241,18 @@ export class PropertiesPanel {
   private readonly draft = new PropsDraftState()
   /** 草稿行需要的最小能力（own 表单与声明段各取所需，读的都是同一份 deps） */
   private readonly formDeps: PropsAddFormDeps
-  /**
-   * **抽出的段**：定义值配置／字段声明（一套内容、多宿主可挂）。
-   *
-   * 段只长内容与交互、不认识宿主：写能力由 deps 注入，「写完谁重画」由段的
-   * `repaint` 带回这里的整卡重画。检视卡与抽屉两个壳都是本面板，
-   * 所以挂的都是同一段；将来的就地投影宿主挂同一段组件，不再抄第二份。
-   */
-  private readonly defConfig: DefConfigSection
-  private readonly declared: DeclaredFieldsSection
+    /**
+     * **抽出的段**：属性值／定义值配置／字段声明（一套内容、多宿主可挂）。
+     *
+     * 段只长内容与交互、不认识宿主：写能力由 deps 注入，「写完谁重画」由段的
+     * `repaint` 带回这里的整卡重画。检视卡与抽屉两个壳都是本面板，
+     * 所以挂的都是同一段；正文投影宿主挂同一段组件，不再抄第二份。
+     * 面板本身只剩装配职责：段序（值 → 类型专属 → 块配置 → 系统信息）、
+     * 岛守卫（正被编辑的行整行保留）与宿主 chrome（行包装 ＋ 抬头）。
+     */
+    private readonly fields: FieldsSection
+    private readonly defConfig: DefConfigSection
+    private readonly declared: DeclaredFieldsSection
 
   constructor(els: PropertiesEls, deps: PropertiesDeps, opts: { inlineRefIsland?: boolean } = {}) {
     this.els = els
@@ -435,6 +282,28 @@ export class PropertiesPanel {
       fieldDeclarations: this.deps.fieldDeclarations,
       toast: this.deps.toast,
     }
+    this.fields = new FieldsSection({
+      // ref 值 inline 岛的门在这里：没开岛的面把装配摘掉，ref 值行照旧画引用 chip
+      // （`inlineRefIsland` 是每个面板实例的固定开关，门在装配点判一次即可）
+      refIsland: this.inlineRefIsland ? this.deps.refIsland : undefined,
+      pickChoice: this.deps.pickChoice,
+      pickAsset: this.deps.pickAsset,
+      tagName: this.deps.tagName,
+      openRef: this.deps.openRef,
+      activateAsset: this.deps.activateAsset,
+      refIcon: this.deps.refIcon,
+      add: this.els.add,
+      draft: this.draft,
+      form: this.formDeps,
+      addOwnProp: this.deps.addOwnProp,
+      createOwnDef: this.deps.createOwnDef,
+      repaint: () => this.render(),
+      shortId: this.deps.shortId,
+      setValue: this.deps.setValue,
+      clearValue: this.deps.clearValue,
+      pickRef: this.deps.pickRef,
+      refLabel: this.deps.refLabel,
+    })
     this.defConfig = new DefConfigSection({
       def: () => this.deps.target() ?? undefined,
       repaint: () => this.render(),
@@ -545,7 +414,7 @@ export class PropertiesPanel {
      */
     const labels = this.deps.propLabels()
     // hold 期间值段（含正被编辑的岛）原样保留：不重建、不搬移，其余段照常换新
-    if (!islandHold) this.els.body.appendChild(this.buildFields(target, rows, labels))
+    if (!islandHold) this.els.body.appendChild(this.fields.render(target, rows, labels))
 
     /**
      * **标签属性**（字段声明）与**定义块的值配置**：两段已抽成宿主无关段
@@ -563,7 +432,7 @@ export class PropertiesPanel {
     this.els.body.appendChild(this.buildConfig(target))
 
     // 系统信息在**最后**：它是这一块的出生与改动记录，不是可编辑的数据
-    this.els.body.appendChild(this.buildSystem(target))
+    this.els.body.appendChild(systemSection(target))
     this.ensureIslands()
   }
 
@@ -607,45 +476,6 @@ export class PropertiesPanel {
   }
 
   /**
-   * **属性段：这一块自己的值**。
-   *
-   * 段头给「属性」一个名字——没有段头时它与身份行混成一张平清单，
-   * 「主次」就是从这里丢的：身份行是轻动作行，这里往下是表单区，节奏必须断开。
-   *
-   * 添加入口与草稿行都**长在段尾**：行清单的追加位就是新行落点（行序＝声明顺序，
-   * 新行落末尾），点 ＋ 后草稿行在原位出现，反馈不跳变；入口本身也跟着落点走
-   * （它不是卡级控件，卡体底部的旧位置看起来像在给别的段加东西）。
-   */
-  private buildFields(target: Block, rows: readonly FieldRow[], labels: ReadonlyMap<string, string>): HTMLElement {
-    const fields = document.createElement('section')
-    fields.className = 'props-section prop-fields props-section--primary'
-    const fieldsHead = sectionHead('lucide:list', t('ui.block.properties'), rows.length)
-    fields.appendChild(fieldsHead)
-
-    if (rows.length === 0) {
-      const empty = document.createElement('p')
-      empty.className = 'props-empty'
-      empty.textContent = t('ui.props.empty')
-      fields.appendChild(empty)
-    }
-
-    // 同名不同 propId 必须能区分（C4）：两行 label 一样时把来源带进显示名
-    const labelCount = new Map<string, number>()
-    for (const r of rows) labelCount.set(r.label, (labelCount.get(r.label) ?? 0) + 1)
-
-    // inline 岛是**实例的门**：没开岛的面把装配摘掉，ref 值行照旧画 chip
-    const rowDeps: FieldRowDeps = this.inlineRefIsland ? this.deps : { ...this.deps, refIsland: undefined }
-
-    for (const row of rows) {
-      fields.appendChild(makeFieldRow(row, target, rowDeps, { labelCount, labels }))
-    }
-    // 草稿行在行清单末尾（新行落点）与追加入口之间；收起时入口独占段尾
-    if (this.draft.formOpen === 'own') fields.appendChild(this.buildForm(target, labels))
-    fields.appendChild(this.els.add)
-    return fields
-  }
-
-  /**
    * **块配置段**：身份（名字／脸／露面／显示）与分类（标签／属于）。
    *
    * 它是低频的「这块是谁」，所以排在属性值之后；段内顺序与块配置弹窗同一条
@@ -666,35 +496,6 @@ export class PropertiesPanel {
     section.appendChild(this.buildTags(target))
     section.appendChild(this.buildBelongs(target))
     return section
-  }
-
-  /**
-   * **系统信息**（只读）：创建时间／修改时间两行。
-   *
-   * 为什么单独成段而不是混进属性行：它们**不是属性**（不在属性袋里，也没有定义块），
-   * 面板的每一行都带「编辑控件 ＋ 清除按钮」，把只读事实塞进那种行里，用户会去点、
-   * 点了没反应。判据是「可见但只读」由**通道**提供 —— 这一段就没有输入控件。
-   */
-  private buildSystem(target: Block): HTMLElement {
-    const box = document.createElement('section')
-    box.className = 'props-section prop-system'
-    box.dataset.systemSection = '1'
-    box.appendChild(sectionHead('lucide:clock', t('ui.props.systemTitle')))
-
-    const value = document.createElement('div')
-    value.className = 'prop-system-value'
-    for (const [key, at] of [
-      ['created', target.created],
-      ['modified', target.modified],
-    ] as const) {
-      const line = document.createElement('span')
-      line.className = 'prop-system-line'
-      line.dataset.systemField = key
-      line.textContent = `${t(key === 'created' ? 'ui.props.createdAt' : 'ui.props.modifiedAt')} ${clockLabel(at) || t('ui.props.timeUnknown')}`
-      value.appendChild(line)
-    }
-    box.appendChild(value)
-    return box
   }
 
   /** 身份/归属段的能力包（每次现建：块与「写完谁重画」都是这一次的） */
@@ -780,36 +581,6 @@ export class PropertiesPanel {
     const add = value.querySelector<HTMLElement>('.props-tag-add')
     add?.remove()
     return stackedRow('prop-tags', t('ui.props.tagsTitle'), value, 'lucide:tag', add ?? undefined)
-  }
-
-  /**
-   * **添加「这一块自己的」属性**：选已有定义（默认复用）或新建一个。
-   *
-   * ⚠️ 这个表单只管一件事：往 `_ownProps` 里加一条。**标签属性／字段声明**有它自己的入口
-   *    （`declared-fields-section.ts` 的草稿行），因为那是写另一个槽（`_fieldDefs`）、长在另一段下面。
-   *    曾经这两件事共用一个表单，靠「这个块有没有 page/tag 露面」猜用户要哪个 ——
-   *    于是标签块永远加不了自己的属性（真踩过）。
-   *
-   * ⚠️ **类型只属于「新建定义」，不属于「给这一块加一条属性」**：`_kind` 住在定义块上、
-   *    全库一份，而「用这个」只吃一个 `propId`——选已有属性能配类型是假的。
-   *    所以两件事分两行画：第一行选/复用，第二行（只在「新建」时出现）才是名字＋类型。
-   */
-  private buildForm(target: Block, labels: ReadonlyMap<string, string>): HTMLElement {
-    return buildAddForm(
-      target,
-      labels,
-      {
-        slot: 'own',
-        className: 'props-form props-form--own',
-        pick: t('ui.props.pick'),
-        use: t('ui.props.use'),
-        onUse: (propId) => this.deps.addOwnProp(target, propId),
-        onCreate: (label, kind, mode, format) => this.deps.createOwnDef(target, label, kind, mode, format),
-      },
-      this.formDeps,
-      this.draft,
-      () => this.render(),
-    )
   }
 
 }
