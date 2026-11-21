@@ -32613,6 +32613,61 @@ await check(
     return `块 ${before.count}→${after.count}；子位 depth=${after.childDepth}（父 ${after.parentDepth}）；光标=新块；原块文本不动`
   },
 )
+
+await check('T343 露面卡片成员实时刷新：给源块新增子块，投影的卡片当场多一张（不聚焦、不重开）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const fx = await buildEmbedTree(page)
+
+  // 源块上建一张卡片视图，拿到 view id（看法住源块，露面只存指针）
+  const viewId = await page.evaluate((sid) => {
+    window.__qua.invoke('core.view/add', { blockId: sid, kind: 'cards' })
+    return (window.__qua.__editor.store.find(sid)?.props?._views ?? []).find((v) => v.kind === 'cards')?.id ?? ''
+  }, fx.src)
+  assert(viewId !== '', `前置：源块应有卡片视图：${viewId}`)
+
+  // 先插 table 投影露面，再把指针改到那张卡片视图
+  await page.evaluate(
+    ({ host, src }) => window.__qua.invoke('core.embed/insert', { blockId: host, targetId: src, view: 'table' }),
+    fx,
+  )
+  await page.waitForTimeout(300)
+  const embedId = await page.evaluate(() => document.querySelector('.blk[data-embed="1"]')?.dataset.blockId ?? '')
+  assert(embedId !== '', '前置：投影露面已插入')
+  await page.evaluate(({ eid, vid }) => window.__qua.invoke('core.embed/set-view', { blockId: eid, view: vid }), {
+    eid: embedId,
+    vid: viewId,
+  })
+  await page.waitForTimeout(450)
+
+  const cardIds = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll('.blk[data-embed="1"] .vcard[data-block-id]')].map((c) => c.dataset.blockId ?? ''),
+    )
+  const before = await cardIds()
+  assert(before.length === 2, `前置：卡片＝源的两个直接子块：${JSON.stringify(before)}`)
+
+  // 给源块新增一个子块；不聚焦、不重开、不手动刷新
+  await page.evaluate((sid) => window.__qua.invoke('core.tree/insert-child', { parentId: sid, text: '子三' }), fx.src)
+  await page.waitForTimeout(200)
+  const after = await cardIds()
+  assert(
+    after.length === 3 && after.includes(before[0]) && after.includes(before[1]),
+    `新增子块后卡片当场变 3 张且旧卡还在：${JSON.stringify({ before, after })}`,
+  )
+  const childInModel = await page.evaluate((sid) => {
+    const b = window.__qua.__editor.store.find(sid)
+    const kids = b?.children.map((c) => window.__qua.__editor.store.find(c.id)).filter((c) => c && !c.props?._deletedAt) ?? []
+    return { count: kids.length, texts: kids.map((c) => window.__qua.blocks().find((p) => p.id === c.id)?.text ?? '') }
+  }, fx.src)
+  assert(
+    childInModel.count === 3 && childInModel.texts.includes('子三'),
+    `模型里源块确实多了「子三」（防假阳性）：${JSON.stringify(childInModel)}`,
+  )
+
+  await ctx.close()
+  return `源加子块 ⇒ 投影卡片 2→3 当场刷新（无聚焦/重开/手动刷新）`
+})
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

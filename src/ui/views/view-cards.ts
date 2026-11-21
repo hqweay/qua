@@ -204,6 +204,16 @@ export class ViewCards {
   sync(ids: readonly string[]): void {
     if (ids.length === 0) return
     const view = this.deps.view()
+    /**
+     * 成员集合变了（插入/删除/移动子块）⇒ 局部修补补不出还没长 DOM 的新成员：
+     * 它只能替换已存在的 `.vcard`，签名里的成员 id 一变就必须整片重画。
+     * 形状签名已含布局＋每张卡 id＋分桶，与表格的 sameSeq 同一条判据；
+     * 内容变化不动签名，仍走下面的按 id 修补（不摘正在编辑那张卡的锚点）。
+     */
+    if (this.shapeOf(view) !== this.shapeSig) {
+      this.render()
+      return
+    }
     if (cardLayoutOf(view) !== this.root.dataset.layout) {
       this.render()
       return
