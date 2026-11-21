@@ -563,7 +563,7 @@ await check('E6 中文 IME：行内原子两侧组合输入、候选取消、提
     //    ——注入器不再可信。真 IME 的「提交」对产品的可观察面只有两件事：
     //    组合终文站在选区锚点、compositionend 派发。这里用 Range 把「中文」插进
     //    选区锚点（与 IME 提交落字同位），再派发 compositionend 让编辑器读回。
-    await page.evaluate((id) => {
+    await page.evaluate(() => {
       const s = document.getSelection()
       const node = s?.anchorNode
       if (!node) throw new Error('没有选区锚点')
@@ -580,7 +580,7 @@ await check('E6 中文 IME：行内原子两侧组合输入、候选取消、提
       node.parentElement?.closest('.tx')?.dispatchEvent(
         new CompositionEvent('compositionend', { data: '中文', bubbles: true }),
       )
-    }, blockId)
+    })
     await new Promise((r) => setTimeout(r, 250))
     const committed = await page.evaluate((id) => {
       const a = window.__qua.atoms().find((x) => x.blockId === id)
