@@ -7,9 +7,10 @@
  * 抽出来之后它是纯的（不碰 DOM、不碰 store 的写面），可以像 `height-index`
  * 一样直接单测失效边界，而不必起 Electron 探针。
  *
- * **四个失效轴**（每一轴的判据见下方缓存键的注释）：
+ * **五个失效轴**（每一轴的判据见下方缓存键的注释）：
  *   · 装载形状：`doc` 身份、`roots` 身份、`folded` 对象身份、`focusRoot*`、`viewRootId`；
  *   · 结构：`structureRevision`（parent/prev/exist/换库）；
+ *   · 属性：`propsRevision`（`_activeView`／`_query` 决定哪一行画身体、子块让不让位）；
  *   · 内容：`revision`——**只**影响筛选结果（筛选可读正文/标签），不影响行集合；
  *   · 画不画身体：`withBody()`（`events.viewBody` 已接）。
  *
@@ -33,9 +34,10 @@ import {
 /** 行筛选判据（三态：keep／drop／neutral） */
 export type RowFilter = (block: Block, path: readonly Block[]) => RowVerdict
 
-/** 只读的两个修订号（`BlockStore` 满足这个形状；测试可传哑对象） */
+/** 只读的三个修订号（`BlockStore` 满足这个形状；测试可传哑对象） */
 export interface RowRevisions {
   structureRevision: number
+  propsRevision: number
   revision: number
 }
 
@@ -78,6 +80,7 @@ export class RowProjection {
     focusRootOpen: boolean | undefined
     viewRootId: string | undefined
     structureRev: number
+    propsRev: number
     withBody: boolean
     rows: VisibleRow[]
   } | null = null
@@ -154,7 +157,9 @@ export class RowProjection {
   private rawRows(): VisibleRow[] {
     const doc = this.deps.doc()
     const withBody = this.deps.withBody()
-    const structureRev = this.deps.revisions().structureRevision
+    const revisions = this.deps.revisions()
+    const structureRev = revisions.structureRevision
+    const propsRev = revisions.propsRevision
     const c = this.rawCache
     if (
       c !== null &&
@@ -165,6 +170,7 @@ export class RowProjection {
       c.focusRootOpen === doc.focusRootOpen &&
       c.viewRootId === doc.viewRootId &&
       c.structureRev === structureRev &&
+      c.propsRev === propsRev &&
       c.withBody === withBody
     ) {
       return c.rows
@@ -192,6 +198,7 @@ export class RowProjection {
       focusRootOpen: doc.focusRootOpen,
       viewRootId: doc.viewRootId,
       structureRev,
+      propsRev,
       withBody,
       rows,
     }

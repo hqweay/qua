@@ -24,13 +24,14 @@ function harness(roots: Block[]) {
   let doc: Doc = { roots }
   let structureRevision = 0
   let revision = 0
+  let propsRevision = 0
   let filter: RowFilter | null = null
   let caret: string | null = null
   let withBody = false
   const probe = { rowsCalls: 0, rowsAllCalls: 0 }
   const projection = new RowProjection({
     doc: () => doc,
-    revisions: () => ({ structureRevision, revision }),
+    revisions: () => ({ structureRevision, revision, propsRevision }),
     filter: () => filter,
     caret: () => caret,
     withBody: () => withBody,
@@ -48,6 +49,9 @@ function harness(roots: Block[]) {
     },
     structureChanged() {
       structureRevision++
+    },
+    propsChanged() {
+      propsRevision++
     },
     setFilter(next: RowFilter | null) {
       filter = next
@@ -124,6 +128,21 @@ test('④ 画不画身体参与失效（同一份 Doc 换 withBody 也要重投�
   h.setWithBody(true)
   const b = h.projection.rows()
   assert.notEqual(b, a, 'withBody 变 ⇒ 投影换代')
+})
+test('⑤ 属性改动换行集合：给行内的块激活视图，子块行当场让位（不画两遍）', () => {
+  const owner = mk('owner', '容器', [mk('c1'), mk('c2')])
+  const h = harness([mk('p', '页面', [owner])])
+  h.setWithBody(true)
+  assert.deepEqual(h.projection.rows().map((r) => r.block.id), ['p', 'owner', 'c1', 'c2'])
+
+  // 写 _views/_activeView 是 prop op：只推 propsRevision，不推结构与内容修订号
+  owner.props = { _views: [{ id: 'v1', kind: 'cards' }], _activeView: 'v1' }
+  h.propsChanged()
+  assert.deepEqual(
+    h.projection.rows().map((r) => r.block.id),
+    ['p', 'owner'],
+    '子块行让位给视图身体；刷新前后必须是同一批行',
+  )
 })
 
 test('行索引/行位置/光标链 force', () => {

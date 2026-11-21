@@ -32795,6 +32795,50 @@ await check('T345 定义投影：定义块名字下面画值配置；标签声�
   await ctx.close()
   return `空标签不画身体；声明后当场出现；定义身体改格式 ⇒ 模型与检视卡同步`
 })
+await check('T346 行内块新建看法：子块行当场让位，卡片与大纲不画两遍（与刷新后同一批行）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const fx = await buildListTree(page)
+  await page.waitForTimeout(300)
+
+  const kids = [fx.cells.c11, fx.cells.c12]
+  const outsideOf = () =>
+    page.evaluate((ids) => {
+      const set = new Set(ids)
+      return [...document.querySelectorAll('#editor .blk')]
+        .filter((el) => set.has(el.dataset.blockId ?? '') && !el.closest('.blk-view-body') && !el.closest('.mount-editor'))
+        .map((el) => el.dataset.blockId ?? '')
+    }, kids)
+  assert((await outsideOf()).length === 2, `前置：两个子块都在正文大纲里：${JSON.stringify(await outsideOf())}`)
+
+  await page.evaluate(
+    (id) => window.__qua.invoke('core.view/add', { owner: { kind: 'block', blockId: id }, kind: 'cards' }),
+    fx.rows[0],
+  )
+  await page.waitForTimeout(500)
+  const after = await page.evaluate(
+    ({ ownerId, ids }) => {
+      const set = new Set(ids)
+      const row = document.querySelector(`.blk[data-block-id="${ownerId}"]`)
+      return {
+        cards: row?.querySelectorAll(':scope > .blk-view-body .vcard').length ?? 0,
+        outside: [...document.querySelectorAll('#editor .blk')]
+          .filter((el) => set.has(el.dataset.blockId ?? '') && !el.closest('.blk-view-body') && !el.closest('.mount-editor'))
+          .map((el) => el.dataset.blockId ?? ''),
+      }
+    },
+    { ownerId: fx.rows[0], ids: kids },
+  )
+  assert(after.cards === 2, `卡片当场画出两个子块：${JSON.stringify(after)}`)
+  assert(after.outside.length === 0, `子块行让位（刷新前不得与卡片同时画两遍）：${JSON.stringify(after.outside)}`)
+  await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+  await page.waitForTimeout(400)
+  const undone = await outsideOf()
+  assert(undone.length === 2, `一次撤销让子块行当场回来（不等刷新）：${JSON.stringify(undone)}`)
+
+  await ctx.close()
+  return `行内块建卡片：卡 2 张、正文大纲 0 行（与刷新后一致）`
+})
 
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
