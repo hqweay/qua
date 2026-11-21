@@ -29,7 +29,7 @@ import {
   type LibraryDocWindow,
   type RawLibraryRows,
 } from '../../src/core/storage/library-reads.ts'
-import { META_KEYS } from '../../src/core/identity/library.ts'
+import { DERIVED_PATH_VERSION, META_KEYS } from '../../src/core/identity/library.ts'
 import { readMeta } from './sqlite.ts'
 
 type Row = Record<string, unknown>
@@ -149,6 +149,7 @@ export function readCatalogRows(db: DatabaseSync): LibraryCatalog {
       ftsTokenizer: meta.get(META_KEYS.ftsTokenizer) ?? '',
       ftsRowidSeq: Number.isFinite(ftsSeq) && ftsSeq >= 0 ? ftsSeq : 0,
       derivedState: meta.get(META_KEYS.derivedState) ?? 'pending',
+      derivedPathVersion: meta.get(META_KEYS.derivedPathVersion) ?? '',
     },
     journals,
     tags,
@@ -232,7 +233,15 @@ export function readCandidatePage(
   page: { after: string | null; limit: number },
   route?: CandidateRoute,
 ): CandidatePage {
-  const derived = readMeta(db, META_KEYS.derivedState) === 'ready'
+  /**
+   * **path 分页的两个前提一起判**：表铺过（`derived_state`）＋ 段编码还是当前口径
+   * （`derived_path_version`）。后者在存量库上是空的：那张表虽然 status=ready，
+   * `path` 却可能是坏的（顶层根同段），按它 keyset 翻页会静默少行。版本不符就退回
+   * 「一页装完」（`next: null`，宽但真），重建成功后版本落盘才重新按 path 分页。
+   */
+  const derived =
+    readMeta(db, META_KEYS.derivedState) === 'ready' &&
+    readMeta(db, META_KEYS.derivedPathVersion) === DERIVED_PATH_VERSION
   const ftsReady = readMeta(db, META_KEYS.ftsState) === 'ready'
   if (derived && ftsReady) {
     const short = gramCandidates(db, plan, page)
@@ -385,10 +394,45 @@ export function readDependents(
   return out
 }
 
-/** 顶层根 id 清单（含软删根）：派生表流式重建的装载单位 */
+/**
+ * 顶层根 id 清单（含软删根），按**文档序**（顶层兄弟链）。
+ *
+ * 不按 rowid：那是创建序，后建的根可以搬到最前面。链头是 `left is null` 的那一个，
+ * 之后每行的 `left` 指向前兄弟。坏链（环／指向不存在的行）不丢根：先把每条能从
+ * 链头走到的链铺完，剩下的按 id 排（确定性，且与创建序无关）。
+ */
 export function readRootIds(db: DatabaseSync): string[] {
-  const rows = db.prepare(LIBRARY_READS.catalogRoots).all() as { id: string }[]
-  return rows.map((r) => String(r.id))
+  const rows = db.prepare(LIBRARY_READS.catalogRoots).all() as { id: unknown; prev: unknown }[]
+  const ids: string[] = []
+  const prevOf = new Map<string, string | null>()
+  for (const r of rows) {
+    const id = String(r.id)
+    ids.push(id)
+    prevOf.set(id, r.prev === null || r.prev === undefined ? null : String(r.prev))
+  }
+  const nextOf = new Map<string, string>()
+  for (const id of ids) {
+    const prev = prevOf.get(id)!
+    if (prev !== null && prevOf.has(prev) && !nextOf.has(prev)) nextOf.set(prev, id)
+  }
+  const heads = ids.filter((id) => {
+    const prev = prevOf.get(id)!
+    return prev === null || !prevOf.has(prev) || nextOf.get(prev) !== id
+  })
+  const out: string[] = []
+  const seen = new Set<string>()
+  const walk = (head: string): void => {
+    let cur: string | undefined = head
+    while (cur !== undefined && !seen.has(cur)) {
+      seen.add(cur)
+      out.push(cur)
+      cur = nextOf.get(cur)
+    }
+  }
+  for (const head of heads) walk(head)
+  // 环／重复前兄弟：上面的遍历会走到它们但可能停在环上；剩下的按 id 排，不丢根
+  for (const id of [...ids].sort()) if (!seen.has(id)) walk(id)
+  return out
 }
 
 /** 入向关系按目标批查（引用角标的全库计数；派生表 ready 后才可读） */

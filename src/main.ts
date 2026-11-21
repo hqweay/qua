@@ -106,6 +106,7 @@ import type { RelationEdge, RelationKind } from './core/relations/relations.ts'
 import { loadWorksetBoot, type WorksetBootResult } from './app/boot/workset-boot.ts'
 import { finishDocWindows, pendingOf, readFirstWindows, withAncestors } from './app/boot/doc-windows.ts'
 import { rebuildDerivedTables } from './app/boot/derived-rebuild.ts'
+import { DERIVED_PATH_VERSION } from './core/identity/library.ts'
 import { ensureDerivedLoaded } from './app/boot/derived-load.ts'
 import { loadCandidateWindow as loadCandidateWindowOf } from './app/boot/query-load.ts'
 import type { CandidateLoadStep, CandidateWindowRequest } from './core/storage/library-client.ts'
@@ -313,19 +314,28 @@ if (worksetBoot) kb.setCatalog(worksetBoot.catalog)
 /**
  * **派生表可不可信**（引用角标的全库计数闸）：catalog meta 的 derivedState；
  * 后台重建跑完置 ready 时由闭包翻真。false ⇒ 角标退回工作集口径（部分装载下是子集）。
+ *
+ * **版本也要对得上**：状态只说明两张表铺过，不说明 `path` 还按现行段编码排。
+ * 存量库的状态是 `ready`、路径却是坏的（顶层根同段）——那种表在重建完成前
+ * 一件都不能信，所以「状态 ready ＋ 版本一致」才算可信。
  */
-let derivedReady = worksetBoot?.catalog.meta.derivedState === 'ready'
+let derivedReady =
+  worksetBoot?.catalog.meta.derivedState === 'ready' &&
+  worksetBoot.catalog.meta.derivedPathVersion === DERIVED_PATH_VERSION
 
 /**
- * **派生表的后台重建**（启动后错峰）：表还是 `pending`（迁移来的库没跑过全量）
- * 时按顶层根逐批重建，跑完置 ready——反链/角标这些全库计数消费者等的就是它。
+ * **派生表的后台重建**（启动后错峰）：表还是 `pending`（迁移来的库没跑过全量），
+ * 或 `path` 的编码版本过期（存量库的顶层段曾撞车），就按顶层根逐批重建，
+ * 跑完置 ready ＋ 版本——反链/角标这些全库计数消费者等的就是它。
  * **FTS 回填**接在同一个错峰槽里：工作集模式的启动不读全库，新库/分词器升版的库
  * 索引永远停在 pending（⌘K 显式空），按根逐批补建才有 ready 的那天。
  * 两者都逐根一个小事务，与用户输入在同一队列里交错；派生重建先跑完再回填 FTS，
  * 不让两个逐根读者并发抢同一个库。
  */
 if (worksetBoot && LIBRARY_BRIDGE) {
-  const needDerived = worksetBoot.catalog.meta.derivedState !== 'ready'
+  const needDerived =
+    worksetBoot.catalog.meta.derivedState !== 'ready' ||
+    worksetBoot.catalog.meta.derivedPathVersion !== DERIVED_PATH_VERSION
   const needFts =
     worksetBoot.catalog.meta.ftsState !== 'ready' ||
     worksetBoot.catalog.meta.ftsTokenizer !== FTS_TOKENIZER_VERSION

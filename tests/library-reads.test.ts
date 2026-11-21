@@ -145,7 +145,7 @@ test('catalog：只回槽要显示的全局身份，不含页列表', () => {
     const catalog = readCatalogRows(db)
     // node:sqlite 的行是 null-prototype 对象；比较前摊平成普通对象（只比较值，不比较原型）
     const plain = <T extends object>(rows: readonly T[]): T[] => rows.map((r) => ({ ...r }))
-    assert.deepEqual(catalog.meta, { activeId: '', savedAt: 0, ftsState: 'pending', ftsTokenizer: '', ftsRowidSeq: 0, derivedState: 'pending' })
+    assert.deepEqual(catalog.meta, { activeId: '', savedAt: 0, ftsState: 'pending', ftsTokenizer: '', ftsRowidSeq: 0, derivedState: 'pending', derivedPathVersion: '' })
     assert.deepEqual(plain(catalog.journals), [{ id: 'j', date: '2026-11-18', deleted: null }], '日记含 deleted：打开软删天要能认出「这一天存在过」')
     assert.deepEqual(plain(catalog.tags), [{ id: 'tag', name: 'Tag' }])
     assert.deepEqual(plain(catalog.propDefs), [{ id: 'def', kind: 'text', name: 'Def' }])

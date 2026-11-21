@@ -48,7 +48,7 @@ import { isDeleted, type Block } from '../model/model.ts'
 import { walkForest } from '../model/walk.ts'
 import { ORDER_STEP } from '../infra/order.ts'
 import { collectPropKinds, collectTagClassIds, relationEdgesOfBlock, type RelationKind } from '../relations/relations.ts'
-import { META_KEYS } from '../identity/library.ts'
+import { DERIVED_PATH_VERSION, META_KEYS } from '../identity/library.ts'
 import { rowsToWorkspace, type RawLibraryRows, type RowWrite } from './db-rows.ts'
 
 /** 一段 rank 的偏置：让负数 rank 的编码仍是等宽非负十进制 */
@@ -110,14 +110,65 @@ export function lastSegmentRank(path: string): number {
 }
 
 /**
+ * 顶层段的分配：**优先保留各根现有的段值**（增量维护在中点插入时用存量段夹值，
+ * 改掉已有段值会让在飞的写落空），**撞车/缺失/乱序时整层按文档序重铺**。
+ *
+ * 为什么必须整层判而不是逐根补：段的唯一性与顺序是同一条约束的两面——
+ * 只给撞车的那几根换段，剩下的是否还递增得重新看一遍；而「重铺」本来就要
+ * 按文档序扫一遍全部根，代价一样。
+ *
+ * `roots` 必须是**文档序**（兄弟链，不是 rowid：后建的块可以搬到最前面）。
+ * 判据三条，任一不成立就整层重铺：
+ *   ① 每根都有一行、且路径恰好是单段（顶层块）；
+ *   ② 段值两两不同；
+ *   ③ 段值严格递增（＝文档序；候选流按 `path > cursor` 翻页靠这一条）。
+ */
+export function topRanksOf(
+  roots: readonly string[],
+  existing: Iterable<{ block: string; path: string }>,
+): number[] {
+  const prev = new Map<string, string>()
+  for (const r of existing) prev.set(r.block, r.path)
+  const ranks: number[] = []
+  for (const id of roots) {
+    const path = prev.get(id)
+    if (path === undefined) return relayoutRanks(roots.length)
+    const rank = lastSegmentRank(path)
+    // 顶层路径必须正好是 `/段/`：多段说明这条行不属于顶层，末段本函数不认
+    if (!Number.isInteger(rank) || path !== `/${pathSegmentOf(rank)}`) return relayoutRanks(roots.length)
+    ranks.push(rank)
+  }
+  for (let i = 0; i < ranks.length; i++) {
+    if (i > 0 && ranks[i]! <= ranks[i - 1]!) return relayoutRanks(roots.length)
+  }
+  return ranks
+}
+
+/** 整层重铺：按兄弟下标铺段（与 `derive` 的缺省口径同一份） */
+function relayoutRanks(n: number): number[] {
+  return Array.from({ length: n }, (_, i) => (i + 1) * ORDER_STEP)
+}
+
+/** 派生行铺写的可选项 */
+export interface DerivedRowsOptions {
+  /**
+   * 顶层根的段 rank，按**顶层次序**给；缺省按 `(i+1)*ORDER_STEP` 铺。
+   *
+   * 流式重建逐根算一段森林——每棵只有一个顶层根，`ctx.index` 恒 0 ⇒ 缺省口径会把
+   * 所有根铺成同一个段。调用方用 `topRanksOf` 把整层分配好，逐根传一条钉住它。
+   */
+  topRanks?: readonly number[]
+}
+
+/**
  * 整片森林的派生行。
  *
  * ⚠️ 这是**全量重建**：O(库) 时间与内存（`rowsToWorkspace` 会建整片模型）。
  * 启动路径不许调它；它是迁移／修复／批量重建的语义基准。流式重建是另一条批量路径
  * （逐批解析、逐批写），本函数是它的正确性基准。
  */
-export function derivedRowsOf(forest: readonly Block[]): DerivedRows {
-  return derive(forest, null)
+export function derivedRowsOf(forest: readonly Block[], opts: DerivedRowsOptions = {}): DerivedRows {
+  return derive(forest, null, opts)
 }
 
 /**
@@ -131,13 +182,17 @@ export function derivedRowsOf(forest: readonly Block[]): DerivedRows {
  * 与库大小有关但与「这次改了几块」无关 —— 写路径若发现这是热路径，再收窄到子树窗口；
  * 语义先保证一份。
  */
-export function derivedRowsOfBlocks(forest: readonly Block[], blocks: Iterable<string>): DerivedRows {
+export function derivedRowsOfBlocks(
+  forest: readonly Block[],
+  blocks: Iterable<string>,
+  opts: DerivedRowsOptions = {},
+): DerivedRows {
   const wanted = blocks instanceof Set ? blocks : new Set(blocks)
   if (wanted.size === 0) return { index: [], relations: [] }
-  return derive(forest, wanted)
+  return derive(forest, wanted, opts)
 }
 
-function derive(forest: readonly Block[], wanted: ReadonlySet<string> | null): DerivedRows {
+function derive(forest: readonly Block[], wanted: ReadonlySet<string> | null, opts: DerivedRowsOptions): DerivedRows {
   const index: BlockIndexRow[] = []
   /** 祖先链的先序键与根：子块直接拼父块那两格（walkForest 是先序，父一定先访问） */
   const pathOf = new Map<string, string>()
@@ -147,7 +202,9 @@ function derive(forest: readonly Block[], wanted: ReadonlySet<string> | null): D
   walkForest(
     forest,
     (b, ctx) => {
-      const path = ctx.parent === null ? `/${pathSegmentOf((ctx.index + 1) * ORDER_STEP)}` : `${pathOf.get(ctx.parent.id)!}${pathSegmentOf((ctx.index + 1) * ORDER_STEP)}`
+      const topRank = ctx.parent === null ? opts.topRanks?.[ctx.index] : undefined
+      const rank = topRank ?? (ctx.index + 1) * ORDER_STEP
+      const path = ctx.parent === null ? `/${pathSegmentOf(rank)}` : `${pathOf.get(ctx.parent.id)!}${pathSegmentOf(rank)}`
       const root = ctx.parent === null ? b.id : rootOf.get(ctx.parent.id)!
       const hidden = isDeleted(b) || (ctx.parent !== null && hiddenOf.get(ctx.parent.id) === true)
       pathOf.set(b.id, path)
@@ -249,6 +306,7 @@ export function rebuildDerivedWrites(raw: RawLibraryRows): RowWrite[] {
   return [
     ...derivedRowWrites(derivedRowsOf(ws.blocks), { clear: true }),
     { table: 'meta', op: 'upsert', key: { key: META_KEYS.derivedState }, values: { value: 'ready' } },
+    { table: 'meta', op: 'upsert', key: { key: META_KEYS.derivedPathVersion }, values: { value: DERIVED_PATH_VERSION } },
   ]
 }
 

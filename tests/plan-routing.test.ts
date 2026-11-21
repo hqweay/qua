@@ -16,7 +16,7 @@ import { join } from 'node:path'
 import { openLibraryDb, applyRowWrites, type Db, type RowWrite } from '../electron/library/sqlite.ts'
 import { readCandidatePage } from '../electron/library/reads.ts'
 import { candidatePageSql, candidatePlanSql, type CandidatePlan } from '../src/core/storage/library-reads.ts'
-import { META_KEYS } from '../src/core/identity/library.ts'
+import { DERIVED_PATH_VERSION, META_KEYS } from '../src/core/identity/library.ts'
 
 const dirs: string[] = []
 function db(): Db {
@@ -62,6 +62,7 @@ function seeded(): Db {
   }
   rows.push(
     { table: 'meta', op: 'upsert', key: { key: META_KEYS.derivedState }, values: { value: 'ready' } },
+    { table: 'meta', op: 'upsert', key: { key: META_KEYS.derivedPathVersion }, values: { value: DERIVED_PATH_VERSION } },
     { table: 'meta', op: 'upsert', key: { key: META_KEYS.ftsState }, values: { value: 'pending' } },
   )
   applyRowWrites(d, rows)

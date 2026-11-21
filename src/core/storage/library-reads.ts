@@ -206,8 +206,14 @@ export const LIBRARY_READS = {
     where b.parent is ?1
     order by i.path`,
 
-  /** **顶层根清单**（派生表流式重建的装载单位；含软删根——它们的行也要 hidden=1） */
-  catalogRoots: `select id from ${B} where parent is null order by rowid`,
+  /**
+   * **顶层根清单**（派生表流式重建的装载单位；含软删根——它们的行也要 hidden=1）。
+   *
+   * 带 `left` 而不是 `order by rowid`：rowid 是**创建序**，后建的根可以搬到最前面，
+   * 而派生路径的顶层段必须按**文档序**（兄弟链）分配。排序在 `readRootIds` 里按链走，
+   * 不写成 SQL 的 `order by left`——left 是「前兄弟的 rowid」，它的数值序不等于链序。
+   */
+  catalogRoots: `select b.id as id, b.left as prev from ${B} b where b.parent is null`,
 
   /** **FTS 映射按块查**（增量索引不再把整张映射搬进内存）：一块最多几行（每来源一行） */
   ftsMapOf: `select block_id, source, fts_rowid from ${DB_TABLES.blockFtsMap}
@@ -323,6 +329,8 @@ export type LibraryCatalog = {
     ftsRowidSeq: number
     /** 派生两表的重建状态：非 ready 时读路径不许信（分层闸——重建完成前它们只是半份答案） */
     derivedState: string
+    /** 派生路径的编码版本（`DERIVED_PATH_VERSION`）：与当前不符 ⇒ path 不可按文档序用 */
+    derivedPathVersion: string
   }
   journals: CatalogJournal[]
   tags: CatalogTag[]

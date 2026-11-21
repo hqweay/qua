@@ -32,8 +32,9 @@ import { positionsOf, rowsOfBlock, type RawLibraryRows, type StoredWorkspace } f
 import type { AliasTarget, CandidatePage, LibraryCatalog, LibraryDocRows, LibraryDocWindow } from './library-reads.ts'
 import type { LibraryClient, LibraryReadResult } from './library-client.ts'
 import type { CandidatePlan } from './library-reads.ts'
+import { DERIVED_PATH_VERSION } from '../identity/library.ts'
 
-/** web 的派生答案就是内存索引本身：永远整份、永远现行 ⇒ 状态恒 ready */
+/** web 的派生答案就是内存索引本身：永远整份、永远现行 ⇒ 状态恒 ready、路径口径恒现行 */
 const MEMORY_DERIVED_STATE = 'ready'
 
 type Rows = RawLibraryRows
@@ -350,6 +351,7 @@ export function createMemoryLibraryClient(deps: MemoryLibraryDeps): LibraryClien
           ftsTokenizer: '',
           ftsRowidSeq: 0,
           derivedState: MEMORY_DERIVED_STATE,
+          derivedPathVersion: DERIVED_PATH_VERSION,
         },
         journals,
         tags,

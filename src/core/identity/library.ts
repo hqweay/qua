@@ -71,6 +71,18 @@ export const LIBRARY_FORMAT = 1
  */
 export const DB_SCHEMA_VERSION = 16
 
+/**
+ * **派生路径的编码版本**（落 `meta.derived_path_version`）。
+ *
+ * 重建与增量维护共用一套段编码；口径变了（最近一次：顶层根的段从「每根各自从段 1
+ * 开始」改成「按文档序整层唯一」），存量 `BlockIndex.path` 整体作废——即使
+ * `derived_state` 还是 `ready`，也不能按 `path` 分页/取窗。启动时版本不符 ⇒ 重建一次。
+ *
+ * 为什么不塞进 `DB_SCHEMA_VERSION`：迁移是「只丢旧形状、不搬数据」，而这张表能由内容
+ * 重算；把重算挂到迁移上会让开库变成一次同步大计算。
+ */
+export const DERIVED_PATH_VERSION = '1'
+
 /** `meta` 表里被代码解释的键（其余键归将来，不在这里登记）。 */
 export const META_KEYS = {
   /** 库的身份：必须与 `library.json.id` 一致（不一致＝这个目录是副本） */
@@ -99,10 +111,18 @@ export const META_KEYS = {
    *
    * 与 `fts_state` 同一条纪律：它描述的是**派生表能不能信**，不是内容。
    * 建库／整份替换／迁移都落 `pending`；全量重建与内容写在同一事务里落 `ready`。
-   * 写路径尚未在同一事务里维护这两张表：任何增量编辑都会让它们过期 ——
-   * 所以在写事务接上之前，读路径**不得**消费它们（不做半迁移发布）。
+   * 之后的位置行／关系边随内容写增量维护，不再靠「过期」兜底——
+   * 读路径只在 `ready` 时消费它们（另有 `derivedPathVersion` 管段编码口径）。
    */
   derivedState: 'derived_state',
+  /**
+   * **派生路径的编码版本**：与 `DERIVED_PATH_VERSION` 不符 ⇒ 已铺好的 `path` 不可信
+   * （段编码/顶层段分配口径变过），启动时整库重建一次。
+   *
+   * 它比 `derived_state` 窄：状态回答「表铺过没有」，版本回答「铺出来的 path 还按不按
+   * 现在的口径排」。候选流按 `path > cursor` 翻页，只有两者都成立才不会跳行。
+   */
+  derivedPathVersion: 'derived_path_version',
 } as const
 
 /**
