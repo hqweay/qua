@@ -33127,6 +33127,75 @@ await check('T349 长文件名折行不溢出：文件 chip 守住正文列，�
   return `长文件名折行：chip 溢出 ${Math.round(g.chipOverflowPx)}px；全名仍在`
 })
 
+/**
+ * T351：日记流滚到「只剩昨天在窗口」后删一块，今天那台空态挂载区会被 store 通知重画。
+ * 身体整段在视口上方时，钉盒的 `bRect.top - sRect.top` 是很大的负数——缺了视口闸就会
+ * 算出上千 px 的 minHeight，把「0 条」空栏钉成一大片空白（真机报告）。
+ */
+await check('T351 日记流滚到昨天删块：视口外的今天空面板不被钉成一大片空白', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1426, height: 1476 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+  await page.waitForTimeout(400)
+
+  // 往今天根块灌 40 行：页面得有足够高度才能滚到「今天面板整段在视口上方」
+  await page.evaluate((rows) => {
+    const hex = (n) => n.toString(16).padStart(32, '0')
+    window.__qua.forceForest((forest) => {
+      const today = forest.find((b) => b.props?._date) ?? forest[0]
+      for (let i = 0; i < rows; i += 1) {
+        today.children.push({
+          id: hex(0xb0000 + i),
+          content: [{ t: 'text', v: `填充行 ${i}` }],
+          children: [], created: 1, modified: 1, props: {},
+        })
+      }
+    })
+  }, 40)
+  await page.waitForTimeout(350)
+
+  // 分段滚，触发过去几天全部装载（不装载则页面不够高，滚不到面板出视口）
+  await page.evaluate(() => { document.getElementById('scroll').scrollTop = 800 })
+  await page.waitForTimeout(250)
+  await page.evaluate(() => { document.getElementById('scroll').scrollTop = 1600 })
+  await page.waitForTimeout(250)
+  await page.evaluate(() => {
+    const s = document.getElementById('scroll')
+    const body = document.querySelector('#editor > .sec .mount[data-open="1"] .mount-body')
+    const overshoot = body.getBoundingClientRect().bottom - s.getBoundingClientRect().top + 30
+    s.scrollTop += overshoot
+  })
+  await page.waitForTimeout(350)
+
+  const before = await page.evaluate(() => {
+    const s = document.getElementById('scroll')
+    const body = document.querySelector('#editor > .sec .mount[data-open="1"] .mount-body')
+    return {
+      bodyTop: Math.round(body.getBoundingClientRect().top - s.getBoundingClientRect().top),
+      bodyH: Math.round(body.getBoundingClientRect().height),
+    }
+  })
+  assert(before.bodyTop < 0, `前置：今天面板应整段在视口上方：${JSON.stringify(before)}`)
+
+  // 删一块（非身份、非填充行），store 通知让今天那台空态挂载区重画
+  await page.evaluate(() => {
+    const all = window.__qua.allBlocks()
+    const victim = all.find((b) => !b.props?._date && !b.id?.startsWith('b0000') &&
+      !b.lists?.includes('tag') && !b.lists?.includes('page'))
+    window.__qua.invoke('core.editor/delete-block', { blockId: victim.id }, 'api')
+  })
+  await page.waitForTimeout(500)
+
+  const after = await page.evaluate(() => {
+    const body = document.querySelector('#editor > .sec .mount[data-open="1"] .mount-body')
+    return { minHeight: body.style.minHeight || '', bodyH: Math.round(body.getBoundingClientRect().height) }
+  })
+  assert(after.minHeight === '', `视口外的面板不该钉 minHeight：${JSON.stringify(after)}`)
+  assert(after.bodyH <= 200, `空面板不该被撑成一大片空白：${JSON.stringify(after)}`)
+
+  await ctx.close()
+  return `视口外面板重画后 minHeight 为空、身体 ${after.bodyH}px`
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

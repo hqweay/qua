@@ -1201,8 +1201,20 @@ export class MountArea {
       return
     }
     const sRect = scroller.getBoundingClientRect()
+    const bRect = this.bodyEl.getBoundingClientRect()
+    /**
+     * 身体整个不在滚动视口里（滚过头、还没滚到）时没有视野可保：塌缩收不走任何东西，
+     * 一分留白都不该钉。漏了这道闸，身体滚到视口上方时 `(bRect.top - sRect.top)` 是
+     * 很大的负数，身体模式的式子会算出远超视口的 `minHeight`——空栏被钉成一大片空白
+     * （日记流滚到昨天、删一块触发今天挂载区重画，就是这一族）。
+     */
+    if (bRect.bottom <= sRect.top || bRect.top >= sRect.bottom) {
+      this.bodyEl.style.minHeight = ''
+      this.clearTailHold()
+      return
+    }
     const sTop = scroller.scrollTop
-    const bodyH = this.bodyEl.getBoundingClientRect().height
+    const bodyH = bRect.height
     const tailCur = this.tailBuffer()
     const editor = this.root.closest<HTMLElement>('#editor')
     // 我是最后一块内容吗：我的底边与滚动内容末尾之间只剩文档尾缓冲
@@ -1219,7 +1231,6 @@ export class MountArea {
       return
     }
     this.clearTailHold()
-    const bRect = this.bodyEl.getBoundingClientRect()
     const padBottom = parseFloat(getComputedStyle(this.root).paddingBottom) || 0
     // +2：scrollHeight/矩形都过取整，贴着下界钉会被整型收敛吃掉一像素
     const needed = Math.ceil(sRect.height - tailCur - padBottom - (bRect.top - sRect.top)) + 2
