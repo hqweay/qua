@@ -515,18 +515,24 @@ function viewEvents(
         // 附**这一次露面自己的两件事**——露面块 id 只有打开这一刻才知道，走现算追加项。
         // 「看法」必须有：镜像行没有任何别的路径够到指针菜单（跟随源／固定大纲／命名视图），
         // 而菜单里那个「视图…」是**源块**的视图菜单——从镜像行切它改的是源，不是这一次露面。
+        // 两条都显式给 group：看法是配置（归视图组），移除是删除（归删除组）——
+        // 无 group 的尾随行会继承上一组标题，正是「看法掉进删除组」的成因。
+        // 删除块行在露面面收起：它会删源；删除只留命名准确的「移除这次露面」。
         ...(appearanceHost
           ? {
+              omitCommands: ['core.editor/delete-block'],
               extraRows: [
                 {
                   id: 'appearance-views',
                   label: t('ui.embed.viewMenuRow'),
                   hint: t('ui.embed.viewChoiceHint'),
+                  group: 'block/5-view',
                 },
                 {
                   id: 'appearance-remove',
                   label: t('ui.embed.remove'),
                   hint: t('ui.embed.removeHint'),
+                  group: 'block/6-delete',
                   command: 'core.embed/remove',
                   args: { blockId: appearanceHost },
                 },
@@ -541,15 +547,6 @@ function viewEvents(
           }
           if (!row.command) return
           const args = (row.args as Record<string, unknown> | undefined) ?? {}
-          /**
-           * 露面行的删除语义只有一种——摘这一次露面（源请去它自己的位置删）。
-           * 判据住在 `delete-block` handler：菜单只把「我在露面行上」这份上下文
-           * 交给它（`embedHost`），不在这里改派命令——键位路径也吃同一个判据。
-           */
-          if (row.command === 'core.editor/delete-block' && appearanceHost) {
-            void getRegistry().invoke(row.command, { ...args, embedHost: appearanceHost }, 'menu')
-            return
-          }
           void getRegistry().invoke(row.command, args, 'menu')
         },
       })

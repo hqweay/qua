@@ -538,13 +538,36 @@ function showMenu(req: MenuRequest): void {
   if (req.kind === 'menu') {
     const ctx = menuCtxOf(req)
     const surface = req.target?.surface
-    const rows = [
-      ...rowsFromBindings(
-        resolveBindings('menu', ctx, { prefix: req.prefix }).filter((b) => rowAllowed(b, surface)),
-        keyHints(),
-      ).map((r) => stampTarget(r, req.target)),
-      ...(req.extraRows ?? []).map((r) => stampTarget(r, req.target)),
-    ]
+    const omitted = new Set(req.omitCommands ?? [])
+    const bound = rowsFromBindings(
+      resolveBindings('menu', ctx, { prefix: req.prefix }).filter(
+        (b) => rowAllowed(b, surface) && !(b.command && omitted.has(b.command)),
+      ),
+      keyHints(),
+    ).map((r) => stampTarget(r, req.target))
+    /**
+     * 带 `group` 的 extraRows 归到**同组绑定行的末尾**（视图/删除这类有组标题的行），
+     * 无 `group` 的仍 append（原子/备注菜单整份都是这种，行为不变）。
+     * 归到末尾而不是 append 到整表之后：否则它会继承最后一组的标题（分组标题只在
+     * `group` 变化时画一次），「露面看法」就会被误收进「删除」组。
+     */
+    const extra = (req.extraRows ?? []).map((r) => stampTarget(r, req.target))
+    const rows: Row[] = [...bound]
+    for (const r of extra) {
+      if (!r.group) {
+        rows.push(r)
+        continue
+      }
+      let at = -1
+      for (let i = rows.length - 1; i >= 0; i--) {
+        if (rows[i]!.group === r.group) {
+          at = i
+          break
+        }
+      }
+      if (at >= 0) rows.splice(at + 1, 0, r)
+      else rows.push(r)
+    }
     layers.openMenu({
       rows,
       anchor: req.anchor,

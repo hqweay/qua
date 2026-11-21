@@ -20115,12 +20115,12 @@ await check('T268 页签视图：页签＝直接子块，身体是可编辑大�
 
 /* ---------------------------------------------------------------- T269 */
 
-await check('T269 露面行的菜单与删除语义：源行菜单带「这一次露面的看法…」；露面行上「删除块」＝移除露面（源不动、不谎报已删除）', async () => {
+await check('T269 露面行的菜单归位与删除语义：看法归视图组、删除组只有「移除这次露面」（无「删除块」）、点了源不动不谎报', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const fx = await buildListTree(page)
 
-  /* ── 删除语义：镜像一个普通块 ⇒ 岛里源行「删除块」＝移除露面（源一个字节不动） ── */
+  /* ── 菜单归位：镜像一个普通块 ⇒ 露面行菜单里「删除块」收起，看法归视图组、移除归删除组 ── */
   await page.evaluate(
     ({ rid, sid }) => window.__qua.invoke('core.embed/insert', { blockId: rid, targetId: sid, view: 'mirror' }),
     { rid: fx.root, sid: fx.rows[1] },
@@ -20136,10 +20136,35 @@ await check('T269 露面行的菜单与删除语义：源行菜单带「这一�
     el?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
   }, fx.rows[1])
   await page.waitForTimeout(250)
+
+  // 分组归属：每项往前找最近的 `.layer-group` 标题（DOM 扁平、顺序即分组）
+  const menuShape = await page.evaluate(() => {
+    const groupOf = (id) => {
+      const item = document.querySelector(`.layer-item[data-id="${id}"]`)
+      if (!item) return null
+      let n = item.previousElementSibling
+      while (n) {
+        if (n.classList.contains('layer-group')) return n.textContent ?? ''
+        n = n.previousElementSibling
+      }
+      return ''
+    }
+    return {
+      labels: [...document.querySelectorAll('.layer-item .layer-label')].map((r) => r.textContent ?? ''),
+      hasDeleteBlock: [...document.querySelectorAll('.layer-item .layer-label')].some((r) => r.textContent?.includes('删除块')),
+      viewsGroup: groupOf('appearance-views'),
+      removeGroup: groupOf('appearance-remove'),
+    }
+  })
+  assert(!menuShape.hasDeleteBlock, `露面行不该有「删除块」（它会删源）：${JSON.stringify(menuShape.labels)}`)
+  assert(
+    menuShape.viewsGroup === '视图与导航' && menuShape.removeGroup === '删除',
+    `看法归视图组、移除归删除组：${JSON.stringify({ views: menuShape.viewsGroup, remove: menuShape.removeGroup })}`,
+  )
+
+  // 点「移除这次露面」⇒ 只摘露面，源一个字节不动、不说「已删除块」
   await page.evaluate(() => {
-    const item = [...document.querySelectorAll('.layer-item')].find((r) =>
-      r.querySelector('.layer-label')?.textContent?.includes('删除块'),
-    )
+    const item = document.querySelector('.layer-item[data-id="appearance-remove"]')
     item?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }))
   })
   await page.waitForTimeout(350)
@@ -20153,7 +20178,7 @@ await check('T269 露面行的菜单与删除语义：源行菜单带「这一�
     { sid: fx.rows[1], eid: embedId2 },
   )
   assert(after.srcIntact, `源块一个字节不动：${JSON.stringify(after)}`)
-  assert(after.embedGone, `露面行上的「删除块」＝移除露面（露面没了）：${JSON.stringify(after)}`)
+  assert(after.embedGone, `「移除这次露面」＝露面没了：${JSON.stringify(after)}`)
   assert(
     !after.toasts.some((t) => t?.includes('已删除块')),
     `不说「已删除块」（删的是露面，不是源）：${JSON.stringify(after.toasts)}`,
@@ -20199,7 +20224,7 @@ await check('T269 露面行的菜单与删除语义：源行菜单带「这一�
   await page.waitForTimeout(200)
 
   await ctx.close()
-  return `源行菜单带露面看法入口（三格）→ 镜像里对源行「删除块」＝摘露面（源还在、不谎报）`
+  return `露面行菜单：看法归视图组、删除组只有「移除这次露面」（无「删除块」）；点了源不动、不谎报`
 })
 
 await check('T197 全部收起／全部展开：一个按钮、文案随状态变；只作用于顶层行；非大纲视图下隐藏', async () => {
