@@ -88,8 +88,9 @@ export function parseInline(src: string): { runs: Run[]; refs: PendingRef[] } {
       continue
     }
     /**
-     * `#标签` ⇒ 一枚**行内标签**（`RefRun` 带 `flavor:'#'`）：占正文 1 格的原子，
-     * 与块级归属（`props._tags`，走 `SeedBlock.tags`）是两件事——同一份归属的两种露面。
+     * `#标签` ⇒ 一枚**行内标签**（`RefRun` 带 `flavor:'#'`）：占正文 1 格的原子。
+     * 它是**提及**，不是归属：不会写 `props._tags`，也不会让这块成为那个标签的成员
+     * （归属只由块级那条路径给，走 `SeedBlock.tags`）。
      *
      * 目标解析与 `[[…]]` 共用一张表（标签占地址）：解析不到就是悬空，不造假 id。
      * ⚠️ 尾部紧跟的标点不进名字（`#功能。` 的标签是「功能」，句号留给文本流）；
