@@ -56,10 +56,18 @@
      语义色（危险 / 禁用）**不**并进来 —— 它们属于消费方，不该让原语猜。
 */
 .ui-btn {
-  padding: var(--ui-gap-2) var(--ui-gap-3);
+  /* 几何定死在原语里：之前只有 padding、高度随行高漂，落进浮层又被
+     `.popover button` 更大的内距顶上去 ⇒ 同一颗按钮在两个面两种大小。 */
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  height: var(--ui-btn-h);
+  padding: 0 var(--ui-gap-2);
   border: var(--ui-sep) solid var(--ui-border);
   border-radius: var(--ui-radius-sm);
   color: var(--ui-text-secondary);
+  font-size: var(--ui-fs-xs);
+  line-height: 1;
 }
 .ui-btn:hover {
   /* 与 [data-active='1'] 分家：悬停中性，激活才用强调色 */

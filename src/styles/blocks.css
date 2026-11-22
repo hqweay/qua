@@ -2304,6 +2304,24 @@
   gap: var(--ui-gap-2);
   margin-left: auto;
 }
+/* 改指向（反链／成员栏抬头）：与「大纲」同型——有边框的轻按钮。
+   独立类名：抬头按钮各是测试锚点，共用类名会让按类名点「第二颗」的用例撞上。 */
+.mount-derived-retarget {
+  display: inline-flex;
+  align-items: center;
+  height: var(--ui-btn-h);
+  padding: 0 var(--ui-gap-2);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface);
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-fs-sm);
+  font-weight: var(--ui-fw-normal);
+}
+.mount-derived-retarget:hover {
+  background: var(--ui-bg-hover);
+  color: var(--ui-text);
+}
 .mount-derived-lens[data-active='1'] {
   color: var(--ui-accent);
 }

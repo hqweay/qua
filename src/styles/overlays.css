@@ -385,13 +385,15 @@
   text-align: start;
   padding: 0 var(--ui-gap-2);
 }
-.popover button {
+/* 通用按钮只服务「浮层里没挂原语的那颗」；挂了 `.ui-btn` 的由原语定几何，
+  否则原语的定高／内距会被这里更高的优先级顶掉（弹窗里按钮偏大的来源）。 */
+.popover button:not(.ui-btn) {
   border: 1px solid var(--ui-border);
   border-radius: var(--ui-radius-sm);
   padding: var(--ui-gap-2) var(--ui-gap-4);
   color: var(--ui-text-secondary);
 }
-.popover button:hover {
+.popover button:not(.ui-btn):hover {
   /* 悬停是中性的「指针在这儿」，不是「我选定了它」——与选中态分家 */
   background: var(--ui-bg-hover);
   color: var(--ui-text);

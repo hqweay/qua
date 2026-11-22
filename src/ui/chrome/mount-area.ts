@@ -1565,7 +1565,7 @@ export class MountArea {
     if (this.deps.onRetarget && (entry.source === 'refs' || entry.source === 'members')) {
       const retargetBtn = document.createElement('button')
       retargetBtn.type = 'button'
-      retargetBtn.className = 'ui-btn mount-derived-retarget'
+      retargetBtn.className = 'mount-derived-retarget'
       retargetBtn.textContent = t('ui.mount.retarget')
       retargetBtn.dataset.tip = t('ui.mount.retargetHint')
       retargetBtn.addEventListener('click', () => {
