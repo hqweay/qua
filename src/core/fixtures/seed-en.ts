@@ -17,6 +17,8 @@ export const SEED_EN: Record<string, string> = {
     'Type / at the start of a line to open the insert menu; ⌘P searches all commands and ⌘K finds blocks by keyword — no need to memorize shortcuts.',
   '想把常去的块钉在手边：Shift+点击在侧槽开一扇窗，⌘⌥2 收放右槽。':
     'Keep the blocks you visit often close by: Shift-click to open one in a side panel, ⌘⌥2 to toggle the right panel.',
+  '界面有中文与英文：⌘, 打开设置就能切，命令、菜单和这份导览会跟着变。':
+    'The interface comes in Chinese and English: open Settings (⌘,) to switch, and commands, menus, and this tour all follow.',
   '感兴趣、有疑问，或想找人聊聊？欢迎加入 QQ 群「qua 双链笔记」（群号 1044063116），用 QQ 搜群号就能找到。':
     'Curious, stuck, or just want to chat? Join the QQ group "Qua Linked Notes" (group ID 1044063116) — search the ID in QQ to find it.',
   '几个值得先存下的地址：': 'A few links worth bookmarking:',
@@ -59,6 +61,12 @@ export const SEED_EN: Record<string, string> = {
     'The right panel is the inspector and backlinks: select a block to see who references it and which properties it carries.',
   '左槽「常用」那格是一张收纳盘：小卡收进一张卡，卡头就是把手；拖出来就还原。':
     'The "Favorites" slot in the left panel is a tray: shortcuts grouped into one card, with the header as its handle; drag one out to restore it.',
+  '左槽「目录」把页、标签、属性、自动化摊成四面：前两面拖块进去就是加一条归属，后两面只读。':
+    'The "Directory" card in the left panel spreads the library into four faces — pages, tags, properties, automations. Drag a block onto the first two to add a membership; the last two are read-only.',
+  '反链栏和成员栏的抬头都有「改指向…」：引用指错了目标，选一次整片改过去，⌘Z 一步回。':
+    'Both the backlinks bar and the members bar have "Retarget…" in the header: if references point at the wrong target, pick a new one and they all move together — one ⌘Z to undo.',
+  '「自动化」是一块「如果…就…」，左槽「目录 · 自动化」里那条「收尾」就是样本。':
+    '"Automation" is a block that reads "if … then …"; the "Wrap up" rule under Directory · Automations in the left panel is the sample.',
   '⌘Z 一步回：拆块、合并、格式、拖动都能撤销。':
     '⌘Z steps back: splitting, merging, formatting, and dragging are all undoable.',
   '⌘T 回到今日日记；编辑器失焦时 ⌘⌥← / ⌘⌥→ 翻日。':
@@ -218,8 +226,15 @@ export const SEED_EN: Record<string, string> = {
   '大文档秒开': 'Large Documents Open Instantly',
   '行内形状语言': 'Inline Shape Language',
   '字段入口三面共用': 'One Field Entry, Three Surfaces',
+  '目录四面': 'Four Directory Faces',
+  '改指向': 'Retargeting',
+  '删除收口': 'One Delete Entry',
+  '中英界面': 'Chinese and English UI',
+  '新版提示': 'Update Notice',
+  '收尾：把这块标成完成': 'Wrap up: mark it done',
   '引用某一段': 'Reference a Passage',
   '自动化': 'Automation',
+  '定时提醒': 'Scheduled Reminders',
   '图库管理': 'Asset Library Management',
   /* ------------------------------------------- 任务状态词汇：种子里那份定义块与选项 */
   '任务状态': 'Task Status',

@@ -13,7 +13,17 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { parseInline, seedWorkspace } from '../src/core/infra/seed.ts'
 import { FEATURE_DATE_PROP_ID, FEATURE_STATUS_PROP_ID } from '../src/core/fixtures/seed.ts'
-import { plainText, walkForest, checkExternalUrl, type Block, type Run } from '../src/core/index.ts'
+import {
+  TASK_STATUS_DONE_ID,
+  TASK_STATUS_PROP_ID,
+  isAutomationBlock,
+  readAutomation,
+  plainText,
+  walkForest,
+  checkExternalUrl,
+  type Block,
+  type Run,
+} from '../src/core/index.ts'
 
 const CANONICAL = [
   'https://github.com/hqweay/qua/releases',
@@ -132,6 +142,25 @@ test('功能实例：普通内容块 ＋ 归属 ＋ 值（没有新实体），�
   assert.ok(withDate.length >= 4, `已落地的实例应带日期（日历的落点）：${withDate.length}`)
   // 实例没有地址：身份由归属给出，不写 _aliases
   for (const b of instances) assert.equal(b.props?._aliases, undefined, `实例不该有地址：${plainText(b.content)}`)
+})
+
+test('自动化样本：一条手动规则（when 圈「任务」、步骤写完成），「目录 · 自动化」不是空面', () => {
+  const ws = seedWorkspace()
+  const auto = ws.blocks.find((b) => isAutomationBlock(b))
+  assert.ok(auto, '顶层应有一条自动化样本')
+  assert.equal(plainText(auto!.content).trim(), '收尾：把这块标成完成')
+  const def = readAutomation(auto!)
+  assert.ok(def, '样本的定义必须读得出来（形状合法）')
+  assert.equal(def!.enabled, true, '手动规则开着：只在人点「运行…」时跑')
+  assert.deepEqual(def!.triggers, ['manual'], '触发只有手动一条')
+  const taskTag = ws.blocks.find(
+    (b) => plainText(b.content).trim() === '任务' && b.props?._lists?.includes('tag'),
+  )
+  assert.ok(taskTag, '应有「任务」标签块')
+  assert.deepEqual(def!.when, { tag: taskTag!.id }, '条件圈的是「任务」：别的块不满足就不跑')
+  assert.equal(def!.steps.length, 1)
+  assert.equal(def!.steps[0]!.cmd, 'core.props/set-value')
+  assert.deepEqual(def!.steps[0]!.args, { propId: TASK_STATUS_PROP_ID, value: TASK_STATUS_DONE_ID })
 })
 
 test('镜像、算作、子块行头属性三份样本的数据形状（要拿到已建块 id 才能写的那批）', () => {

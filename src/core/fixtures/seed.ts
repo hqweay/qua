@@ -6,7 +6,8 @@
  * 提及与归属的分工（`#名` 只占正文一格，行尾 chip 才是归属）、待办两种状态、嵌套，
  * 以及「这一屏可以随便改」的提醒。
  * 顶层另有**属性 / 实例 / 看法**的完整样本：`功能` 标签声明两个属性、几条实例填着值、
- * 一条「功能看板」查询在四张看法（看板 / 表格 / 画廊 / 日历）之间切换——
+ * 一条「功能看板」查询在四张看法（看板 / 表格 / 画廊 / 日历）之间切换；
+ * 一条手动『自动化』（「收尾」）让「目录 · 自动化」那一面也有东西可点——
  * 每个已落地的能力都有一份**能摸到的数据**，而不是一句文档。
  * 一条示例备注（划选写批注）挂在「写作示范」页；槽的样本在**设备侧**（`seedDock()`）：
  * 左槽一只演示收纳盘，两颗快捷卡指到功能看板与写作示范。
@@ -31,6 +32,7 @@ import {
   declareField,
   DEFAULT_PROP,
   derivedId,
+  mkAutomationBlock,
   mkBlock,
   mkObjRecord,
   mkPropDef,
@@ -99,6 +101,7 @@ export function seedWorkspace(): Workspace {
         { text: '选中一段字试试 ⌘B 加粗、⌘I 斜体、⌘E 高亮、⌘＋反引号行内代码；划选气泡里还能写备注。' },
         { text: '行首敲 / 呼出插入菜单；⌘P 搜全部命令，⌘K 按关键词找块，记不住快捷键也没关系。' },
         { text: '想把常去的块钉在手边：Shift+点击在侧槽开一扇窗，⌘⌥2 收放右槽。' },
+        { text: '界面有中文与英文：⌘, 打开设置就能切，命令、菜单和这份导览会跟着变。' },
       ],
     },
     {
@@ -145,6 +148,9 @@ export function seedWorkspace(): Workspace {
       '屏幕底部那条「今天的待办」是一条查询：自动收集今天还没做完的事。',
       '右槽是检视与反链：选中一块，就能看到谁在引用它、它身上有哪些属性。',
       '左槽「常用」那格是一张收纳盘：小卡收进一张卡，卡头就是把手；拖出来就还原。',
+      '左槽「目录」把页、标签、属性、自动化摊成四面：前两面拖块进去就是加一条归属，后两面只读。',
+      '反链栏和成员栏的抬头都有「改指向…」：引用指错了目标，选一次整片改过去，⌘Z 一步回。',
+      '「自动化」是一块「如果…就…」，左槽「目录 · 自动化」里那条「收尾」就是样本。',
       '⌘Z 一步回：拆块、合并、格式、拖动都能撤销。',
       '⌘T 回到今日日记；编辑器失焦时 ⌘⌥← / ⌘⌥→ 翻日。',
       '⌘⇧? 查看全部键位——每条命令的键位与生效条件都列在里面。',
@@ -396,6 +402,24 @@ export function seedWorkspace(): Workspace {
   const vocab = coreVocabulary()
   blocks.push(...vocab.blocks)
 
+  // 自动化样本：一块「如果…就…」——「目录 · 自动化」那一面不是空的，定义体也能直接摸。
+  // 手动触发 ⇒ 只在人点「运行…」时跑；`when` 自己圈目标（这块得是「任务」）。
+  const automation = mkAutomationBlock({
+    name: s('收尾：把这块标成完成'),
+    icon: 'lucide:zap',
+    def: {
+      enabled: true,
+      triggers: ['manual'],
+      when: { tag: vocab.taskTagId },
+      steps: [
+        { cmd: 'core.props/set-value', args: { propId: TASK_STATUS_PROP_ID, value: TASK_STATUS_DONE_ID } },
+      ],
+    },
+  })
+  automation.created = SEED_AT
+  automation.modified = SEED_AT
+  blocks.push(automation)
+
   // 标签归属先落成 id（新标签块会在这时进森林），再解析 `[[ ]]` 与 `#标签`
   resolveSeedTags(blocks, built.flatMap((b) => b.pendingTags))
   resolveRefs(blocks, built)
@@ -529,7 +553,7 @@ function featureVocabulary(): { blocks: Block[]; tagId: string } {
  * 实例样本：**一条普通的内容块**，靠 `props._tags` 归属在「功能」下——没有新实体。
  *
  * 内容是自指的：这几条就是相自己的功能清单，随阶段翻新。值的分布是刻意的：
- * 已落地的带日期（日历有落点）、「自动化」不填状态（缺省读出「探索中」，看板的
+ * 已落地的带日期（日历有落点）、「定时提醒」不填状态（缺省读出「探索中」，看板的
  * 「未设置」列也要有一条撑着）、探索与搁置各有一条（看板每一列都有卡）。
  */
 function featureInstances(tagId: string): Block[] {
@@ -556,8 +580,14 @@ function featureInstances(tagId: string): Block[] {
     record(s('大文档秒开'), FEATURE_STATUS_SHIPPED_ID, '2026-11-20'),
     record(s('行内形状语言'), FEATURE_STATUS_SHIPPED_ID, '2026-11-22'),
     record(s('字段入口三面共用'), FEATURE_STATUS_SHIPPED_ID, '2026-11-22'),
+    record(s('自动化'), FEATURE_STATUS_SHIPPED_ID, '2026-11-21'),
+    record(s('目录四面'), FEATURE_STATUS_SHIPPED_ID, '2026-11-22'),
+    record(s('改指向'), FEATURE_STATUS_SHIPPED_ID, '2026-11-22'),
+    record(s('删除收口'), FEATURE_STATUS_SHIPPED_ID, '2026-11-22'),
+    record(s('中英界面'), FEATURE_STATUS_SHIPPED_ID, '2026-11-22'),
+    record(s('新版提示'), FEATURE_STATUS_SHIPPED_ID, '2026-11-22'),
     record(s('引用某一段'), FEATURE_STATUS_EXPLORING_ID),
-    record(s('自动化')),
+    record(s('定时提醒')),
     record(s('图库管理'), FEATURE_STATUS_SHELVED_ID),
   ]
 }
@@ -636,7 +666,7 @@ export function seedDock(): DockPrefs {
   }
 }
 
-function coreVocabulary(): { blocks: Block[]; featureTagId: string } {
+function coreVocabulary(): { blocks: Block[]; taskTagId: string; featureTagId: string } {
   // 定义块与选项从 core 的构造器来：种子与写路径的按需物化共用同一份形状，
   // 两边各造一份就会漂移（种子有的选项、按需物化的没有，查询就分叉）。
   // 选项 id 仍是核心词汇的**确定性 id**（`closureOf`／⌘↵／种子查询按 id 认「完成」）。
@@ -656,5 +686,5 @@ function coreVocabulary(): { blocks: Block[]; featureTagId: string } {
     b.created = SEED_AT
     b.modified = SEED_AT
   }
-  return { blocks: [taskStatus, task, ...feature.blocks], featureTagId: feature.tagId }
+  return { blocks: [taskStatus, task, ...feature.blocks], taskTagId: task.id, featureTagId: feature.tagId }
 }
