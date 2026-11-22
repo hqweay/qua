@@ -6672,7 +6672,7 @@ await check('T16 每一页的锚点与 DOM 表现逐条对得上（标记顺序�
 await check('T20 过新 / 损坏的库不被覆盖：进入只读演示态并持久告警', async () => {
   const KEY = 'qua.workspace'
   const run = async (raw) => {
-    const ctx = await browser.newContext({ viewport: { width: 1200, height: 800 } })
+    const ctx = await browser.newContext({ viewport: { width: 1200, height: 800 }, locale: 'zh-CN' })
     const page = await ctx.newPage()
     await page.addInitScript(([k, v]) => localStorage.setItem(k, v), [KEY, raw])
     await page.goto(base, { waitUntil: 'load' })
@@ -6713,7 +6713,7 @@ await check('T20 过新 / 损坏的库不被覆盖：进入只读演示态并持
    * 第二点只能靠**另起一个 context 装新字节**来验：同一个页面上的 initScript 每次导航都会
    * 把损坏的字节写回去，原样刷新验不出「盘上那份现在是好的」。
    */
-  const recoverCtx = await browser.newContext({ viewport: { width: 1200, height: 800 } })
+  const recoverCtx = await browser.newContext({ viewport: { width: 1200, height: 800 }, locale: 'zh-CN' })
   const recoverPage = await recoverCtx.newPage()
   await recoverPage.addInitScript(([k, v]) => localStorage.setItem(k, v), [KEY, corrupt])
   await recoverPage.goto(base, { waitUntil: 'load' })
@@ -6758,7 +6758,7 @@ await check('T20 过新 / 损坏的库不被覆盖：进入只读演示态并持
   await recoverCtx.close()
 
   // ④ 另起 context 用新字节冷启动：能打开，且不是只读态
-  const reopenCtx = await browser.newContext({ viewport: { width: 1200, height: 800 } })
+  const reopenCtx = await browser.newContext({ viewport: { width: 1200, height: 800 }, locale: 'zh-CN' })
   const reopenPage = await reopenCtx.newPage()
   await reopenPage.addInitScript(([k, v]) => localStorage.setItem(k, v), [KEY, recovered.raw])
   await reopenPage.goto(base, { waitUntil: 'load' })
@@ -15267,11 +15267,11 @@ await check('T150 派生卡也能关：关掉即离开槽（模型不动）；�
   await page.waitForTimeout(160)
   const rows = await layerRows(page)
   assert(
-    rows.some((r) => r.label === '归属'),
-    `画廊里应有归属卡：${JSON.stringify(rows.map((r) => r.label))}`,
+    rows.some((r) => r.label === '目录'),
+    `画廊里应有目录卡：${JSON.stringify(rows.map((r) => r.label))}`,
   )
   // 行是 `mousedown` 触发的（与命令面板同一条选择路径），所以用真鼠标点
-  const at = rows.findIndex((r) => r.label === '归属')
+  const at = rows.findIndex((r) => r.label === '目录')
   await page.locator(`.layer-item[data-index="${at}"]`).click()
   await page.waitForTimeout(160)
   const back = await dockState()
@@ -32157,13 +32157,13 @@ await check('T331 记录面右键＝同一张块菜单：只放块级动作，�
   assert(menu, '右键记录行应开块菜单')
   assert(menu.title.includes('块'), `菜单抬头应是「块」：${JSON.stringify(menu.title)}`)
   assert(menu.text.includes('看属性'), `块级动作应在：${JSON.stringify(menu.text)}`)
-  assert(menu.text.includes('删除块'), `删除应在：${JSON.stringify(menu.text)}`)
+  assert(menu.text.includes('删除'), `删除应在：${JSON.stringify(menu.text)}`)
   // 位置/选区类行不该出现：记录面没有装载树，缩进/折叠在这里没有语义
   assert(!menu.text.includes('缩进'), `记录面不该出现缩进：${JSON.stringify(menu.text)}`)
   assert(!menu.text.includes('折叠'), `记录面不该出现折叠：${JSON.stringify(menu.text)}`)
 
   // ② 删除 ⇒ 被右键那一行当场消失（目标不是「活动编辑器的光标块」）
-  await page.locator('.layer .layer-item', { hasText: '删除块' }).first().click()
+  await page.locator('.layer .layer-item', { hasText: '删除' }).first().click()
   await page.waitForTimeout(500)
   const gone = await page.evaluate(
     (id) => !document.querySelector(`.tv-row[data-block-id="${id}"]`),
@@ -33353,16 +33353,19 @@ await check('T351 日记流滚到昨天删块：视口外的今天空面板不�
   }, 40)
   await page.waitForTimeout(350)
 
-  // 分段滚，触发过去几天全部装载（不装载则页面不够高，滚不到面板出视口）
-  await page.evaluate(() => { document.getElementById('scroll').scrollTop = 800 })
-  await page.waitForTimeout(250)
-  await page.evaluate(() => { document.getElementById('scroll').scrollTop = 1600 })
-  await page.waitForTimeout(250)
+  // 触发过去几天全部装载（装载点在底部）：一次性算出的 overshoot 会被**旧**最大滚动量
+  // 夹住，而装载本身又会把文档撑高 ⇒ 先反复滚到底等段数稳定，再按身体位置校准一次。
+  for (let i = 0; i < 3; i += 1) {
+    await page.evaluate(() => {
+      const s = document.getElementById('scroll')
+      s.scrollTop = s.scrollHeight
+    })
+    await page.waitForTimeout(300)
+  }
   await page.evaluate(() => {
     const s = document.getElementById('scroll')
     const body = document.querySelector('#editor > .sec .mount[data-open="1"] .mount-body')
-    const overshoot = body.getBoundingClientRect().bottom - s.getBoundingClientRect().top + 30
-    s.scrollTop += overshoot
+    s.scrollTop += body.getBoundingClientRect().bottom - s.getBoundingClientRect().top + 30
   })
   await page.waitForTimeout(350)
 
@@ -33483,10 +33486,14 @@ await check('T353 日记流临界位编辑一块：今天空面板不被钉成�
     })
   })
   await page.waitForTimeout(350)
-  // 分段滚装载过去几天，再把身体底边停在视口内 50px（临界：闸不挡、旧公式漏项）
-  for (const y of [800, 1600]) {
-    await page.evaluate((v) => { document.getElementById('scroll').scrollTop = v }, y)
-    await page.waitForTimeout(250)
+  // 装载过去几天（同 T351：反复滚到底等段数稳定），再把身体底边停在视口内 50px
+  // （临界：闸不挡、旧公式漏项）
+  for (let i = 0; i < 3; i += 1) {
+    await page.evaluate(() => {
+      const s = document.getElementById('scroll')
+      s.scrollTop = s.scrollHeight
+    })
+    await page.waitForTimeout(300)
   }
   await page.evaluate(() => {
     const s = document.getElementById('scroll')

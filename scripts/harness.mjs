@@ -208,8 +208,17 @@ export async function reopenPage(browser, ctx, base, page) {
   await ctx.close()
   // 视口要跟 freshPage 同档：不传会落到 Playwright 缺省（1280×720），
   // 「关掉重开」就变成「换了个更小的窗口」，凡是量几何的断言两轮就对不上。
-  const next = await browser.newContext({ storageState: state, viewport: { width: 1440, height: 900 } })
-  return openPage(browser, next, base)
+  // 视口与 locale 都要跟 freshPage 同档：缺 locale 会落到宿主浏览器的 en-US，
+  // 于是「关掉重开」顺带换了一种界面语言（语言偏好没落库时按系统语言现算）——
+  // 按中文标签定位的用例会在这里等一个永远不出现的「表格」。
+  const loc = process.env.QUA_LOCALE === 'en' ? 'en-US' : 'zh-CN'
+  const next = await browser.newContext({
+    storageState: state,
+    viewport: { width: 1440, height: 900 },
+    deviceScaleFactor: 2,
+    locale: loc,
+  })
+  return openPage(browser, next, process.env.QUA_LOCALE === 'en' ? base + '?locale=en' : base)
 }
 
 export function assert(cond, msg) {
