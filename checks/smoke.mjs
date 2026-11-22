@@ -27323,21 +27323,46 @@ await check('T281 收纳盘：建盘在原位、一次收完、盘内排序、�
   assert(tray2.cards[tray2.cards.length - 1] === shKey && !now.includes(shKey),
     `小卡应收进盘末、顶层不再有它：${JSON.stringify({ tray2, now })}`)
 
-  // ④′ 点盘内小卡 ⇒ 整槽重画，但**盘壳是复用的**：header 节点身份得留着。
-  // 每重画重建壳会让盘头的按钮与标题重新从透明淡入一次（盘头闪一下）；
-  // 与派生卡同一条判据——header 只认身份与收起态，不认 body 里的内容。
-  await page.evaluate((k) => {
-    const head = document.querySelector(`#dock-left-stack > .dock-card[data-card-id="${k}"] > .dock-card-head`)
+  // ④′ 点盘内小卡 ⇒ 整槽重画，但**盘壳与小卡都不重建**。那是两处独立的闪：
+  //   壳重建 ⇒ 按钮与标题重新从透明淡入一次（盘头闪）；
+  //   小卡被摘下来再挂回去 ⇒ 悬停底色掉回白底再淡一遍（那一格闪）。
+  // 断言用**childList 变更计数**（节点被摘掉重挂也算一次）——比截图/像素稳，也不靠时序。
+  const clickedTileSel = `.dock-tray-body > .dock-tile[data-card-id="${shKey}"]`
+  const tileBox = await page.locator(`${clickedTileSel} .dock-tile-main`).boundingBox()
+  // 真鼠标停在那一格上：悬停底色是「重建之后才会淡出来」的东西，不 hover 就量不到
+  await page.mouse.move(tileBox.x + tileBox.width / 2, tileBox.y + tileBox.height / 2)
+  await page.waitForTimeout(200)
+  await page.evaluate(({ k, sel }) => {
+    const card = document.querySelector(`#dock-left-stack > .dock-card[data-card-id="${k}"]`)
+    const head = card?.querySelector('.dock-card-head')
+    const tile = card?.querySelector(sel)
     if (head) head.dataset.probe = 'kept'
-  }, trayKey)
-  await page.locator(`.dock-tray-body > .dock-tile[data-card-id="${shKey}"] .dock-tile-main`).click()
+    if (tile) tile.dataset.probe = 'kept'
+    window.__trayChanges = 0
+    const mo = new MutationObserver((rs) => {
+      for (const r of rs) if (r.type === 'childList') window.__trayChanges += r.removedNodes.length + r.addedNodes.length
+    })
+    mo.observe(card, { childList: true, subtree: true })
+    window.__trayMo = mo
+    tile.querySelector('.dock-tile-main').click()
+  }, { k: trayKey, sel: clickedTileSel })
   await page.waitForTimeout(300)
-  const tileClick = await page.evaluate((k) => {
-    const head = document.querySelector(`#dock-left-stack > .dock-card[data-card-id="${k}"] > .dock-card-head`)
-    return { probe: head?.dataset.probe ?? null, activeId: window.__qua.snapshot().activeId }
-  }, trayKey)
+  const tileClick = await page.evaluate(({ k, sel }) => {
+    const card = document.querySelector(`#dock-left-stack > .dock-card[data-card-id="${k}"]`)
+    const probe = (n) => n?.dataset.probe ?? null
+    window.__trayMo?.disconnect()
+    return {
+      headProbe: probe(card?.querySelector('.dock-card-head')),
+      tileProbe: probe(card?.querySelector(sel)),
+      childListChanges: window.__trayChanges ?? -1,
+      activeId: window.__qua.snapshot().activeId,
+    }
+  }, { k: trayKey, sel: clickedTileSel })
   assert(tileClick.activeId === blockId, `点盘内小卡应打开它指向的块：${JSON.stringify(tileClick)}`)
-  assert(tileClick.probe === 'kept', `点小卡不该重建盘壳 header（会在盘头上闪一次淡入）：${JSON.stringify(tileClick)}`)
+  assert(tileClick.headProbe === 'kept' && tileClick.tileProbe === 'kept',
+    `点小卡不该重建盘壳或小卡：${JSON.stringify(tileClick)}`)
+  assert(tileClick.childListChanges === 0,
+    `点小卡不该把小卡摘下来重挂（会掉 hover、淡入一次）：${JSON.stringify(tileClick)}`)
 
   // ⑤ 槽里＝移出来：拖盘内格到槽里两张卡之间 ⇒ 落点决定容器，不需要「先出盘」
   const out = await dragTo({

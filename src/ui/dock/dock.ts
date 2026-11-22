@@ -135,12 +135,19 @@ export function tileGlyph(label: string): string {
   return (chars[0] ?? '').toUpperCase()
 }
 
+/**
+ * 一张小卡**当前的**文案与回调。
+ *
+ * 与卡壳的 `cardStates` 同一条理由：小卡按 key 复用（见 `syncDockTile`），回调会被下一帧
+ * 换掉（换目标、命令被裁掉、槽里位置变了），而监听器只绑一次 ⇒ 不能在闭包里捕获它。
+ */
+const tileStates = new WeakMap<HTMLElement, DockTile>()
+
 /** 小卡的唯一产地：44px 格 + 主按钮 + hover 出现的移除入口 */
 export function buildDockTile(tile: DockTile): HTMLElement {
   const el = document.createElement('div')
   el.className = 'dock-tile'
   el.dataset.cardId = tile.id
-  if (tile.missing) el.dataset.missing = '1'
   el.draggable = true
   el.addEventListener('dragstart', (e) => {
     // 移除按钮不是拖源：从它起拖会把「点 ×」变成一次拖拽
@@ -148,53 +155,95 @@ export function buildDockTile(tile: DockTile): HTMLElement {
       e.preventDefault()
       return
     }
-    tile.onDragStart?.(e)
+    tileStates.get(el)?.onDragStart?.(e)
   })
 
   const main = document.createElement('button')
   main.type = 'button'
   main.className = 'dock-tile-main'
-  main.dataset.tip = tile.title
-  main.setAttribute('aria-label', tile.title)
-  if (tile.disabled) main.setAttribute('aria-disabled', 'true')
-  renderIcon(main, tile.missing ? 'lucide:circle-help' : tile.icon, 'square', 'md')
-  if (tile.glyph && !tile.missing) {
-    main.dataset.glyph = tile.glyph
-    const glyph = document.createElement('span')
-    // 省略行为用原语，不在这里再抄一份几何声明
-    glyph.className = 'dock-tile-glyph ui-ellipsis'
-    glyph.textContent = tile.glyph
-    main.appendChild(glyph)
-  }
   main.addEventListener('click', (e) => {
     e.stopPropagation()
     // 置灰不等于禁用：只有 `disabled` 的格子才由外壳吞掉点击，
     // 其余一律交给小卡自己（悬空的快捷卡要借这次点击说清「为什么打不开」）。
-    if (tile.disabled) return
-    tile.onClick(e)
+    const cur = tileStates.get(el)
+    if (!cur || cur.disabled) return
+    cur.onClick(e)
   })
   el.appendChild(main)
-  if (tile.onMenu) {
-    el.addEventListener('contextmenu', (e) => {
-      e.preventDefault()
-      tile.onMenu?.(el.getBoundingClientRect(), el)
-    })
+  // 右键监听常驻：哪一次重画后这一格有没有菜单，由“当前那一份”说话。
+  // 按「建时有没有 onMenu」决定要不要绑，会在复用之后变成无菜单或双菜单
+  el.addEventListener('contextmenu', (e) => {
+    const cur = tileStates.get(el)
+    if (!cur?.onMenu) return
+    e.preventDefault()
+    cur.onMenu(el.getBoundingClientRect(), el)
+  })
+
+  paintTile(el, tile)
+  return el
+}
+
+/**
+ * 就地同步一张已存在的小卡：只改会变的那几位（标题／图标／短标签／置灰／禁用／移出入口），
+ * **不重建节点**。建与同步共用的就是这一份。
+ *
+ * 为什么不能重建：`button` 的悬停底色与文字色走全局 transition（`shell.css` 一处声明），
+ * 新节点的悬停色要从「无底色」淡入一次——按下小卡那一下就会看到那一格闪一下
+ * （实测：先 `rgb(20,22,26,.05)` 底色 → 重建后白色 → 三百毫秒淡回去，两轮）。
+ */
+export function syncDockTile(el: HTMLElement, tile: DockTile): void {
+  paintTile(el, tile)
+}
+
+/** 把这张小卡画成当前这一份：**只写真的变了的那几位**，免得把进行中的悬停过渡打断 */
+function paintTile(el: HTMLElement, tile: DockTile): void {
+  tileStates.set(el, tile)
+  el.dataset.cardId = tile.id
+  if (tile.missing) el.dataset.missing = '1'
+  else delete el.dataset.missing
+
+  const main = el.querySelector<HTMLButtonElement>(':scope > .dock-tile-main')
+  if (main) {
+    // 图标与短标签是同一格里的两半（图标由 renderIcon 画、短标签是追加的子节点），
+    // 只在两者之一真的变了时一起重画——顺手避开 renderIcon 的 `replaceChildren` 把短标签抹掉
+    const icon = tile.missing ? 'lucide:circle-help' : tile.icon
+    const glyph = tile.missing ? '' : (tile.glyph ?? '')
+    if (main.dataset.icon !== icon || (main.dataset.glyph ?? '') !== glyph) {
+      renderIcon(main, icon, 'square', 'md')
+      for (const old of Array.from(main.querySelectorAll(':scope > .dock-tile-glyph'))) old.remove()
+      if (glyph !== '') {
+        main.dataset.glyph = glyph
+        const span = document.createElement('span')
+        // 省略行为用原语，不在这里再抄一份几何声明
+        span.className = 'dock-tile-glyph ui-ellipsis'
+        span.textContent = glyph
+        main.appendChild(span)
+      } else delete main.dataset.glyph
+    }
+    if (main.dataset.tip !== tile.title) main.dataset.tip = tile.title
+    main.setAttribute('aria-label', tile.title)
+    if (tile.disabled) main.setAttribute('aria-disabled', 'true')
+    else main.removeAttribute('aria-disabled')
   }
 
   if (tile.close) {
-    const x = document.createElement('button')
-    x.type = 'button'
-    x.className = 'dock-tile-x'
-    x.dataset.tip = tile.close.title ?? ''
-    if (tile.close.title) x.setAttribute('aria-label', tile.close.title)
-    renderIcon(x, 'lucide:x', 'x', 'sm')
-    x.addEventListener('click', (e) => {
-      e.stopPropagation()
-      tile.close?.onClick()
-    })
-    el.appendChild(x)
-  }
-  return el
+    let x = el.querySelector<HTMLButtonElement>(':scope > .dock-tile-x')
+    if (!x) {
+      x = document.createElement('button')
+      x.type = 'button'
+      x.className = 'dock-tile-x'
+      renderIcon(x, 'lucide:x', 'x', 'sm')
+      x.addEventListener('click', (e) => {
+        e.stopPropagation()
+        tileStates.get(el)?.close?.onClick()
+      })
+      el.appendChild(x)
+    }
+    const tip = tile.close.title ?? ''
+    if (x.dataset.tip !== tip) x.dataset.tip = tip
+    if (tip !== '') x.setAttribute('aria-label', tip)
+    else x.removeAttribute('aria-label')
+  } else el.querySelector(':scope > .dock-tile-x')?.remove()
 }
 
 export interface DockCardState {
@@ -333,7 +382,8 @@ export function syncDockCard(el: HTMLElement, card: DockCard, state: DockCardSta
     if (count.textContent !== card.count) count.textContent = card.count
   } else oldCount?.remove()
   const body = el.querySelector<HTMLElement>(':scope > .dock-card-body')
-  if (body) body.replaceChildren(card.body)
+  // 已经是这一份就不动：把已挂着的节点先摘再挂，会丢掉 `:hover` 与进行中的过渡
+  if (body && !(body.childNodes.length === 1 && body.firstChild === card.body)) body.replaceChildren(card.body)
   applyDockCardState(el, state)
 }
 

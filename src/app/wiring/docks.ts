@@ -43,6 +43,7 @@ import {
   buildDockTile,
   decorateDockCard,
   syncDockCard,
+  syncDockTile,
   renderDockStack,
   tileGlyph,
   type DockCard,
@@ -171,6 +172,27 @@ export function setupDocks(deps: DocksDeps) {
     }
     const el = buildDockCard(spec, state)
     cardShells.set(cacheKey, el)
+    return el
+  }
+
+  /**
+   * 小卡壳按「槽 + key」缓存：与卡壳同一条理由，只是看得见的差别在**悬停底色**。
+   *
+   * 小卡的悬停底色与文字色走全局 `button` 过渡，重建节点会让那一格从「无底色」重新淡入一次
+   * ——点一下盘里的小卡，那一格就闪一下（实测：底色 → 白 → 三百毫秒淡回去）。
+   * 同一槽内 key 唯一（含盘里的），所以「槽 + key」就是一个落点的稳定身份。
+   */
+  const tileEls = new Map<string, HTMLElement>()
+
+  function tileFor(side: 'left' | 'right', tile: DockTile): HTMLElement {
+    const cacheKey = `${side}:${tile.id}`
+    const hit = tileEls.get(cacheKey)
+    if (hit) {
+      syncDockTile(hit, tile)
+      return hit
+    }
+    const el = buildDockTile(tile)
+    tileEls.set(cacheKey, el)
     return el
   }
 
@@ -543,13 +565,19 @@ export function setupDocks(deps: DocksDeps) {
     pruneOnBoot()
     // 卡被摘掉后清壳缓存：再加回来时才不会复用一个已经离槽的旧壳
     const live = new Set<string>()
+    const liveTiles = new Set<string>()
     for (const side of ['left', 'right'] as const)
       for (const c of deps.prefs().dock[side].cards) {
         if (c.kind === 'derived' && c.card !== 'inspect') live.add(`${side}:${c.card}`)
         // 收纳盘同样是纯 chrome 的壳（header 只认身份与状态），body 每次现造
         else if (c.kind === 'tray') live.add(`${side}:${dockKey(c)}`)
+        // 小卡不论在顶层还是在盘里，壳都按 key 复用；盘中成员也要算进「还在场」
+        if (c.kind === 'cmd' || c.kind === 'shortcut') liveTiles.add(`${side}:${dockKey(c)}`)
+        else if (c.kind === 'tray')
+          for (const m of c.cards) if (m.kind === 'cmd' || m.kind === 'shortcut') liveTiles.add(`${side}:${dockKey(m)}`)
       }
     for (const k of cardShells.keys()) if (!live.has(k)) cardShells.delete(k)
+    for (const k of tileEls.keys()) if (!liveTiles.has(k)) tileEls.delete(k)
     ensureCardDrops()
     ensureTileCols()
     const { left, right } = deps.getSlots()
@@ -643,19 +671,38 @@ export function setupDocks(deps: DocksDeps) {
    * 卡壳走 `shellFor`（与派生卡同一份缓存）：盘的成员／名字每重画都在变，但头部只认
    * 身份与收起态——每重画重建壳，就会让按钮和标题重新从透明淡入一次（点盘里的小卡
    * 会让整槽重画一次，用户看到的就是「点一下，盘头闪一下」）。
+   *
+   * **小卡排也是就地 diff、不整片重建**（理由同壳）：把已挂着的节点先摘下来、再挂进一只
+   * 新的 band，中间的样式重算就是一次「不再 hover ⇒ 悬停底色掉回白底」，再挂上又淡一遍
+   * ——小卡那一格照样闪（实测：壳不换了它还是闪，只是闪的是格不是头）。
    */
   function trayCard(side: 'left' | 'right', tray: Extract<DockEntry, { kind: 'tray' }>): DockCardEntry {
     const key = dockKey(tray)
-    const band = document.createElement('div')
-    band.className = 'dock-tray-body'
+    // 壳已存在就接着用它的 band：节点始终在文档里，悬停态与进行中的过渡才不会被抖断
+    const el = cardShells.get(`${side}:${key}`)
+    const band =
+      el?.querySelector<HTMLElement>(':scope > .dock-card-body > .dock-tray-body') ??
+      (() => {
+        const created = document.createElement('div')
+        created.className = 'dock-tray-body'
+        return created
+      })()
     // 成员复用同一对小卡产地：点击／右键／移出／拖拽的所有行为白拿——
     // 移出走 `closeCard`（findDock 找得到盘内的它），拖拽载荷就是它自己的 key
+    const members: HTMLElement[] = []
     for (const member of tray.cards) {
-      if (member.kind === 'cmd') band.appendChild(actionTile(side, member.command))
-      else if (member.kind === 'shortcut') band.appendChild(shortcutTile(side, member.block))
+      if (member.kind === 'cmd') members.push(actionTile(side, member.command))
+      else if (member.kind === 'shortcut') members.push(shortcutTile(side, member.block))
     }
+    // 就地重排：同序时一个节点都不动；顺序变了只搬；多了退、少了去
+    members.forEach((node, i) => {
+      const at = band.children[i] ?? null
+      if (at !== node) band.insertBefore(node, at)
+    })
+    while (band.children.length > members.length) band.lastElementChild!.remove()
+
     const named = tray.title !== undefined && tray.title !== ''
-    const el = shellFor(side, key, {
+    const shell = shellFor(side, key, {
       id: key,
       title: named ? tray.title! : t('ui.dock.trayCount', { count: tray.cards.length }),
       ...(named ? { count: String(tray.cards.length) } : {}),
@@ -669,8 +716,8 @@ export function setupDocks(deps: DocksDeps) {
        */
       ...(named ? {} : { quietHead: true }),
     })
-    bindTrayDrops(side, tray.id, el)
-    return { id: key, el, size: 'large' }
+    bindTrayDrops(side, tray.id, shell)
+    return { id: key, el: shell, size: 'large' }
   }
 
   /** 盘的 body 也是同一条网格流：列数同一份函数，只是换成盘的内容盒来算（A18 的新口径） */
@@ -774,7 +821,7 @@ export function setupDocks(deps: DocksDeps) {
         : {}),
       onDragStart: (e) => setDragCard(e.dataTransfer, id),
     }
-    return buildDockTile(tile)
+    return tileFor(side, tile)
   }
 
   /**
@@ -811,7 +858,7 @@ export function setupDocks(deps: DocksDeps) {
       onMenu: (anchor, trigger) => deps.showShortcutMenu(side, blockId, anchor, trigger),
       onDragStart: (e) => setDragCard(e.dataTransfer, id),
     }
-    return buildDockTile(tile)
+    return tileFor(side, tile)
   }
 
   /** 只改 `cards`：这一槽（含盘里）已有这一颗就不再加；返回这次是否真的新增 */
