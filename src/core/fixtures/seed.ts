@@ -357,6 +357,22 @@ export function seedWorkspace(): Workspace {
         { text: 'PDF 批注', tags: ['功能'] },
       ],
     },
+    // **同一批子块，换个看法**：导图不另存一份内容，它就是「把子块摊成一张图」。
+    // 四根分支（两根各带两个孩子）是故意留出的第二层：导图的价值在层级，不在单层的扇面。
+    { text: '「功能地图」这一块读成思维导图：根在中间、子块是分支——换看法不重排内容。' },
+    {
+      text: '功能地图',
+      props: {
+        [VIEWS_PROP]: [{ id: SEED_MAP_VIEW_ID, name: s('思维导图'), kind: 'mindmap', mindmap: { direction: 'both' } }],
+        [ACTIVE_VIEW_PROP]: SEED_MAP_VIEW_ID,
+      },
+      children: [
+        { text: '写', children: [{ text: '块树与行内原子' }, { text: '备注与颜色' }] },
+        { text: '组织', children: [{ text: '标签与属性' }, { text: '镜像与引用' }] },
+        { text: '读', children: [{ text: '七种看法' }] },
+        { text: '找', children: [{ text: '搜索与命令面板' }] },
+      ],
+    },
     { text: '在这块下面新建的每一行都会自动打上「功能」标签——左槽「目录 · 自动化」里那条规则就是干这个的。' },
     { text: '把这一页拖进左槽就能开一扇常驻的窗——常去的页面都值得这样放。' },
     { text: '复盘只写「变了什么、为什么」，不抄流水账。', tags: ['复盘'] },
@@ -570,6 +586,8 @@ export const SEED_FEATURE_BOARD_ID = derivedId('block', 'seed/feature-board')
 export const SEED_INPUT_NOTES_ID = derivedId('block', 'seed/input-notes')
 /** 「候选功能」那张表格看法的 id：块上的 `_activeView` 与 `_views[]` 要拿到同一个 */
 export const SEED_BACKLOG_VIEW_ID = 'seed-backlog-table'
+/** 「功能地图」那张思维导图看法的 id（同样要 `_views[]` 与 `_activeView` 对齐） */
+export const SEED_MAP_VIEW_ID = 'seed-functional-map'
 export const SEED_TRAY_ID = derivedId('tray', 'seed/quick')
 
 /**

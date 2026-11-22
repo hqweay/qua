@@ -1144,6 +1144,7 @@ button.queryview-chip:hover {
 }
 .vm-node-text {
   display: -webkit-box;
+  width: 100%;
   overflow: hidden;
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;

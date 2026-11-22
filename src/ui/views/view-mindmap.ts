@@ -33,17 +33,20 @@ export interface ViewMindmapDeps {
 /** 节点上限：超过就只画这些（并说出来） */
 export const MINDMAP_CAP = 500
 
-/** 节点几何（px）：列宽、行槽、列间距。布局与 CSS 的宽高都从这里来，只此一份。 */
-const NODE_W = 208
-const NODE_H = 60
-const COL_GAP = 56
-const ROW_GAP = 12
+/** 节点几何（px）：列宽、列间距、行距。CSS 的宽高都从这里来，只此一份。 */
+const NODE_W = 176
+/** 卡片最小高（单行）；实际高度量出来——三行的卡片本就该更高 */
+const NODE_H_MIN = 32
+const COL_GAP = 40
+const ROW_GAP = 10
 const PAD = 24
 const STEP = NODE_W + COL_GAP
 
 interface Node {
   block: Block
   depth: number
+  /** 实测高度：一行与三行的卡片不该一样高（空卡片读起来像一格占位） */
+  h: number
   /** 分支方向：根的孩子分到两侧时，左边那侧的边要镜像 */
   dir: 1 | -1
   parent: Node | undefined
@@ -128,6 +131,7 @@ export class ViewMindmap {
         parent: undefined,
         children: [],
         side: undefined,
+        h: NODE_H_MIN,
         x: 0,
         y: 0,
       })
@@ -171,6 +175,41 @@ export class ViewMindmap {
       }
     }
 
+    // 先造卡片再排版：卡片高由**文字折成几行**决定（一行与三行不该一样高），
+    // 只有挂上去量一次 `offsetHeight` 才知道。绝对定位 ＋ 定宽 ⇒ 量高不受彼此位置影响。
+    const canvas = document.createElement('div')
+    canvas.className = 'vm-canvas'
+    const cards = new Map<string, HTMLButtonElement>()
+    for (const n of order) {
+      const card = document.createElement('button')
+      card.type = 'button'
+      card.className = 'vm-node'
+      card.dataset.blockId = n.block.id
+      card.dataset.depth = String(n.depth)
+      card.dataset.dir = n.dir === 1 ? 'right' : 'left'
+      // 层级只影响文字轻重：根与一层是正文色，二层起退成次级
+      card.dataset.tier = String(Math.min(n.depth, 2))
+      card.style.width = CSS.px(NODE_W).toString()
+
+      const text = document.createElement('span')
+      text.className = 'vm-node-text'
+      this.deps.projectTitle(n.block, text)
+      const full = text.textContent?.trim() ?? ''
+      if (!full) {
+        // 空标题也画出来：它是树里的一格（可能还带着子块），消失会让父子的层级断掉
+        text.textContent = '—'
+        text.classList.add('vm-node-text--empty')
+      } else if (full.length > 28) {
+        // 省略号之外再给一条完整的：导图节点是截断的，正文入口在点击之后
+        card.dataset.tip = full
+      }
+      card.appendChild(text)
+      card.addEventListener('click', (e) => this.deps.openBlock(n.block.id, openActionOf(e)))
+      canvas.appendChild(card)
+      cards.set(n.block.id, card)
+      n.h = Math.max(NODE_H_MIN, card.offsetHeight)
+    }
+
     /** 一侧的布局：叶子按先序占纵向槽，父取首末孩子中点（逆序保证孩子已有 y）；整侧再对中到根（y=0） */
     const layoutSide = (side: Set<Node>, dir: 1 | -1): void => {
       if (!side.size) return
@@ -182,8 +221,8 @@ export class ViewMindmap {
         // 左右两边的缝不对称（实测左支离根比右支远一个卡片宽）
         n.x = dir === 1 ? n.depth * STEP : -n.depth * STEP
         if (!n.children.length) {
-          n.y = cursor + NODE_H / 2
-          cursor += NODE_H + ROW_GAP
+          n.y = cursor + n.h / 2
+          cursor += n.h + ROW_GAP
         }
       }
       for (let i = nodes.length - 1; i >= 0; i--) {
@@ -193,8 +232,8 @@ export class ViewMindmap {
       let min = Infinity
       let max = -Infinity
       for (const n of nodes) {
-        min = Math.min(min, n.y - NODE_H / 2)
-        max = Math.max(max, n.y + NODE_H / 2)
+        min = Math.min(min, n.y - n.h / 2)
+        max = Math.max(max, n.y + n.h / 2)
       }
       const shift = -(min + max) / 2
       for (const n of nodes) n.y += shift
@@ -210,19 +249,15 @@ export class ViewMindmap {
     for (const n of made.values()) {
       minX = Math.min(minX, n.x)
       maxX = Math.max(maxX, n.x + NODE_W)
-      minY = Math.min(minY, n.y - NODE_H / 2)
-      maxY = Math.max(maxY, n.y + NODE_H / 2)
+      minY = Math.min(minY, n.y - n.h / 2)
+      maxY = Math.max(maxY, n.y + n.h / 2)
     }
     const width = maxX - minX + PAD * 2
     const height = maxY - minY + PAD * 2
     const dx = PAD - minX
     const dy = PAD - minY
 
-    const canvas = document.createElement('div')
-    canvas.className = 'vm-canvas'
-    canvas.style.width = CSS.px(width).toString()
-    canvas.style.height = CSS.px(height).toString()
-
+    // 边要在画布坐标里画；节点位置也在这时落下去（此前只用来量高）
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
     svg.setAttribute('class', 'vm-edges')
     svg.setAttribute('width', String(width))
@@ -242,38 +277,16 @@ export class ViewMindmap {
       path.setAttribute('class', 'vm-edge')
       svg.appendChild(path)
     }
-    canvas.appendChild(svg)
+    canvas.insertBefore(svg, canvas.firstChild)
 
     for (const n of made.values()) {
-      const card = document.createElement('button')
-      card.type = 'button'
-      card.className = 'vm-node'
-      card.dataset.blockId = n.block.id
-      card.dataset.depth = String(n.depth)
-      card.dataset.dir = n.dir === 1 ? 'right' : 'left'
-      // 层级只影响文字轻重：根与一层是正文色，二层起退成次级
-      card.dataset.tier = String(Math.min(n.depth, 2))
+      const card = cards.get(n.block.id)
+      if (!card) continue
       card.style.left = CSS.px(n.x + dx).toString()
-      card.style.top = CSS.px(n.y - NODE_H / 2 + dy).toString()
-      card.style.width = CSS.px(NODE_W).toString()
-      card.style.height = CSS.px(NODE_H).toString()
-
-      const text = document.createElement('span')
-      text.className = 'vm-node-text'
-      this.deps.projectTitle(n.block, text)
-      const full = text.textContent?.trim() ?? ''
-      if (!full) {
-        // 空标题也画出来：它是树里的一格（可能还带着子块），消失会让父子的层级断掉
-        text.textContent = '—'
-        text.classList.add('vm-node-text--empty')
-      } else if (full.length > 28) {
-        // 省略号之外再给一条完整的：导图节点是截断的，正文入口在点击之后
-        card.dataset.tip = full
-      }
-      card.appendChild(text)
-      card.addEventListener('click', (e) => this.deps.openBlock(n.block.id, openActionOf(e)))
-      canvas.appendChild(card)
+      card.style.top = CSS.px(n.y - n.h / 2 + dy).toString()
     }
+    canvas.style.width = CSS.px(width).toString()
+    canvas.style.height = CSS.px(height).toString()
     this.root.appendChild(canvas)
     // 两侧铺开的图比面板宽时，初始横滚要落在**根**上（默认停在最左＝用户先看到一条支线，
     // 根在屏幕外）。宽度变了才重对中；同一个宽度下的重绘保留用户自己拖到的位置。

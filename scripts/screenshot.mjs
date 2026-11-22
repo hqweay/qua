@@ -27,7 +27,7 @@ const asProduct = () =>
   document.querySelectorAll('#badge, #badge-panel, #state-menu-btn, #status').forEach((el) => el.remove())
 
 async function scene(name, fn, opts = {}) {
-  const { ctx, page, errors } = await freshPage(browser, base, { viewport: VIEW })
+  const { ctx, page, errors } = await freshPage(browser, base, { viewport: opts.viewport ?? VIEW })
   try {
     await page.evaluate(() => window.__qua.quiet(true))
     if (opts.state) await page.evaluate((s) => window.__qua.loadState(s), opts.state)
@@ -164,6 +164,26 @@ await scene(
     await p.waitForTimeout(150)
   },
   { theme: 'light' },
+)
+
+// 思维导图：同一棵子树换个方向读——根在中间，分支向两侧铺开。
+// 用**宽屏档位**拍：导图本来就比正文列宽，宽屏（两侧槽收起、阅读宽度放开）才是它
+// 该被比对的观感；常规档位下图会横向可拖，那不是这张图要说明的事。
+await scene(
+  'view-思维导图',
+  async (p) => {
+    await openPage(p, '每周复盘')
+    await p.waitForTimeout(150)
+    // 先换档位再聚焦：换档位会重装这一屏，焦点放在前面会被丢掉（实测截图还是整页）
+    await p.evaluate(() => window.__qua.invoke('core.view/axis-to', { mode: 'wide' }))
+    await p.waitForTimeout(300)
+    const id = await blockByText(p, '功能地图')
+    // 聚焦在这一块上（正文只剩它 ＋ 身体）：图的观感要比的是图，不是整页
+    await p.evaluate((bid) => window.__qua.invoke('core.block/focus-block', { blockId: bid }), id)
+    await p.waitForTimeout(300)
+  },
+  // 窗口压矮：图本身就是这一屏的主角，整页留白不该占掉一半画幅
+  { theme: 'light', viewport: { width: 1440, height: 590 } },
 )
 
 // 条件树展开时的样子：一行一条、读成一句话，且/或 ＋ 每层一个「非」。

@@ -251,3 +251,33 @@ test('«候选功能»：普通容器带一条表格看法；一条圈住它的�
   assert.ok(featureTag, '应有「功能」标签块')
   assert.deepEqual(def!.steps, [{ cmd: 'core.tags/add', args: { tagId: featureTag!.id } }], '步骤只有一个：按 id 打标签')
 })
+
+/* ------------------------------------------------------------- 思维导图样本 */
+
+/**
+ * «功能地图»：**同一批子块换个看法**的导图样本。
+ *
+ * 钉三件事，缺一件样本就等于没演示：
+ *   · 看法挂在**普通容器**上（不是查询块——导图只接 children 源，查询命中没有根）；
+ *   · 激活的就是那张导图（否则打开页面看到的是大纲，样本静默不存在）；
+ *   · 子块有**第二层**（单层扇面看不出导图与大纲的区别）。
+ */
+test('«功能地图»：普通容器带一条思维导图看法（激活），子块留出第二层', () => {
+  const ws = seedWorkspace()
+  const p3 = ws.blocks.find((b) => plainText(b.content).trim() === '每周复盘')
+  assert.ok(p3, '应有「每周复盘」页')
+  const map = p3!.children.find((b) => plainText(b.content).trim() === '功能地图')
+  assert.ok(map, '「每周复盘」下应有「功能地图」容器块')
+
+  const views = map!.props?._views as { id: string; kind: string; mindmap?: { direction?: string } }[] | undefined
+  assert.ok(Array.isArray(views) && views.length === 1, `应有一张命名看法：${JSON.stringify(views)}`)
+  assert.equal(views![0]!.kind, 'mindmap', `样本看法应是思维导图：${JSON.stringify(views![0])}`)
+  assert.equal(views![0]!.mindmap?.direction, 'both', '默认两侧铺开')
+  assert.equal(map!.props?._activeView, views![0]!.id, '激活的应是那张导图（不是缺省大纲）')
+
+  assert.ok(map!.children.length >= 3, `导图容器里应有几根分支：${map!.children.length}`)
+  assert.ok(
+    map!.children.some((c) => c.children.length > 0),
+    '至少要有一根分支带子块：单层扇面看不出层级',
+  )
+})

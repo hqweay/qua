@@ -52,19 +52,35 @@ There are no rigid boundaries between pages, daily notes, tags, and views: a pag
 
 The model behind this design (why pages, daily notes, tags, and views can all be reduced to blocks) is written up in [`docs/模型-一切皆块.md`](docs/模型-一切皆块.md)—read it if you're curious; you don't need it to use Qua.
 
-![Side dock: the right dock is a stack of cards (windows, inspector, mount area, trash, and more); a window card holds the same content and can be edited directly](shots/dock-窗口卡.png)
+---
+
+## One chunk of content, several readings
+
+The outline is the default shape, not the only one. The direct children of a page (or of any block) can be read another way, and the configuration lives on that block itself: **how a block is read is its configuration, not its type.**
+
+- **Table**: children become rows, properties become columns, and you edit the body right in the cell.
+- **Outline table**: the header row is the direct children, and one column is that child's kids—indentation turned sideways.
+- **Cards**: a gallery when ungrouped, a board when grouped by a property, with an optional cover taken from the body's first image.
+- **Calendar**: blocks with dates land on their day.
+- **Mind map**: the root sits in the middle and branches spread to both sides. A node shows the block's own title (up to three lines; hover for the full text, click to jump there). When the map is wider than the pane, drag horizontally, or switch to the wide layout to see all of it.
+- **Tabs**: one child at a time.
+- **Outline**: switch back and the child rows return exactly as they were—every reading renders the same set of children.
+
+Switching views never rearranges content, and changing a view never touches data. The same block stays visible in the body, in a dock window, and in the mount area—same content, same configuration.
+
+![Mind map: the root sits in the middle and branches spread to both sides; nodes are the blocks themselves, click to jump there](shots/view-思维导图.png)
 
 ---
 
 ## What you can do
 
-**Write**: the body is an editable tree of blocks. Bold, italic, highlight, inline code, text color, and background color all travel with the text; `[[references]]`, `#tags`, `@names`, external links, and images are self-contained inline units, so adding or deleting them never damages the characters nearby—deleting at the end of a line won't break a reference into stray characters, and deleting text won't turn a tag into a handful of `#` symbols. Pasting a bare URL automatically turns it into a link. Shortcuts step aside during IME composition, so Chinese input is never interrupted. Select a span of text to add a **note** (comments follow the text) or set a color from the selection bubble; cross-block selections under the same parent block can be deleted or edited in place (the first and last fragments merge into one block). With multiple blocks selected, you can drag them as a group, delete or indent them in bulk—`⌘⇧A` upgrades "the words on this line" into "these blocks".
+**Write**: the body is an editable tree of blocks. Bold, italic, highlight, inline code, text color, and background color all travel with the text; `[[references]]`, `#tags`, `@names`, external links, and images are self-contained inline units, so adding or deleting them never damages the characters nearby—deleting at the end of a line won't break a reference into stray characters, and deleting text won't turn a tag into a handful of `#` symbols. Pasting a bare URL automatically turns it into a link. Shortcuts step aside during IME composition, so Chinese input is never interrupted. Select a span of text to add a **note** (comments follow the text) or set a color from the selection bubble; cross-block selections under the same parent block can be deleted or edited directly (the first and last paragraphs merge into one). Select several blocks to drag them as a group, delete them in bulk, or indent them—`⌘⇧A` upgrades "this line's text" to "these blocks".
 
 ![Slash menu: type / at the start of a line to insert a to-do, query block, reference, date, or image in place](shots/overlay-斜杠菜单.png)
 
 **Capture**: quick notes land in today's daily note; `⌘T` brings you back to today any time, `⌘⇧R` reviews the last three days (`⌘⌥⇧R` the last seven); `@` mentions pages and blocks, creating a page on the spot if no page with that name exists; every daily note and page can be given an **icon and color**, so you can tell at a glance what's what. The daily-note host also carries a few built-in sections: references, created today, notes, and mentions.
 
-**Organize**: a block can belong to several tags at once, and tags themselves can be hierarchical. The **Directory** card in the left panel spreads the library's structural objects across four faces—pages, tags, property definitions, automations. The first two lay out the membership tree: dragging a block in adds a membership relation, it doesn't move the block. The last two are flat lists by identity and read-only. Properties are declared on tags, written on each block itself, and edited in place in the inspector card on the right. There are seven property types: text, number, date, switch, option, reference, and attachment. Text can carry formatting (link / email / phone), and dates can be a date or a date-time; text, number, option, reference, and attachment can all store **multiple values**, displayed as a row of chips. A reference property can narrow its candidate pool (under certain tags, a specified set of blocks, or the results of a query) and display as a chip or an editable inline reference; an attachment value can be an external link or a local image imported into the library. Mark an option field as "task status" and checking it completes the task, using the same interactions and queries as built-in to-dos.
+**Organize**: a block can belong to several tags at once, and tags themselves can be hierarchical. The **Directory** card in the left panel spreads the library's structural objects across four faces—pages, tags, property definitions, automations. The first two lay out the membership tree: dragging a block in adds a membership relation, it doesn't move the block. The last two are flat lists by identity and read-only. Properties are declared on tags, written on each block itself, and edited in place in the inspector card on the right. There are seven property types: text, number, date, switch, option, reference, and attachment. Text can carry formatting (link / email / phone), and dates can be a date or a date-time; text, number, option, reference, and attachment values can hold **multiple values**, shown as a row of chips. A reference property can restrict its candidates (blocks under certain tags, a hand-picked set, or a query's results) and renders as a chip or an inline reference you can edit in place; an attachment value can be an external link or a local image imported into the library. Mark an option field as "task status" and ticking it completes the block, sharing the same interactions and queries as built-in to-dos.
 
 When references point at the wrong target, you don't have to fix them one by one: the header of the backlinks bar and of a tag's members bar both offer "**Retarget…**"—pick a new target once and that whole batch of references moves over, undoable in one step.
 
@@ -72,7 +88,7 @@ Deletion has a single entry point: a block, a day, a page, a tag, a field defini
 
 **Automation**: an automation is a block that reads "**if … then …**". Triggers can be manual, a property change, a tag being added or removed, or a new child under a block; the "if" uses the same condition language as queries to circle up targets; the "then" is a small closed set of built-in actions: set/clear a property, add/remove a tag, insert a child, move. A manual run acts on the block you selected; to run over a batch, use the "if" to define the range. Each run is one transaction—a failure rolls the whole batch back, and one undo reverses the run. Disabled/active is part of the definition (it travels with the library), so a rule you got from somewhere else never starts firing on its own.
 
-**View**: the direct children of a page (or of any block) can be presented in seven views: outline, table, outline-table, cards (a gallery when ungrouped, a board when grouped by a property, with a toggle to "use the body's first image as the cover"), calendar, mind map, and tabs; query results can switch among four views: outline, table, cards, and calendar. Switching views never rearranges data, and changing a view never touches your content. Each view has an "Options" button in its header that gathers sorting, filtering, grouping, and display into one panel: tables let you drag column widths, cards let you adjust covers, and a grouped column header is that property's value. To look at a batch of blocks at once, use a query to circle up the members: conditions form a nestable condition tree, with each line reading like a sentence; "unfilled tasks" and "not tasks" are clearly distinguished; you can also ask existence questions like "has children", "has body", "has tag", or write relative dates like "before today" or "last seven days".
+**View**: the direct children of a page (or of any block) can be presented in seven views: outline, table, outline-table, cards (a gallery when ungrouped, a board when grouped by a property, with a toggle to "use the body's first image as the cover"), calendar, mind map, and tabs; query results can switch among four views: outline, table, cards, and calendar. Switching views never rearranges data, and changing a view never touches your content. Each view has an "Options" button in its header that gathers sorting, filtering, grouping, and display into one panel: tables let you drag column widths, cards let you adjust covers, and a grouped column header is that property's value. To look at a batch of blocks at once, use a query to circle up the members: conditions form a nestable tree, one condition per line reading like a sentence, and "unfilled tasks" is clearly distinct from "not a task"; you can also ask existence questions like "has children", "has a body", "has tags", or write relative dates like "before today" or "last seven days".
 
 ![Condition tree: one condition per line, each reading like a sentence; nothing is written until you click Apply](shots/query-条件树.png)
 
@@ -109,7 +125,7 @@ Tags answer "whose content is this"; field values answer "what does this content
 | `⌘.` | fold / unfold the current block |
 | `⌘Z` / `⌘⇧Z` | undo / redo (while the editor has focus) |
 | `⌘⇧A` | select this line → these blocks |
-| `⌘P` | command palette |
+| `⌘P` | command palette (also holds actions without a keybinding, such as the wide layout) |
 | `⌘K` | global search (always available; inserting a link lives in the slash menu and block menu) |
 | `⌘T` / `⌘⇧R` | back to today's journal / review the last three days |
 | `⌘⌥1` / `⌘⌥2` | toggle the left / right dock |
@@ -135,6 +151,7 @@ Mouse: the block handle sits to the left of each row and turns into a drag grip 
 - Cross-block merging has unfinished edges: a cross-block selection that spans different parents, or whose first block is a section root (the first level of a page or daily note), can't be deleted or replaced yet.
 - Inline assets and attachments currently accept images only; an attachment value can also be an external link.
 - Automation actions are a small closed set of built-in operations—no scripting. Richer workflows will have to wait for a plugin system.
+- The mind map reads child blocks only (query hits are a flat batch with no root), and does not fold or drag yet.
 - The interface is available in Chinese and English (system language by default, switchable in Settings); there is no mobile app, collaboration, or plugin system, and none of those are near-term goals.
 
 ---
