@@ -37,6 +37,7 @@ import { restoreFromBackup } from './library/restore.ts'
 import { createRecorder } from './diagnostics/recorder.ts'
 import type { OpenFailure } from './library/session.ts'
 import { LibraryManager } from './library/windows.ts'
+import { createUpdater, type Updater } from './updates/index.ts'
 
 /**
  * 资产协议必须在 `app.ready` **之前**登记特权（登记晚了不生效，且没有报错）。
@@ -474,6 +475,14 @@ function buildMenu(): Menu {
       label: t('app.name'),
       submenu: [
         { role: 'about', label: t('menu.item.about', { app: t('app.name') }) },
+        {
+          // 菜单项**自己承载更新状态**：有新版时文案换成「有新版 0.1.0-beta.7…」。
+          // 不在启动时弹模态框——beta 用户打开应用可能是要写东西。
+          id: 'app-check-update',
+          label: updater.menuLabel(),
+          enabled: updater.menuEnabled(),
+          click: () => updater.checkNow(),
+        },
         { type: 'separator' },
         { role: 'services', label: t('menu.item.services') },
         { type: 'separator' },
@@ -586,6 +595,17 @@ const manager = new LibraryManager({
 })
 
 manager.installIpc()
+
+/**
+ * 更新提示：每 5 小时问一次发布源，手动检查无视缓存。
+ *
+ * 菜单是**构建时快照**（同「最近的库」）：状态一变就重建，且延一拍再换 NSMenu
+ * ——重建可能发生在菜单条目自己的 click 处理里，当场替换不安全。
+ */
+const updater: Updater = createUpdater({
+  userData: USER_DATA,
+  onChanged: () => setTimeout(() => Menu.setApplicationMenu(buildMenu()), 0),
+})
 
 /* ------------------------------------------------------------ 选库（首次启动 / 菜单） */
 
@@ -836,6 +856,7 @@ if (!app.requestSingleInstanceLock()) {
     Menu.setApplicationMenu(buildMenu())
     protocol.handle(ASSET_SCHEME, serveAsset)
     bootLibraries()
+    updater.start()
 
     app.on('activate', () => {
       // macOS：点 Dock 图标且没有窗口时重开最后库

@@ -120,7 +120,8 @@ Mouse: the block handle stays at the left of each line and turns into a drag gri
 ## Current limitations
 
 - No import/export (Markdown and other formats aren't supported yet) and no cloud sync.
-- The desktop apps are unsigned and have no auto-update; back up your repo directory before upgrading.
+- The desktop apps are unsigned (on macOS, right-click → Open on first launch) and never replace themselves:
+  the app checks for a new version every 5 hours and says so in the app menu; installing it is still up to you. Back up your repo directory before upgrading.
 - The edges of cross-block collapsing aren't fully covered yet: when a selection crosses parent blocks, or when the first block is a section root (the first level of a page's or daily note's body), deleting or replacing that cross-block selection isn't supported yet.
 - Inline assets are limited to images for now; attachments in properties can be any file or an external link.
 - The interface is available in Chinese and English; it follows your system language by default and can be switched in Settings. There's no mobile app, collaboration, or plugin system, and none of these are near-term goals.

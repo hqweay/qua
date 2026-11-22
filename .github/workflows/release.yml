@@ -120,6 +120,7 @@ jobs:
           path: |
             release/Qua-*-x64.exe
             release/Qua-*-x64.exe.blockmap
+            release/latest.yml
           if-no-files-found: error
 
   release:

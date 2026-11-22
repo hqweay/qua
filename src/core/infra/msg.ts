@@ -1705,6 +1705,9 @@ export const MSG = {
   'library.restoreFailedTitle': '恢复失败',
   'library.restoreFailedBody': '这次没有恢复，库保持原样。原因：{why}',
   'menu.item.about': '关于 {app}',
+  'menu.item.checkUpdate': '检查更新…',
+  /* 有新版时菜单项换成这一句：常驻一行小字比弹一次模态框便宜（beta 用户可能正在写东西） */
+  'menu.item.updateAvailable': '有新版 {version}…',
   'menu.item.services': '服务',
   'menu.item.hide': '隐藏 {app}',
   'menu.item.hideOthers': '隐藏其他',
@@ -1733,6 +1736,18 @@ export const MSG = {
   'menu.item.minimize': '最小化',
   'menu.item.zoom': '缩放',
   'menu.item.front': '前置全部窗口',
+
+  /* -------------------------------------------------- 更新提示（通知式：只告知，装由用户自己来） */
+  'update.availableTitle': '发现新版本 {next}',
+  'update.availableDetail': '当前 {current} → {next}\n\n{notes}\n\n装新版只会替换程序本身，不会动你的库；换数据格式时版本自己会先留一份快照。',
+  'update.noNotes': '（这一版没有发布说明）',
+  'update.upToDate': '已是最新版本',
+  'update.upToDateDetail': '当前 {current} 就是已发布的最新版本。',
+  'update.openRelease': '打开发布页',
+  'update.later': '稍后',
+  'update.ok': '好',
+  'update.failed': '现在检查不了更新',
+  'update.failedDetail': '连不上发布源，或者发布源返回了读不懂的内容。稍后再试一次。',
 
   /* ------------------------------------------------------ 档位轴（常规／宽屏／全屏，三档循环） */
   'cmd.view.axisUp': '进一档（宽屏 / 全屏 / 常规，循环）',

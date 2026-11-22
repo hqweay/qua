@@ -57,7 +57,7 @@ function assert(cond, msg) {
 }
 
 let seq = 0
-async function launch(label, { userData } = {}) {
+async function launch(label, { userData, env } = {}) {
   seq += 1
   const dir = userData ?? join(CACHE, `${String(seq).padStart(2, '0')}-${label}`)
   // 自动生成的目录**每次跑都清空**：否则 localStorage 会跨轮串场
@@ -66,7 +66,7 @@ async function launch(label, { userData } = {}) {
   mkdirSync(dir, { recursive: true })
   const app = await _electron.launch({
     args: [ROOT, `--user-data-dir=${dir}`, ...extraArgs],
-    env: cleanEnv,
+    env: env ? { ...cleanEnv, ...env } : cleanEnv,
   })
   const page = await app.firstWindow()
   const errors = []
@@ -295,6 +295,105 @@ await check('E3b 菜单 role 与它背后的窗口动作（外加一条 Electron
   assert(closed.windows === 0, `关窗后不该还有窗口，实际 ${closed.windows}`)
   assert(appAlive === true, 'macOS 上关掉窗口后 app 不该退出')
   return `六个关键项里五个是原生 role（${['退出', '关闭窗口', '隐藏', '最小化', '全选'].map((k) => roles[k]).join('/')}）；撤销/重做**已摘 role**（归 app 模型栈）；role 动作经 w.minimize()/w.close() 验证有效（关窗后窗口 0 个、app 仍活）；**实测 MenuItem.click() 对 role 项空转**；真实 ⌘Q/⌘W/⌘H/⌘M 因 TCC 禁止 System Events 而**无法端到端实测**`
+})
+
+/* ═══════════════════════════════════════════════════ E3c 更新提示 */
+
+/**
+ * 更新提示的两条真断言（都不联网）：
+ *   E3c  手动检查：菜单项默认是「检查更新…」→ 点它 → 弹窗内容是这一版的版本号与发布说明 → 菜单换成「有新版 …」
+ *   E3d  启动检查：注入即可（不等时序），**一次弹窗都不许弹**，只换菜单文案
+ * 载荷走 `QUA_UPDATE_FEED`（自检专用注入点）；`QUA_UPDATE_DELAY_MS` 把启动检查推到观测窗口之外，
+ * 让「点之前」的那一帧是确定的。
+ */
+const UPDATE_FEED = join(CACHE, 'update-feed.json')
+writeFileSync(
+  UPDATE_FEED,
+  JSON.stringify([
+    {
+      tag_name: 'v9.9.9',
+      draft: false,
+      prerelease: false,
+      html_url: 'https://example.com/release',
+      body: 'fixture notes',
+      published_at: '2026-01-01T00:00:00Z',
+    },
+  ]),
+)
+
+/** 主进程里把 dialog 换成录音机（返回「稍后」，不真弹框、不打开浏览器） */
+const stubDialog = ({ dialog }) => {
+  globalThis.__updateBoxes = []
+  dialog.showMessageBox = (...args) => {
+    globalThis.__updateBoxes.push(args[args.length - 1])
+    return Promise.resolve({ response: 1, checkboxChecked: false })
+  }
+}
+
+const readUpdateItem = ({ Menu }) => {
+  const top = Menu.getApplicationMenu().items[0]
+  const found = top.submenu.items.find((i) => i.id === 'app-check-update')
+  return found ? { label: found.label, enabled: found.enabled } : null
+}
+
+await check('E3c 更新提示：手动检查 ⇒ 弹窗里有版本号与发布说明，菜单换成「有新版 …」', async () => {
+  const { app } = await launch('update-manual', {
+    env: { QUA_UPDATE_FEED: UPDATE_FEED, QUA_UPDATE_DELAY_MS: '600000' },
+  })
+  await app.evaluate(stubDialog)
+  const before = await app.evaluate(readUpdateItem)
+  assert(before, '应用菜单里应当有「检查更新」这一项')
+  assert(before.label === '检查更新…', `还没查过时菜单项应当是「检查更新…」，实际「${before.label}」`)
+
+  const after = await app.evaluate(async ({ Menu }) => {
+    const read = () => {
+      const found = Menu.getApplicationMenu().items[0].submenu.items.find((i) => i.id === 'app-check-update')
+      return found ? { label: found.label, enabled: found.enabled } : null
+    }
+    const item = Menu.getApplicationMenu().items[0].submenu.items.find((i) => i.id === 'app-check-update')
+    item.click() // 自定义条目（无 role）的 click 就是传进去的那个函数
+    // 「检查中置灰」是一个**真实可见**的状态（点了没反应比变灰更糟）⇒ 要真的观察到它
+    let grayed = false
+    for (let i = 0; i < 100 && !grayed; i += 1) {
+      await new Promise((r) => setTimeout(r, 20))
+      grayed = read()?.enabled === false
+    }
+    let label = read()?.label ?? null
+    for (let i = 0; i < 100 && !String(label).includes('9.9.9'); i += 1) {
+      await new Promise((r) => setTimeout(r, 50))
+      label = read()?.label ?? label
+    }
+    return { boxes: globalThis.__updateBoxes, grayed, label, enabled: read()?.enabled ?? null }
+  })
+  await app.close()
+
+  assert(after.boxes.length === 1, `手动检查应当只弹一次框，实际 ${after.boxes.length} 次`)
+  const box = after.boxes[0]
+  assert(box.message.includes('9.9.9'), `弹窗标题该带版本号，实际「${box.message}」`)
+  assert(box.detail.includes('fixture notes'), `弹窗正文该带发布说明，实际「${box.detail}」`)
+  assert(box.detail.includes('不会动你的库'), `弹窗正文该说清「装新版不动库」，实际「${box.detail}」`)
+  assert(box.buttons[0] === '打开发布页', `第一个按钮应当是「打开发布页」，实际「${box.buttons[0]}」`)
+  assert(after.grayed === true, '检查期间菜单项应当置灰（状态要看得见）')
+  assert(after.label === '有新版 9.9.9…', `发现新版后菜单文案应当换掉，实际「${after.label}」`)
+  assert(after.enabled === true, '检查结束后菜单项应当恢复可点')
+  return `「${before.label}」→ 点击 → 弹窗「${box.message}」/「${box.buttons.join('｜')}」→ 菜单「${after.label}」；全程无网络（注入了载荷）`
+})
+
+await check('E3d 更新提示：启动检查只换菜单文案，**不弹框**', async () => {
+  const { app } = await launch('update-startup', {
+    env: { QUA_UPDATE_FEED: UPDATE_FEED, QUA_UPDATE_DELAY_MS: '150' },
+  })
+  await app.evaluate(stubDialog)
+  let label = null
+  for (let i = 0; i < 60 && !String(label).includes('9.9.9'); i += 1) {
+    await new Promise((r) => setTimeout(r, 100))
+    label = (await app.evaluate(readUpdateItem))?.label ?? label
+  }
+  const boxes = await app.evaluate(() => globalThis.__updateBoxes.length)
+  await app.close()
+  assert(String(label).includes('有新版'), `启动检查后菜单文案应当换成「有新版 …」，实际「${label}」`)
+  assert(boxes === 0, `启动检查不许弹框（beta 用户可能正在写东西），实际弹了 ${boxes} 次`)
+  return `菜单「${label}」，弹窗 0 次`
 })
 
 /* ═══════════════════════════════════════════════════ E4 窗口尺寸/位置记忆 */
