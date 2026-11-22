@@ -625,9 +625,10 @@ export function setupPages(deps: PagesDeps) {
       return r
     },
     removeBlock: (id) => {
-      // 删除：整棵子树原位标记（软删）。走 `run` 是为了产出 op —— 命令层只声明「删这块」，
-      // 打标记由事务那一份实现负责（一条 op，只落操作根）。
-      run((tx) => tx.remove(id), deps.getMainEd())
+      // 删除：整棵子树原位标记（软删）。打标记由事务那一份实现负责（一条 op，只落操作根）。
+      // ⚠️ 走 `pageDeps.run`（**带撤销条目**），不是注入的 `deps.run`——后者只跑事务、
+      //    不记快照 ⇒ 删除成功但 ⌘Z 撤不回来（与 `moveBlock` 同一条坑，见下）。
+      pageDeps.run((tx) => tx.remove(id))
     },
     /**
      * 摘行（机制一）：这块在**当前这一屏**里就交给编辑器删 —— 光标、空位、
@@ -641,7 +642,8 @@ export function setupPages(deps: PagesDeps) {
     insertBlock: (block, parentId, index) => {
       // 与 `removeBlock` 对称的结构写入口：插一棵子树（含自带的首子块），
       // op 由事务产出——每个后代报它们自己的 parent/index，换库后行行有落点。
-      run((tx) => tx.insert(block, parentId, index), deps.getMainEd())
+      // 撤销条目同上：创建与删除都必须一步撤回。
+      pageDeps.run((tx) => tx.insert(block, parentId, index))
     },
     moveBlock: (blockId, parentId, index) => {
       /**
