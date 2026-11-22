@@ -6,9 +6,9 @@
  * 的封闭集合），也不带 `automation` 准入标记 ⇒ 步骤引用它天然被拒（防递归）。
  *
  * 面板里的形态判据（与 runner 的 guards 共用一份）：
- *   · 禁用的**不列**（运行一个「关着」的东西只会造成困惑）；
- *   · 事件-only（没有手动触发）的**不列**（它们在「自动化」库视图里）；
- *   · 条件不满足／没有步骤／目标不适用 ⇒ **灰掉并说明**（不是隐藏——发现性靠它）；
+ *   · 事件-only（没有手动触发）的**不列**（面板里对它没有可做的动作；它们在「目录 · 自动化」）；
+ *   · 停用／条件不满足／没有步骤／目标不适用 ⇒ **灰掉并说明**（不是隐藏——发现性靠它；
+ *     新建的自动化默认停用，刚建完去面板找它是最常见的路）；
  *   · 定义读不出来 ⇒ 灰掉（修复面：跳到那一块）。
  */
 import type { Block } from '../model/model.ts'
@@ -59,7 +59,7 @@ export function projectManualAutomations(kb: ProjectionKb, targetId: string | un
       })
       continue
     }
-    if (!def.enabled) continue
+    // 事件-only 不列（面板里没有可做的动作）；停用**不在这里跳**——交给 guards 灰成 `disabled`
     if (!def.triggers.some((tr) => tr === 'manual')) continue
     // 条件对目标现算（规则少时便宜；变贵再 memo——代价已登记）
     const whenOk = def.when === undefined ? true : evaluateWhen(kb, def.when, targetId)

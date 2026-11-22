@@ -299,12 +299,13 @@ function projFixture(): { kb: MemoryKb; target: Block; rules: Record<string, Blo
   return { kb, target, rules: { ok, disabled, eventOnly, noSteps, broken } }
 }
 
-test('投影：禁用与事件-only 不列；可运行的标记 runnable；空步骤与坏形状灰掉并给原因', () => {
+test('投影：事件-only 不列；停用灰掉并说明；可运行的标记 runnable；空步骤与坏形状灰掉并给原因', () => {
   const { kb, target } = projFixture()
   const rows = projectManualAutomations(kb, target.id)
   const byTitle = new Map(rows.map((r) => [r.title, r]))
-  assert.equal(rows.some((r) => r.title === '停用'), false, '禁用的不列')
-  assert.equal(rows.some((r) => r.title === '事件规则'), false, '事件-only 不列（在「自动化」库视图里）')
+  assert.equal(byTitle.get('停用')?.runnable, false, '停用不隐藏——灰掉并说明（发现性靠它；新建的自动化默认停用）')
+  assert.equal(byTitle.get('停用')?.reason, 'disabled')
+  assert.equal(rows.some((r) => r.title === '事件规则'), false, '事件-only 不列（面板里没有可做的动作）')
   assert.equal(byTitle.get('可运行')?.runnable, true)
   assert.equal(byTitle.get('空步骤')?.runnable, false)
   assert.equal(byTitle.get('空步骤')?.reason, 'noSteps')
