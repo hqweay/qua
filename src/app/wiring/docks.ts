@@ -44,6 +44,7 @@ import {
   decorateDockCard,
   syncDockCard,
   renderDockStack,
+  tileGlyph,
   type DockCard,
   type DockCardEntry,
   type DockCardState,
@@ -790,7 +791,7 @@ export function setupDocks(deps: DocksDeps) {
       id,
       title: label,
       icon: target ? (face || 'lucide:arrow-up-right') : 'lucide:circle-help',
-      ...(target ? { glyph: label.slice(0, 2) } : {}),
+      ...(target ? { glyph: tileGlyph(label) } : {}),
       missing: !target,
       close: { title: t('ui.dock.removeShortcut'), onClick: () => removeShortcut(side, blockId) },
       onClick: (e) => {

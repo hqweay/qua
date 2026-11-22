@@ -17,6 +17,7 @@ import {
   pinDefaultFor,
   pruneEphemeralWindows,
 } from '../src/core/views/dock.ts'
+import { tileGlyph } from '../src/ui/dock/dock.ts'
 
 test('dock: 三种条目的扁平 key 各自唯一（身份，不是种类）', () => {
   assert.equal(dockKey({ kind: 'block', block: 'b1' }), 'b1')
@@ -294,3 +295,16 @@ test('dock: findDock 是「按 key 找条目」的唯一一份——顶层与盘
   assert.notEqual(inner.list, cards, '盘内条目返回盘的成员列表——调用方直接在它上面 splice')
   assert.equal(findDock(cards, 'gone'), null)
 })
+
+/* --------------------------------------------------------- 小卡短标签（glyph） */
+
+test('小卡短标签：中文取两字，拉丁词取词首字母（不能把「Feature Board」切成「Fe」）', () => {
+  assert.equal(tileGlyph('功能看板'), '功能')
+  assert.equal(tileGlyph('写作示范'), '写作')
+  assert.equal(tileGlyph('Feature Board'), 'FB')
+  assert.equal(tileGlyph('Writing Samples'), 'WS')
+  assert.equal(tileGlyph('Weekly Review'), 'WR')
+  assert.equal(tileGlyph('Automation'), 'A')
+  assert.equal(tileGlyph('  '), '')
+})
+

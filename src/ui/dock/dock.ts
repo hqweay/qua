@@ -112,6 +112,29 @@ export interface DockTile {
   onDragStart?: (e: DragEvent) => void
 }
 
+/**
+ * 小卡那行短标签的取值（中文两字／拉丁词首字母）。
+ *
+ * 为什么要按文字系统分：中文两个字就是一个词（「功能看板」⇒「功能」），
+ * 英文直接切两字只剩「Fe」——看起来像被截断的 bug，而不是一个缩写。
+ * 全名仍在 `title` 的悬停提示里，短标签只负责在一排小卡里可区分。
+ */
+export function tileGlyph(label: string): string {
+  const text = label.trim()
+  if (text === '') return ''
+  const chars = [...text]
+  if (chars.some((c) => /[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]/.test(c))) return chars.slice(0, 2).join('')
+  const words = text.split(/\s+/).filter(Boolean)
+  if (words.length > 1) {
+    return words
+      .map((w) => [...w][0] ?? '')
+      .join('')
+      .slice(0, 2)
+      .toUpperCase()
+  }
+  return (chars[0] ?? '').toUpperCase()
+}
+
 /** 小卡的唯一产地：44px 格 + 主按钮 + hover 出现的移除入口 */
 export function buildDockTile(tile: DockTile): HTMLElement {
   const el = document.createElement('div')
