@@ -54,7 +54,8 @@ import { SearchCard } from '../../ui/cards/search-card.ts'
 import { emptyCardList } from '../../ui/chrome/card-parts.ts'
 import type { DockMountCard } from '../../ui/cards/mount-card.ts'
 import { calendarCard } from '../../ui/cards/calendar-card.ts'
-import { BelongsTree } from '../../ui/cards/belongs-tree.ts'
+import { BelongsTree, type DirectoryFace } from '../../ui/cards/belongs-tree.ts'
+import type { BelongsRow } from '../../core/relations/hierarchy.ts'
 import { renderIcon } from '../../view/icons.ts'
 import { bindDropTarget, setDragCard } from '../../view/dnd.ts'
 import { bindWindowDrop } from '../../ui/dock/dock-windows.ts'
@@ -216,13 +217,20 @@ export function setupDocks(deps: DocksDeps) {
   }
 
   /**
-   * **归属树面板**（左槽）：页 / 标签两面，同一个摊平函数。
+   * **目录卡**（左槽）：页/标签两面是归属边的摊平，属性/自动化两面是身份列表。
    *
    * 面是视图状态、住在组件实例里；每次整槽重画都重新取一行行 —— 根集合随露面变，
-   * 缓存一处就会出现「补了露面，位置还是原来那个」。
+   * 缓存一处就会出现「补了露面，位置还是原来那个」。身份列表同理，新定义块要当场出现。
+   * 两种判据在这里分路，不让树逻辑去套没有边的块。
    */
+  const directoryRows = (face: DirectoryFace): readonly BelongsRow[] => {
+    if (face === 'page' || face === 'tag') return belongsToTree(buildAdjacency(deps.getWs().blocks), face)
+    const blocks = face === 'schema' ? kb.propDefs() : kb.automations()
+    return blocks.map((block) => ({ block, depth: 0 }))
+  }
+
   const belongsTree = new BelongsTree({
-    rows: (face) => belongsToTree(buildAdjacency(deps.getWs().blocks), face),
+    rows: directoryRows,
     activeId: () => deps.getWs().activeId,
     open: (id, place) => deps.openBlock(id, place ?? 'center', { center: 'keep' }),
     find: (id) => kb.get(id),

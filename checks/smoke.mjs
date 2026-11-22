@@ -11712,7 +11712,7 @@ await check(
 
 /* ------------------------------------------------- 归属树面板（左槽） */
 
-await check('T104 归属树面板：页/标签两面、根按本树重算、点行打开、跨类只由属性区回答', async () => {
+await check('T104 目录卡：页/标签走归属树、属性/自动化平铺且不可拖', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
 
@@ -11722,13 +11722,13 @@ await check('T104 归属树面板：页/标签两面、根按本树重算、点�
   })
   const invoke = (name, args) => page.evaluate(([n, a]) => window.__qua.invoke(n, a), [name, args])
 
-  // 左槽有一张「归属」卡，默认看**页**那一面
+  // 左槽有一张「目录」卡，默认看**页**那一面
   const card = await page.evaluate(() => ({
-    hasCard: [...document.querySelectorAll('#dock-left .dock-card-title')].some((e) => e.textContent === '归属'),
+    hasCard: [...document.querySelectorAll('#dock-left .dock-card-title')].some((e) => e.textContent === '目录'),
     active: document.querySelector('#dock-left .belongs-tab[data-active="1"]')?.textContent ?? '',
     rows: document.querySelectorAll('#dock-left .belongs-row').length,
   }))
-  assert(card.hasCard, '左槽应有「归属」卡')
+  assert(card.hasCard, '左槽应有「目录」卡')
   assert(card.active === '页', `默认面应是页：${JSON.stringify(card)}`)
 
   // 页 B 归在页 A 下 ⇒ B 以 depth=1 出现在 A 下面
@@ -11774,8 +11774,32 @@ await check('T104 归属树面板：页/标签两面、根按本树重算、点�
   assert(tagFace.rows.includes('任务'), `标签树里 T 是根：${JSON.stringify(tagFace)}`)
   assert(!tagFace.rows.includes(ids.nameC), '页不进标签的归属树')
 
+  // 四面齐全；身份两面按索引列表平铺，且不给身份块亮「归到它下面」的落点
+  const faces = await page.evaluate(() =>
+    [...document.querySelectorAll('#dock-left .belongs-tab')].map((b) => b.dataset.face))
+  assert(
+    JSON.stringify(faces) === JSON.stringify(['page', 'tag', 'schema', 'automation']),
+    `四面应齐全且顺序稳定：${JSON.stringify(faces)}`,
+  )
+  const counts = await page.evaluate(() => {
+    const count = (f) => window.__qua.allBlocks().filter((b) => b.roles.includes(f)).length
+    return { schema: count('schema'), automation: count('automation') }
+  })
+  for (const [face, expected] of [['schema', counts.schema], ['automation', counts.automation]]) {
+    await page.locator(`#dock-left .belongs-tab[data-face="${face}"]`).click()
+    await page.waitForTimeout(250)
+    const got = await page.evaluate(() => ({
+      rows: document.querySelectorAll('#dock-left .belongs-row').length,
+      draggable: [...document.querySelectorAll('#dock-left .belongs-row')].filter((r) => r.draggable).length,
+      active: document.querySelector('#dock-left .belongs-tab[data-active="1"]')?.dataset.face ?? '',
+    }))
+    assert(got.active === face, `点 tab 应切到 ${face}：${JSON.stringify(got)}`)
+    assert(got.rows === expected, `${face} 行数应等于索引列表 ${expected}：${JSON.stringify(got)}`)
+    assert(got.draggable === 0, `身份面不该可拖（加边写不进任何读路径）：${JSON.stringify(got)}`)
+  }
+
   await ctx.close()
-  return `页/标签两面；B 在 A 下 depth=1；点行打开 B；跨类的 C 在自己那棵树里是根、那条边两棵树都不画`
+  return `页/标签走归属树；属性/自动化按索引平铺且不可拖；四面齐全；点行打开、跨类只由属性区回答`
 })
 
 /* ------------------------------------------------- 拖拽的一条缝（载荷跨组件） */

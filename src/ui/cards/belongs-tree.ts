@@ -1,34 +1,34 @@
 /**
- * **归属树面板**（左槽）：一条归属边摊平成一行行导航。
+ * **目录卡**（左槽）：库里四类「结构块」各占一面。
  *
- * 两种露面、同一个摊平函数，只差根集合与图标：**页的归属树**与**标签的归属树**。
- * 主判据：**每个节点至少要在它自己那棵树里可见** —— 所以根不是「模型里没有父」的块，
- * 而是「**本树内**没有可见父」的块（父被露面筛掉 ⇒ 子升级为根）。
+ * 页/标签两面走**归属边**：`belongsToTree` 把 `_belongsTo` 摊成导航行，根按本树重算
+ * （父被露面筛掉 ⇒ 子升级为根，否则那块会从树里消失）。
+ * 属性/自动化两面走**派生身份**：它们不参与归属组织，只按 `_kind`／`_automation`
+ * 从索引列表平铺出来——没有边可摊，所以缩进恒为 0。
  *
- * ⚠️ 这里的行**不是可编辑的块**：`renderBlock` 出来的一行是导航（图标＋名字），
- *    没有 `contenteditable`、不参与选区、不接受正文编辑 —— 与侧槽的窗口卡片
- *    （里面是真编辑器）是两种东西。这也是它便宜的原因。
- * ⚠️ 跨类的边（页挂在标签下）在两棵树里都不画，由属性区的「属于」那一行回答：
- *    树只回答「同类里谁在谁下面」。
- * ⚠️ 拖入＝**加边**（`_belongsTo`），不是把块搬到这棵树里：树是位置，边是关系。
- *    同一个手势落到正文行是「移动」、落到侧槽是「打开窗口」—— 含义由落点说，悬停时就贴出来。
+ * ⚠️ 两种判据共用一行导航的形状，但只有前两面接拖拽：给身份块「归到它下面」写不进
+ *    任何读路径（身份按 id 找、不看位置），亮起来的落点会是半个件。
+ * ⚠️ 这里的行不是可编辑的块：`renderBlock` 只出图标＋名字，没有 `contenteditable`。
  */
 import type { BelongsRow } from '../../core/relations/hierarchy.ts'
-import { blockLabel, type Block, type BlockList, type FindBlock } from '../../core/index.ts'
+import { blockLabel, type Block, type FindBlock } from '../../core/index.ts'
+import type { IdentityKind } from '../../core/model/model.ts'
 import { t } from '../../core/infra/msg.ts'
 import { renderBlock, type BlockRenderCtx } from '../block-ui/block-renderers.ts'
 import { cardList, cardNote } from '../chrome/card-parts.ts'
 import type { DockCard } from '../dock/dock.ts'
 import { bindDropTarget, setDragBlock } from '../../view/dnd.ts'
 
+/** 面顺序只在这里；新增身份要显式进来，不会从 `IDENTITY_KINDS` 自动漏入。 */
+export type DirectoryFace = Extract<IdentityKind, 'page' | 'tag' | 'schema' | 'automation'>
+export const DIRECTORY_FACES: readonly DirectoryFace[] = ['page', 'tag', 'schema', 'automation']
+
 export interface BelongsTreeDeps {
   /**
-   * 摊平后的归属树（装配层现算：纯函数 ＋ 当次邻接表）。
-   *
-   * ⚠️ 每次重画都现算，不缓存：根集合随「父的露面」变，缓存一处就会出现
-   *    「给 A 加了页露面，A 在树里的位置还是原来的」。
+   * 当前面的行（装配层现算）。页/标签走 `belongsToTree`，属性/自动化读索引列表平铺。
+   * ⚠️ 每次重画都现算，不缓存：根集合随露面变，缓存会出现「补了露面位置还是旧的」。
    */
-  rows: (face: BlockList) => readonly BelongsRow[]
+  rows: (face: DirectoryFace) => readonly BelongsRow[]
   activeId: () => string
   /** 点一行：打开它（页/标签都是块，落点由 `place` 说） */
   open: (id: string, place?: import('../../core/index.ts').OpenAction) => void
@@ -42,29 +42,38 @@ export interface BelongsTreeDeps {
 
 export class BelongsTree {
   /** 当前看哪一面（**视图状态**：只在这一屏里，不落库、不落设备偏好） */
-  private face: BlockList = 'page'
+  private face: DirectoryFace = 'page'
   private readonly deps: BelongsTreeDeps
 
   constructor(deps: BelongsTreeDeps) {
     this.deps = deps
   }
 
-  /** 每次整槽重画都从这里取一张卡：面（页/标签）由实例记住，不随 DOM 重建丢失 */
+  /** 每次整槽重画都从这里取一张卡：面由实例记住，不随 DOM 重建丢失 */
   card(): DockCard {
     const body = document.createElement('div')
     body.className = 'belongs-tree'
 
+    const labels: Record<DirectoryFace, string> = {
+      page: t('ui.belongs.pages'),
+      tag: t('ui.belongs.tags'),
+      schema: t('ui.belongs.defs'),
+      automation: t('ui.belongs.automations'),
+    }
+    const empties: Record<DirectoryFace, string> = {
+      page: t('ui.belongs.emptyPages'),
+      tag: t('ui.belongs.emptyTags'),
+      schema: t('ui.belongs.emptyDefs'),
+      automation: t('ui.belongs.emptyAutomations'),
+    }
     const tabs = document.createElement('div')
     tabs.className = 'belongs-tabs'
-    for (const [face, label] of [
-      ['page', t('ui.belongs.pages')],
-      ['tag', t('ui.belongs.tags')],
-    ] as const) {
+    for (const face of DIRECTORY_FACES) {
       const btn = document.createElement('button')
       btn.type = 'button'
       btn.className = 'belongs-tab'
       btn.dataset.face = face
-      btn.textContent = label
+      btn.textContent = labels[face]
       if (face === this.face) btn.dataset.active = '1'
       btn.setAttribute('aria-pressed', face === this.face ? 'true' : 'false')
       btn.addEventListener('click', () => {
@@ -84,10 +93,10 @@ export class BelongsTree {
     }
 
     const rows = this.deps.rows(this.face)
-    if (rows.length === 0) {
-      body.appendChild(cardNote(this.face === 'page' ? t('ui.belongs.emptyPages') : t('ui.belongs.emptyTags')))
-    }
+    if (rows.length === 0) body.appendChild(cardNote(empties[this.face]))
     const list = cardList()
+    // 身份块不参与归属组织：给它亮一个「归到它下面」的落点，写了也不改变任何读路径
+    const linkable = this.face === 'page' || this.face === 'tag'
     for (const row of rows) {
       const wrap = document.createElement('div')
       wrap.className = 'belongs-row'
@@ -95,21 +104,21 @@ export class BelongsTree {
       wrap.dataset.belongsId = row.block.id
       wrap.style.setProperty('--depth', String(row.depth))
       wrap.appendChild(renderRow(row.block, ctx))
-      // 这一行也是**拖源**：能拿到块 id 就能拖（拖到正文＝移动、拖到另一行＝加边、拖到槽＝打开窗口）
-      wrap.draggable = true
-      wrap.addEventListener('dragstart', (e) => setDragBlock(e.dataTransfer, row.block.id))
-      // 拖一个块到这个 item 上 ⇒ **加边**（不是重排兄弟：兄弟顺序不落盘）
-      const name = blockLabel(row.block, this.deps.find)
-      bindDropTarget(wrap, {
-        effect: 'link',
-        targetId: () => row.block.id,
-        // 自己落自己没意思（命令层也会拒，但悬停就不该亮）
-        accept: (id) => id !== row.block.id,
-        hint: () => t('ui.dnd.linkTo', { name }),
-        onDrop: (childId, parentId) => {
-          if (parentId) this.deps.link(childId, parentId)
-        },
-      })
+      if (linkable) {
+        wrap.draggable = true
+        wrap.addEventListener('dragstart', (e) => setDragBlock(e.dataTransfer, row.block.id))
+        const name = blockLabel(row.block, this.deps.find)
+        bindDropTarget(wrap, {
+          effect: 'link',
+          targetId: () => row.block.id,
+          // 自己落自己没意思（命令层也会拒，但悬停就不该亮）
+          accept: (id) => id !== row.block.id,
+          hint: () => t('ui.dnd.linkTo', { name }),
+          onDrop: (childId, parentId) => {
+            if (parentId) this.deps.link(childId, parentId)
+          },
+        })
+      }
       list.appendChild(wrap)
     }
     body.appendChild(list)
