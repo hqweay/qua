@@ -139,23 +139,29 @@ export const LIBRARY_READS = {
     where b.parent in (select value from json_each(?1))`,
 
   /**
-   * **全局身份块**（catalog 的块对象面）：页/标签露面、字段定义、回收站根。
+   * **全局身份块**（catalog 的块对象面）：页/标签露面、字段定义、自动化、回收站根。
    *
    * catalog 摘要（§`catalogTags` 等）只回答 id 与名字；选择器、页清单、回收站卡
    * 要的是**块对象**。这一批是「库的身份清单」——体量跟身份数走，不跟块数走
-   * （1M 块的库通常几千个身份）。装载后 `kb.pages()/tags()/propDefs()/trash()`
+   * （1M 块的库通常几千个身份）。装载后 `kb.pages()/tags()/propDefs()/trash()/automations()`
    * 这些同步全局读在工作集模式下依然正确。
    *
-   * ⚠️ **三段 `union` 而不是一个 `or`**：`OR` 会让 SQLite 放弃两条 partial index
-   *    （`deleted`／`kind`），退化成全表扫描＋逐行相关子查询；拆成并集后每段各吃
-   *    自己的索引（`idx_Block_deleted`／`idx_Block_kind`／`idx_BlockList_list`）。
-   *    `union`（不是 `union all`）顺带去掉一块既是页又是标签的重复行。
+   * ⚠️ **自动化块必须在这一批里**：它物化在顶层、不属于任何视图子树，doc 与闭包装载
+   *    永远碰不到它（`_automation` 也不是 `Block` 的列，只住在属性行里）。漏了这一段，
+   *    「目录 · 自动化」与命令面板的投影就只看得到恰好被打开过的那几块——多数时候一条都没有。
+   *
+   * ⚠️ **四段 `union` 而不是一个 `or`**：`OR` 会让 SQLite 放弃各段的索引
+   *    （`deleted`／`kind` 的 partial index、`BlockList.list`、`BlockProperty(name,value)`），
+   *    退化成全表扫描＋逐行相关子查询；拆成并集后每段各吃自己的索引。
+   *    `union`（不是 `union all`）顺带去掉一块既是页又是标签、或已删的自动化这类重复行。
    */
   catalogIdentity: `select ${BLOCK_COLUMNS} from ${B} b where b.deleted is not null
     union
     select ${BLOCK_COLUMNS} from ${B} b where b.kind is not null
     union
-    select ${BLOCK_COLUMNS} from ${B} b join ${L} l on l.block = b.id where l.list in ('page','tag')`,
+    select ${BLOCK_COLUMNS} from ${B} b join ${L} l on l.block = b.id where l.list in ('page','tag')
+    union
+    select ${BLOCK_COLUMNS} from ${B} b join ${P} p on p.block = b.id where p.name = '_automation'`,
 
   /**
    * **依赖方查询**（改名／清除的低频路径）：谁引用了这一块——正文引用、标签成员、

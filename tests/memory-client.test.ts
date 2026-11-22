@@ -46,7 +46,7 @@ function block(idStr: string, text: string, children: Block[] = [], props?: Reco
   }
 }
 
-/** 一份尽量把形状用上的库：嵌套页、标签、字段定义、软删子树、日记天、属性值 */
+/** 一份尽量把形状用上的库：嵌套页、标签、字段定义、自动化、软删子树、日记天、属性值 */
 function richWorkspace(): StoredWorkspace {
   const deletedChild = block(id('g'), '被删的子块')
   deletedChild.props = { ...deletedChild.props, _deletedAt: 1_700_000_000_100 }
@@ -60,6 +60,11 @@ function richWorkspace(): StoredWorkspace {
       _lists: ['tag'],
     }),
     block(id('k'), '', [], { _aliases: ['定义'], _kind: 'text' }),
+    // 自动化块：顶层物化、不在任何 Doc 子树里——身份读要能把它带进工作集
+    block(id('m'), '自动化', [], {
+      _aliases: ['规则'],
+      _automation: { enabled: true, triggers: ['manual'], steps: [] },
+    }),
     block(id('d'), '日记内容', [], { _date: '2026-11-12' }),
     block(id('a'), '引用 [[页名]] 与 #标签', [], { _tags: [id('t')], custom: 'v1' }),
     block(id('r'), '被删的根', [deletedChild], { _deletedAt: 1_700_000_000_090 }),
@@ -161,7 +166,7 @@ test('tree：候选块＋全部祖先链（可选一层子级）', async () => {
   assert.deepEqual(byId(mem.value.lists), byId(sql.lists))
 })
 
-test('identity：全局身份块（页/标签/定义/回收站，含被软删的）', async () => {
+test('identity：全局身份块（页/标签/定义/自动化/回收站，含被软删的）', async () => {
   const ws = richWorkspace()
   const db = sqlSide(ws)
   const sql = readIdentityRows(db)
@@ -172,6 +177,11 @@ test('identity：全局身份块（页/标签/定义/回收站，含被软删的
   assert.deepEqual(
     mem.value.blocks.map((r) => r.id).sort(),
     sql.blocks.map((r) => r.id).sort(),
+  )
+  // 自动化块在**两边都要有**：只比「同解」的话，两边一起漏掉也会绿
+  assert.ok(
+    sql.blocks.some((r) => r.id === id('m')) && mem.value.blocks.some((r) => r.id === id('m')),
+    '自动化块随身份读装载（目录卡／命令面板按它枚举，顶层物化的块没有别的装载入口）',
   )
   assert.deepEqual(byId(mem.value.props), byId(sql.props))
   assert.deepEqual(byId(mem.value.aliases), byId(sql.aliases))

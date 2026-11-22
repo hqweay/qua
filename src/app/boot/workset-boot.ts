@@ -136,8 +136,8 @@ export async function loadWorksetBoot(deps: WorksetBootDeps): Promise<WorksetBoo
 
   const first = await loadOnce(rootIds)
   if (first.status !== 'ok') return first
-  // 全局身份块（页/标签/定义/回收站根）：catalog 的块对象面——
-  // kb.pages()/tags()/propDefs()/trash() 这些同步全局读靠它在工作集模式下保持正确
+  // 全局身份块（页/标签/定义/自动化/回收站根）：catalog 的块对象面——
+  // kb.pages()/tags()/propDefs()/automations()/trash() 这些同步全局读靠它在工作集模式下保持正确
   const idn = await deps.client.identity()
   if (idn.status !== 'ok') {
     return idn.status === 'no-library' ? { status: 'no-library' } : { status: 'error', error: `identity: ${describe(idn)}` }

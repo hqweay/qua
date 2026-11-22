@@ -18,6 +18,7 @@ import { openLibraryDb, applyRowWrites, type RowWrite } from '../electron/librar
 import { readAliasTargets, readBlockRows, readCatalogRows, readDocRows, readIdentityRows } from '../electron/library/reads.ts'
 import { rowsToWorkspace } from '../src/core/storage/db-rows.ts'
 import { normalizeAlias } from '../src/core/identity/address-key.ts'
+import { isAutomationBlock } from '../src/core/model/model.ts'
 
 function block(
   id: string,
@@ -61,7 +62,7 @@ const prop = (block: string, name: string, pos: number, multi: number, value: st
  *   │        └ B
  *   S（顶层兄弟，不属于 P 的 Doc）
  *   J（日记日）──────── J1
- *   TAG（标签露面）／DEF（字段定义）／X（软删根）
+ *   TAG（标签露面）／DEF（字段定义）／AUTO（自动化）／X（软删根）
  */
 function seed(): RowWrite[] {
   return [
@@ -74,6 +75,7 @@ function seed(): RowWrite[] {
     block('j1', 'j'),
     block('tag'),
     block('def', null, null, { kind: 'text' }),
+    block('auto'),
     block('x', null, null, { deleted: 1 }),
     alias('Page', 'p', 0),
     alias('Child', 'a', 0),
@@ -82,6 +84,9 @@ function seed(): RowWrite[] {
     list('p', 'page'),
     list('tag', 'tag'),
     prop('a', '_tags', 0, 1, JSON.stringify('tag')),
+    // 自动化块的身份只在属性行里（`_automation` 不是 Block 的列）——顶层物化、
+    // 不属于任何视图子树 ⇒ 身份读是它进工作集的唯一入口
+    prop('auto', '_automation', 0, 0, JSON.stringify({ enabled: true, triggers: ['manual'], steps: [] })),
   ]
 }
 
@@ -185,19 +190,26 @@ test('blocks：一批块自己的行，不带子树', () => {
 })
 
 
-test('identity：全局身份块＝页/标签露面、字段定义、回收站根（不含普通内容块）', () => {
+test('identity：全局身份块＝页/标签露面、字段定义、自动化、回收站根（不含普通内容块）', () => {
   withDb((db) => {
     const rows = readIdentityRows(db)
     const ids = rows.blocks.map((b) => String(b.id)).sort()
     assert.deepEqual(
       ids,
-      ['def', 'p', 'tag', 'x'],
-      '页 p（page 露面）、标签 tag、定义 def（kind）、回收站根 x（软删）；日记 j 的身份由 _date 推出、靠 catalog 日期表答，不在这批里',
+      ['auto', 'def', 'p', 'tag', 'x'],
+      '页 p（page 露面）、标签 tag、定义 def（kind）、自动化 auto（_automation）、回收站根 x（软删）；日记 j 的身份由 _date 推出、靠 catalog 日期表答，不在这批里',
     )
     // p 有 page 露面 ⇒ 带 _aliases；tag 有 tag 露面 ⇒ 名字在这份行里
     const names = rows.aliases.map((r) => String(r.name)).sort()
     assert.ok(names.includes('Page'), '页名随身份块一起装（选择器要显示名字）')
     assert.ok(!ids.includes('a') && !ids.includes('a1'), '普通内容块不是身份块')
     assert.ok(ids.includes('x'), '回收站根（软删）也是身份块——回收站卡要列它')
+    /**
+     * 自动化块：顶层物化、不在任何 Doc 子树里 ⇒ 身份读是它进工作集的**唯一**入口。
+     * 装进来还不算数，要能被 `isAutomationBlock` 认出来（目录卡／命令面板按它枚举）。
+     */
+    const ws = rowsToWorkspace(rows)
+    const auto = ws.blocks.find((b) => b.id === 'auto')
+    assert.ok(auto !== undefined && isAutomationBlock(auto), '自动化块随身份读装载，且定义可用')
   })
 })

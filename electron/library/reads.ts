@@ -369,7 +369,7 @@ export function readBlockTreeRows(db: DatabaseSync, blockIds: readonly string[],
   return { blocks: all, props, aliases, lists, meta: {} }
 }
 
-/** 全局身份块（页/标签露面、字段定义、回收站根）＋附属行：catalog 的块对象面 */
+/** 全局身份块（页/标签露面、字段定义、自动化、回收站根）＋附属行：catalog 的块对象面 */
 export function readIdentityRows(db: DatabaseSync): RawLibraryRows {
   const blocks = db.prepare(LIBRARY_READS.catalogIdentity).all() as Row[]
   if (blocks.length === 0) return { blocks: [], props: [], aliases: [], lists: [], meta: {} }
