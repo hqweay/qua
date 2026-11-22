@@ -33268,6 +33268,76 @@ await check('T352 保留行重画不把视图宿主塞进属性投影的壳：�
   return `标签行只有属性投影；重画（保留行路径）后不叠「新建一行」抬头；激活看法后切到表格`
 })
 
+/**
+ * T353：日记流滚到今天面板「底边还露一点在视口内」的临界位，编辑一块——空面板不该变长。
+ * 这是 T351 的视口闸漏掉的缝：身体没完全出视口，旧身体模式按「下面只剩尾巴」算缺口，
+ * 漏掉日记流下方过去几天的高度，算出上千 px。真正的量是滚动不变量 S+V−(H−h)。
+ */
+await check('T353 日记流临界位编辑一块：今天空面板不被钉成一大片空白', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1426, height: 1476 } })
+  await page.evaluate(() => window.__qua.quiet(true))
+  await page.waitForTimeout(400)
+
+  await page.evaluate(() => {
+    const hex = (n) => n.toString(16).padStart(32, '0')
+    window.__qua.forceForest((forest) => {
+      const today = forest.find((b) => b.props?._date) ?? forest[0]
+      for (let i = 0; i < 40; i += 1) today.children.push({
+        id: hex(0xb0000 + i), content: [{ t: 'text', v: `填充 ${i}` }],
+        children: [], created: 1, modified: 1, props: {},
+      })
+    })
+  })
+  await page.waitForTimeout(350)
+  // 分段滚装载过去几天，再把身体底边停在视口内 50px（临界：闸不挡、旧公式漏项）
+  for (const y of [800, 1600]) {
+    await page.evaluate((v) => { document.getElementById('scroll').scrollTop = v }, y)
+    await page.waitForTimeout(250)
+  }
+  await page.evaluate(() => {
+    const s = document.getElementById('scroll')
+    const body = document.querySelector('#editor > .sec .mount[data-open="1"] .mount-body')
+    s.scrollTop += body.getBoundingClientRect().bottom - s.getBoundingClientRect().top - 50
+  })
+  await page.waitForTimeout(350)
+  const before = await page.evaluate(() => {
+    const s = document.getElementById('scroll')
+    const body = document.querySelector('#editor > .sec .mount[data-open="1"] .mount-body')
+    return {
+      bottom: Math.round(body.getBoundingClientRect().bottom - s.getBoundingClientRect().top),
+      bodyH: Math.round(body.getBoundingClientRect().height),
+    }
+  })
+  assert(before.bottom > 0 && before.bottom < 150, `前置：身体底边应露在视口内一点：${JSON.stringify(before)}`)
+
+  // 编辑非身份正文块 4 次（store 通知触发今天挂载区重画，但那不是换栏）
+  const victim = await page.evaluate(() => {
+    const b = window.__qua.allBlocks().find((x) => {
+      const raw = window.__qua.__editor.store.find(x.id)
+      return raw && !raw.props?._date && !x.lists?.includes('tag') &&
+        !x.lists?.includes('page') && (raw.content ?? []).length
+    })
+    return b?.id
+  })
+  assert(Boolean(victim), '前置：库里应有可编辑的正文块')
+  for (let i = 0; i < 4; i += 1) {
+    await page.evaluate(({ id, i }) => {
+      window.__qua.__editor.write((tx) => tx.patch(id, (b) => {
+        b.content = [{ t: 'text', v: `编辑 ${i} · ${'字'.repeat((i % 3) + 1)}` }]
+      }))
+    }, { id: victim, i })
+    await page.waitForTimeout(320)
+    const s = await page.evaluate(() => {
+      const body = document.querySelector('#editor > .sec .mount[data-open="1"] .mount-body')
+      return { minHeight: body.style.minHeight || '', bodyH: Math.round(body.getBoundingClientRect().height) }
+    })
+    assert(s.bodyH <= 200, `编辑不该撑长空面板（第 ${i} 次）：${JSON.stringify(s)}`)
+  }
+
+  await ctx.close()
+  return `临界位编辑 4 次，今天空面板 minHeight 始终为空、身体 80px`
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

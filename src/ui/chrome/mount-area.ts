@@ -836,7 +836,11 @@ export class MountArea {
     const host = this.deps.host()
     if (host) this.renderTabs(host, this.entries.findIndex((e) => e.id === this.active))
     const entry = this.entries.find((e) => e.id === this.active)
-    if (host && entry) this.load(host, entry, focusHint)
+    if (host && entry) {
+      // 钉盒只服务真换体：编辑/打字触发的 render 也走 load，但那不是换栏，不碰滚动补偿
+      this.holdBodyAgainstCollapse()
+      this.load(host, entry, focusHint)
+    }
   }
 
   /* ------------------------------------------------------------ body */
@@ -1163,35 +1167,32 @@ export class MountArea {
       this.showView(host, entry)
     }
     /**
-     * 换体期间保住滚动位，两手各管一侧：
-     * · **变矮**：换体前按**当前滚动位**钉住身体的最小高度（精确到「刚好够」，
-     *   见 `holdBodyAgainstCollapse`）——旧身体摘出、新身体（首次还空着）挂上的
-     *   瞬间，整页不塌到滚动位以下，滚动位原地不动。
-     * · **中间态的强制布局**：途中任何几何读取都会让浏览器按中间态收走 scrollTop；
-     *   keepScrollWhile 换体前记下、换完写回（上一手之后这是保险，不是主闸）。
-     * 带落点的装载例外：落点行的 reveal 要滚到位，不能被写回盖掉。
+     * 换体期间保住滚动位：`keepScrollWhile` 换体前记下、换完写回（换体途中任何几何读取
+     * 都会让浏览器按中间态收走 scrollTop）。**变矮的钉盒不在这里**——它只在真换栏时由
+     * `activate` 调 `holdBodyAgainstCollapse`；编辑/打字触发的 `render` 也走这里，但那
+     * 不是换栏，不该碰滚动补偿。带落点的装载例外：落点行的 reveal 要滚到位，不被写回盖掉。
      */
-    this.holdBodyAgainstCollapse()
     if (focusHint === undefined) keepScrollWhile(this.root, swap)
     else swap()
   }
 
   /**
-   * **按当前滚动位钉住「刚好够」的高度**——高度只服务「这一下换体不抖」，不多留。
+   * **换体前把滚动位钉住**：补的只是「身体塌到 0 时文档还差多少」这个缺口，不多留。
    *
-   * 换到更矮的栏时整页塌缩，滚进面板里的视窗会被浏览器按新上限收走。需要补多高
-   * 才够？答数由换体那一刻的几何直接给出；**钉在哪一格**按面板的位置分两档：
+   * 设当前滚动位 `S`、视口高 `V`、文档高 `H`、身体高 `h`。换体瞬间旧身体摘下、新身体
+   * 还没填满，最坏按身体塌到 0 算，文档剩 `H − h`。要继续装得下滚动位，缺口就是
    *
-   * · **面板是最后一块内容**（段尾挂载区，下面只剩文档尾缓冲）：钉**缓冲**
-   *   （`--doc-tail-h`，`center.css` 的 `#editor::after`）。卡片贴着内容收起，
-   *   空白落在页面尾的页底色上——不是卡片内部的一段沉底色。缓冲两个方向都管：
-   *   变高时面板先长进缓冲，变矮时缓冲补住页高。
-   * · **下面还有内容**（日记流里展开的过去几天）：尾巴补页高会把下方的块滑进
-   *   视野——同一种抖，换了个落点。钉回**身体**：盒子不塌，视野里的东西都不动。
+   * ```
+   * D = max(0, S + V − (H − h)) + 2
+   * ```
    *
-   * 滚动位在顶上（`scrollTop ≤ 0`）或身体在视口外时不钉——塌缩收不走任何东西，
-   * 留白一分都不该有。内容比钉的盒子矮时下方留白（封顶于视口）；内容更高时
-   * 盒子照常长高（整页滚动，不设上限）。
+   * 两条好性质都从定义来：① `H ≥ S + V` 恒成立 ⇒ `D ≤ h`，钉盒永不超过身体自己那点高，
+   * 位置无关（身体在视口上方/下方都不改变 `H − h`）；② 文档本就装得下时 `D = 0`，一分不留。
+   * 旧身体模式用 `V − tail − pad − (身体顶 − 视口顶)`，它默认「身体下面只剩尾巴和内距」——
+   * 日记流下面还有过去几天，那一截被漏算，于是算出上千 px。缺口式用现量 `H` 天然接住。
+   *
+   * **钉在哪一格**按面板位置分两档（观感，用户拍过）：段尾钉文档尾缓冲，空白落到页底色；
+   * 下面还有内容（日记流过去几天）钉回身体，避开尾巴补页高把下方块滑进视野。
    */
   private holdBodyAgainstCollapse(): void {
     const scroller = scrollParentOf(this.root)
@@ -1201,40 +1202,25 @@ export class MountArea {
       return
     }
     const sRect = scroller.getBoundingClientRect()
-    const bRect = this.bodyEl.getBoundingClientRect()
-    /**
-     * 身体整个不在滚动视口里（滚过头、还没滚到）时没有视野可保：塌缩收不走任何东西，
-     * 一分留白都不该钉。漏了这道闸，身体滚到视口上方时 `(bRect.top - sRect.top)` 是
-     * 很大的负数，身体模式的式子会算出远超视口的 `minHeight`——空栏被钉成一大片空白
-     * （日记流滚到昨天、删一块触发今天挂载区重画，就是这一族）。
-     */
-    if (bRect.bottom <= sRect.top || bRect.top >= sRect.bottom) {
-      this.bodyEl.style.minHeight = ''
-      this.clearTailHold()
-      return
-    }
     const sTop = scroller.scrollTop
-    const bodyH = bRect.height
+    const bodyH = this.bodyEl.getBoundingClientRect().height
     const tailCur = this.tailBuffer()
     const editor = this.root.closest<HTMLElement>('#editor')
     // 我是最后一块内容吗：我的底边与滚动内容末尾之间只剩文档尾缓冲
     const mountBottomDoc = this.root.getBoundingClientRect().bottom + sTop
     const isLast = editor !== null && scroller.scrollHeight - tailCur - mountBottomDoc <= 4
+    // 身体塌到 0 后，文档要装下当前滚动位还缺多少；+2 抵矩形取整，贴下界不被收敛吃掉
+    const deficit = Math.max(0, Math.ceil(sTop + sRect.height - (scroller.scrollHeight - bodyH)) + 2)
     if (isLast) {
-      // 尾巴模式：最坏按「身体塌到 0」的中间态兜——缓冲单独把页高顶到滚动位够用。
-      // 答数与现值无关（scrollHeight 里的旧缓冲在式子里抵掉），每次现量现写，
-      // 几何允许时自动回落到设计档。
-      const needed = Math.ceil(sTop + sRect.height - (scroller.scrollHeight - bodyH - tailCur)) + 2
+      // 尾巴模式：缺口加在现有缓冲上（现缓冲算在 H 里，要先扣再加，别重复计）
       this.bodyEl.style.minHeight = ''
-      if (needed > DOC_TAIL_IDLE) editor!.style.setProperty('--doc-tail-h', `${needed}px`)
+      const tailNeeded = deficit + tailCur
+      if (tailNeeded > DOC_TAIL_IDLE) editor!.style.setProperty('--doc-tail-h', `${tailNeeded}px`)
       else editor!.style.removeProperty('--doc-tail-h')
       return
     }
     this.clearTailHold()
-    const padBottom = parseFloat(getComputedStyle(this.root).paddingBottom) || 0
-    // +2：scrollHeight/矩形都过取整，贴着下界钉会被整型收敛吃掉一像素
-    const needed = Math.ceil(sRect.height - tailCur - padBottom - (bRect.top - sRect.top)) + 2
-    this.bodyEl.style.minHeight = `${Math.max(0, needed)}px`
+    this.bodyEl.style.minHeight = `${deficit}px`
   }
 
   /**
