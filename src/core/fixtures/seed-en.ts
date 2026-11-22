@@ -67,6 +67,10 @@ export const SEED_EN: Record<string, string> = {
     'Both the backlinks bar and the members bar have "Retarget…" in the header: if references point at the wrong target, pick a new one and they all move together — one ⌘Z to undo.',
   '「自动化」是一块「如果…就…」，左槽「目录 · 自动化」里那条「收尾」就是样本。':
     '"Automation" is a block that reads "if … then …"; the "Wrap up" rule under Directory · Automations in the left panel is the sample.',
+  '任何一块都能配看法：右键一块「视图…」，或点它身体抬头那颗「大纲」——「每周复盘」里的「候选功能」现在就读成表格。':
+    'Any block can carry a view: right-click and pick "Views…", or click the "Outline" button on its body — "Backlog" on the Weekly Review page is currently read as a table.',
+  '自动化也能圈范围：设成「在某块下面新建子块时」，自动打标签——「候选功能」就是这么把新行喂给功能看板的。':
+    'Automations can also be scoped: set one to "when a child is added under this block" and it tags the new row — that is how "Backlog" feeds new rows to the feature board.',
   '⌘Z 一步回：拆块、合并、格式、拖动都能撤销。':
     '⌘Z steps back: splitting, merging, formatting, and dragging are all undoable.',
   '⌘T 回到今日日记；编辑器失焦时 ⌘⌥← / ⌘⌥→ 翻日。':
@@ -181,6 +185,14 @@ export const SEED_EN: Record<string, string> = {
     'Invite a few friends to try the beta and gather the first round of feedback.',
   '安装包签名与自动更新。': 'Sign the installer and enable auto-updates.',
   '图库管理：图片多起来之后再想。': 'Asset library management: revisit once the image collection grows.',
+  '「候选功能」这一块读成表格：普通容器也能配看法——一块怎么读是它的配置，不是它的类型。':
+    '"Backlog" is read as a table: any container can carry views — how a block reads is its configuration, not its type.',
+  '候选功能': 'Backlog',
+  '导入 Markdown 笔记': 'Import Markdown notes',
+  'PDF 批注': 'PDF annotations',
+  '在这块下面新建的每一行都会自动打上「功能」标签——左槽「目录 · 自动化」里那条规则就是干这个的。':
+    'Every row created under this block is tagged "Feature" automatically — that is what the rule under Directory · Automations does.',
+  '候选功能：新行自动带上「功能」': 'Backlog: tag new rows as Feature',
   '把这一页拖进左槽就能开一扇常驻的窗——常去的页面都值得这样放。':
     'Drag this page into the left panel to keep a permanent window — every page you visit often deserves that.',
   '复盘只写「变了什么、为什么」，不抄流水账。':
@@ -223,6 +235,8 @@ export const SEED_EN: Record<string, string> = {
   '多值与附件': 'Multi-value and Attachments',
   '块取名': 'Naming Blocks',
   '视图显示与排序': 'View Display and Sorting',
+  '任何块都能配看法': 'Views on Any Block',
+  '新子块自动打标签': 'Auto-tag New Children',
   '大文档秒开': 'Large Documents Open Instantly',
   '行内形状语言': 'Inline Shape Language',
   '字段入口三面共用': 'One Field Entry, Three Surfaces',

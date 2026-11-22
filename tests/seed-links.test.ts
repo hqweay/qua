@@ -13,6 +13,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { parseInline, seedWorkspace } from '../src/core/infra/seed.ts'
 import { FEATURE_DATE_PROP_ID, FEATURE_STATUS_PROP_ID } from '../src/core/fixtures/seed.ts'
+import { validateTriggerQuery } from '../src/core/automation/trigger-query.ts'
 import {
   TASK_STATUS_DONE_ID,
   TASK_STATUS_PROP_ID,
@@ -199,4 +200,54 @@ test('镜像、算作、子块行头属性三份样本的数据形状（要拿�
   assert.deepEqual(childProps, [FEATURE_STATUS_PROP_ID], `「下一步」应声明行头属性：${JSON.stringify(childProps)}`)
   const valued = nextStep!.children.filter((c) => (c.props as Record<string, string> | undefined)?.[FEATURE_STATUS_PROP_ID])
   assert.ok(valued.length === nextStep!.children.length && valued.length >= 3, `子块都应带状态值：${valued.length}`)
+})
+
+/* ------------------------------------------------- 块级看法 ＋ 按父块触发的自动化 */
+
+/**
+ * 两块**新能力样本**共用一个容器：「候选功能」。
+ *
+ * 为什么值得钉两份形状：
+ *   · 看法不是查询块的特权——一张表格挂在**普通容器**上（`_views` 谁的 props 都能带）；
+ *   · 触发器的范围可以圈在**某一父块**上（`birth` ＋ `{up:{is}}`）——这是「在这块下面
+ *     新建子块时」的唯一合法形状，写成别的样子引擎不会开火，而那是静默的。
+ */
+test('«候选功能»：普通容器带一条表格看法；一条圈住它的新子块自动化', () => {
+  const ws = seedWorkspace()
+  const p3 = ws.blocks.find((b) => plainText(b.content).trim() === '每周复盘')
+  assert.ok(p3, '应有「每周复盘」页')
+  const backlog = p3!.children.find((b) => plainText(b.content).trim() === '候选功能')
+  assert.ok(backlog, '「每周复盘」下应有「候选功能」容器块')
+
+  // ① 看法：一项表格（露出「功能状态」），激活的就是它
+  const views = backlog!.props?._views as { id: string; kind: string; displayProps?: string[] }[] | undefined
+  assert.ok(Array.isArray(views) && views.length === 1, `应有一张命名看法：${JSON.stringify(views)}`)
+  assert.equal(views![0]!.kind, 'table', `样本看法应是表格：${JSON.stringify(views![0])}`)
+  assert.deepEqual(views![0]!.displayProps, [FEATURE_STATUS_PROP_ID], `表格应露出状态一栏：${JSON.stringify(views![0])}`)
+  assert.equal(backlog!.props?._activeView, views![0]!.id, '激活的应是那张表格（不是缺省大纲）')
+  // 它的子块是真实记录：表格与看板读同一批值
+  assert.ok(backlog!.children.length >= 2, `容器里应有样本行：${backlog!.children.length}`)
+
+  // ② 自动化：出生触发器 ＋ 父块条件 ＋ 打标签一步
+  const auto = ws.blocks.find(
+    (b) => isAutomationBlock(b) && plainText(b.content).trim() !== '收尾：把这块标成完成',
+  )
+  assert.ok(auto, '应有一条按父块触发的自动化样本')
+  const def = readAutomation(auto!)
+  assert.ok(def, '定义必须读得出来（形状合法）')
+  assert.equal(def!.enabled, true, '样本规则开着：新建行当场打标签')
+  assert.equal(def!.triggers.length, 1)
+  const tr = def!.triggers[0]!
+  assert.notEqual(tr, 'manual', '这不是手动规则')
+  if (tr !== 'manual') {
+    assert.equal(tr.on, 'entered')
+    assert.equal(tr.birth, true, '含 up 的触发器必须 birth：容纳链只在诞生时刻求值')
+    assert.deepEqual(tr.query, { up: { is: backlog!.id } }, '条件圈在「候选功能」这一块上')
+    assert.equal(validateTriggerQuery(tr.on, tr.query, tr.birth === true), null, '形状必须过写侧校验')
+  }
+  const featureTag = ws.blocks.find(
+    (b) => plainText(b.content).trim() === '功能' && b.props?._lists?.includes('tag'),
+  )
+  assert.ok(featureTag, '应有「功能」标签块')
+  assert.deepEqual(def!.steps, [{ cmd: 'core.tags/add', args: { tagId: featureTag!.id } }], '步骤只有一个：按 id 打标签')
 })

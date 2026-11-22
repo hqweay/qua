@@ -7,7 +7,9 @@
  * 以及「这一屏可以随便改」的提醒。
  * 顶层另有**属性 / 实例 / 看法**的完整样本：`功能` 标签声明两个属性、几条实例填着值、
  * 一条「功能看板」查询在四张看法（看板 / 表格 / 画廊 / 日历）之间切换；
- * 一条手动『自动化』（「收尾」）让「目录 · 自动化」那一面也有东西可点——
+ * 一条手动『自动化』（「收尾」）让「目录 · 自动化」那一面也有东西可点；
+ * 另一条是**圈住父块的事件自动化**：「候选功能」下新建的每一行自动打上「功能」标签；
+ * 而「候选功能」本身是一块**普通容器**，配了一张表格看法（`_views` 挂在谁身上都行）——
  * 每个已落地的能力都有一份**能摸到的数据**，而不是一句文档。
  * 一条示例备注（划选写批注）挂在「写作示范」页；槽的样本在**设备侧**（`seedDock()`）：
  * 左槽一只演示收纳盘，两颗快捷卡指到功能看板与写作示范。
@@ -26,6 +28,7 @@
  *    换 id 就要连带 `seedDock()` 与它的断言。
  */
 import {
+  ACTIVE_VIEW_PROP,
   appendEdge,
   ALIASES_PROP,
   CHILD_PROPS_PROP,
@@ -46,6 +49,7 @@ import {
   TASK_STATUS_PROP_ID,
   textRuns,
   todayISO,
+  VIEWS_PROP,
   type Anno,
   type Block,
   type MountEntry,
@@ -151,6 +155,8 @@ export function seedWorkspace(): Workspace {
       '左槽「目录」把页、标签、属性、自动化摊成四面：前两面拖块进去就是加一条归属，后两面只读。',
       '反链栏和成员栏的抬头都有「改指向…」：引用指错了目标，选一次整片改过去，⌘Z 一步回。',
       '「自动化」是一块「如果…就…」，左槽「目录 · 自动化」里那条「收尾」就是样本。',
+      '任何一块都能配看法：右键一块「视图…」，或点它身体抬头那颗「大纲」——「每周复盘」里的「候选功能」现在就读成表格。',
+      '自动化也能圈范围：设成「在某块下面新建子块时」，自动打标签——「候选功能」就是这么把新行喂给功能看板的。',
       '⌘Z 一步回：拆块、合并、格式、拖动都能撤销。',
       '⌘T 回到今日日记；编辑器失焦时 ⌘⌥← / ⌘⌥→ 翻日。',
       '⌘⇧? 查看全部键位——每条命令的键位与生效条件都列在里面。',
@@ -322,6 +328,36 @@ export function seedWorkspace(): Workspace {
         },
       ],
     },
+    // **视图配置 ＋ 事件自动化**两份样本都挂在**普通容器块**上（不是查询块）：
+    //   ① 一块怎么读是它的**配置**（`_views` 挂在谁身上都行），不是它的类型；
+    //   ② 触发器可以圈**父块**（`{up:{is}}`）——在这块下新建的每一行，出生就被打上「功能」标签。
+    // 两件事共用这一块，是因为它们在这一块上互相解释：新行进来即成为「功能」实例，表格与看板读的是同一批值。
+    { text: '「候选功能」这一块读成表格：普通容器也能配看法——一块怎么读是它的配置，不是它的类型。' },
+    {
+      text: '候选功能',
+      props: {
+        [VIEWS_PROP]: [
+          {
+            id: SEED_BACKLOG_VIEW_ID,
+            name: s('表格'),
+            kind: 'table',
+            // 露出哪一栏也是配置：挑「功能状态」，于是这些行与功能看板读同一批值
+            displayProps: [FEATURE_STATUS_PROP_ID],
+          },
+        ],
+        [ACTIVE_VIEW_PROP]: SEED_BACKLOG_VIEW_ID,
+      },
+      children: [
+        {
+          text: '导入 Markdown 笔记',
+          tags: ['功能'],
+          props: { [FEATURE_STATUS_PROP_ID]: FEATURE_STATUS_EXPLORING_ID },
+        },
+        // 不填状态：缺省从定义上读出「探索中」，表格里照样有这一栏
+        { text: 'PDF 批注', tags: ['功能'] },
+      ],
+    },
+    { text: '在这块下面新建的每一行都会自动打上「功能」标签——左槽「目录 · 自动化」里那条规则就是干这个的。' },
     { text: '把这一页拖进左槽就能开一扇常驻的窗——常去的页面都值得这样放。' },
     { text: '复盘只写「变了什么、为什么」，不抄流水账。', tags: ['复盘'] },
   ])
@@ -430,6 +466,31 @@ export function seedWorkspace(): Workspace {
 
   /* ---------------------------------------------- 要拿到已建块 id 才能写的样本 */
 
+  /**
+   * **新子块自动打标签**：一条事件自动化，范围圈在「候选功能」这一块上——
+   * 在它下面新建的每一行，诞生那一刻就被打上「功能」标签（于是当场进功能看板）。
+   *
+   * 为什么住在装配段：触发器要写**父块 id**，而那个 id 只有页建完才有（与镜像、备注同层）。
+   * `birth: true` ＋ `{up:{is}}` 是「在某一块下面新建子块时」的唯一合法形状——
+   * `up` 是诞生时刻对容纳链的一次性判定，白名单见 `automation/trigger-query.ts`。
+   */
+  const backlog = childByPlain(p3.page, s('候选功能'))
+  if (backlog) {
+    const auto = mkAutomationBlock({
+      name: s('候选功能：新行自动带上「功能」'),
+      icon: 'lucide:zap',
+      def: {
+        enabled: true,
+        triggers: [{ on: 'entered', birth: true, query: { up: { is: backlog.id } } }],
+        // 步骤里存**标签 id**（名字会漂，id 不漂）：与所有引用同一条纪律
+        steps: [{ cmd: 'core.tags/add', args: { tagId: vocab.featureTagId } }],
+      },
+    })
+    auto.created = SEED_AT
+    auto.modified = SEED_AT
+    blocks.push(auto)
+  }
+
   const nextStep = childByPlain(p3.page, s('下一步'))
   // 镜像：p1 的宿主块指向 p3 的「下一步」（`view:''` ＝ 跟随源块的默认看法）
   if (nextStep) {
@@ -507,6 +568,8 @@ export const SEED_NOTE_ANNO_ID = derivedId('anno', 'seed/welcome-note')
  */
 export const SEED_FEATURE_BOARD_ID = derivedId('block', 'seed/feature-board')
 export const SEED_INPUT_NOTES_ID = derivedId('block', 'seed/input-notes')
+/** 「候选功能」那张表格看法的 id：块上的 `_activeView` 与 `_views[]` 要拿到同一个 */
+export const SEED_BACKLOG_VIEW_ID = 'seed-backlog-table'
 export const SEED_TRAY_ID = derivedId('tray', 'seed/quick')
 
 /**
@@ -586,6 +649,8 @@ function featureInstances(tagId: string): Block[] {
     record(s('删除收口'), FEATURE_STATUS_SHIPPED_ID, '2026-11-22'),
     record(s('中英界面'), FEATURE_STATUS_SHIPPED_ID, '2026-11-22'),
     record(s('新版提示'), FEATURE_STATUS_SHIPPED_ID, '2026-11-22'),
+    record(s('任何块都能配看法'), FEATURE_STATUS_SHIPPED_ID, '2026-11-22'),
+    record(s('新子块自动打标签'), FEATURE_STATUS_SHIPPED_ID, '2026-11-22'),
     record(s('引用某一段'), FEATURE_STATUS_EXPLORING_ID),
     record(s('定时提醒')),
     record(s('图库管理'), FEATURE_STATUS_SHELVED_ID),
