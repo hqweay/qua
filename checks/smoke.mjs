@@ -33662,6 +33662,71 @@ await check('T355 思维导图：连线两端贴住节点边、长句在卡片�
   return `${geom.nodes.length} 节点 / ${geom.edges.length} 边：端点贴边、文字零溢出、根居中`
 })
 
+/**
+ * T356：「新建子块时」的触发器，父块选完立刻问一句「沿不沿引用」。
+ *
+ * 这一格不点开触发器菜单就永远看不见（行上只有一个后缀），而它决定规则按谁判定 ——
+ * 藏在二级菜单里等于默认没人配。钉两件事：①选完父块**当场**就有这一问（不是要再点一次
+ * 触发器）；②在这里选了「要」，落盘就是 `followRefs: true`、行上立刻出现后缀。
+ * 反向验证：把第二问去掉、改回选完直接写 ⇒ 第一条断言红。
+ */
+await check('T356 新建子块触发器：选完父块当场问「沿不沿引用」，选择直接落盘', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const ids = await page.evaluate(() => {
+    const hex = (n) => n.toString(16).padStart(32, '0')
+    const tagId = hex(0xa35601)
+    const parentId = hex(0xa35602)
+    const ruleId = hex(0xa35603)
+    const mk = (id, content, props = {}) => ({ id, content, children: [], created: 1, modified: 1, props })
+    window.__qua.forceForest((forest) => {
+      forest.push(mk(tagId, [{ t: 'text', v: 'AI-探针' }], { _aliases: ['AI-探针'], _lists: ['tag'] }))
+      forest.push(mk(parentId, [{ t: 'text', v: '父块探针' }]))
+      forest.push(
+        mk(ruleId, [{ t: 'text', v: '探针规则' }], {
+          _automation: { enabled: true, triggers: ['manual'], steps: [{ cmd: 'core.tags/add', args: { tagId } }] },
+        }),
+      )
+    })
+    return { ruleId }
+  })
+  await page.waitForTimeout(400)
+  const row = `#editor .blk[data-block-id="${ids.ruleId}"]`
+  await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), ids.ruleId)
+  await page.waitForTimeout(500)
+  await page.locator(`${row} .tx`).first().click()
+  await page.waitForTimeout(400)
+
+  // 加触发器 → 新建子块时… → 选一个父块… → 选「父块探针」
+  await page.locator(`${row} .blk-auto-chip.is-edit`).first().click()
+  await page.waitForTimeout(350)
+  await page.locator('text=新建子块时…').first().click()
+  await page.waitForTimeout(350)
+  await page.locator('text=选一个父块…').first().click()
+  await page.waitForTimeout(500)
+  await page.keyboard.type('父块探针')
+  await page.waitForTimeout(700)
+  await page.locator('text=父块探针').first().click()
+  await page.waitForTimeout(600)
+
+  // ① 父块一选定，第二问就在屏幕上（不用再点触发器）
+  const text = await page.locator('body').innerText()
+  assert(text.includes('父块是引用行时'), `选完父块就该问「沿不沿引用」：${text.slice(0, 200)}`)
+  assert(text.includes('不，只看直接父块') && text.includes('要，沿引用展开'), '两档都要摆出来（默认档排第一）')
+
+  // ② 选「要」⇒ 落盘只有 true，行上立刻带后缀
+  await page.locator('text=要，沿引用展开').first().click()
+  await page.waitForTimeout(600)
+  const stored = await page.evaluate((id) => window.__qua.__editor.store.find(id)?.props?._automation?.triggers, ids.ruleId)
+  const birth = (stored ?? []).find((t) => t !== 'manual')
+  assert(birth && birth.followRefs === true, `选「要」⇒ 触发器带 followRefs:true：${JSON.stringify(stored)}`)
+  const chip = await page.locator(`${row} .blk-auto-chip.is-event`).first().textContent()
+  assert(String(chip).includes('含传递引用'), `行上要看得见这一格是开的：${chip}`)
+
+  await ctx.close()
+  return '父块选定 ⇒ 当场问沿不沿引用；选「要」⇒ 落盘 followRefs:true；行上后缀同步'
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

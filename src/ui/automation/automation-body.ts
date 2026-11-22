@@ -404,6 +404,30 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
     )
   }
 
+  /**
+   * 建「新建子块」触发器的**第二问**：父块定了，紧接着问一句「沿不沿引用」。
+   *
+   * 为什么挪到创建流程里：这一格不点开触发器菜单就永远看不见（行上只有一个后缀），
+   * 而它决定规则按谁判定——藏在二级菜单里等于默认没人配。创建是低频动作，
+   * 多一次二选一比「半年后才发现有这个开关」便宜。默认项排第一个，回车即过。
+   */
+  const addChildTrigger = (def: AutomationDef, query: QueryNode, after?: () => void): void => {
+    deps.openMenu(
+      [
+        { id: 'off', label: t('ui.automation.trigger.followRefsOff'), hint: t('ui.automation.trigger.followRefsOffHint'), group: 'trigger/refs' },
+        { id: 'on', label: t('ui.automation.trigger.followRefsOn'), hint: t('ui.automation.trigger.followRefsHint'), group: 'trigger/refs' },
+      ],
+      (row) => {
+        write({
+          ...def,
+          triggers: [...def.triggers, { on: 'entered', query, birth: true, ...(row.id === 'on' ? { followRefs: true as const } : {}) }],
+        })
+        after?.()
+      },
+      t('ui.automation.trigger.followRefsTitle'),
+    )
+  }
+
   /** 新建子块触发器：一个父块条件槽的三种填法——空（＝任意父块，条件即「如果」）／点名／条件筛 */
   const pickParentForTrigger = (def: AutomationDef): void => {
     const whenQuery = def.when !== undefined ? triggerQueryFromWhen(def.when) : null
@@ -418,17 +442,16 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
       (row) => {
         if (row.id === '') {
           // 槽空态＝任意父块：条件跟着「如果」走（「任意父块＋无条件」＝每笔新建都触发，保护性拒绝）
-          write({ ...def, triggers: [...def.triggers, { on: 'entered', query: whenQuery!, birth: true }] })
+          addChildTrigger(def, whenQuery!)
           return
         }
         if (row.id === 'query') {
           // 加触发器时还没有下标：先落一条占位父条件，随即开条件树改它
-          write({ ...def, triggers: [...def.triggers, { on: 'entered', query: { up: { any: [] } }, birth: true }] })
-          deps.editParentFilter(def.triggers.length)
+          addChildTrigger(def, { up: { any: [] } }, () => deps.editParentFilter(def.triggers.length))
           return
         }
         pickParent((parentId) => {
-          write({ ...def, triggers: [...def.triggers, { on: 'entered', query: { up: { is: parentId } }, birth: true }] })
+          addChildTrigger(def, { up: { is: parentId } })
         })
       },
       t('ui.automation.trigger.addChildTitle'),
