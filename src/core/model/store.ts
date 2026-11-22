@@ -350,6 +350,29 @@ export class BlockStore {
   }
 
   /**
+   * **本笔事务新插进来的子树**入册：它们本来就在内存里、形状完整（`children` 就是
+   * 构造时给的那棵），所以「这一块要不要补装载」对它们只有一个答案——不用。
+   *
+   * 不入册的后果不是性能而是**行为**：`needsDoc` 会把「刚建出来的块」报成未装载，
+   * 于是所有「建完就打开」的入口都去库里补读一次，而这时这一次写还躺在落盘防抖窗口里
+   * （250ms）⇒ 读回空 ⇒ 打开闸按「没读到」中止（`whenDocLoaded`），屏幕毫无反应。
+   * 整库模式（web／种子库）不走这条路，所以这个洞只在真库的部分装载面出现。
+   *
+   * 整库模式（`loaded === null`）什么都不做：那里 `isLoaded` 问的是索引。
+   */
+  markCreated(ids: Iterable<string>): void {
+    const loaded = this.workset.loaded
+    if (loaded === null) return
+    for (const id of ids) {
+      loaded.add(id)
+      // 新子树的形状就是手上这一份：不欠子树读（欠了的话打开时正文只有根行）
+      this.workset.childrenUnknown.delete(id)
+      this.touch(id)
+    }
+    this.worksetProbe.loaded = loaded.size
+  }
+
+  /**
    * 装载路径的索引修补：`roots` 是这一批**挂进树里的片段根**（父可能已装载或为顶层）。
    *
    * 走 `patchIndex` 与编辑同一条路（`indexSubtree` 会把整棵新片段收进去），所以

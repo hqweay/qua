@@ -452,6 +452,15 @@ export class MemoryKb implements KbClient {
        * 调用方（编辑器／命令）**不得**再自己宣布（那会让这次修补白做）。
        */
       this.store.apply(ops, opts.source)
+      /**
+       * **本笔新插入的子树入册**（`before === null` 就是本笔造的块）：它们已经在内存里、
+       * children 就是构造时给的那份 ⇒ `needsDoc` 对它们的答案必须是「不用补」。
+       * 不记这一步，「建完就打开」的入口（新建自动化之后跳过去写定义）会去库里补读一次，
+       * 而这次写还躺在落盘防抖窗口里 ⇒ 读回空 ⇒ 打开闸按「没读到」中止，屏幕没反应。
+       * 放在 `apply` 之后：失败路径已在 catch 里整批回滚，不会留下「已装载」的假记录。
+       */
+      const created = [...touched.values()].filter((t) => t.before === null)
+      if (created.length > 0) this.store.markCreated(created.map((t) => t.block.id))
       return { ops, changes, result, undo }
     } catch (err) {
       // 逆序回滚：后做的先退（同一块被改两次时，先退第二次再退第一次）

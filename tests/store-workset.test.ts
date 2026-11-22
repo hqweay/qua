@@ -9,6 +9,7 @@
  * | ② | 工作集模式：未加载的 `find` ⇒ `undefined`、`isLoaded` ⇒ false | 让 `find` 回退全库扫描/造占位块，本条红 |
  * | ③ | pin 住的块不淘汰（含「钉在子树里」） | `trimWorkset` 不看 pin，本条红 |
  * | ④ | 淘汰按 LRU：最近被 `find` 过的先留下 | 淘汰顺序改成数组顺序，LRU 那条红 |
+ * | ⑤ | 本笔新建的子树入册（`needsDoc` 假）；失败事务不留假记录 | 去掉 `markCreated` 调用 ⇒「建完就打开」的入口又去打库读回空 |
  *
  * 为什么「未加载」必须显式：部分装载下「读不到」同时表示「未加载」与「不存在」；
  * 任何一条静默回退（全库扫描、占位块）都会让这两件事重新混成一个答案。
@@ -16,6 +17,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkBlock } from '../src/core/model/model.ts'
+import { mkAutomationBlock } from '../src/core/automation/automation.ts'
+import { MemoryKb } from '../src/core/kb/memory.ts'
 import { BlockStore } from '../src/core/model/store.ts'
 import type { Block } from '../src/core/model/model.ts'
 
@@ -85,4 +88,45 @@ test('reset（换库）回到整库模式，旧工作集状态不残留', () => 
   assert.equal(store.partial, false)
   assert.equal(store.isLoaded(c.id), true, '整库模式下另一块也在内存里')
   assert.equal(store.isPinned(a.id), false)
+})
+
+test('⑤ 本笔新建的子树入册：needsDoc 为假（建完就打开不再去打库）；失败事务不留假记录', () => {
+  const store = new BlockStore([])
+  // 切进部分装载（空工作集）：这是桌面启动之后的状态，`needsDoc` 在这里才有意义
+  store.adoptLoaded([])
+  const kb = new MemoryKb(store)
+  assert.equal(store.partial, true)
+
+  const rule = mkAutomationBlock({
+    name: '未命名自动化',
+    def: { enabled: false, triggers: ['manual'], steps: [] },
+  })
+  kb.tx((tx) => {
+    tx.insert(rule, null, 0)
+  })
+  assert.equal(store.isLoaded(rule.id), true, '本笔造出来的块就在内存里')
+  assert.equal(store.childrenKnown(rule.id), true, '它的 children 就是构造时给的那份')
+  assert.equal(
+    kb.needsDoc(rule.id),
+    false,
+    '不用补读——否则「建完就打开」会去库里读（写还在防抖窗口里）而读回空，打开闸中止',
+  )
+
+  // 整库模式不因新建被切成部分装载
+  const whole = new BlockStore([])
+  new MemoryKb(whole).tx((tx) => {
+    tx.insert(mkBlock('普通块'), null, 0)
+  })
+  assert.equal(whole.partial, false)
+
+  // 失败事务整批回滚 ⇒ 不留「已装载」的假记录（块不在树上，也不该在集合里）
+  const doomed = mkBlock('会失败的新块')
+  assert.throws(() =>
+    kb.tx((tx) => {
+      tx.insert(doomed, null, 0)
+      throw new Error('boom')
+    }),
+  )
+  assert.equal(store.isLoaded(doomed.id), false)
+  assert.equal(kb.needsDoc(doomed.id), true, '没建成的块照旧是「要补读」')
 })
