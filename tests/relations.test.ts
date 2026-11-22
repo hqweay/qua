@@ -48,13 +48,13 @@ function forest() {
   return [tag, prop, target, src, mention]
 }
 
-test('{ref} 默认收 inline／property／embed，不收标签归属与 #名 提及', () => {
+test('{ref} 默认收 inline／property／embed／tagMention，不收标签归属', () => {
   const blocks = forest()
   const hits = runQuery({ where: { ref: 'target' } }, { blocks }).map((h) => h.blockId)
   assert.deepEqual(hits, ['src'], '正文引用与属性引用都指向 target')
 
   const tagHits = runQuery({ where: { ref: 'tag' } }, { blocks }).map((h) => h.blockId)
-  assert.deepEqual(tagHits, [], '标签归属不是引用；#名 提及也不是引用')
+  assert.deepEqual(tagHits, ['mention'], '#名 指向标签类算 tagMention 引用；标签归属不是引用')
 })
 
 test('{ref:{kind}} 能收窄到某一类引用', () => {
@@ -67,7 +67,7 @@ test('{ref:{kind}} 能收窄到某一类引用', () => {
   assert.deepEqual(none, [], '没有 embed 边')
 })
 
-test('行内实例：#名 指向记录是引用（{ref} 命中、进引用栏），指向标签类才是提及', () => {
+test('行内实例与行内标签都是引用：#名 按目标身份分 inline／tagMention', () => {
   const tag = b('tag', '人物', { props: { _aliases: ['人物'], _lists: ['tag'] } })
   const record = b('rec', '张三', { props: { _tags: ['tag'] } })
   const note = b('note', '写了 #张三 和 #人物', {
@@ -81,7 +81,7 @@ test('行内实例：#名 指向记录是引用（{ref} 命中、进引用栏）
   const blocks = [tag, record, note]
   const ids = (where: QueryNode) => runQuery({ where }, { blocks }).map((h) => h.blockId)
   assert.deepEqual(ids({ ref: 'rec' }), ['note'], '胶囊指向记录＝指向具体目标的引用')
-  assert.deepEqual(ids({ ref: 'tag' }), [], '胶囊指向标签类＝分类提及，两问不混')
+  assert.deepEqual(ids({ ref: 'tag' }), ['note'], '行内标签也算引用；分类语义另由 {tag} 答')
 
   // 索引路径与纯函数路径同口径（tagClass 集合由 rebuild 自收）
   const idx = rebuild(blocks)
@@ -90,13 +90,15 @@ test('行内实例：#名 指向记录是引用（{ref} 命中、进引用栏）
     ['note'],
   )
 
-  // 引用栏收胶囊；提及栏只剩文本命中（原子不进正文投影 ⇒ 这枚胶囊不出现在提及里）
+  // 引用栏收胶囊与行内标签；提及栏只剩无指向的文本命中（原子不进正文投影）
   const kb = new MemoryKb(new BlockStore(blocks))
   const rec = blocks.find((x) => x.id === 'rec')!
   const refs = derivedRecordsOf(rec, kb, 'refs')
   assert.deepEqual(refs.map((r) => r.block.id), ['note'], '记录的引用栏收行内实例')
   const mentions = derivedRecordsOf(rec, kb, 'mentions')
-  assert.deepEqual(mentions.map((r) => r.block.id), [], '胶囊提及已迁入引用，不重复出在提及栏')
+  assert.deepEqual(mentions.map((r) => r.block.id), [], '原子不进提及栏')
+  const tagRows = derivedRecordsOf(tag, kb, 'refs')
+  assert.deepEqual(tagRows.map((r) => r.block.id), ['note'], '标签的引用栏收行内标签')
 })
 
 test('canonicalSpec：ref 的对象形式能存活，kind 规范成数组', () => {
@@ -127,13 +129,14 @@ test('成员：标签块自己的成员不含正文 #名 提及', () => {
   assert.deepEqual(rows.map((r) => r.block.id), ['src'], '只有 _tags 归属算成员')
 })
 
-test('提及：文本命中与 #名 提及合成一行，且不把 #名 当引用', () => {
+test('提及：只剩纯文本命中，#名 行内标签归反链栏', () => {
   const blocks = forest()
   const tag = blocks.find((b) => b.id === 'tag')!
   const kb = new MemoryKb(new BlockStore(blocks))
-  const rows = derivedRecordsOf(tag, kb, 'mentions')
-  assert.deepEqual(rows.map((r) => r.block.id), ['mention'])
-  assert.equal(rows[0]!.derived?.matched, '#人物')
+  const mentions = derivedRecordsOf(tag, kb, 'mentions')
+  assert.deepEqual(mentions.map((r) => r.block.id), [], '#名 是 tagMention 引用，不进提及栏')
+  const refs = derivedRecordsOf(tag, kb, 'refs')
+  assert.deepEqual(refs.map((r) => r.block.id), ['mention'], '行内标签进反链栏')
 })
 
 test('增量：改属性 ref 值 ⇒ 关系边跟着换，且与全量重建一致', () => {

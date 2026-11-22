@@ -1,7 +1,7 @@
 /**
  * 引用数的**唯一读法**：从入向关系边聚合出「几次 / 几个来源 / 每来源几次」。
  *
- * 只认 `REFERENCE_KINDS`（inline／property／embed）这三类：标签归属与备注是另外两种
+ * 只认 `REFERENCE_KINDS`（inline／property／embed／tagMention）这四类：标签归属与备注是另外两种
  * 关系，不进反链 —— 与 `mount.ts:refRecords` 同一份口径，别在别处再写一遍过滤器。
  *
  * 两个数字不是一回事，也不许互相代替：

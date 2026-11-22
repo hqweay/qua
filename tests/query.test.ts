@@ -1320,8 +1320,8 @@ test('{link}：有外链即可；url 给了比 contains（大小写不敏）', (
   assertSameHits({ where: { link: {} } }, blocks)
 })
 
-test('{ref} 不限目标：发过任一指定 kind 引用边的块都命中；#标签 提及不算引用', () => {
-  // 目标是标签类 ⇒ hash 那枚 `#目标` 是分类提及（tagMention），不算引用
+test('{ref} 不限目标：发过任一指定 kind 引用边的块都命中；#标签 也算引用', () => {
+  // 目标是标签类 ⇒ `#目标` 是 tagMention，现在算引用；它的分类语义由 {tag} 另答
   const tgt: Block = b('tgt', '目标', { props: { _lists: ['tag'] } })
   const x: Block = b('x', '甲')
   x.content = [{ id: 'r1', t: 'ref', to: 'tgt', label: '目标' }]
@@ -1330,10 +1330,11 @@ test('{ref} 不限目标：发过任一指定 kind 引用边的块都命中；#�
   const z: Block = b('z', '丙')
   const blocks = [tgt, x, hash, z]
   const ids = (where: QueryNode) => runQuery({ where }, { blocks }).map((h) => h.blockId)
-  assert.deepEqual(ids({ ref: {} }), ['x'], '有引用即命中')
-  assert.deepEqual(ids({ ref: { kind: ['inline'] } }), ['x'])
-  assert.deepEqual(ids({ ref: { kind: ['property'] } }), [], '只有 #标签 提及不算（tagMention 不是引用 kind）')
-  assert.deepEqual(ids({ not: { ref: {} } }), ['tgt', 'hash', 'z'], '否定照常可组合（tgt 自己没发过引用边）')
+  assert.deepEqual(ids({ ref: {} }), ['x', 'hash'], '有引用即命中；行内标签也算')
+  assert.deepEqual(ids({ ref: { kind: ['inline'] } }), ['x'], '收窄 inline 仍可只取正文引用')
+  assert.deepEqual(ids({ ref: { kind: ['tagMention'] } }), ['hash'], '收窄 tagMention 只取行内标签')
+  assert.deepEqual(ids({ ref: { kind: ['property'] } }), [], '没有属性引用')
+  assert.deepEqual(ids({ not: { ref: {} } }), ['tgt', 'z'], '否定照常可组合（tgt 自己没发过引用边）')
   assert.equal(usesRefAny({ ref: {} }), true)
   assert.equal(usesRefAny({ ref: 'tgt' }), false, '指名目标走入向表，不建出向表')
   assert.equal(usesRefAny({ all: [{ ref: {} }] }), true)

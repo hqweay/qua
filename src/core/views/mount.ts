@@ -546,6 +546,8 @@ function refRecords(host: Block, kb: KbClient, rows: readonly ViewRecord[]): Vie
         const props = [...m.props].map((id) => names.get(id) ?? '').filter((x) => x !== '')
         if (props.length === 0) labels.push(t('ui.mount.kind.property'))
         for (const p of props) labels.push(t('ui.mount.kind.propertyWith', { name: p }))
+      } else if (kind === 'tagMention') {
+        labels.push(t('ui.mount.kind.tagMention'))
       } else {
         labels.push(t(kind === 'inline' ? 'ui.mount.kind.inline' : 'ui.mount.kind.embed'))
       }
@@ -571,12 +573,12 @@ function memberRecords(host: Block, kb: KbClient, rows: readonly ViewRecord[]): 
 }
 
 /**
- * 提及行：正文文本命中（`{text} ∧ not {ref}`）＋ 行内 `#名` 提及。
+ * 提及行：正文文本命中（`{text} ∧ not {ref}`）——**没有指向**目标的名字出现。
  *
- * 两者合成一行；`matched` 记命中的词／标签。标签提及是**提及**，不是引用，
- * 也不是成员：它只回答「正文里提到了我」。
+ * `matched` 记命中的词。行内 `#名` 现在算 `tagMention` 引用，归反链栏，不在这里；
+ * 这一栏从此与术语表「提及＝无指向的正文出现」对齐。
  *
- * 文本命中行另带**候选引用**的两样东西（`#名` 已是引用，不在转换之列）：
+ * 命中行另带**候选引用**的两样东西（`mark` 已是引用，不在转换之列）：
  *   · `mentionSpots` —— 名字在那一块正文里的可转换出现处（plain 区间）；
  *   · `mentionSnippet` —— 片段（命中段标 mark，第 k 个 mark ⇄ `mentionSpots[k]`）。
  * 都是这次读出来的派生值，不落盘；渲染端拿它画「高亮 ＋ 一键转换」，
@@ -591,13 +593,7 @@ function mentionRecords(host: Block, kb: KbClient): ViewRecord[] {
     set.add(word)
     byBlock.set(h.blockId, set)
   }
-  const tagWord = word === '' ? '' : `#${word}`
-  for (const e of kb.relationsTo(host.id)) {
-    if (e.kind !== 'tagMention' || e.from === host.id) continue
-    const set = byBlock.get(e.from) ?? new Set<string>()
-    set.add(tagWord)
-    byBlock.set(e.from, set)
-  }
+
   const hits: QueryHit[] = []
   for (const blockId of byBlock.keys()) {
     const path = kb.pathOf(blockId)

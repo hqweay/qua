@@ -3,7 +3,7 @@
  *
  * 钉住四件在界面上容易被「看起来差不多」糊过去的事：
  *   ① 次数 ≠ 来源数：同一来源块引两次，徽标 2、列表 1 行且那行标「2 次」；
- *   ② 只读引用三类关系，标签归属／备注不进反链；
+ *   ② 只读引用四类关系（inline／property／embed／tagMention），标签归属／备注不进反链；
  *   ③ `Σ rows.count === total` —— 徽标与列表永远能对上账；
  *   ④ 排序稳定、不改动入参（渲染每次现算，纯函数不能偷改索引里的边）。
  */
@@ -74,4 +74,18 @@ test('同一来源跨多种关系：合并成一行，种类都留着', () => {
   assert.equal(s.sources, 1)
   assert.equal(s.total, 3)
   assert.deepEqual([...(s.rows[0]?.kinds ?? [])].sort(), ['embed', 'inline'])
+})
+
+test('行内标签（tagMention）计入反链徽标，与正文引用同口径', () => {
+  const s = refSourcesOf([edge('a', 'tagMention', 2), edge('b', 'inline')])
+  assert.equal(s.total, 3)
+  assert.equal(s.sources, 2)
+  assert.deepEqual(s.rows.map((r) => [r.from, r.count]), [['a', 2], ['b', 1]])
+  assert.deepEqual(s.rows[0]?.kinds, ['tagMention'])
+})
+
+test('标签归属与备注仍不进反链', () => {
+  const s = refSourcesOf([edge('a', 'tag'), edge('b', 'annotates')])
+  assert.equal(s.total, 0)
+  assert.equal(s.sources, 0)
 })

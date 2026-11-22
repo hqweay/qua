@@ -24,11 +24,11 @@ import { walkForest } from '../model/walk.ts'
  *
  * | kind | 从哪来 | 回答 |
  * |---|---|---|
- * | `inline` | 正文里无 flavor 的 ref run | 谁在正文里指向我 |
+ * | `inline` | 正文里无 flavor 的 ref run；或 flavor `#` 但目标**不是标签类**（记录＝实例胶囊、普通块） | 谁在正文里引用了我 |
  * | `property` | 用户属性定义 `kind:'ref'` 的值 | 哪个属性指向我 |
  * | `embed` | `_embed.block` | 谁把我露在别处 |
  * | `tag` | `_tags` | 谁归我管 |
- * | `tagMention` | 正文里 `flavor:'#'` 且目标仍是标签类的 ref run | 谁在正文里提到这个标签 |
+ * | `tagMention` | 正文里 `flavor:'#'` 且目标仍是标签类的 ref run | 谁在正文里用行内标签指向我 |
  * | `belongsTo` | `_belongsTo` | 谁归在谁下面 |
  * | `annotates` | `_annotates`（备注块的指向槽） | 谁在评论我的一段 |
  * | `item` | `_items` | 谁把我收进集合 |
@@ -42,13 +42,18 @@ export type RelationKind =
   | 'belongsTo'
   | 'annotates'
 
-/** 「引用」只收这三类；标签归属是分类，不是引用。 */
-export type RefKind = Extract<RelationKind, 'inline' | 'property' | 'embed'>
+/**
+ * 「引用」收四类：正文引用、属性引用、露面指针、**行内标签**（指向标签类的 `#名`）。
+ * 行内标签有指向边、点击跳目标、改名跟随，符合术语表「引用＝有指向边的出现」；
+ * 它的**分类语义**由 `{tag}` 另答，不影响它作为引用被计数与查询。
+ * 标签归属（`tag`）与备注（`annotates`）是另外两种事实，不是引用。
+ */
+export type RefKind = Extract<RelationKind, 'inline' | 'property' | 'embed' | 'tagMention'>
 
-export const REFERENCE_KINDS: readonly RefKind[] = ['inline', 'property', 'embed']
+export const REFERENCE_KINDS: readonly RefKind[] = ['inline', 'property', 'embed', 'tagMention']
 
 export function isRefKind(v: unknown): v is RefKind {
-  return v === 'inline' || v === 'property' || v === 'embed'
+  return v === 'inline' || v === 'property' || v === 'embed' || v === 'tagMention'
 }
 
 /** 一个边对象。同一 `(from,to,kind,propId,view,pos)` 只出现一次；`inline` 用 `count` 记次数。 */

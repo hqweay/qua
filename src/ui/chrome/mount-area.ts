@@ -360,7 +360,7 @@ export class MountArea {
    */
   private readonly tabViews = new Map<string, ViewBodyHost>()
   /** 引用栏的 kind 过滤（大纲专用设备状态；切到表格时由「类型」列承担同一件事） */
-  private refKind: 'all' | 'inline' | 'property' | 'embed' = 'all'
+  private refKind: 'all' | 'inline' | 'property' | 'embed' | 'tagMention' = 'all'
   /** 派生栏镜头面板现在挂在哪个浮层宿主里（`null` ＝ 没开） */
   private lensHost: HTMLElement | null = null
   /**
@@ -1827,18 +1827,18 @@ export class MountArea {
     /* 类型：只在引用栏的大纲看法里——表格用「类型」列承担同一件事 */
     if (entry.source === 'refs' && kind === 'outline' && all.length > 0) {
       const body = this.lensSection(root, 'ui.mount.kindTitle')
-      const counts = new Map<'inline' | 'property' | 'embed', number>()
+      const counts = new Map<'inline' | 'property' | 'embed' | 'tagMention', number>()
       for (const r of all) {
         const keys = r.derived?.relKindKeys
         if (!Array.isArray(keys)) continue
         for (const k of keys) {
-          if (k !== 'inline' && k !== 'property' && k !== 'embed') continue
+          if (k !== 'inline' && k !== 'property' && k !== 'embed' && k !== 'tagMention') continue
           counts.set(k, (counts.get(k) ?? 0) + 1)
         }
       }
       const kinds = document.createElement('div')
       kinds.className = 'mount-derived-kinds'
-      const add = (key: 'all' | 'inline' | 'property' | 'embed', label: string, n: number): void => {
+      const add = (key: 'all' | 'inline' | 'property' | 'embed' | 'tagMention', label: string, n: number): void => {
         const b = document.createElement('button')
         b.type = 'button'
         b.className = 'ui-btn mount-derived-kind'
@@ -1856,6 +1856,7 @@ export class MountArea {
       add('all', t('ui.mount.kind.all'), all.length)
       add('inline', t('ui.mount.kind.inline'), counts.get('inline') ?? 0)
       add('property', t('ui.mount.kind.property'), counts.get('property') ?? 0)
+      add('tagMention', t('ui.mount.kind.tagMention'), counts.get('tagMention') ?? 0)
       add('embed', t('ui.mount.kind.embed'), counts.get('embed') ?? 0)
       body.appendChild(kinds)
     }
