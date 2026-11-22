@@ -432,7 +432,7 @@
 <span class="key">{ text: 串 }</span>              <span class="cmt">正文投影包含；未链接提及走这里，不算反链</span>
 <span class="key">{ prop: { id, 算子 } }</span>  <span class="cmt">通用路径：键是定义块 id，改显示名不动语义；任务三态也走这里</span>
 <span class="key">{ is: 块 id }</span>           <span class="cmt">「就是这一块」（身份判定，不是成员判定）</span>
-<span class="key">{ role: 'journal' | 'page' }</span> <span class="cmt">是这种东西<b>本身</b>（成员条件）</span>
+<span class="key">{ role: 'journal' | 'page' | 'tag' | 'note' | 'schema' | 'query' | 'automation' }</span> <span class="cmt">是这种东西<b>本身</b>（身份判定）：日记／页／标签／备注／属性定义／查询视图／自动化</span>
 <span class="key">{ today: { offset } }</span>   <span class="cmt">相对日期：基准 ± offset 那天的日记块；存表达式不存字面量</span>
 <span class="key">{ up } / { down } / { near }</span> <span class="cmt">存在一个祖先／子孙／任一处满足条件；方向是独立一轴，可套任意条件</span>
 <span class="key">{ all } / { any } / { not }</span>  <span class="cmt">可嵌套；能组合表达的，不另造专用键</span>
@@ -440,7 +440,7 @@
       <div class="note" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line2)">
         <b>三种东西别混</b>：<b>条件</b>（入 KB、进撤销）／<b>结果集</b>（一次求值，冻结在表面实例）／<b>内容</b>（永远按 block id 现读）。
         专用键每多一个，<code>canonicalSpec</code> 就多一处会漏的分支，而漏掉的表现是「条件看着没变、结果对不上」。
-        <code>role</code> 与方向原子的分工写死：<code>{up}/{down}/{near}</code> 问<b>位置</b>，<code>role</code> 问<b>身份</b>——「某一天下面」＝<code>{up:{all:[{role:'journal'},{prop:{id:'_date',eq:…}}]}}</code>，不是又一个专用键。
+        <code>role</code> 与方向原子的分工写死：<code>{up}/{down}/{near}</code> 问<b>位置</b>，<code>role</code> 问<b>身份</b>（内建语义判据，值域封闭）——「某一天下面」＝<code>{up:{all:[{role:'journal'},{prop:{id:'_date',eq:…}}]}}</code>，不是又一个专用键。
       </div>
     </div>
 
@@ -473,10 +473,10 @@
       </div>
       <div class="hr"></div>
       <div class="subh">构建器 <span>条件树 ⇄ JSON，同一份数据</span></div>
-      <div class="struct" style="line-height:1.85"><span class="type">TreeRow</span>   <span class="pipe">{</span> kind: tag|prop|text|ref|path|role|is, … <span class="pipe">}</span>
+      <div class="struct" style="line-height:1.85"><span class="type">TreeRow</span>   <span class="pipe">{</span> kind: tag|prop|text|ref|children|is|role|day|stamp|mark|link, dir? <span class="pipe">}</span>
 <span class="type">TreeDraft</span> <span class="pipe">{</span> root: TreeGroup, limit?, sort?, todayFrom? <span class="pipe">}</span></div>
       <div class="note" style="margin-top:8px">
-        <code>path</code> 行是<b>方向预设</b>：它展开成 <code>{up:…}</code>／<code>{down:…}</code>／<code>{near:…}</code>，落盘的只有一种形状 —— 界面留着「上级／下级／任一处」三个词，模型里不多一个原子。
+        <b>方向不是一种行</b>：它是行上的 <code>dir</code> 字段（界面留着「上级／下级／任一处」三个词），展开成 <code>{up:…}</code>／<code>{down:…}</code>／<code>{near:…}</code>，落盘的只有一种形状 —— 模型里不多一个原子。
         <code>specOfTree(treeOfSpec(s))</code> 与 <code>canonicalSpec(s)</code> <b>逐字节相等</b>（有单测）；两边各写一份转换，就一定会在某个原子上分叉。
         拆不成行的嵌套（<code>not</code> 里套 <code>any</code>）整块走 JSON，<b>不拆</b>——拆了再拼回来就不是它自己。一次「应用」＝一笔事务＝一轮撤销；JSON 解析失败<b>保留原文</b>，绝不静默清空。
       </div>
@@ -747,7 +747,7 @@
         <dt>查询</dt><dd>有 <code>_query</code> 的块：<b>条件</b>是内容（入 KB、可引用、进回收站），<b>结果</b>只是表面实例的冻结快照（第五节）</dd>
         <dt>视图</dt><dd>对<b>一份源</b>的记录怎么排、怎么画；配置住拥有者（<code>_views</code>／<code>_activeView</code>），滚动/选中/冻结结果外挂、不入 KB</dd>
         <dt>侧栏</dt><dd>一个槽，里面是一列<b>条目</b>：窗口卡／快捷卡／派生卡／命令小卡／工具面卡。堆叠归槽、卡片归块；清单是设备状态（第七节）</dd>
-        <dt>落点</dt><dd><b>页</b>（新建 / <code>@</code> 建页）与<b>身份</b>（tag / schema / journal）创建时物化在森林顶层；<b>记录 / 笔记</b>落当天。<code>标记为页</code> 原地；<code>提取为页</code> 才把块连子树搬到顶层，并在原位置留一枚引用。用户世界仍没有「根」：无根视图、无「提取为无名根」</dd>
+        <dt>落点</dt><dd><b>页</b>（新建 / <code>@</code> 建页）与<b>身份</b>（tag / schema / journal / query / automation）创建时物化在森林顶层；<b>记录 / 笔记</b>落当天。<code>标记为页</code> 原地；<code>提取为页</code> 才把块连子树搬到顶层，并在原位置留一枚引用。用户世界仍没有「根」：无根视图、无「提取为无名根」</dd>
       </div>
     </div>
     <div class="card pad">
@@ -766,6 +766,15 @@
         各自只有一份真相，所以「改一处」不会悄悄改掉另一处。
       </div>
     </div>
+  </div>
+
+  <div class="note" style="margin-top:12px;padding-top:11px;border-top:1px dashed var(--line2)">
+    <b>三个值域别混</b>（身份不是一个字段，是三层不同的东西）：
+    <b>存储</b>只有两种机制——<b>露面</b> <code>props._lists</code>（<code>page</code>／<code>tag</code>，可兼位）＋ <b>派生身份</b>的四个专属槽（<code>_date</code>／<code>_kind</code>／<code>_query</code>／<code>_automation</code>）；
+    <b>外观标记</b> <code>data-role</code> 认六种（露面 2 ＋ 派生 4）；
+    <b>查询值域</b> <code>{role}</code> 七种（六种身份 ＋ <code>note</code>——备注可查，但它不是身份块：正文可编辑、能删）。
+    ⇒ 块上<b>没有</b> <code>role</code> 字段（<code>_roles</code> 是旧键，读侧判 corrupt），<code>{role}</code> 是<b>问法</b>不是存储；
+    三层的关系由两条类型断言钉住：身份 ⊆ 查询值域，差集恰好是 <code>note</code>。
   </div>
 </section>
 
