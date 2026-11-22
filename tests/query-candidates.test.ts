@@ -111,6 +111,13 @@ function seed(): RowWrite[] {
     block('BROKEN_Q', null, null, { query: JSON.stringify({ oops: 1 }) }),
     block('AUTO', null, null),
     prop('AUTO', '_automation', 0, { enabled: true, triggers: ['manual'], steps: [] }),
+    /**
+     * **只带死标签**：`_tags` 里是一个不存在的标签块 id。它是**合法状态**，不是坏数据——
+     * 归属列表的形状只回答「是不是 id 列表」，悬空 id 明确被允许（删标签不摘引用）。
+     * 它没有**活**标签 ⇒ matcher 对 `{_tags exists:true}` 不命中。
+     */
+    block('Z_DEADTAG', null, null),
+    prop('Z_DEADTAG', '_tags', 0, 'TAG_GONE', 1),
     alias('标签A', 'TAG_A'),
     alias('标签B', 'TAG_B'),
     alias('X页', 'PAGE_X'),
@@ -563,5 +570,26 @@ test('{not:{role:query}} 不挖掉「列非空但条件读不出」的块（候�
       [...hitSet(kb, notQuery, {})].sort(),
       '候选装载求值与整库求值必须一致',
     )
+  })
+})
+
+/**
+ * `tagged` 计划的**精确性是假的**：候选问「有没有 `_tags` 这一行」，matcher 问「有没有**活**标签」。
+ *
+ * 死标签 id 是合法状态 ⇒ 存在「行在、标签全死」的块：它不命中 `{_tags exists:true}`，
+ * 但会被 `tagged` 候选选中。一旦 tagged 被当成精确集用于否定差集，这类块就从
+ * 「没有活标签」的查询结果里被挖掉——静默漏行。
+ */
+test('{not:{_tags exists}} 保留「只带死标签」的块（tagged 计划不精确）', () => {
+  withDb((db) => {
+    const { forest, kb } = baseline(db)
+    const plan = (spec: QuerySpec) => candidateBuildOf(spec, undefined, forest, {}).plan
+    const notTags = { where: { not: { prop: { id: '_tags', exists: true } } } } as QuerySpec
+    const sql = candidatePlanSql(plan(notTags))
+    assert.ok(!sql.sql.toLowerCase().includes('except'), '`tagged` 不精确 ⇒ 差集不许生效')
+    const { hits, candidates } = worksetEval(db, notTags, forest, {})
+    assert.ok(new Set(hits).has('Z_DEADTAG'), 'matcher 说它没有活标签，它必须命中否定条件')
+    assert.ok(candidates.includes('Z_DEADTAG'), '候选不许把它挖掉（差集减多一个就是漏行）')
+    assert.deepEqual([...new Set(hits)].sort(), [...hitSet(kb, notTags, {})].sort(), '候选装载求值与整库求值必须一致')
   })
 })

@@ -929,7 +929,6 @@ function planIsExact(plan: CandidatePlan, derived: boolean): boolean {
     case 'note':
     case 'kind':
     case 'aliased':
-    case 'tagged':
       return true
     /**
      * ⚠️ **`visible` 不算精确**，哪怕它的集合（可见块）本身就是判定域。
@@ -969,6 +968,13 @@ function planIsExact(plan: CandidatePlan, derived: boolean): boolean {
     case 'prop':
     case 'text':
     case 'query':
+    /**
+     * **`tagged` 不能当差集的减数**：候选问「有没有 `_tags` 这一行」，matcher 问
+     * 「有没有**活**标签」。死标签 id 是合法状态（删标签不摘引用），所以「行在、
+     * 标签全死」的块会被候选选中、却不被 matcher 命中——拿它做 `except` 就把这类块
+     * 从「没有活标签」的结果里挖掉了。退化成 `visible`：宽，但真。
+     */
+    case 'tagged':
       return false
     /**
      * 逐 run 问同一组键值：与 matcher 的判定集同集（可见性两处同源）⇒ 可信时精确。
