@@ -216,6 +216,11 @@ export interface MountAreaDeps {
    */
   openMenu?: (o: MenuOpts) => void
   /**
+   * 改指向：反链栏（refs）／成员栏（members）抬头各一颗。
+   * UI 只报「哪个面、锚点、触发者」，选目标与写库归装配层。
+   */
+  onRetarget?: (source: 'refs' | 'members', anchor: DOMRect, trigger: HTMLElement) => void
+  /**
    * 这一台挂载区所在的表面（`dock` 是右槽窄列：镜头面板要向主内容一侧开）。
    * 只影响浮层落位，不影响数据与写路径。
    */
@@ -1555,6 +1560,19 @@ export class MountArea {
 
     const actions = document.createElement('div')
     actions.className = 'mount-derived-actions'
+
+    // 改指向：反链栏／成员栏各一颗（选目标与写库归装配层，这里只发意图）
+    if (this.deps.onRetarget && (entry.source === 'refs' || entry.source === 'members')) {
+      const retargetBtn = document.createElement('button')
+      retargetBtn.type = 'button'
+      retargetBtn.className = 'ui-btn mount-derived-retarget'
+      retargetBtn.textContent = t('ui.mount.retarget')
+      retargetBtn.dataset.tip = t('ui.mount.retargetHint')
+      retargetBtn.addEventListener('click', () => {
+        this.deps.onRetarget!(entry.source as 'refs' | 'members', retargetBtn.getBoundingClientRect(), retargetBtn)
+      })
+      actions.appendChild(retargetBtn)
+    }
 
     /**
      * **一键折/展**（引用栏·大纲看法）：折/展全部**关联型**根。传递型不在名单里——

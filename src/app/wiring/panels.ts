@@ -90,6 +90,8 @@ import type { BlockEditor } from '../../view/editor/editor.ts'
 import { editorRun } from '../../view/editor/editor-run.ts'
 import { renderNamePrompt } from '../../ui/overlay/panels.ts'
 import type { OwnerStore } from './owners.ts'
+import { collectTagClassIds } from '../../core/relations/relations.ts'
+import { planRetarget, applyRetargetPlan, type RetargetKind } from '../../core/relations/retarget.ts'
 
 export type PanelsDeps = {
   blocks: BlockStore
@@ -1330,6 +1332,47 @@ export function setupPanels(deps: PanelsDeps) {
     renderSurface: () => void
   }
 
+  /** 改指向：选一个目标块，把「指向当前宿主」的指针改过去（反链栏＝引用 kinds，成员栏＝tag） */
+  function handleRetarget(spec: MountSurface, surface: 'refs' | 'members', anchor: DOMRect, trigger: HTMLElement): void {
+    const host = spec.host()
+    if (!host) return
+    const fromId = host.id
+    const kinds: readonly RetargetKind[] = surface === 'members' ? ['tag'] : ['inline', 'property', 'embed', 'tagMention']
+    openNameChoice({
+      layers,
+      forest: kb.roots(),
+      kind: surface === 'members' ? 'tag' : 'ref',
+      allowCreate: false,
+      excludeIds: [fromId],
+      anchor,
+      trigger,
+      title: t('ui.mount.retargetPickTitle'),
+      emptyText: t('ui.mount.retargetPickEmpty'),
+      idPrefix: 'retarget',
+      onPick: (pick) => {
+        if (pick.kind !== 'block') return
+        const toId = pick.id
+        const tagClassIds = collectTagClassIds(kb.roots())
+        // 选目标即用户意图：同一 tx 回调里全量重扫 → 算计划 → 有阻塞/零命中就不写
+        const result = kb.tx((tx) => {
+          const edges = kb.relationsTo(fromId)
+          const plan = planRetarget(fromId, toId, { edges, find: (id) => kb.get(id), kinds, tagClassIds })
+          if (plan.blocked.length > 0 || plan.total === 0) return { done: false, total: plan.total, blocked: plan.blocked.length }
+          applyRetargetPlan(plan, tx)
+          return { done: true, total: plan.total, blocked: 0 }
+        })
+        const r = result.result
+        if (!r.done) {
+          app.toast(t(r.blocked > 0 ? 'ui.mount.retargetBlocked' : 'ui.mount.retargetEmpty'), 'warn')
+          return
+        }
+        app.toast(t('ui.mount.retargetDone', { count: r.total }), 'ok')
+        spec.renderSurface()
+      },
+    })
+  }
+
+
   function createMountArea(spec: MountSurface): MountArea {
     return new MountArea({
       store: blocks,
@@ -1361,6 +1404,7 @@ export function setupPanels(deps: PanelsDeps) {
       closePopover: () => layers.closePopover(),
       // 派生栏的看法下拉：与视图宿主那条「视图…」同一张菜单渲染器（行由挂载区现画）
       openMenu: (o) => layers.openMenu(o),
+      onRetarget: (surface, anchor, trigger) => handleRetarget(spec, surface, anchor, trigger),
       // 大纲分支的切换下拉：与视图宿主那条同一个菜单（装配层现画行，这里只给锚点）
       derivedKind: (hostBlock, source) => {
         const mountHost = mountHostOf(hostBlock)

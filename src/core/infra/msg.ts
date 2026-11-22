@@ -621,6 +621,13 @@ export const MSG = {
   'ui.mount.empty.refsKind': '这一栏没有这类引用',
   'ui.mount.via.direct': '直接',
   'ui.query.untitled': '未命名查询',
+  'ui.mount.retarget': '改指向…',
+  'ui.mount.retargetHint': '把指向这一块的引用改指到别的块',
+  'ui.mount.retargetPickTitle': '改指向到…',
+  'ui.mount.retargetPickEmpty': '没有可选的块',
+  'ui.mount.retargetDone': '已把 {count} 处改指向（⌘Z 可撤销）',
+  'ui.mount.retargetBlocked': '有些引用在只读正文里或会改变引用类型，未做改动',
+  'ui.mount.retargetEmpty': '没有可改指向的引用',
   /* ---- 自动化（命令块）---- */
   'ui.automation.untitled': '未命名自动化',
   'ui.automation.created': '已创建自动化「{name}」，默认停用——写好步骤后启用它',
