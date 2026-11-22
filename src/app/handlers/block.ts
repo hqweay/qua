@@ -80,23 +80,19 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     app.toast(t('ui.toast.blockDuplicated'))
     return true
   },
-  'core.editor/delete-block': (a, app) => {
-    /**
-     * 删除落点只有一条判据：这一下站在**露面岛**里 ⇒ 删的是这一次露面，不是岛里的源。
-     * 菜单把宿主 id 放在 `embedHost`（键位没有菜单上下文，编辑器自带 `embedHostId`）；
-     * 两条入口都汇聚到这里，源自己的位置照旧删源。
-     */
+  /**
+   * **删除一块** —— 页／标签／日记／字段定义／内容块共用这一条。
+   *
+   * 落点只有一条判据：这一下站在**露面岛**里 ⇒ 删的是这一次露面，不是岛里的源
+   * （菜单把宿主 id 放在 `embedHost`；键位没有菜单上下文，编辑器自带 `embedHostId`）。
+   * 其余全部交给 `App.deleteBlock`：怎么删、要不要确认、删完落到哪，都在那一份里。
+   */
+  'core.block/delete': (a, app) => {
     const embedHost = S(a.embedHost) || app.ed.embedHostId
-    if (embedHost) {
-      // 摘露面不发「已删除块」——删的是这一次的露面，源与其正文一个字节没动
-      return app.removeEmbed(embedHost)
-    }
+    // 摘露面不发「已删除」——删的是这一次的露面，源与其正文一个字节没动
+    if (embedHost) return app.removeEmbed(embedHost)
     const id = S(a.blockId) || curBlock(app)
-    if (!id) return false
-    // 守卫会静默拒绝（身份块／不能删的装载根）——没删就不说「已删除」
-    if (!app.deleteBlock(id)) return false
-    app.toast(t('ui.toast.blockDeleted'))
-    return true
+    return id ? app.deleteBlock(id) : false
   },
   /**
    * 修一枚 dangling 引用：回收站里有目标 ⇒ 恢复；真没了 ⇒ 建同名块并把这一枚指过去。

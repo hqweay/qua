@@ -14,7 +14,7 @@ import {
   hasIdentity,
   hasLiveChildren,
   indentMove,
-  canDeleteBlock,
+  removableBySplice,
   isJournal,
   locate,
   mergeIntoPrevPlan,
@@ -533,9 +533,9 @@ export class StructOps {
      *
      * 为什么按身份而不是按「是不是根」判：正文的根既可能是
      *   · 一个**有身份的容器**（页／日记／反链）—— 它是视图的装载单位，
-     *     `doc.roots[0]` 就是森林里那块本身；删它要走命令面（`core.page/delete` 那一路，
-     *     带「至少留一页」与换邻页）。删掉它只 splice 视图的话，库里那块还在
-     * ⇒ 刷新就回来（「删了又复活」比报错更糟）。
+     *     `doc.roots[0]` 就是森林里那块本身；只 splice 视图的话库里那块还在
+     * ⇒ 刷新就回来（「删了又复活」比报错更糟）。所以它要绕到库级软删那一路
+     * （`App.deleteBlock` 拿到 `false` 后自己走）。
      *   · 也可能是一个**普通内容块**（zoom 进来的某一块）—— 没有身份语义，
      *     删掉就是删掉这块内容，应当放行。
      *   · **查询块根**：晋升出来的查询是内容，又没有自己的删除命令面——
@@ -549,7 +549,7 @@ export class StructOps {
      *    收尾是关闭不是删除）与卡片格（岛与块 id 绑定，提交假定块存在）。
      *    其余面默认放行：行的删除＝软删真块，面按 store 重算收尾。
      */
-    if (loc.parent === null && !canDeleteBlock(loc.block)) return false
+    if (loc.parent === null && !removableBySplice(loc.block)) return false
     if (loc.parent === null && !this.ed.allowRootRemove) return false
     this.ed.beginUndoEntry()
     const idx = flatten(this.ed.doc).findIndex((b) => b.id === id)

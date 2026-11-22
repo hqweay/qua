@@ -615,7 +615,7 @@ function viewEvents(
         // 删除块行在露面面收起：它会删源；删除只留命名准确的「移除这次露面」。
         ...(appearanceHost
           ? {
-              omitCommands: ['core.editor/delete-block'],
+              omitCommands: ['core.block/delete'],
               extraRows: [
                 {
                   id: 'appearance-views',

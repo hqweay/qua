@@ -36,7 +36,7 @@ import { mountDockSlot } from './ui/dock/dock.ts'
 import { createIcon } from './view/icons.ts'
 import { mountNotePopover, type NotePopoverHandle } from './ui/block-ui/note-popover.ts'
 import { type ObjFieldDeps } from './ui/overlay/panels.ts'
-import { devCommands, journalCommands, mentionCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, viewCommands, viewConfigCommands, buildFreshView, zoomCommands } from './app/commands-impl.ts'
+import { deleteCommands, devCommands, journalCommands, mentionCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, viewCommands, viewConfigCommands, buildFreshView, zoomCommands } from './app/commands-impl.ts'
 import { automationCommands } from './app/commands/automation.ts'
 import { createAutomationEngine } from './core/automation/engine.ts'
 import type { TxRun } from './app/commands/types.ts'
@@ -1442,7 +1442,6 @@ const viewMenus = setupViewMenus({
   getPanels: () => panels,
   getApp: () => app,
   shortId,
-  getPageDeps: () => pageDeps,
   toast: (text, kind) => app.toast(text, kind),
   blockName,
 })
@@ -1597,6 +1596,11 @@ const app: App = {
   ...pageCommands(pageDeps),
   // 日记与页共用同一份依赖（今日是落点，不是特例代码路径）
   ...journalCommands(pageDeps),
+  /**
+   * 删除：一份实现、一个入口。落点的第三档要回「今日日记流」——那是日记命令的事，
+   * 所以这里传一个**函数**而不是命令对象（`app` 在这一行还没赋值，真正调用在删除那一刻）。
+   */
+  ...deleteCommands(pageDeps, { openTodayFeed: () => app.journalToday() }),
   ...zoomCommands(pageDeps),
   ...moveCommands(pageDeps),
   ...mountCommands({
@@ -1742,21 +1746,6 @@ const app: App = {
   openBlockConfig: (blockId, opts) => panels.openBlockConfig(blockId, opts),
   openPropertiesDrawer: (blockId, focusPropId) => panels.openPropertiesDrawer(blockId, focusPropId),
   setBlockType: (blockId, typeId) => applyBlockType(blockId, typeId),
-  /**
-   * 块级删除：在正文里 ⇒ 编辑器的结构删除（装载根收尾、留空位）；
-   * 不在正文里（记录面／派生栏）⇒ 库级软删。身份块不走这里，各有自己的命令。
-   */
-  deleteBlock: (blockId) => {
-    if (!findInForest(ws.blocks, blockId)) return false
-    if (locate(ed.doc, blockId)) return ed.struct.remove(blockId)
-    /**
-     * 不在正文里（记录面）：走 `pageDeps.run`（**带撤销条目**），不是
-     * `pageDeps.removeBlock`——后者是身份删除用的裸结构写（回收站兜底、不进 ⌘Z），
-     * 而「删一条记录」必须能一次撤销回来。
-     */
-    pageDeps.run((tx) => tx.remove(blockId))
-    return true
-  },
   /** 复制一块到它自己后面；正文里沿用编辑器（落点结构判据），记录面走库级插入。 */
   duplicateBlock: (blockId) => {
     if (locate(ed.doc, blockId)) return ed.struct.duplicate(blockId)

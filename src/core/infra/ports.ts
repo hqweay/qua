@@ -224,13 +224,13 @@ export interface App {
   activePageId(): string
   newPage(): void
   openPage(id: string): void
-  deletePage(id: string): void
   /**
-   * **删一块（按 id，软删可撤销）**——块级动作，任何表面都能调。
+   * **删一块（按 id，软删可撤销）** —— 删除只有这一个入口，所有块同一份。
    *
-   * 与三个身份删除（页／标签／日记）分开：身份块不走这里，它们各有自己的命令与守卫。
-   * 块在当前正文里时走编辑器的结构删除（装载根收尾、留空位）；不在（记录面）时
-   * 走库级软删。返回值＝真的删了（编辑器侧的守卫会静默拒绝）。
+   * 页／标签／日记／字段定义／内容块在这里不分家：它们差别只在**怎么删**
+   * （摘行还是库级软删＋换落点），那是机制，藏在门面里。准入（今天不删）由菜单行的
+   * `when` 回答；要问确认的那一层（命令 handler）按 `deletionCostOf` 报的代价决定。
+   * @returns 真的删了
    */
   deleteBlock(id: string): boolean
   /** 复制一块（含子树，原子换新 id）到它自己后面；返回新块 id。 */
@@ -246,8 +246,6 @@ export interface App {
    *          op 的落盘与重画都在这条门面里收口，handler 只管说「做了多少」。
    */
   purgeTrash(ids: readonly string[]): number
-  /** 删除标签块（整棵子树软删，回收站可恢复）；不是「取消标签」——那是摘露面位 */
-  deleteTag(id: string): boolean
   renamePage(id: string, title: string): void
   /** 把焦点交给页名（**UI 归装配层**：命令只说「要改名」，不碰 `document` — 59 ） */
   focusTitle(): void
@@ -616,11 +614,6 @@ export interface App {
   journalReview(days: number): void
   /** 在复盘的空天格子里落笔：物化那一天、按同一参数重开、光标落进那一天 */
   journalShellWrite(date: string): void
-  /**
-   * 删除一天（软删，回收站可恢复）。再打开这一天会**复活同一块**；
-   * 今天删不掉（冷启动会把它物化回来）。
-   */
-  deleteJournal(id: string): boolean
   /** 设定日记流的段排列（设备偏好；复盘的排列切换入口将来接这里） */
   journalFeedLayout(layout: SecLayout): void
   /* zoom（块可任意 zoom in；zoom 是视图配置，不是新对象） */

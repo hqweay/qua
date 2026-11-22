@@ -25,7 +25,12 @@ export const COMMANDS: CommandDecl[] = [
   // 点导轨段走这条（点线 ≠ 点三角——线折**直接子块**，三角折**自己**）
   { name: 'core.editor/toggle-children-collapse', title: t('cmd.editor.toggle-children-collapse'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { blockId: { type: 'string' } }, keywords: ['fold', 'collapse', 'children'] },
   { name: 'core.editor/duplicate-block', title: t('cmd.editor.duplicate-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['duplicate', 'clone'], actsOn: 'block' },
-  { name: 'core.editor/delete-block', title: t('cmd.editor.delete-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['delete', 'remove'], actsOn: 'block' },
+  /**
+   * **删除是一件事，一条命令**：页／标签／日记／字段定义／内容块都走它。
+   * 差别只在机制（摘行还是库级软删＋换落点），用户在菜单上看到的是一行「删除」；
+   * 确认按**这次删的连带代价**算（没代价不问）。
+   */
+  { name: 'core.block/delete', title: t('cmd.block.delete'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { blockId: { type: 'string' } }, keywords: ['delete', 'remove', 'page', 'tag', 'journal', 'day', 'trash', t('menu.kw.delete')], actsOn: 'block' },
   { name: 'core.editor/toggle-closure', title: t('cmd.editor.toggle-closure'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['todo', 'check', 'checkbox'], actsOn: 'block' },
   /**
    * 「切换待办」的**反向**：那个只在 `true`／`false` 之间翻，永远摘不掉这一栏。
@@ -185,7 +190,6 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.page/next', title: t('cmd.page.next'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.page') },
   { name: 'core.page/prev', title: t('cmd.page.prev'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.page') },
   { name: 'core.page/rename', title: t('cmd.page.rename'), capability: 'write', undoable: false, version: '1.0', category: t('menu.cat.page') },
-  { name: 'core.page/delete', title: t('cmd.page.delete'), capability: 'admin', undoable: false, version: '1.0', category: t('menu.cat.page'), keywords: ['delete page'], actsOn: 'block' },
 
   /* ---- 日记（今日是落点，不是特例；：日期只读、一天一个） ---- */
   { name: 'core.journal/today', title: t('cmd.journal.today'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), args: { date: { type: 'string' } }, keywords: ['journal', 'today', 'daily'], tile: { icon: 'lucide:calendar' } },
@@ -194,7 +198,6 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.journal/next', title: t('cmd.journal.next'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), keywords: ['journal', 'next', 'tomorrow'] },
   { name: 'core.journal/review', title: t('cmd.journal.review'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.journal'), args: { days: { type: 'number' } }, keywords: ['review', 'retro', 'days'] },
   { name: 'core.journal/feed-layout', title: t('cmd.journal.feed-layout'), capability: 'write', undoable: false, version: '1.0', category: t('menu.cat.journal'), args: { layout: { type: 'string' } }, keywords: ['layout', 'feed', 'column', 'row'] },
-  { name: 'core.journal/delete', title: t('cmd.journal.delete'), capability: 'admin', undoable: false, version: '1.0', category: t('menu.cat.journal'), args: { blockId: { type: 'string' } }, keywords: ['journal', 'delete', 'day'], actsOn: 'block' },
 
   /* ---- zoom（zoom 是视图配置，不是新对象，也不引入焦点栈） ---- */
   { name: 'core.block/focus-block', title: t('cmd.block.focus-block'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, feed: { type: 'boolean' }, restore: { type: 'boolean' }, newTab: { type: 'boolean' } }, keywords: ['zoom', 'focus', t('menu.kw.zoom')], actsOn: 'block' },
@@ -214,7 +217,6 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.block/untag', title: t('cmd.block.untag'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['tag', 'role', 'remove'], actsOn: 'block' },
   { name: 'core.block/set-color', title: t('cmd.block.set-color'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, color: { type: 'string' } }, keywords: ['color', 'identity'], hidden: true },
   { name: 'core.block/set-icon', title: t('cmd.block.set-icon'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, icon: { type: 'string' } }, keywords: ['icon', 'identity'], hidden: true },
-  { name: 'core.tag/delete', title: t('cmd.tag.delete'), capability: 'admin', undoable: false, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['tag', 'delete', 'remove'], actsOn: 'block' },
   /**
    * 块配置弹窗（名字／露面／显示模式／脸）：一个块只有这一个配置面，
    * 脸跟名字住同一个弹窗——读路径对所有块一致，写入口也一致。

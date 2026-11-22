@@ -3795,10 +3795,10 @@ await check('T39 显示名 = 主别名：改正文＝改描述；别名编辑器
   await page.evaluate(() => window.__qua.__layers.closePopover())
 
   // ⑦ **目标被删 ⇒ dangling**：不静默错指，chip 上带 .dangling
-  // ⚠️ `core.page/delete` 删的是**当前对象**（不收 pageId 参数）⇒ 先打开它再删
+  // 删除只认**给定这一块**（不认「当前对象」）⇒ 显式给 id，免得删到装载根的首行
   await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), target.targetId)
   await page.waitForTimeout(150)
-  await page.evaluate(() => window.__qua.invoke('core.page/delete'))
+  await page.evaluate((id) => window.__qua.invoke('core.block/delete', { blockId: id }), target.targetId)
   await page.waitForTimeout(120)
   await page.locator('.confirm-ok').click() // 删页弹确认（爆炸半径：整棵子树）
   await page.waitForTimeout(100)
@@ -5062,49 +5062,77 @@ await check('T55 载入假数据：落点是日记就装日记流（今日在顶
  * 库里那块还在 ⇒ 刷新就回来。用户看到的是「删了又复活」，
  * 而且**没有报错**——这类静默不一致只能靠断言钉住。
  */
-await check('T56 聚焦根块时块菜单**没有**「删除块」，命令被直接调用也拒绝（不静默丢块）', async () => {
+await check('T56 聚焦装载根也能删：走库级软删（不是 splice 假删）⇒ 刷新不回来、落点在邻页', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
 
-  // ① 聚焦**根块**（页自己）⇒ 上下文键应报「是根」
-  const rootKeys = await page.evaluate(() => {
-    const rootId = window.__qua.blocks()[0].id
-    window.__qua.focusBlock(rootId, 0)
+  // ① 打开一页并聚焦**根块**（页自己）——装载根仍是真块，不是视图里的一行
+  const target = await page.evaluate(() => {
+    const p = window.__qua.pages()[0]
+    window.__qua.invoke('core.page/open', { pageId: p.id })
+    return { id: p.id, pages: window.__qua.pages().length }
+  })
+  await page.waitForTimeout(200)
+  const rootKeys = await page.evaluate((id) => {
+    window.__qua.focusBlock(id, 0)
     const k = window.__qua.ctxKeys()
-    return { blockIsRoot: Boolean(k.blockIsRoot), blockFocused: Boolean(k.blockFocused) }
-  })
-  assert(rootKeys.blockFocused === true, `前置：根块应处于聚焦态：${JSON.stringify(rootKeys)}`)
-  assert(rootKeys.blockIsRoot === true, `根块的 blockIsRoot 应为 true：${JSON.stringify(rootKeys)}`)
+    return { blockIsRoot: Boolean(k.blockIsRoot), blockCanDelete: Boolean(k.blockCanDelete) }
+  }, target.id)
+  assert(rootKeys.blockIsRoot === true, `前置：根块的 blockIsRoot 应为 true：${JSON.stringify(rootKeys)}`)
+  assert(rootKeys.blockCanDelete === true, `装载根也能删（准入只剩「今天不删」）：${JSON.stringify(rootKeys)}`)
 
-  // ② 菜单里不该出现删除项
-  const items = await page.evaluate(() => {
+  // ② 菜单里**只有一行**删除（不是「删除块」＋「删除页面」两行）
+  const items = await page.evaluate((id) => {
     const ed = window.__qua.__editor
-    const rootId = window.__qua.blocks()[0].id
-    ed.events.blockMenu?.(rootId, document.querySelector(`.blk[data-block-id="${rootId}"]`).getBoundingClientRect())
+    ed.events.blockMenu?.(id, document.querySelector(`.blk[data-block-id="${id}"]`).getBoundingClientRect())
     return [...document.querySelectorAll('.layer-item .layer-label')].map((e) => e.textContent ?? '')
-  })
+  }, target.id)
   assert(
-    !items.some((x) => x.includes('删除块') || x.includes('删除选中的块')),
-    `根块菜单不该有删除项：${JSON.stringify(items)}`,
+    items.filter((x) => x.startsWith('删除')).length === 1,
+    `装载根的删除只应有一行：${JSON.stringify(items)}`,
+  )
+  await page.keyboard.press('Escape')
+
+  /**
+   * ③ 真删的判据：绕过菜单直接 invoke 也**真的删**（库级软删），
+   * 不是旧事故那种「splice 出视图、库里还在 ⇒ 刷新又回来」。
+   */
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), target.id)
+  await page.waitForTimeout(120)
+  await page.evaluate(() => window.__qua.invoke('core.block/delete'))
+  await page.waitForTimeout(150)
+  await page.locator('.confirm-ok').click() // 有连带（整棵子树）就弹确认
+  await page.waitForTimeout(250)
+
+  const after = await page.evaluate((t) => {
+    const store = window.__qua.__editor.store
+    let deleted = null
+    const walk = (list) => {
+      for (const b of list) {
+        if (b.id === t.id) deleted = Boolean(b.props?._deletedAt)
+        walk(b.children)
+      }
+    }
+    walk(store.blocks)
+    return {
+      pages: window.__qua.pages().length,
+      visible: Boolean(store.find(t.id)),
+      deleted,
+      roots: window.__qua.__editor.doc.roots.map((r) => r.id),
+      activeId: window.__qua.snapshot().activeId,
+    }
+  }, target)
+  assert(after.pages === target.pages - 1, `页清单应少一项：${target.pages} → ${after.pages}`)
+  assert(!after.visible, '删掉的块不该还在可见读里')
+  assert(after.deleted === true, `应原位软删（库里留着带标记的那一块）：${JSON.stringify(after)}`)
+  assert(
+    !after.roots.includes(target.id) && after.activeId !== target.id,
+    `删掉装载根 ⇒ 落点要换开，不能停在一个已删的根上：${JSON.stringify(after)}`,
   )
 
-  // ③ 兜底：就算绕开 `when` 直接 invoke，也不许删（块数与活动 id 都不变）
-  const before = await page.evaluate(() => ({
-    total: window.__qua.snapshot().totalBlocks,
-    activeId: window.__qua.snapshot().activeId,
-  }))
-  await page.evaluate(() => window.__qua.invoke('core.editor/delete-block'))
-  await page.waitForTimeout(150)
-  const after = await page.evaluate(() => ({
-    total: window.__qua.snapshot().totalBlocks,
-    activeId: window.__qua.snapshot().activeId,
-  }))
-  assert(after.total === before.total, `删根块被拒 ⇒ 块数不该变：${JSON.stringify({ before, after })}`)
-  assert(after.activeId === before.activeId, `落点不该被改：${JSON.stringify({ before, after })}`)
-
   await ctx.close()
-  return `根块：blockIsRoot=true、菜单无删除项、直接 invoke 也被拒（块数不变 ${before.total}）`
+  return `装载根：菜单只有一行删除；直接 invoke 也走库级软删（带标记留在库里），落点换邻页`
 })
 
 await check('T254 查询块根可删：菜单有删除项、软删可撤销（此前三处入口都不给、又没有替代命令 ⇒ 完全删不掉）', async () => {
@@ -5146,7 +5174,7 @@ await check('T254 查询块根可删：菜单有删除项、软删可撤销（�
   )
 
   // 删除生效：正文里不再有它；⌘Z 一撤销就回来（整棵软删、可回）
-  await page.evaluate(() => window.__qua.invoke('core.editor/delete-block'))
+  await page.evaluate(() => window.__qua.invoke('core.block/delete'))
   await page.waitForTimeout(200)
   // text() 只读当前视图；存在性按整片森林的投影判
   const hasBlock = (mark) =>
@@ -5157,7 +5185,7 @@ await check('T254 查询块根可删：菜单有删除项、软删可撤销（�
   assert(await hasBlock('查询根块XYZ'), '撤销应找回查询块')
 
   await ctx.close()
-  return '查询块根：菜单有删除项、删了可撤销；页根仍不给删除块（T56）'
+  return '查询块根：菜单有删除项、删了可撤销（与页根同一条命令，见 T56）'
 })
 
 /**
@@ -6395,7 +6423,7 @@ await check('T18 跨页锚点不被误删：在当前容器里删块，只回收
     // 被删那一块自己带几条锚点 ⇒ 允许的掉幅度**恰好**等于这个数
     onTarget: window.__qua.marks().filter((m) => m.blockId === id).length,
   }), target)
-  await page.evaluate(() => window.__qua.invoke('core.editor/delete-block'))
+  await page.evaluate(() => window.__qua.invoke('core.block/delete'))
   await new Promise((r) => setTimeout(r, 250))
   const after = await page.evaluate(() => ({ marks: window.__qua.marks().length, atoms: window.__qua.atoms().length }))
 
@@ -8925,9 +8953,9 @@ await check(
     })
     assert(created.pageId && created.kidId, `前置：新页与子块都应存在：${JSON.stringify(created)}`)
 
-    await page.evaluate(() => window.__qua.invoke('core.page/delete'))
+    await page.evaluate((id) => window.__qua.invoke('core.block/delete', { blockId: id }), created.pageId)
     await page.waitForTimeout(120)
-    await page.locator('.confirm-ok').click() // 删页确认（T2：删除即弹确认，不再同步）
+    await page.locator('.confirm-ok').click() // 有连带就弹确认（T2：删除即弹确认，不再同步）
     await page.waitForTimeout(200)
 
     const after = await page.evaluate((t) => {
@@ -14367,7 +14395,7 @@ await check('T143 回收站：删掉的块看得见、能一键恢复回原位�
 
   /**
    * 删除走编辑器层（\`ed.remove\` 才是用户按删除时走的那一条：它带视图补偿）。
-   * 命令面 \`core.editor/delete-block\` 取的是「当前块」，而这里要删的是**指定的一块**。
+   * 命令面 \`core.block/delete\` 取的是「当前块」，而这里要删的是**指定的一块**。
    */
   await page.evaluate((id) => window.__qua.__editor.struct.remove(id), target.id)
   await page.waitForTimeout(250)
@@ -16190,7 +16218,7 @@ const buildListTree = (page) =>
     inv('core.editor/insert-block', { text: '库存' })
     const r3 = sel()
     focus(stub)
-    inv('core.editor/delete-block')
+    inv('core.block/delete')
     // 名称 → 键盘 / 鼠标
     focus(r1)
     inv('core.editor/insert-block', { text: '键盘' })
@@ -16665,7 +16693,7 @@ const buildEmbedTree = (page) =>
     inv('core.editor/insert-block', { text: '这里放镜像' })
     const host = sel()
     q.focusBlock(stub, 0)
-    inv('core.editor/delete-block')
+    inv('core.block/delete')
     return { root, src, c1, c2, host }
   })
 
@@ -20325,7 +20353,7 @@ await check('T269 露面行的菜单归位与删除语义：看法归视图组�
     `看法归视图组、移除归删除组：${JSON.stringify({ views: menuShape.viewsGroup, remove: menuShape.removeGroup })}`,
   )
 
-  // 点「移除这次露面」⇒ 只摘露面，源一个字节不动、不说「已删除块」
+  // 点「移除这次露面」⇒ 只摘露面，源一个字节不动、不说「已删除」
   await page.evaluate(() => {
     const item = document.querySelector('.layer-item[data-id="appearance-remove"]')
     item?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }))
@@ -20343,8 +20371,8 @@ await check('T269 露面行的菜单归位与删除语义：看法归视图组�
   assert(after.srcIntact, `源块一个字节不动：${JSON.stringify(after)}`)
   assert(after.embedGone, `「移除这次露面」＝露面没了：${JSON.stringify(after)}`)
   assert(
-    !after.toasts.some((t) => t?.includes('已删除块')),
-    `不说「已删除块」（删的是露面，不是源）：${JSON.stringify(after.toasts)}`,
+    !after.toasts.some((t) => t?.includes('已删除')),
+    `不说「已删除」（删的是露面，不是源）：${JSON.stringify(after.toasts)}`,
   )
 
 
@@ -21346,7 +21374,7 @@ await check(
 
     // 删掉唯一那一格
     await page.evaluate((id) => window.__qua.focusBlock(id, 0), only)
-    await page.evaluate(() => window.__qua.invoke('core.editor/delete-block'))
+    await page.evaluate(() => window.__qua.invoke('core.block/delete'))
     await page.waitForTimeout(250)
     const after = await read(date)
     const live = after.kids.filter((k) => !k.deleted)
@@ -21378,7 +21406,7 @@ await check(
 
     // 再删一次，然后**直接打字**：补出来的那格是真的能写，不是「看得见、打不进」
     await page.evaluate((id) => window.__qua.focusBlock(id, 0), only)
-    await page.evaluate(() => window.__qua.invoke('core.editor/delete-block'))
+    await page.evaluate(() => window.__qua.invoke('core.block/delete'))
     await page.waitForTimeout(250)
     await page.keyboard.type('甲')
     await page.waitForTimeout(250)
@@ -21458,7 +21486,7 @@ await check(
     await page.waitForTimeout(150)
     await page.keyboard.press('Enter')
     await page.waitForTimeout(200)
-    await page.evaluate(() => window.__qua.invoke('core.editor/delete-block'))
+    await page.evaluate(() => window.__qua.invoke('core.block/delete'))
     await page.waitForTimeout(250)
 
     const staged = await page.evaluate((dt) => {
@@ -21494,30 +21522,34 @@ await check(
 )
 
 await check(
-  'T211 页/标签的块菜单都有删除：删页换到邻页且不留在空白；删标签在有人用时要确认，成员上的归属保留（恢复时接回）',
+  'T211 删除只有一行：页/标签/兼位块共用同一个入口；删页换到邻页不留空白；有人用的标签要说清连带，成员归属保留',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
 
-    // ---- 页：新建一页 → 右键它的块标 → 菜单里有「删除页面」
+    const menuOf = (id) =>
+      page.evaluate((bid) => {
+        const el = document.querySelector(`.blk[data-block-id="${bid}"] .handle`)
+        el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+        return [...document.querySelectorAll('.layer-item .layer-label')].map((e) => e.textContent ?? '')
+      }, id)
+
+    // ---- 页：删除组只有一行，且就叫「删除」
     await page.evaluate(() => window.__qua.invoke('core.page/new'))
     await page.waitForTimeout(150)
     const ids = await page.evaluate(() => {
       const root = window.__qua.__editor.doc.roots[0]
       return { pageId: root.id, pages: window.__qua.pages().length }
     })
-    const pageMenu = await page.evaluate((id) => {
-      const el = document.querySelector(`.blk[data-block-id="${id}"] .handle`)
-      el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
-      return [...document.querySelectorAll('.layer-item .layer-label')].map((e) => e.textContent ?? '')
-    }, ids.pageId)
+    const pageMenu = await menuOf(ids.pageId)
+    const pageDel = pageMenu.filter((x) => x.startsWith('删除'))
     assert(
-      pageMenu.includes('删除页面'),
-      `页块的块菜单应有「删除页面」：${JSON.stringify(pageMenu)}`,
+      pageDel.length === 1 && pageDel[0] === '删除',
+      `页块的删除只应有一行、名字不按身份变：${JSON.stringify(pageMenu)}`,
     )
-    await page.locator('.layer-item', { hasText: '删除页面' }).first().click()
+    await page.locator('.layer-item', { hasText: '删除' }).first().click()
     await page.waitForTimeout(120)
-    await page.locator('.confirm-ok').click() // 删页走会话确认框（整棵子树）
+    await page.locator('.confirm-ok').click() // 有连带（子树）就弹确认
     await page.waitForTimeout(200)
     const afterPage = await page.evaluate(
       (t) => ({
@@ -21535,7 +21567,7 @@ await check(
       `删掉正装载的页 ⇒ 应换到邻页（不是留一片空白）：${JSON.stringify(afterPage)}`,
     )
 
-    // ---- 标签：造一个「有人用」的标签 → 右键 → 确认 → 删除
+    // ---- 标签：造一个「有人用」的标签 → 菜单仍是同一行「删除」→ 确认框把连带说清
     const tagSetup = await page.evaluate(() => {
       const ed = window.__qua.__editor
       const root = ed.doc.roots[0]
@@ -21548,20 +21580,17 @@ await check(
     })
     assert(tagSetup.members === 1, `前置：标签应有 1 个成员：${JSON.stringify(tagSetup)}`)
 
-    const tagMenu = await page.evaluate((id) => {
-      const el = document.querySelector(`.blk[data-block-id="${id}"] .handle`)
-      el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
-      return [...document.querySelectorAll('.layer-item .layer-label')].map((e) => e.textContent ?? '')
-    }, tagSetup.tag)
+    const tagMenu = await menuOf(tagSetup.tag)
+    const tagDel = tagMenu.filter((x) => x.startsWith('删除'))
     assert(
-      tagMenu.includes('删除标签'),
-      `标签块的块菜单应有「删除标签」：${JSON.stringify(tagMenu)}`,
+      tagDel.length === 1 && tagDel[0] === '删除',
+      `标签块的删除也只应有一行（同一个入口）：${JSON.stringify(tagMenu)}`,
     )
-    await page.locator('.layer-item', { hasText: '删除标签' }).first().click()
+    await page.locator('.layer-item', { hasText: '删除' }).first().click()
     await page.waitForTimeout(120)
     const confirm = await page.locator('.confirm').innerText()
     assert(
-      confirm.includes('删除标签') && confirm.includes('1 个块'),
+      confirm.includes('标签') && confirm.includes('1 个块'),
       `有人用时删除要先说清影响（确认框）：${JSON.stringify(confirm)}`,
     )
     await page.locator('.confirm-ok').click()
@@ -21584,8 +21613,131 @@ await check(
       `成员上的归属**不摘**（恢复标签时自动接回）：${JSON.stringify(afterTag)}`,
     )
 
+    /**
+     * ---- 兼位块（页＋标签）：**删除不能变成两行**。按身份分四行时，这一块会同时
+     * 命中「删除页面」与「删除标签」，两行做同一件事、守卫答案还不一样。
+     */
+    const dual = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const root = ed.doc.roots[0]
+      const id = ed.insert.insertBlockAfter(root.id, '兼位块')
+      window.__qua.invoke('core.block/as-page', { blockId: id })
+      window.__qua.invoke('core.block/as-tag', { blockId: id })
+      return id
+    })
+    await page.waitForTimeout(150)
+    const dualMenu = await menuOf(dual)
+    const dualDel = dualMenu.filter((x) => x.startsWith('删除'))
+    assert(
+      dualDel.length === 1,
+      `兼位的块（页＋标签）删除只能出现一行：${JSON.stringify(dualMenu)}`,
+    )
+
     await ctx.close()
-    return `删页 ⇒ 换到邻页不留空白；删标签 ⇒ 有人用时确认，成员归属保留 1 条`
+    return `页/标签/兼位块共用一行「删除」；删页换到邻页不留空白；有人用的标签确认框说清 1 个块`
+  },
+)
+
+await check(
+  'T354 属性定义也能删：没人用 ⇒ 不问直接删；别人带着值时 ⇒ 确认框说清连带，值不丢（恢复后接回）',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+
+    // 正文是 run 序列：取纯文本要投影，不能用 `b.text`（那个字段已经退场）
+    const findDef = `(label) => {
+      let found = ''
+      const plain = (b) => (b.content ?? []).map((r) => (typeof r.v === 'string' ? r.v : '')).join('')
+      const walk = (list) => {
+        for (const b of list) {
+          if (b.props && b.props._kind !== undefined && plain(b).trim() === label) found = b.id
+          walk(b.children)
+        }
+      }
+      walk(window.__qua.__editor.store.blocks)
+      return found
+    }`
+
+    // 两份定义：一份没人用，一份挂在某块上当值
+    const made = await page.evaluate(`(() => {
+      const find = ${findDef}
+      const p = window.__qua.pages()[0]
+      window.__qua.invoke('core.page/open', { pageId: p.id })
+      const ed = window.__qua.__editor
+      const host = ed.doc.roots[0].children[0].id
+      window.__qua.invoke('core.props/create-def', { blockId: '', label: '没人用的属性XYZ', kind: 'text', target: 'own', mode: 'new' })
+      window.__qua.invoke('core.props/create-def', { blockId: host, label: '有人用的属性XYZ', kind: 'text', target: 'own', mode: 'new' })
+      // 声明了槽 ≠ 有值：值要真的写一次，删除的「连带」才有话可说
+      const usedId = find('有人用的属性XYZ')
+      window.__qua.invoke('core.props/set-value', { blockId: host, propId: usedId, value: '一格值' })
+      return {
+        unused: find('没人用的属性XYZ'),
+        used: find('有人用的属性XYZ'),
+        host,
+      }
+    })()`)
+    assert(made.unused && made.used, `前置：两份定义都要建出来：${JSON.stringify(made)}`)
+
+    const menuOf = async (id) => {
+      await page.evaluate((bid) => window.__qua.invoke('core.block/focus-block', { blockId: bid }), id)
+      await page.waitForTimeout(200)
+      return page.evaluate((bid) => {
+        const el = document.querySelector(`.blk[data-block-id="${bid}"] .handle`)
+        el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+        return [...document.querySelectorAll('.layer-item .layer-label')].map((e) => e.textContent ?? '')
+      }, id)
+    }
+
+    // ① 没人用：删除只有一行，点掉不问
+    const unusedMenu = await menuOf(made.unused)
+    assert(
+      unusedMenu.filter((x) => x.startsWith('删除')).length === 1,
+      `字段定义的删除也只应有一行：${JSON.stringify(unusedMenu)}`,
+    )
+    await page.locator('.layer-item', { hasText: '删除' }).first().click()
+    await page.waitForTimeout(250)
+    const unusedAfter = await page.evaluate(() => ({
+      confirmOpen: document.querySelectorAll('.confirm').length,
+      defs: window.__qua.propDefs().map((d) => d.label),
+    }))
+    assert(unusedAfter.confirmOpen === 0, '没人用的定义：不该停下来问')
+    assert(!unusedAfter.defs.includes('没人用的属性XYZ'), `定义应从清单里消失：${JSON.stringify(unusedAfter.defs)}`)
+
+    // ② 有值：先问，问的时候把连带说清
+    const usedMenu = await menuOf(made.used)
+    assert(usedMenu.some((x) => x.startsWith('删除')), `有值的定义也要有删除：${JSON.stringify(usedMenu)}`)
+    await page.locator('.layer-item', { hasText: '删除' }).first().click()
+    await page.waitForTimeout(200)
+    const confirm = await page.locator('.confirm').innerText()
+    assert(confirm.includes('1 个块'), `确认框要说清这一格值会看不见：${JSON.stringify(confirm)}`)
+    await page.locator('.confirm-ok').click()
+    await page.waitForTimeout(250)
+
+    const after = await page.evaluate(
+      (t) => {
+        let host = null
+        const walk = (list) => {
+          for (const b of list) {
+            if (b.id === t.host) host = b
+            walk(b.children)
+          }
+        }
+        walk(window.__qua.__editor.store.blocks)
+        return {
+          defs: window.__qua.propDefs().map((d) => d.label ?? ''),
+          valueStillOnBlock: host ? JSON.stringify(host.props?.[t.used] ?? null) : 'no-host',
+        }
+      },
+      made,
+    )
+    assert(!after.defs.includes('有人用的属性XYZ'), `定义应消失：${JSON.stringify(after.defs)}`)
+    assert(
+      after.valueStillOnBlock !== 'null' && after.valueStillOnBlock !== 'no-host',
+      `值不该被顺手清掉（恢复定义后自动接回）：${JSON.stringify(after)}`,
+    )
+
+    await ctx.close()
+    return '没人用的定义不问直接删；有值的定义先问并说清 1 个块；块上的值不丢'
   },
 )
 
@@ -21602,8 +21754,8 @@ await check(
       return [...document.querySelectorAll('.layer-item .layer-label')].map((e) => e.textContent ?? '')
     })
     assert(
-      !todayMenu.includes('删除这一天'),
-      `今天不该有「删除这一天」（冷启动会物化回来）：${JSON.stringify(todayMenu)}`,
+      !todayMenu.some((x) => x.startsWith('删除')),
+      `今天不该有任何删除项（冷启动会物化回来）：${JSON.stringify(todayMenu)}`,
     )
     await page.keyboard.press('Escape')
 
@@ -21629,12 +21781,15 @@ await check(
       const ph = tx ? getComputedStyle(tx, '::before').content : ''
       return { labels, ph }
     })
-    assert(dayMenu.labels.includes('删除这一天'), `过去的日记天应有「删除这一天」：${JSON.stringify(dayMenu.labels)}`)
+    assert(
+      dayMenu.labels.filter((x) => x.startsWith('删除')).length === 1,
+      `过去的日记天应有且只有一行「删除」：${JSON.stringify(dayMenu.labels)}`,
+    )
     assert(
       dayMenu.ph !== 'none' && dayMenu.ph !== '' && dayMenu.ph !== 'normal',
       `右键日记块标（块菜单打开、光标指到这一块）时日期投影必须还在：${JSON.stringify(dayMenu.ph)}`,
     )
-    await page.locator('.layer-item', { hasText: '删除这一天' }).first().click()
+    await page.locator('.layer-item', { hasText: '删除' }).first().click()
     await page.waitForTimeout(120)
     await page.locator('.confirm-ok').click() // 删天走会话确认框（整棵子树）
     await page.waitForTimeout(200)
@@ -21747,7 +21902,7 @@ await check(
       return a ? { atomId: a.id, targetId: a.target.id, label: a.label } : null
     }, host)
     assert(live, '前置：宿主页上应有一条能解析的引用')
-    await page.evaluate((id) => void window.__qua.invoke('core.page/delete', { blockId: id }), live.targetId)
+    await page.evaluate((id) => void window.__qua.invoke('core.block/delete', { blockId: id }), live.targetId)
     await page.waitForTimeout(120)
     await page.locator('.confirm-ok').click() // 删页弹确认（爆炸半径：整棵子树）
     await page.waitForTimeout(150)
@@ -23359,7 +23514,7 @@ await check('T233 回收站在中心打开：卡留在槽里（同一份数据�
     window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[0].id })
     const blk = document.querySelector('#editor .blk[data-depth="1"]')
     window.__qua.focusBlock(blk.dataset.blockId, 0)
-    window.__qua.invoke('core.editor/delete-block', {}, 'api')
+    window.__qua.invoke('core.block/delete', {}, 'api')
   })
   await page.waitForTimeout(150)
   const slotRows = await page.evaluate(() => document.querySelectorAll('#dock-right [data-trash-row]').length)
@@ -24337,7 +24492,7 @@ await check('T241 搜索面右预览：就地编辑落盘、Enter 建子块并�
   // ④ 选中的块被删掉 ⇒ 那一行按 id 收掉、选中回落到还活着的一条、预览跟着换
   const victim = moved.selected[0]
   await page.evaluate((id) => window.__qua.focusBlock(id, 0), victim)
-  await page.evaluate(() => window.__qua.invoke('core.editor/delete-block', {}, 'api'))
+  await page.evaluate(() => window.__qua.invoke('core.block/delete', {}, 'api'))
   await page.waitForTimeout(500)
   const afterDelete = await state()
   assert(
@@ -32903,8 +33058,8 @@ await check('T344 镜像岛里按 ⌘⇧D＝摘这一次露面，源不动；从
   assert(after.srcIntact, `⌘⇧D 在镜像上不删源：${JSON.stringify(after)}`)
   assert(after.embedGone, `⌘⇧D 在镜像上摘的是露面：${JSON.stringify(after)}`)
   assert(
-    !after.toasts.some((t) => t?.includes('已删除块')),
-    `摘露面不说「已删除块」（与菜单同口径）：${JSON.stringify(after.toasts)}`,
+    !after.toasts.some((t) => t?.includes('已删除')),
+    `摘露面不说「已删除」（与菜单同口径）：${JSON.stringify(after.toasts)}`,
   )
 
   // 反向：从正文里源自己的那一行按 ⌘⇧D，仍要能删源（不因判据收紧而丢能力）
@@ -33226,7 +33381,7 @@ await check('T351 日记流滚到昨天删块：视口外的今天空面板不�
     const all = window.__qua.allBlocks()
     const victim = all.find((b) => !b.props?._date && !b.id?.startsWith('b0000') &&
       !b.lists?.includes('tag') && !b.lists?.includes('page'))
-    window.__qua.invoke('core.editor/delete-block', { blockId: victim.id }, 'api')
+    window.__qua.invoke('core.block/delete', { blockId: victim.id }, 'api')
   })
   await page.waitForTimeout(500)
 

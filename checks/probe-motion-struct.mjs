@@ -24,7 +24,7 @@ const fx = await page.evaluate(() => {
   inv('core.editor/insert-block', { text: '价格' })
   const r2 = sel()
   focus(stub)
-  inv('core.editor/delete-block')
+  inv('core.block/delete')
   focus(r1)
   inv('core.editor/insert-block', { text: '键盘' })
   const c11 = sel()

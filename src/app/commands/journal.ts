@@ -1,33 +1,10 @@
 /**
  * 日记命令：翻日与「回今日」。
  */
-import {
-  FEED_INITIAL,
-  isJournal,
-  journalDate,
-  journalId,
-  mkJournalBlock,
-  shiftISO,
-  todayISO,
-  type Block,
-  type SecLayout,
-  type ShellCol,
-} from '../../core/index.ts'
+import { FEED_INITIAL, isJournal, journalDate, journalId, mkJournalBlock, shiftISO, todayISO, type Block, type SecLayout, type ShellCol } from '../../core/index.ts'
 import type { App } from '../../core/infra/ports.ts'
-import { t } from '../../core/infra/msg.ts'
 import { rootsFor, rootsForMany } from './roots.ts'
 import type { PageDeps } from './types.ts'
-
-/** 一棵子树里有多少块（含根自己）——确认框里告诉用户这一下影响多大 */
-function countBlocks(b: Block): number {
-  let n = 0
-  const walk = (x: Block): void => {
-    n++
-    x.children.forEach(walk)
-  }
-  walk(b)
-  return n
-}
 
 /**
  * 日记（日记流）。
@@ -42,7 +19,7 @@ function countBlocks(b: Block): number {
  * · **只读**：日期只进 `_date`，不进 `text`；这里没有任何写 `_date` 的分支。
  * · **不引入焦点栈**：翻日/回流只是把中心槽的「当前对象」换一块或换一串（同口径）。
  */
-export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journalShift' | 'journalReview' | 'journalShellWrite' | 'deleteJournal' | 'openJournal' | 'ensureJournal'> {
+export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journalShift' | 'journalReview' | 'journalShellWrite' | 'openJournal' | 'ensureJournal'> {
   /**
    * 幂等物化：库里没有这一天的**活块**才创建（一点 op）。
    *
@@ -211,51 +188,6 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
     return shells
   }
 
-  /**
-   * 删除一天。与页/标签同一套：**软删**（回收站可恢复），再打开这一天会**复活同一块**
-   * （`ensure` 认 id，见那里的注释）。
-   *
-   * 两条前置：
-   *   · **今天不让删** —— 冷启动会把今天物化回来（它是落点），入口只会在下一次启动时
-   *     「删了又回来」，那比不给更糟；
-   *   · 删的是**正装载着的那一天** ⇒ 删完回日记流，别让中心留着一个已删的根。
-   */
-  const deleteJournal = (id: string): boolean => {
-    // 删一天要看它的子树有多大（确认框）⇒ 未装载先装载（软删块也读得回来）
-    if (!d.kb.isLoaded(id)) {
-      d.loadDocThen([id], () => {
-        // 补读没成功就不再递归（否则同一天在「再装一次」上死循环，点了没反应）
-        if (!d.kb.isLoaded(id)) {
-          console.warn('[doc] journal still unloaded; skip delete:', id)
-          return
-        }
-        deleteJournal(id)
-      })
-      return true
-    }
-    const b = d.kb.get(id)
-    if (!b || !isJournal(b) || journalDate(b) === todayISO()) return false
-    // 爆炸半径：删一天带走整棵子树（日期行＋所有内容），与删页/删标签同一判据确认
-    const blocks = countBlocks(b)
-    d.confirm({
-      title: t('ui.confirm.deleteJournalTitle'),
-      body: t('ui.confirm.deleteJournalBody', { count: String(blocks) }),
-      confirmLabel: t('ui.confirm.delete'),
-      danger: true,
-      onConfirm: () => {
-        const loaded = d.activeId() === id || d.rootIds().includes(id)
-        d.removeBlock(id)
-        if (loaded) openFeed(todayISO())
-        else {
-          d.refreshList()
-          d.saveNow()
-        }
-        d.toast(t('ui.toast.journalDeleted'))
-      },
-    })
-    return true
-  }
-
   return {
     // 「引用日期」与「打开那天」共用同一份物化：两份拼装会出现两个「哪天是哪个块」的答案
     ensureJournal: ensure,
@@ -303,15 +235,5 @@ export function journalCommands(d: PageDeps): Pick<App, 'journalToday' | 'journa
         openFeed(todayISO(), { days: lastReview?.days ?? FEED_INITIAL, layout: 'row', focusDate: date })
       })
     },
-    /**
-     * 删除一天。与页/标签同一套：**软删**（回收站可恢复），再打开这一天会**复活同一块**
-     * （`ensure` 认 id，见那里的注释）。
-     *
-     * 两条前置：
-     *   · **今天不让删** —— 冷启动会把今天物化回来（它是落点），入口只会在下一次启动时
-     *     「删了又回来」，那比不给更糟；
-     *   · 删的是**正装载着的那一天** ⇒ 删完回日记流，别让中心留着一个已删的根。
-     */
-    deleteJournal,
   }
 }

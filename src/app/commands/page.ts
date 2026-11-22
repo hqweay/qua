@@ -40,35 +40,6 @@ import { rootsFor, rootsForMany, takenWhere } from './roots.ts'
 import { whenDocLoaded } from '../doc-load.ts'
 import type { PageDeps } from './types.ts'
 
-/**
- * 删除一个**身份块**（页／标签），返回它是否真的被删。
- *
- * 三条判据都在这里，调用方（页／标签）只决定「能不能删」：
- *   · **整棵子树一起软删**——身份块的内容跟着它走，不是只摘露面位；
- *   · **正被装载在中心视图里 ⇒ 先换到邻页再删**：删除后 `walkForest` 会跳过它，
- *     留着一个已删的根只会得到一片空白（点它还会「打开即没」）；
- *   · 删除走 `removeBlock`（事务 ＋ 撤销条目），所以 ⌘Z 能把整棵子树找回来。
- */
-export function dropIdentity(d: PageDeps, id: string): boolean {
-  const before = d.kb.pages()
-  const i = before.findIndex((p) => p.id === id)
-  const loaded = d.activeId() === id || d.rootIds().includes(id)
-  d.removeBlock(id)
-  if (loaded) {
-    // 落点必须是**页**（删的可能是标签，也可能邻位没有页）
-    const rest = d.kb.pages()
-    const p = rest[Math.min(i < 0 ? 0 : i, rest.length - 1)] ?? rest[0]
-    if (p) {
-      d.setActiveId(p.id, { restore: 'none' })
-      d.loadPage(rootsFor(p))
-    }
-  }
-  d.refreshList()
-  d.refreshTitle()
-  d.saveNow()
-  return true
-}
-
 /** 页命令（页名＝块正文，所以「改名」就是改块） */
 export function pageCommands(d: PageDeps): Pick<
   App,
@@ -76,7 +47,6 @@ export function pageCommands(d: PageDeps): Pick<
   | 'activePageId'
   | 'newPage'
   | 'openPage'
-  | 'deletePage'
   | 'renamePage'
   | 'focusTitle'
   | 'showRefPicker'
@@ -206,7 +176,6 @@ export function pageCommands(d: PageDeps): Pick<
     | 'activePageId'
     | 'newPage'
     | 'openPage'
-    | 'deletePage'
     | 'renamePage'
     | 'focusTitle'
     | 'showRefPicker'
@@ -241,32 +210,6 @@ export function pageCommands(d: PageDeps): Pick<
     },
 
     openPage: (id) => openPageNow(id),
-
-    deletePage: (id) => {
-      const before = pages()
-      // 「至少留一页」只数**页**（journal 不是页，删掉它不违反这条）
-      if (before.length <= 1) {
-        d.toast(t('ui.toast.keepOnePage'), 'warn')
-        return
-      }
-      const i = before.findIndex((p) => p.id === id)
-      if (i < 0) return
-      // **爆炸半径**：删页带走整棵子树（页名行＋所有内容块）。与删除标签（有成员/
-      // 声明时确认）同一判据——可撤销＋回收站都能找回来，但要用户在这之前说一次要。
-      const p = before[i]!
-      // 只数 p 的后代（不含 p 自己），与 `listPages` 的 blocks 口径一致；整棵含 p 自己
-      const blocks = count(p) + 1
-      d.confirm({
-        title: t('ui.confirm.deletePageTitle'),
-        body: t('ui.confirm.deletePageBody', { name: d.pageTitle(p), count: String(blocks) }),
-        confirmLabel: t('ui.confirm.delete'),
-        danger: true,
-        onConfirm: () => {
-          dropIdentity(d, id)
-          d.toast(t('ui.toast.pageDeleted'))
-        },
-      })
-    },
 
     renamePage: (id, title) => {
       const p = d.kb.get(id)

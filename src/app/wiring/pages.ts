@@ -19,6 +19,7 @@ import {
   isJournal,
   journalId,
   liveChildren,
+  locate,
   mkBlock,
   ownerDataOfBlock,
   surfaceRefKey,
@@ -624,9 +625,18 @@ export function setupPages(deps: PagesDeps) {
       return r
     },
     removeBlock: (id) => {
-      // 删页：整棵子树原位标记（软删）。走 `run` 是为了产出 op —— 命令层只声明「删这块」，
+      // 删除：整棵子树原位标记（软删）。走 `run` 是为了产出 op —— 命令层只声明「删这块」，
       // 打标记由事务那一份实现负责（一条 op，只落操作根）。
       run((tx) => tx.remove(id), deps.getMainEd())
+    },
+    /**
+     * 摘行（机制一）：这块在**当前这一屏**里就交给编辑器删 —— 光标、空位、
+     * 装载根收尾都是视图的事，命令层不该知道。摘不到（不在这一屏、或有身份的装载根）
+     * 返回 false，由删除那一份换库级软删。
+     */
+    spliceOut: (id) => {
+      const ed = deps.getEd()
+      return locate(ed.doc, id) !== null && ed.struct.remove(id)
     },
     insertBlock: (block, parentId, index) => {
       // 与 `removeBlock` 对称的结构写入口：插一棵子树（含自带的首子块），

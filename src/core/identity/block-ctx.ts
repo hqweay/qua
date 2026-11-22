@@ -9,7 +9,7 @@
  * 由调用方补（编辑器补它那一份；记录面补空选区）。
  */
 import type { Block } from '../model/model.ts'
-import { canDeleteBlock, hasList, hasLiveChildren, isPropDefBlock, isQueryBlock } from '../model/model.ts'
+import { hasList, hasLiveChildren, isPropDefBlock, isQueryBlock } from '../model/model.ts'
 import { typeDeclOf } from '../model/types.ts'
 import type { CtxKeys } from '../model/undo.ts'
 import { isJournal, journalDate, todayISO } from './journal.ts'
@@ -46,11 +46,16 @@ export function blockMenuCtxOf(
     blockIsRoot: opts.isDocRoot,
     blockIsForestRoot: opts.isForestRoot,
     /**
-     * 删除入口的准入：判据在 model（`canDeleteBlock`）——菜单行与编辑器守卫同一份，
-     * 两个答案分叉过一次（守卫放行了自动化块、行还被旧谓词藏着）。
+     * **这块此刻能不能删** —— 准入只剩一个变量：今天不删。
+     *
+     * 为什么今天例外：今天不是「恰好存在的一天」，是落点（冷启动每次都会把它物化回来），
+     * 给一个「删了下次启动又回来」的入口，用户只会认为是坏了。
+     *
+     * ⚠️ 这不回答「该怎么删」（splice 还是库级软删）——那是机制，在
+     *    `removableBySplice` ＋ `App.deleteBlock` 的分派里。两个问题收在一个键上的后果是：
+     *    「有名字的块」「属性定义块」既无菜单行、也无删除面。
      */
-    blockCanDelete: canDeleteBlock(b),
-    blockCanDeleteJournal: isJournal(b) && journalDate(b) !== todayISO(),
+    blockCanDelete: !(isJournal(b) && journalDate(b) === todayISO()),
     blockCanExtractPage:
       !opts.isForestRoot &&
       !isJournal(b) &&

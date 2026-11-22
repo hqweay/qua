@@ -7,7 +7,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { blockMenuCtxOf, mkBlock, type Block } from '../src/core/index.ts'
+import { blockMenuCtxOf, mkBlock, todayISO, type Block } from '../src/core/index.ts'
 import { BINDINGS, type Binding } from '../src/core/infra/bindings.ts'
 import { ALL_COMMANDS } from '../src/core/commands/decls.ts'
 
@@ -24,10 +24,10 @@ function ctxOf(b: Block, opts: { forest?: Block[]; isForestRoot?: boolean } = {}
 
 const page = (): Block => mkBlock('', { props: { _lists: ['page'], _aliases: ['某页'] } })
 const tag = (): Block => mkBlock('', { props: { _lists: ['tag'], _aliases: ['某标签'] } })
-const journal = (): Block => mkBlock('', { props: { _date: '2020-01-01' } })
+const journal = (date = '2020-01-01'): Block => mkBlock('', { props: { _date: date } })
 const query = (): Block => mkBlock('', { props: { _query: { where: { any: [] } } } })
 
-test('块级 ctx：普通块可删、可提取；身份块只留自己的删除命令', () => {
+test('块级 ctx：准入只有「今天不删」这一条，身份不再决定能不能删', () => {
   const normal = ctxOf(mkBlock('内容'))
   assert.equal(normal.blockMenuTarget, true)
   assert.equal(normal.blockCanDelete, true, '普通块走软删')
@@ -36,17 +36,18 @@ test('块级 ctx：普通块可删、可提取；身份块只留自己的删除�
   assert.equal(normal.blockType, 'paragraph')
 
   const p = ctxOf(page())
-  assert.equal(p.blockCanDelete, false, '页有自己的删除命令，不再给「删除块」')
+  assert.equal(p.blockCanDelete, true, '页可删：菜单上那唯一一行「删除」就是它')
   assert.equal(p.blockHasPageRole, true)
 
   const t = ctxOf(tag())
-  assert.equal(t.blockCanDelete, false)
+  assert.equal(t.blockCanDelete, true, '标签可删（有成员时确认框会说清连带）')
   assert.equal(t.blockHasTagRole, true)
   assert.equal(t.blockCanExtractPage, false, '纯标签块没有可提取的内容身份')
 
   const j = ctxOf(journal())
-  assert.equal(j.blockCanDelete, false)
-  assert.equal(j.blockCanDeleteJournal, true, '不是今天的日记天可以删')
+  assert.equal(j.blockCanDelete, true, '不是今天的日记天可以删')
+  const today = ctxOf(journal(todayISO()))
+  assert.equal(today.blockCanDelete, false, '今天不给删：冷启动会把它物化回来')
 
   const q = ctxOf(query())
   assert.equal(q.blockCanDelete, true, '查询块是内容：没有替代删除命令，必须可删')
@@ -57,7 +58,7 @@ test('块级 ctx：嵌套的页也只留「删页」——身份决定，不按�
   const childPage = page()
   parent.children.push(childPage)
   const ctx = ctxOf(childPage, { forest: [parent], isForestRoot: false })
-  assert.equal(ctx.blockCanDelete, false, '页就是页：不因为「嵌在别处」变成可当内容删')
+  assert.equal(ctx.blockCanDelete, true, '页就是页：能不能删不由「嵌在哪」决定')
   assert.equal(ctx.blockHasPageRole, true)
 })
 
@@ -85,8 +86,7 @@ test('作用域切分：块级动作在记录面可用，位置/选区动作不�
     'core.block/inspect',
     'core.block/configure',
     'core.block/move-to',
-    'core.tag/delete',
-    'core.editor/delete-block',
+    'core.block/delete',
     'core.editor/toggle-closure',
     'core.editor/copy-block',
     'core.editor/duplicate-block',

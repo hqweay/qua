@@ -75,7 +75,7 @@ export const BINDINGS: Binding[] = [
   { command: 'core.editor/move-block-up', kind: 'keymap', key: 'mod+shift+up', when: 'editorTextFocus', layer: 'core' },
   { command: 'core.editor/move-block-down', kind: 'keymap', key: 'mod+shift+down', when: 'editorTextFocus', layer: 'core' },
   // 删除块只有 ⌘⇧D 一键（复制块不占键位，走块菜单/斜杠）：块选区态的同键绑定在下面盖过它
-  { command: 'core.editor/delete-block', kind: 'keymap', key: 'mod+shift+d', when: 'editorTextFocus && blockCanDelete', layer: 'core' },
+  { command: 'core.block/delete', kind: 'keymap', key: 'mod+shift+d', when: 'editorTextFocus && blockCanDelete', layer: 'core' },
   { command: 'core.editor/toggle-collapse', kind: 'keymap', key: 'mod+.', when: 'editorTextFocus', layer: 'core' },
   { command: 'core.editor/toggle-closure', kind: 'keymap', key: 'mod+enter', when: 'editorTextFocus', layer: 'core' },
   { command: 'core.editor/insert-page-ref', kind: 'keymap', key: 'mod+shift+k', when: 'editorTextFocus', layer: 'core' },
@@ -256,13 +256,16 @@ export const BINDINGS: Binding[] = [
   // 「加到快捷」与「在右槽打开」是两条独立露面：前者只留一颗 44px 入口，后者摊一张窗口卡
   { command: 'core.dock/add-shortcut', kind: 'menu', when: 'blockMenuTarget', group: 'block/5-view', order: 56, layer: 'core' },
 
-  /* ---- 删除：危险动作**同位**——位置恒定，`when` 决定那一行删的是什么 ---- */
-  { command: 'core.editor/delete-block', kind: 'menu', when: 'blockMenuTarget && blockCanDelete', group: 'block/6-delete', order: 10, layer: 'core', keywords: [t('menu.kw.delete')] },
-  // 日记天也是装载根（编辑器里的 delete-block 删不到）⇒ 删除走命令面；今天不出现（见 ctx 键）
-  { command: 'core.journal/delete', kind: 'menu', when: 'blockMenuTarget && blockCanDeleteJournal', group: 'block/6-delete', order: 20, layer: 'core', keywords: [t('menu.kw.delete')] },
-  // 与「取消页」是两条轴：取消只摘露面位（块和内容都还在），删除连子树一起软删（回收站可恢复）
-  { command: 'core.page/delete', kind: 'menu', when: 'blockMenuTarget && blockHasPageRole', group: 'block/6-delete', order: 30, layer: 'core' },
-  { command: 'core.tag/delete', kind: 'menu', when: 'blockMenuTarget && blockHasTagRole', group: 'block/6-delete', order: 40, layer: 'core' },
+  /* ---- 删除：危险动作**同位** ---- */
+  /**
+   * **删除是一件事，一个入口**。页／标签／日记／字段定义／内容块都长在这里：
+   * 它们差别只在「怎么删」（摘行还是库级软删＋换落点），那是机制，不是准入 ——
+   * 准入只有一个变量（今天不删，见 `blockCanDelete`）。按身份分四行会让兼位的块
+   * （页＋标签）出现两行做同一件事，且两行对同一个动作给出不同的守卫答案。
+   *
+   * 确认不在绑定层：它按**这次删的连带代价**算，没代价就不问 —— 见命令 handler。
+   */
+  { command: 'core.block/delete', kind: 'menu', when: 'blockMenuTarget && blockCanDelete', group: 'block/6-delete', order: 10, layer: 'core', keywords: [t('menu.kw.delete'), 'page', 'tag', 'journal'] },
   /* 「粘贴为…」的两档：同一个命令，只差一个看法（菜单动态项由装配层现画，绑定点只给选项） */
   /**
    * ⚠️ 判据用 `blockFocused`（编辑器上下文里**有**这个键），不要用 `editorFocus`：

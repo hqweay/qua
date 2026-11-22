@@ -12,7 +12,6 @@ import { QueryTree } from '../../ui/query/query-tree.ts'
 import { ViewOptionsPanel } from '../../ui/views/view-options.ts'
 import { renderLinkComposer, renderNamePrompt } from '../../ui/overlay/panels.ts'
 import { openTagChoice } from '../../app/retrieval/name-choice.ts'
-import { dropIdentity } from '../../app/commands-impl.ts'
 import { Layers, type Row } from '../../ui/overlay/layers.ts'
 import {
   blockLabel,
@@ -28,7 +27,6 @@ import {
   evaluateQuerySpec,
   fieldCoverageOf,
   filterOfSpec,
-  findInForest,
   hasList,
   isEmbedBlock,
   listTableOf,
@@ -44,8 +42,6 @@ import {
   sourceOfOwner,
   storedKindsFor,
   TAGS_COLUMN,
-  tagMemberIds,
-  declaredFieldIds,
   defaultDisplayPropsFor,
   viewNameOf,
   VIEW_KIND_ICON,
@@ -65,7 +61,6 @@ import type { App } from '../../core/infra/ports.ts'
 import type { BlockEditor } from '../../view/editor/editor.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
 import type { OwnerStore } from '../../app/wiring/owners.ts'
-import type { PageDeps } from '../../app/commands/types.ts'
 import type { setupPanels } from '../../app/wiring/panels.ts'
 
 export interface ViewMenusDeps {
@@ -81,8 +76,6 @@ export interface ViewMenusDeps {
   /** 面板晚于本片装配：候选选择器与显示名三件走闭包 */
   getPanels: () => Pick<ReturnType<typeof setupPanels>, 'pickRefValue' | 'pickTagValue' | 'tagLabel'>
   getApp: () => App
-  /** 删除标签走页工厂的 dropIdentity（pages 片返回值，晚于本片） */
-  getPageDeps: () => PageDeps
   toast: App['toast']
   /** 短 id（uuidv7 尾段）：装配层唯一一份 */
   shortId: (id: string) => string
@@ -90,7 +83,7 @@ export interface ViewMenusDeps {
 }
 
 export function setupViewMenus(deps: ViewMenusDeps) {
-  const { ws, blocks, kb, kbGet, owners, layers, uiCtx, getEd, getRegistry, getPanels, getApp, toast, shortId, blockName } = deps
+  const { ws, blocks, kb, kbGet, owners, layers, uiCtx, getEd, getRegistry, getPanels, getApp, toast, shortId } = deps
 
 /**
  * **露面的「视图…」菜单**：编辑的是**这一次露面的指针**（`_embed.view`），不是源块的配置。
@@ -787,43 +780,6 @@ function showTagPicker(): void {
 }
 
   /**
-   * 删除标签块。与「取消标签」是**两条轴**：取消只摘 `tag` 露面位（块与内容都还在），
-   * 删除连块带子树一起软删（回收站可恢复）。
-   *
-   * **不要求「先把引用摘干净」**：归属是一格标签 id，目标不在了读路径直接跳过
-   * （`resolveTagIds`），恢复标签时旧归属自动接回 —— 这是软删 ＋ 同地址复活的一部分。
-   * 但**用着它的时候要明说**：删完这些块上的标签会消失（与「取消标签」同一份确认形状），
-   * 否则用户只会看到一堆 chip 一起没了。
-   */
-function deleteTag(blockId: string): boolean {
-  const b = findInForest(ws.blocks, blockId)
-  if (!b || !hasList(b, 'tag')) return false
-  const members = tagMemberIds(b.id, ws.blocks).size
-  const declarations = declaredFieldIds(b).length
-  const drop = (): boolean => {
-    dropIdentity(deps.getPageDeps(), b.id)
-    toast(t('ui.toast.tagDeleted'))
-    return true
-  }
-  // B 档条件确认：只有它还连着成员/声明才问——叶子标签没有任何连带，直接删。
-  // 与删页/删天同一个会话确认框（danger 红钮），不再用「菜单里嵌一行继续」的形状。
-  if (members === 0 && declarations === 0) return drop()
-  const body =
-    members > 0 && declarations > 0
-      ? t('ui.confirm.deleteTagBoth', { members: String(members), decls: String(declarations) })
-      : members > 0
-        ? t('ui.confirm.deleteTagMembers', { count: String(members) })
-        : t('ui.confirm.deleteTagDecls', { decls: String(declarations) })
-  layers.confirm({
-    title: t('ui.confirm.deleteTagTitle', { tag: blockName(b) }),
-    body,
-    confirmLabel: t('ui.confirm.delete'),
-    danger: true,
-    onConfirm: () => drop(),
-  })
-  return true
-}
-  /**
    * **自动化条件（`when`）的编辑弹层**：与查询/切片**同一台**条件树组件，落点不同——
    * 应用写的是 `_automation.when`（整份定义一次写回，一步撤销）。
    * 草稿清空 ⇒ `when` 回到「无条件」（`{any:[]}` 是 specOfTree 对空草稿的固定答案）。
@@ -950,6 +906,5 @@ function deleteTag(blockId: string): boolean {
     showLinkComposer,
     showChildPropsPicker,
     showTagPicker,
-    deleteTag,
   }
 }

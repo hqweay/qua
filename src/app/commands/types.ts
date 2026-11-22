@@ -39,6 +39,14 @@ export interface PageDeps {
    */
   removeBlock: (id: string) => void
   /**
+   * **把这一块从当前正文里摘掉**（行级删除）。摘不到就 `false`：
+   * 有身份的装载根，或者它根本不在这一屏。
+   *
+   * 为什么不直接把编辑器交给命令层：摘行要管光标、空位、装载根收尾（都是视图的事），
+   * 而库级软删要管落点与清单（都是命令的事）。两个机制分开，入口只问「摘得到吗」。
+   */
+  spliceOut: (id: string) => boolean
+  /**
    * 插一棵子树（`block` 自带 children）——与 `removeBlock` 对称的**结构写入口**。
    *
    * 命令层不许自己 `blocks().push`：结构写必须走事务产 op，否则「这块在库里」

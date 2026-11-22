@@ -90,7 +90,7 @@ test('斜杠只收「这里有什么」：折叠/删除不进斜杠，露面/复
   const slash = BINDINGS.filter((b) => b.kind === 'slash')
   const cmds = slash.map((b) => b.command)
   assert.ok(!cmds.includes('core.editor/toggle-collapse'), '折叠是视图状态（⌘. 在），不回答「这里有什么」')
-  assert.ok(!cmds.includes('core.editor/delete-block'), '删除是块骨架操作（⌘⇧D/⌫ 在），不回答「这里有什么」')
+  assert.ok(!cmds.includes('core.block/delete'), '删除是块骨架操作（⌘⇧D/⌫ 在），不回答「这里有什么」')
   assert.ok(
     !slash.some((b) => b.command === 'core.editor/insert-block' && b.args === undefined),
     '正文块档（无参 insert-block）与 ↵ 同果，不许悄悄加回来；待办/分割线两档不受此限',
@@ -108,9 +108,9 @@ test('斜杠只收「这里有什么」：折叠/删除不进斜杠，露面/复
 test('块菜单：删除同位、复制/插入收子菜单、组标题人人有份', () => {
   const menu = BINDINGS.filter((b) => b.kind === 'menu' && (b.group ?? '').startsWith('block/'))
   const deleteGroup = menu.filter((b) => b.group === 'block/6-delete').map((b) => b.command)
-  for (const need of ['core.editor/delete-block', 'core.journal/delete', 'core.page/delete', 'core.tag/delete']) {
-    assert.ok(deleteGroup.includes(need), `${need} 应住在删除组：危险动作位置恒定`)
-  }
+  // 删除只有一条：页/标签/日记/字段定义/内容块共用它。按身份分四行会让兼位块
+  // （页＋标签）出现两行做同一件事，而两行守卫答案还不一样
+  assert.deepEqual(deleteGroup, ['core.block/delete'], '删除组只有一行：准入按「此刻能不能删」，不按身份')
   const anchors = BINDINGS.filter((b) => b.kind === 'menu' && b.submenu !== undefined)
     .map((b) => `${b.submenu}:${b.actsOn ?? 'editor'}`)
   assert.deepEqual(
