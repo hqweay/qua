@@ -30,7 +30,7 @@ import { DECL_BY_NAME } from '../../core/commands/decls.ts'
 import { STEP_COMMANDS } from '../../core/automation/run.ts'
 import { mentionsContentAtoms } from '../../core/automation/automation.ts'
 import { renderIcon } from '../../view/icons.ts'
-import { canonicalAutomation, readAutomation } from '../../core/automation/automation.ts'
+import { canonicalAutomation, followsRefs, readAutomation } from '../../core/automation/automation.ts'
 import { topUpOf, triggerQueryFromWhen, withUp } from '../../core/automation/trigger-query.ts'
 import { displayNameOf } from '../../core/identity/alias.ts'
 import type { QueryNode, QuerySpec } from '../../core/query/query.ts'
@@ -164,6 +164,13 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
 
   /** 一条触发器的人话（chip 显示；与引擎的触发键同一份形状来源） */
   const triggerText = (tr: AutomationTrigger): string => {
+    const base = triggerBaseText(tr)
+    // 穿不穿引用是这条触发器的**态**，不是条件的措辞：同一个父块条件，开与关的
+    // 判定面差一整层，行上不写出来就只剩「跑不跑」一个信号
+    return followsRefs(tr) ? base + t('ui.automation.trigger.refsSuffix') : base
+  }
+
+  const triggerBaseText = (tr: AutomationTrigger): string => {
     if (tr === 'manual') return t('ui.automation.trigger.manual')
     // 常见形状给专句；其余按事件轴走通用句式（收纳重排时再按「当/如果/就」统一）
     const cond = (): string => parentCondChips(tr.query).join(' ')
@@ -261,6 +268,13 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
       if (whenQuery) {
         rows.push({ id: 'trigger/clearparent', label: t('ui.automation.trigger.clearParent'), hint: t('ui.automation.trigger.anyParentWhenHint'), group: 'trigger/1' })
       }
+      // 容纳链怎么走：这一格只说「这一跳算不算」，不动条件本身
+      rows.push({
+        id: 'trigger/followrefs',
+        label: t('ui.automation.trigger.followRefsToggle', { on: t(followsRefs(tr) ? 'ui.automation.on' : 'ui.automation.off') }),
+        hint: t('ui.automation.trigger.followRefsHint'),
+        group: 'trigger/2',
+      })
     }
     deps.openMenu(rows, (row) => {
       if (row.id === 'trigger/remove') {
@@ -281,6 +295,19 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
         const whenQuery = def.when !== undefined ? triggerQueryFromWhen(def.when) : null
         if (!whenQuery) return
         write({ ...def, triggers: def.triggers.map((x, i) => (i === at && x !== 'manual' && x.birth === true ? { ...x, query: whenQuery } : x)) })
+        return
+      }
+      if (row.id === 'trigger/followrefs') {
+        const next = !followsRefs(tr)
+        write({
+          ...def,
+          triggers: def.triggers.map((x, i) => {
+            if (i !== at || x === 'manual' || x.birth !== true) return x
+            // 关＝删键（与「开回默认＝删格」同口径：只有打开才落盘）
+            const { followRefs: _drop, ...rest } = x
+            return next ? { ...rest, followRefs: true as const } : rest
+          }),
+        })
         return
       }
     }, triggerText(tr))

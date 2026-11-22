@@ -13,9 +13,9 @@
  * 3. `tag(T,added/removed)` ≡ `entered/left({tag T})`：边沿开火；创建即带标签——v1 不开火，
  *    统一后开火【有意变更①】；块删除不触发（原子没变）
  * 4. `child.added(父条件)` ≡ `entered({up:父条件}, birth)`：仅诞生开火；移动已有块进匹配
- *    父级不开火；`followRefs` 开关退场——容纳链走查（真父链，传递型引用行透明）吸收其能力，
- *    v1 的两变体都是容纳链的子集【有意变更④：直接父块 → 容纳链】；「任意父块＋无条件」
- *    被 ≥1 引用原子保护性拒绝
+ *    父级不开火；容纳链走查（真父链任一层）吸收 v1 的直接父块读法【有意变更④：直接父块 →
+ *    容纳链】；**引用行透不透由触发器 `followRefs` 说，缺省不穿**（「看」的默认可以还原意图，
+ *    「写」的默认必须保守）；「任意父块＋无条件」被 ≥1 引用原子保护性拒绝
  * 5. when 时态：一律对 after 求值；`left({X})`＋`when({X})` 永不开火（边界随本条断言）
  * 6. 去重与序：同 tx 同规则同目标一次（多支触发器同时命中也只跑一次）；规则按森林先序——
  *    两条规则写同一格，后写的赢、结果确定
@@ -278,7 +278,7 @@ test('等式④：仅诞生开火——匹配父块下新建开火；移动已�
   assert.equal(hasTag(kb.get(stray.id)!, aiTag.id), false, '移动已有块进匹配父级：不开火（birth 闸；移入不立项严格对齐）')
 })
 
-test('等式④【有意变更④】：容纳链——真父链任一层命中即开火；传递型引用行透明（followRefs 开关被链吸收）', () => {
+test('等式④【有意变更④】：容纳链——真父链任一层命中即开火；引用行透不透由触发器说（缺省不穿）', () => {
   const aiTag = mkTag('AI')
   const deepParent = mkBlock('深层父块')
   const topPage = mkBlock('顶页')
@@ -298,7 +298,7 @@ test('等式④【有意变更④】：容纳链——真父链任一层命中�
   kb.tx((tx) => tx.insert(fresh, deepParent.id, Number.MAX_SAFE_INTEGER))
   assert.equal(hasTag(kb.get(fresh.id)!, aiTag.id), true, '生在顶页的更深层：容纳链命中（v1 直接父块读法不开火）')
 
-  // 传递型引用行：容纳链穿过它命中目标（v1 需要显式开 followRefs，统一后开关退场）
+  // 传递型引用行：容纳链穿不穿它由**触发器这一格**说（缺省不穿——写路径保守）
   const realParent = mkBlock('真父块')
   const passThrough = mkBlock('')
   passThrough.content = [{ id: 'ref-1', t: 'ref', to: realParent.id }] as typeof passThrough.content
@@ -306,14 +306,14 @@ test('等式④【有意变更④】：容纳链——真父链任一层命中�
     name: '沿容纳链打标',
     def: {
       enabled: true,
-      triggers: [{ on: 'entered', query: { up: { is: realParent.id } }, birth: true }],
+      triggers: [{ on: 'entered', query: { up: { is: realParent.id } }, birth: true, followRefs: true }],
       steps: [{ cmd: 'core.tags/add', args: { tagId: aiTag.id } }],
     },
   })
   const { kb: kb2 } = engineFixture([aiTag, realParent, passThrough, rule2])
   const fresh2 = mkBlock('透过引用进来的子块')
   kb2.tx((tx) => tx.insert(fresh2, passThrough.id, Number.MAX_SAFE_INTEGER))
-  assert.equal(hasTag(kb2.get(fresh2.id)!, aiTag.id), true, '父块是传递型引用行 ⇒ 容纳链穿过它命中目标')
+  assert.equal(hasTag(kb2.get(fresh2.id)!, aiTag.id), true, '触发器开了 followRefs ⇒ 容纳链穿过引用行命中目标')
 })
 
 test('等式④补：容纳链上的复合条件——self 半边照常求值（all 的其余成员对新块）', () => {

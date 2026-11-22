@@ -183,8 +183,12 @@ import {
  * v48 → v49：**自动化触发器统一形状 `{on, query, birth?}`**（查询 × 迁移；含 `up` 的诞生
  *            触发器走容纳链，`followRefs` 开关被链吸收）。旧三种 kind（prop/tag/child.added）
  *            不是合法形状：定义读不出＝「需要修复」灰态可跳转，作废重 seed，不写兼容分支。
+ * v49 → v50：**「沿传递型引用展开」回到触发器上**（`followRefs?: true`，只落 `true`／关＝删键）。
+ *            v49 把父块条件的容纳链做成无条件穿引用（`followRefs` 开关退场），而「写」的默认不该
+ *            由「看」的默认决定：显示继承默认穿是「看错了立刻能纠正」，规则开火穿是「把块写到别处」。
+ *            ⇒ 容纳链只在触发器开了这一格时穿引用行，缺省只看真父链。旧库没有这个键，读侧按关兜底。
  */
-export const WORKSPACE_VERSION = 49
+export const WORKSPACE_VERSION = 50
 
 /** 示例库：一片块森林（行内内容与 annos 住块上，没有库级锚点数组） */
 export interface Workspace {

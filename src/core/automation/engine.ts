@@ -5,7 +5,8 @@
  * 按事件轴取边沿——`entered`（不满足→满足）、`left`（满足→不满足）、`changed`
  * （前后均满足且引用原子真变）。before 侧经一个很小的主体适配器进同一台求值器
  * （不克隆整块、不造第二求值器）；`{up}` 只活在诞生时刻——birth 触发器对**容纳链**
- * （真父链，传递型引用行按 `passThroughRefTarget` 透明，与引用继承同一条链判据）
+ * （真父链；传递型引用行只在触发器开了 `followRefs` 时透明——默认透传会把规则的写入
+ * 落到引用行的目标上，而用户那一行看起来只是「挂在引用下面」）
  * 求值一次，before 侧完全不求值祖先。
  *
  * 四条不变量（实现落点）：
@@ -38,7 +39,7 @@ import type { QueryNode } from '../query/query.ts'
 import type { TagLookup } from '../kb/ensure-tag.ts'
 import type { Tx } from '../kb/types.ts'
 import type { TouchedBlock } from '../kb/diff.ts'
-import { readAutomation, type AutomationDef, type AutomationTrigger } from './automation.ts'
+import { readAutomation, followsRefs, type AutomationDef, type AutomationTrigger } from './automation.ts'
 import { triggerDeps, type TriggerDeps } from './trigger-query.ts'
 import { checkStepsInTx, runStepsInTx, type AutomationKb } from './run.ts'
 
@@ -158,10 +159,13 @@ export function createAutomationEngine(deps: AutomationEngineDeps) {
   }
 
   /**
-   * **容纳链**：真父链 ＋ 传递型引用行的目标（seen 防环）——与引用继承同一条链判据。
+   * **容纳链**：真父链（`followRefs` 打开时另加传递型引用行的目标，seen 防环）。
    * 只在诞生时刻枚举一次；`{up}` 的条件对链上任一块成立即命中。
+   *
+   * 引用行透不透由**这条触发器**说（缺省不透）：显示继承默认穿是「看」的事，
+   * 规则开火是「写」的事——默认保守，要穿就在触发器上显式打开。
    */
-  const containmentChainOf = (entry: TouchedBlock): Block[] => {
+  const containmentChainOf = (entry: TouchedBlock, followRefs: boolean): Block[] => {
     const parentId = entry.afterPlacement?.parent ?? null
     const chain: Block[] = []
     const seen = new Set<string>()
@@ -169,6 +173,7 @@ export function createAutomationEngine(deps: AutomationEngineDeps) {
       if (seen.has(b.id)) return
       seen.add(b.id)
       chain.push(b)
+      if (!followRefs) return
       const ref = passThroughRefTarget(b)
       if (ref) {
         const target = kb.get(ref)
@@ -216,7 +221,7 @@ export function createAutomationEngine(deps: AutomationEngineDeps) {
       // 含 up 的触发器只在诞生时刻对容纳链求值（腐坏的无 birth 形态也按 birth 对待）
       if (c.tr.birth === true || c.placement.length > 0) {
         if (entry.before !== null) continue // 只对诞生开火：移动已有块、已有块改属性都不算
-        if (!evalQuery(c, b, containmentChainOf(entry))) continue
+        if (!evalQuery(c, b, containmentChainOf(entry, followsRefs(c.tr)))) continue
         return true
       }
       if (entry.before === null) {

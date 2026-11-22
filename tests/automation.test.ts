@@ -526,26 +526,44 @@ test('事件④：停用的规则不跑；条件不满足不跑；条件按刚�
   assert.equal(hasTag(kb2.get(withWhenTarget.id)!, tag.id), true, '条件满足 ⇒ 打标')
 })
 
-test('事件⑤：容纳链——传递型引用行透明（引用开关被链吸收退场）', () => {
+test('事件⑤：容纳链——引用行默认透明**不穿**，触发器打开 followRefs 才穿', () => {
   const aiTag = mkBlock('AI')
   aiTag.props = { _aliases: ['AI'], _lists: ['tag'] }
   const realParent = mkBlock('真父块')
   const passThrough = mkBlock('')
   // 传递型＝正文只有一枚指向目标块的引用 run
   passThrough.content = [{ id: 'ref-1', t: 'ref', to: realParent.id }] as typeof passThrough.content
-  const rule = mkAutomationBlock({
-    name: '沿引用打标',
+  const ruleOff = mkAutomationBlock({
+    name: '只看直接父块',
     def: {
       enabled: true,
       triggers: [{ on: 'entered', query: { up: { is: realParent.id } }, birth: true }],
       steps: [{ cmd: 'core.tags/add', args: { tagId: aiTag.id } }],
     },
   })
-  const { kb } = engineFixture([aiTag, realParent, passThrough, rule])
+  const { kb } = engineFixture([aiTag, realParent, passThrough, ruleOff])
 
   const fresh = mkBlock('透过引用进来的子块')
   kb.tx((tx) => tx.insert(fresh, passThrough.id, Number.MAX_SAFE_INTEGER))
-  assert.equal(hasTag(kb.get(fresh.id)!, aiTag.id), true, '父块是传递型引用行 ⇒ 容纳链穿过它命中目标（引用行透明）')
+  assert.equal(hasTag(kb.get(fresh.id)!, aiTag.id), false, '缺省不穿：父块是引用行时，规则不按它指向的目标开火（写路径保守）')
+
+  // 同一个父块条件、另一种走法：链上多一艘引用行 ⇒ 命中
+  const { kb: kb2 } = engineFixture([
+    aiTag,
+    realParent,
+    passThrough,
+    mkAutomationBlock({
+      name: '穿过引用行',
+      def: {
+        enabled: true,
+        triggers: [{ on: 'entered', query: { up: { is: realParent.id } }, birth: true, followRefs: true }],
+        steps: [{ cmd: 'core.tags/add', args: { tagId: aiTag.id } }],
+      },
+    }),
+  ])
+  const fresh2 = mkBlock('透传进来的子块')
+  kb2.tx((tx) => tx.insert(fresh2, passThrough.id, Number.MAX_SAFE_INTEGER))
+  assert.equal(hasTag(kb2.get(fresh2.id)!, aiTag.id), true, 'followRefs 打开 ⇒ 容纳链穿过引用行命中目标')
 })
 
 test('mentionsContentAtoms：内容原子才算错配；{up} 子树说的是祖先，不算', () => {
