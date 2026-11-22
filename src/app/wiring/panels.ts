@@ -1354,20 +1354,33 @@ export function setupPanels(deps: PanelsDeps) {
         const toId = pick.kind === 'create' ? '' : pick.id
         if (!toId) return
         const tagClassIds = collectTagClassIds(kb.roots())
-        // 选目标即用户意图：同一 tx 回调里全量重扫 → 算计划 → 有阻塞/零命中就不写
-        const result = kb.tx((tx) => {
-          const edges = kb.relationsTo(fromId)
-          const plan = planRetarget(fromId, toId, { edges, find: (id) => kb.get(id), kinds, tagClassIds })
-          if (plan.blocked.length > 0 || plan.total === 0) return { done: false, total: plan.total, blocked: plan.blocked.length }
-          applyRetargetPlan(plan, tx)
-          return { done: true, total: plan.total, blocked: 0 }
-        })
-        const r = result.result
-        if (!r.done) {
-          app.toast(t(r.blocked > 0 ? 'ui.mount.retargetBlocked' : 'ui.mount.retargetEmpty'), 'warn')
+        // 走编辑器的写入口：它把事务的 undo 捕获并进当前动作袋，finishUndoEntry 记成一步。
+        // 直接 kb.tx 只改内存、不记撤销（上一版 ⌘Z 无效的坑）。
+        const ed = spec.edSource() ?? deps.getMainEd()
+        ed.beginUndoEntry()
+        let done = false
+        let count = 0
+        let blocked = 0
+        try {
+          ed.write((tx) => {
+            const edges = kb.relationsTo(fromId)
+            const plan = planRetarget(fromId, toId, { edges, find: (id) => kb.get(id), kinds, tagClassIds })
+            if (plan.blocked.length > 0 || plan.total === 0) {
+              blocked = plan.blocked.length
+              return
+            }
+            applyRetargetPlan(plan, tx)
+            count = plan.total
+            done = true
+          }, ed)
+        } finally {
+          ed.finishUndoEntry('other')
+        }
+        if (!done) {
+          app.toast(t(blocked > 0 ? 'ui.mount.retargetBlocked' : 'ui.mount.retargetEmpty'), 'warn')
           return
         }
-        app.toast(t('ui.mount.retargetDone', { count: r.total }), 'ok')
+        app.toast(t('ui.mount.retargetDone', { count }), 'ok')
         spec.renderSurface()
       },
     })
