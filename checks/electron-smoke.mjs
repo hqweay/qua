@@ -1021,13 +1021,15 @@ await check('E9 虚拟化下选区投影与组合期两段式的 Electron 现状
       blocksWithPreedit: window.__qua.text().filter((t) => t.includes('zhongwen')).length,
     }
   }, targetId)
-  await cdp.send('Input.insertText', { text: '中文' })
+  // 提交用的字要**够独特**：断言按「模型里谁含这串」找落点，用一个常见词（如「中文」）
+  // 会把种子正文里本来就有的同字当成漂移（实测：导览加了「界面有中文与英文」之后）。
+  await cdp.send('Input.insertText', { text: '组合提交积' })
   await new Promise((r) => setTimeout(r, 400))
   const afterCommit = await page.evaluate(
     ({ id, preedit }) => {
       const b = window.__qua.blocks().find((x) => x.id === id)
       const all = window.__qua.blocks()
-      const hit = all.filter((x) => x.text.includes('中文'))
+      const hit = all.filter((x) => x.text.includes('组合提交积'))
       return {
         isComposing: window.__qua.snapshot().composing,
         targetText: b?.text ?? '(块没了)',
@@ -1057,7 +1059,7 @@ await check('E9 虚拟化下选区投影与组合期两段式的 Electron 现状
   log(`      ④ 组合中：${JSON.stringify(midCompose)}`)
   log(`      ④ 滚出窗口后：目标块还挂着=${afterScroll.stillMounted} mounted=${afterScroll.mountedCount} composing=${afterScroll.isComposing} 模型里带预编辑串的块=${afterScroll.blocksWithPreedit}`)
   log(`      ④ 提交后：目标块文本="${afterCommit.targetText}"（块还在=${afterCommit.targetSurvived}，共 ${afterCommit.totalBlocks} 块）`)
-  log(`      ④ 提交的「中文」落在 ${afterCommit.committedCount} 块上：${JSON.stringify(afterCommit.committedAt)}`)
+  log(`      ④ 提交的「组合提交积」落在 ${afterCommit.committedCount} 块上：${JSON.stringify(afterCommit.committedAt)}`)
   log(`      ④ 预编辑串 zhongwen 还留在模型里：${JSON.stringify(afterCommit.preeditLeft)}`)
   /**
    * 这一档钉的是**组合期的卸载守卫**（`deferWhileComposing`）：
