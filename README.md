@@ -10,6 +10,14 @@
 
 ---
 
+## 加群交流
+
+感兴趣、有疑问，或想找人聊聊？欢迎加入 QQ 群「qua 双链笔记」（群号：1044063116）——扫码即可入群。
+
+<p align="center"><img src="shots/qq-group-qr.png" alt="qua 双链笔记 QQ 群二维码（群号 1044063116）" width="280"></p>
+
+---
+
 ## 快速开始
 
 **在线体验**：[qua.leay.net](https://qua.leay.net/) —— 打开就能写，不用安装。

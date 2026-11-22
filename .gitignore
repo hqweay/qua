@@ -20,6 +20,7 @@ shots/*.png
 !shots/embed-大纲表格.png
 !shots/dock-窗口卡.png
 !shots/theme-暗色.png
+!shots/qq-group-qr.png
 # 探针的明细（尺寸/位置记录）与自检报告：`checks/probe-*.mjs` 的副产物，不入库
 shots/*.json
 shots/*.html
