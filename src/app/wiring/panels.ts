@@ -1350,8 +1350,9 @@ export function setupPanels(deps: PanelsDeps) {
       emptyText: t('ui.mount.retargetPickEmpty'),
       idPrefix: 'retarget',
       onPick: (pick) => {
-        if (pick.kind !== 'block') return
-        const toId = pick.id
+        // 反链栏 kind:'ref' 给 {kind:'block'}；成员栏 kind:'tag' 给 {kind:'tag'}；'create' 不选
+        const toId = pick.kind === 'create' ? '' : pick.id
+        if (!toId) return
         const tagClassIds = collectTagClassIds(kb.roots())
         // 选目标即用户意图：同一 tx 回调里全量重扫 → 算计划 → 有阻塞/零命中就不写
         const result = kb.tx((tx) => {
