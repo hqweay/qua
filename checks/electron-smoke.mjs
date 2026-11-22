@@ -26,7 +26,14 @@ mkdirSync(CACHE, { recursive: true })
 const cleanEnv = { ...process.env }
 delete cleanEnv.ELECTRON_RUN_AS_NODE
 
-const extraArgs = ['--no-sandbox', '--disable-gpu']
+/**
+ * `--lang=zh-CN` 把整套 Electron 断言的界面语言钉死。
+ *
+ * 这些用例按中文标签定位（原生菜单「库」、种子正文「内容寻址」），而应用默认跟系统语言：
+ * CI 的 macOS runner 是英文，菜单与种子都会变成英文 ⇒ 同一份代码本地绿、云端红。
+ * 钉语言让「测的是壳的行为」而不是「测的是 runner 的语言设置」。
+ */
+const extraArgs = ['--no-sandbox', '--disable-gpu', '--lang=zh-CN']
 
 const ONLY = process.env.QUA_SMOKE_ONLY ?? ''
 const results = []
