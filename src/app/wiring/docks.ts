@@ -153,21 +153,24 @@ export function setupDocks(deps: DocksDeps) {
   const mountCards = new Map<'left' | 'right', DockMountCard>()
 
   /**
-   * 派生卡壳按「槽 + key」缓存：header 只依赖卡的身份与状态，不依赖身体里的视图状态。
-   * 切面/切日期只换身体——重建壳会让 header 闪一下，还会打断它上面正在进行的交互。
+   * **纯 chrome 的卡**（派生卡、收纳盘）的壳按「槽 + key」缓存：header 只依赖卡的身份
+   * 与状态，不依赖身体里的视图状态。
+   *
+   * 切面／切日期／盘内容变化只换身体——重建壳会让 header 闪一下（按钮与标题本来是按
+   * hover 淡入的，新节点从 0 再淡一次），还会打断它上面正在进行的交互（行内重命名）。
    */
-  const derivedShells = new Map<string, HTMLElement>()
+  const cardShells = new Map<string, HTMLElement>()
 
   function shellFor(side: 'left' | 'right', key: string, spec: DockCard): HTMLElement {
     const cacheKey = `${side}:${key}`
-    const hit = derivedShells.get(cacheKey)
+    const hit = cardShells.get(cacheKey)
     const state = cardStateFor(side, key)
     if (hit) {
       syncDockCard(hit, spec, state)
       return hit
     }
     const el = buildDockCard(spec, state)
-    derivedShells.set(cacheKey, el)
+    cardShells.set(cacheKey, el)
     return el
   }
 
@@ -541,9 +544,12 @@ export function setupDocks(deps: DocksDeps) {
     // 卡被摘掉后清壳缓存：再加回来时才不会复用一个已经离槽的旧壳
     const live = new Set<string>()
     for (const side of ['left', 'right'] as const)
-      for (const c of deps.prefs().dock[side].cards)
+      for (const c of deps.prefs().dock[side].cards) {
         if (c.kind === 'derived' && c.card !== 'inspect') live.add(`${side}:${c.card}`)
-    for (const k of derivedShells.keys()) if (!live.has(k)) derivedShells.delete(k)
+        // 收纳盘同样是纯 chrome 的壳（header 只认身份与状态），body 每次现造
+        else if (c.kind === 'tray') live.add(`${side}:${dockKey(c)}`)
+      }
+    for (const k of cardShells.keys()) if (!live.has(k)) cardShells.delete(k)
     ensureCardDrops()
     ensureTileCols()
     const { left, right } = deps.getSlots()
@@ -633,6 +639,10 @@ export function setupDocks(deps: DocksDeps) {
    * 小卡留在原位（关容器不许带走成员），所以 close 给的是 `dissolveTray`。
    * 盘的收起复用 `collapsedCards`（键是 `tray:<id>`）与 `isCardCollapsed` 唯一判据，
    * 不新增收起表。
+   *
+   * 卡壳走 `shellFor`（与派生卡同一份缓存）：盘的成员／名字每重画都在变，但头部只认
+   * 身份与收起态——每重画重建壳，就会让按钮和标题重新从透明淡入一次（点盘里的小卡
+   * 会让整槽重画一次，用户看到的就是「点一下，盘头闪一下」）。
    */
   function trayCard(side: 'left' | 'right', tray: Extract<DockEntry, { kind: 'tray' }>): DockCardEntry {
     const key = dockKey(tray)
@@ -645,23 +655,20 @@ export function setupDocks(deps: DocksDeps) {
       else if (member.kind === 'shortcut') band.appendChild(shortcutTile(side, member.block))
     }
     const named = tray.title !== undefined && tray.title !== ''
-    const el = buildDockCard(
-      {
-        id: key,
-        title: named ? tray.title! : t('ui.dock.trayCount', { count: tray.cards.length }),
-        ...(named ? { count: String(tray.cards.length) } : {}),
-        body: band,
-        close: { title: t('ui.dock.trayDissolve'), onClick: () => dissolveTray(side, key) },
-        /**
-         * 未命名的盘静置**闭嘴**：展开时成员就摆在 body 里，「n 张小卡」报的是
-         * 看得见的信息——按「静置文字只报正文看不出的上下文」的判据只剩 grip。
-         * 盘名是用户起给这一组的、body 里没有的字 ⇒ 命名的盘静置留守。
-         * 收起后成员看不见了 ⇒ 收起态全键与标题常驻（壳的统一规则，见 §7）。
-         */
-        ...(named ? {} : { quietHead: true }),
-      },
-      cardStateFor(side, key),
-    )
+    const el = shellFor(side, key, {
+      id: key,
+      title: named ? tray.title! : t('ui.dock.trayCount', { count: tray.cards.length }),
+      ...(named ? { count: String(tray.cards.length) } : {}),
+      body: band,
+      close: { title: t('ui.dock.trayDissolve'), onClick: () => dissolveTray(side, key) },
+      /**
+       * 未命名的盘静置**闭嘴**：展开时成员就摆在 body 里，「n 张小卡」报的是
+       * 看得见的信息——按「静置文字只报正文看不出的上下文」的判据只剩 grip。
+       * 盘名是用户起给这一组的、body 里没有的字 ⇒ 命名的盘静置留守。
+       * 收起后成员看不见了 ⇒ 收起态全键与标题常驻（壳的统一规则，见 §7）。
+       */
+      ...(named ? {} : { quietHead: true }),
+    })
     bindTrayDrops(side, tray.id, el)
     return { id: key, el, size: 'large' }
   }
@@ -1010,11 +1017,14 @@ export function setupDocks(deps: DocksDeps) {
   }
 
   /**
-   * 盘的三个落点（落点都在**每次重画现建的**卡上，绑定随卡生灭，不需要解绑）：
+   * 盘的三个落点：
    *   · 盘头 ＝ 收进去（追加到盘末；收起态 body 不在，落点自然只剩盘头）；
    *   · 盘内格前后 ＝ 盘内排序（与裸排同一份 cardDrop、同一条规则）；
    *   · 槽里两张卡之间 ＝ 移出来（走槽 stack 既有的落点，见 `bindCardStack`）。
    * 盘只收叶子：窗口类条目在 accept 处就拒掉（它们上提是**读路径**的兜底，不是通路）。
+   *
+   * 卡壳是**复用**的（见 `shellFor`）⇒ 盘头的落点只绑一次（闭包只认 side／trayId，
+   * 两者随壳的 key 固定），盘内 band 每次重画现造，所以它每画一次绑一次。
    */
   function bindTrayDrops(side: 'left' | 'right', trayId: string, cardEl: HTMLElement): void {
     const trayKey = dockKey({ kind: 'tray', id: trayId, cards: [] })
@@ -1028,21 +1038,24 @@ export function setupDocks(deps: DocksDeps) {
       const entry = found ? found.list[found.index]! : null
       return entry !== null && isLeafEntry(entry)
     }
-    bindDropTarget(head, {
-      kind: 'card',
-      effect: 'move',
-      targetId: () => trayKey,
-      accept: (id) => id !== trayKey && leafDrag(id),
-      hint: () => t('ui.dock.trayDropIn'),
-      mark: () => {
-        head.dataset.dropInto = '1'
-      },
-      unmark: clearCardDropMarks,
-      onDrop: (id) => {
-        const src = findSide(id)
-        if (src) moveCard(src, side, id, { targetId: null, place: 'end' }, trayId)
-      },
-    })
+    if (head.dataset.dropBound !== '1') {
+      head.dataset.dropBound = '1'
+      bindDropTarget(head, {
+        kind: 'card',
+        effect: 'move',
+        targetId: () => trayKey,
+        accept: (id) => id !== trayKey && leafDrag(id),
+        hint: () => t('ui.dock.trayDropIn'),
+        mark: () => {
+          head.dataset.dropInto = '1'
+        },
+        unmark: clearCardDropMarks,
+        onDrop: (id) => {
+          const src = findSide(id)
+          if (src) moveCard(src, side, id, { targetId: null, place: 'end' }, trayId)
+        },
+      })
+    }
     bindDropTarget(band, {
       kind: 'card',
       effect: 'move',
@@ -1366,6 +1379,9 @@ export function setupDocks(deps: DocksDeps) {
    * 重命名的**行内输入**：把盘头的标题位换成一只输入框，Enter／失灵点别处＝提交，
    * Esc＝取消（重画恢复原样）。点盘头仍然是开合——输入框吞掉自己的点击与按键，
    * 不让「改名打到一半」变成一次折叠。空串＝回到未命名（卡头显示「n 张小卡」）。
+   *
+   * 输入框是**向标题位借位**：收尾时把标题格换回去再让重画落字。卡壳是复用的
+   * （见 `trayCard`），不还位的话重画就找不到 `.dock-card-title`，盘名从此再也不跟着变。
    */
   function startTrayRename(side: 'left' | 'right', trayId: string): void {
     const key = dockKey({ kind: 'tray', id: trayId, cards: [] })
@@ -1382,14 +1398,19 @@ export function setupDocks(deps: DocksDeps) {
     input.placeholder = t('ui.dock.trayRenamePlaceholder')
     input.spellcheck = false
     let done = false
+    const restoreTitle = () => {
+      if (input.parentElement) input.replaceWith(titleEl)
+    }
     const commit = () => {
       if (done) return
       done = true
+      restoreTitle()
       renameTray(side, trayId, input.value)
     }
     const cancel = () => {
       if (done) return
       done = true
+      restoreTitle()
       renderDocks()
     }
     input.addEventListener('click', (e) => e.stopPropagation())

@@ -27323,6 +27323,22 @@ await check('T281 收纳盘：建盘在原位、一次收完、盘内排序、�
   assert(tray2.cards[tray2.cards.length - 1] === shKey && !now.includes(shKey),
     `小卡应收进盘末、顶层不再有它：${JSON.stringify({ tray2, now })}`)
 
+  // ④′ 点盘内小卡 ⇒ 整槽重画，但**盘壳是复用的**：header 节点身份得留着。
+  // 每重画重建壳会让盘头的按钮与标题重新从透明淡入一次（盘头闪一下）；
+  // 与派生卡同一条判据——header 只认身份与收起态，不认 body 里的内容。
+  await page.evaluate((k) => {
+    const head = document.querySelector(`#dock-left-stack > .dock-card[data-card-id="${k}"] > .dock-card-head`)
+    if (head) head.dataset.probe = 'kept'
+  }, trayKey)
+  await page.locator(`.dock-tray-body > .dock-tile[data-card-id="${shKey}"] .dock-tile-main`).click()
+  await page.waitForTimeout(300)
+  const tileClick = await page.evaluate((k) => {
+    const head = document.querySelector(`#dock-left-stack > .dock-card[data-card-id="${k}"] > .dock-card-head`)
+    return { probe: head?.dataset.probe ?? null, activeId: window.__qua.snapshot().activeId }
+  }, trayKey)
+  assert(tileClick.activeId === blockId, `点盘内小卡应打开它指向的块：${JSON.stringify(tileClick)}`)
+  assert(tileClick.probe === 'kept', `点小卡不该重建盘壳 header（会在盘头上闪一次淡入）：${JSON.stringify(tileClick)}`)
+
   // ⑤ 槽里＝移出来：拖盘内格到槽里两张卡之间 ⇒ 落点决定容器，不需要「先出盘」
   const out = await dragTo({
     tileSel: '.dock-tray-body > .dock-tile[data-card-id="cmd:core.command-palette/show"]',
