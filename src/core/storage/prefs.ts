@@ -25,6 +25,13 @@ export interface Prefs {
   /** 主题三档；设备状态，不入 KB */
   theme: ThemeMode
   /**
+   * **界面语言**（设备态）：`null` ＝ 跟系统语言（首次启动自动选），`zh`／`en` ＝ 用户显式选过。
+   *
+   * 为什么设备态而非库状态：它回答「这一台机器用什么语言看」，跟着库走会让同一份内容
+   * 在别人的机器上换语言。切换走整页重载（命令表在 import 时就取走了文案）。
+   */
+  locale: 'zh' | 'en' | null
+  /**
    * 日记流的段排列（设备级视图状态，不进 KB——日记流非块、无 props 可挂，与 dock 开关同位）。
    * 值域首版只认 `column`／`row`（grid 轴已定、入口未做）。
    */
@@ -200,6 +207,7 @@ export const DEFAULT_DOCK: DockPrefs = {
 
 export const DEFAULT_PREFS: Prefs = {
   theme: 'system',
+  locale: null,
   feedLayout: 'column',
   journalMounts: [],
   mountViews: {},
@@ -358,6 +366,9 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
   return {
     ...DEFAULT_PREFS,
     ...p,
+    // 段排列只认两档（grid 轴未开）：别的值一律回单列，不让坏形状进偏好
+    // 语言只认两档＋null（跟系统）；坏值回 null，不让非法档位进字典
+    locale: p.locale === 'zh' || p.locale === 'en' ? p.locale : null,
     // 段排列只认两档（grid 轴未开）：别的值一律回单列，不让坏形状进偏好
     feedLayout: p.feedLayout === 'row' ? 'row' : 'column',
     // 块下属性密度只认两档；坏值回默认（「没选过」与「选了摘要」在这里同义：默认就是摘要）

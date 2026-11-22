@@ -25,6 +25,7 @@ import { isRefKind, relationEdgesOfForest, REFERENCE_KINDS, type RefKind, type R
 import { annotatesPairsOf } from '../relations/annotates.ts'
 import { compareRanks } from '../infra/order.ts'
 import type { KbClient } from '../kb/types.ts'
+import { getLocale } from '../infra/msg.ts'
 
 /**
  * 本地化字符串比较**只建一次**：旧写法在 `compareValues` 里每次比较都
@@ -32,6 +33,7 @@ import type { KbClient } from '../kb/types.ts'
  * 光构造 collator 就有几十万次。只读、无状态，模块级共享安全。
  */
 const ZH_COLLATOR = new Intl.Collator('zh-Hans-CN', { numeric: true })
+const EN_COLLATOR = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
 
 /* ------------------------------------------------------------ 条件形状 */
 
@@ -1169,7 +1171,7 @@ function compareValues(a: unknown, b: unknown): number | null {
   if (typeof a === 'number' && typeof b === 'number') return a - b
   // 属性值可能是 `"3"` 这种旧输入遗留：一边是数字串也按数值比
   if (typeof a === 'string' && typeof b === 'string') {
-    return ZH_COLLATOR.compare(a, b)
+    return (getLocale() === 'zh' ? ZH_COLLATOR : EN_COLLATOR).compare(a, b)
   }
   if (typeof a === 'number' && typeof b === 'string' && b.trim() !== '' && !Number.isNaN(Number(b))) {
     return a - Number(b)

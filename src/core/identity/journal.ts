@@ -8,6 +8,7 @@
 
 import { isJournalBlock, prop, type Block } from '../model/model.ts'
 import { derivedId, pad } from '../model/ids.ts'
+import { intlLocale } from '../infra/locale.ts'
 import { walkForest } from '../model/walk.ts'
 import { isEmptyContent } from '../model/runs.ts'
 export function todayISO(now: Date = new Date()): string {
@@ -179,7 +180,7 @@ export function ensureTodayJournal(blocks: Block[], now: Date = new Date()): str
 export function journalDateLabel(date: string): string {
   const [y, m, d] = date.split('-').map(Number)
   if (!y || !m || !d) return date
-  return new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' }).format(
+  return new Intl.DateTimeFormat(intlLocale(), { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' }).format(
     new Date(y, m - 1, d),
   )
 }
@@ -198,6 +199,6 @@ export function journalDateLabel(date: string): string {
 export function clockLabel(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return ''
   const d = new Date(ms)
-  const day = new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' }).format(d)
+  const day = new Intl.DateTimeFormat(intlLocale(), { year: 'numeric', month: 'long', day: 'numeric' }).format(d)
   return `${day} ${pad(d.getHours(), 2)}:${pad(d.getMinutes(), 2)}:${pad(d.getSeconds(), 2)}`
 }

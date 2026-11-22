@@ -1,3 +1,4 @@
+import { collatorLocale } from '../infra/locale.ts'
 /**
  * 视图的**记录投影族**：记录（`ViewRecord`）、结构列、分组、行序——
  * 「有哪些记录、按什么序」住这里，「怎么画」住 `ui/views/*`，
@@ -331,7 +332,7 @@ export function fieldTextOf(r: ViewRecord, key: string, resolve?: (value: unknow
   }
   if (key === CREATED_COLUMN || key === MODIFIED_COLUMN) {
     const at = key === CREATED_COLUMN ? r.block.created : r.block.modified
-    return new Date(at).toLocaleDateString('zh-Hans-CN')
+    return new Date(at).toLocaleDateString(collatorLocale())
   }
   const v = r.values[key]
   if (v === undefined || v === null) return ''
@@ -414,7 +415,7 @@ function compareAny(a: unknown, b: unknown): number {
   // 「一边是数字」也算数值比较：属性值可能被写成 `"3"`（旧输入框的遗留），
   // 判成字典序会让 10 排在 9 前面，且从表面看只是「顺序怪怪的」
   if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb
-  return String(a).localeCompare(String(b), 'zh-Hans-CN', { numeric: true, sensitivity: 'base' })
+  return String(a).localeCompare(String(b), collatorLocale(), { numeric: true, sensitivity: 'base' })
 }
 
 /**

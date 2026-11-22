@@ -35,6 +35,21 @@ function isEnvelope(x: unknown): x is Envelope {
   return e.backend === BACKEND && e.envelope === ENVELOPE && 'data' in e
 }
 
+/**
+ * **同步读设备字节**——只给启动定档用（见 `src/app/boot/locale.ts`）。
+ *
+ * 装载走的是异步 `load()`，但界面语言必须赶在命令表求值前定好（那些 title 在 import 时
+ * 就取走文案了）。所以这里给一个**只读、不解析形状**的同步出口：信封怎么拆由调用方判，
+ * 适配器仍然只有这一处碰 `localStorage`。
+ */
+export function readRawSync(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
 export function createLocalStorageAdapter(key: string): StoragePort {
   /**
    * 串行队列（单写者）：后一次提交永远排在前一次之后。

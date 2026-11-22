@@ -1,3 +1,4 @@
+import { collatorLocale } from '../infra/locale.ts'
 /**
  * **大纲 → 表格**：把一棵两层树摊成一张「表头＝一级子块、一列＝那个子块的孩子」的表。
  *
@@ -104,7 +105,7 @@ export function sortListRows(rows: readonly ListTableRow[], sort: ListSort | und
     if (ea && eb) return a.i - b.i
     if (ea) return 1
     if (eb) return -1
-    const c = a.v.localeCompare(b.v, 'zh-Hans-CN', { numeric: true, sensitivity: 'base' })
+    const c = a.v.localeCompare(b.v, collatorLocale(), { numeric: true, sensitivity: 'base' })
     return c === 0 ? a.i - b.i : sort.dir === 'desc' ? -c : c
   })
   return indexed.map((x) => x.r)

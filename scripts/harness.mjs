@@ -145,9 +145,10 @@ export async function launch() {
  *     要绕开得把清空放进 `addInitScript` 的一次性标志里（那样才 0/6 泄漏）。
  */
 export async function freshPage(browser, base, opts = {}) {
-  const ctx = await browser.newContext({ viewport: opts.viewport ?? { width: 1440, height: 900 }, deviceScaleFactor: opts.dsf ?? 2, locale: 'zh-CN' })
+  const loc = process.env.QUA_LOCALE === 'en' ? 'en-US' : 'zh-CN'
+  const ctx = await browser.newContext({ viewport: opts.viewport ?? { width: 1440, height: 900 }, deviceScaleFactor: opts.dsf ?? 2, locale: loc })
   await ctx.addInitScript(tagIdHelper)
-  return openPage(browser, ctx, base)
+  return openPage(browser, ctx, process.env.QUA_LOCALE === 'en' ? base + '?locale=en' : base)
 }
 
 /**

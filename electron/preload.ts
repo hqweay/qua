@@ -162,6 +162,10 @@ const qua = {
 
 contextBridge.exposeInMainWorld('kb', {
   shellInfo: (): Promise<Record<string, unknown>> => ipcRenderer.invoke('kb:shell/info'),
+  /** 界面语言：把 renderer 选定的档位告诉主进程，菜单文案随之重建 */
+  setLocale: (locale: string): void => {
+    ipcRenderer.send('kb:locale/set', locale)
+  },
   kernel,
 })
 

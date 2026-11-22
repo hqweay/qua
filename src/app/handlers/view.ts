@@ -85,6 +85,10 @@ export const VIEW_HANDLERS: Record<string, Handler> = {
     app.setTheme(S(a.mode, 'system'))
     return true
   },
+  'core.view/set-locale': (a, app) => {
+    app.setLocale(S(a.locale, 'zh'))
+    return true
+  },
   'core.view/set-props-density': (a, app) => {
     app.setPropsDensity(S(a.density, 'summary'))
     return true

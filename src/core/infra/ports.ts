@@ -690,6 +690,11 @@ export interface App {
   setTheme(mode: string): void
   toggleTheme(): void
   /**
+   * 界面语言（设备态）：写偏好、落盘、整页重载。
+   * 重载是硬要求——命令表／绑定表在 import 时就取走了文案，就地换档只会让一半界面变语言。
+   */
+  setLocale(locale: string): void
+  /**
    * **块下属性的默认密度**（设备态）：`summary` 一行摘要／`list` 一栏一行。
    * 它只是默认值（单块覆盖照旧生效）；改行高 ⇒ 实现里要重排这一屏。
    */

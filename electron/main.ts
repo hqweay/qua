@@ -29,8 +29,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 // 文案字典与 renderer **共用同一份**（`src/core/msg.ts` 是零依赖叶子）。菜单是用户可见文案，
-// 所以连「相」都走 t('app.name')，不在这里硬编码。
-import { t } from '../src/core/infra/msg'
+import { setLocale, t } from '../src/core/infra/msg'
 import { ASSET_SCHEME, isAssetHash } from '../src/core/infra/assets.ts'
 import { MANIFEST_FILE, DB_SCHEMA_VERSION, libraryId } from '../src/core/identity/library.ts'
 import { loadRegistry } from './library/registry.ts'
@@ -55,7 +54,8 @@ const DEV_URL = process.env.KB_DEV_SERVER_URL ?? null
 
 /* ------------------------------------------------------------ 名字与数据目录 */
 
-/** 中文显示名（菜单、About 面板、`.app` 名）—— 走字典，不硬编码 */
+/** 显示名（菜单、About 面板）——走字典，不硬编码；菜单档位先按系统语言定，renderer 之后可用 IPC 改 */
+setLocale(/^zh\b/i.test(app.getLocale()) ? 'zh' : 'en')
 const APP_NAME = t('app.name')
 /** 英文名：`app.setName()` 用这个（**不进任何文件路径**） */
 const APP_SLUG = 'qua'
@@ -231,6 +231,13 @@ ipcMain.handle('kb:shell/info', () => ({
   locale: app.getLocale(),
   dataDirs: DATA_DIRS,
 }))
+
+/** renderer 定档后告知：菜单文案走同一档（renderer 重载不会重跑主进程，所以要主动重建） */
+ipcMain.on('kb:locale/set', (_e, locale: unknown) => {
+  if (locale !== 'zh' && locale !== 'en') return
+  setLocale(locale)
+  Menu.setApplicationMenu(buildMenu())
+})
 
 /* ------------------------------------------------------------ 窗口 */
 
@@ -464,17 +471,17 @@ function buildMenu(): Menu {
 
   const template: MenuItemConstructorOptions[] = [
     {
-      label: APP_NAME,
+      label: t('app.name'),
       submenu: [
-        { role: 'about', label: t('menu.item.about', { app: APP_NAME }) },
+        { role: 'about', label: t('menu.item.about', { app: t('app.name') }) },
         { type: 'separator' },
         { role: 'services', label: t('menu.item.services') },
         { type: 'separator' },
-        { role: 'hide', label: t('menu.item.hide', { app: APP_NAME }) },
+        { role: 'hide', label: t('menu.item.hide', { app: t('app.name') }) },
         { role: 'hideOthers', label: t('menu.item.hideOthers') },
         { role: 'unhide', label: t('menu.item.showAll') },
         { type: 'separator' },
-        { role: 'quit', label: t('menu.item.quit', { app: APP_NAME }) },
+        { role: 'quit', label: t('menu.item.quit', { app: t('app.name') }) },
       ],
     },
     {

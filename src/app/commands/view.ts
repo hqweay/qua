@@ -12,7 +12,7 @@ export function viewCommands(
   d: ViewDeps,
 ): Pick<
   App,
-  'setTheme' | 'toggleTheme' | 'toggleDock' | 'journalFeedLayout' | 'setPropsDensity' | 'setPropsLineMode'
+  'setTheme' | 'toggleTheme' | 'setLocale' | 'toggleDock' | 'journalFeedLayout' | 'setPropsDensity' | 'setPropsLineMode'
 > {
   return {
     /**
@@ -36,6 +36,22 @@ export function viewCommands(
       d.renderDebugState()
       d.scheduleDeviceSave()
       d.scheduleBadge()
+    },
+
+    /**
+     * 界面语言：写设备偏好、落盘、整页重载。
+     *
+     * 为什么不就地换：命令表、绑定表在 import 时就把 title／label 取成字符串存下来了，
+     * 就地 `setLocale` 只会让「现取现翻」的那部分变语言，菜单和命令面板仍是旧语言。
+     * 重载让所有 import 重跑——这次 `boot/locale.ts` 先读到新档位，整份界面一致。
+     */
+    setLocale: (locale) => {
+      const next = locale === 'en' || locale === 'zh' ? locale : null
+      if (next === null) return
+      if (d.prefs().locale === next) return
+      d.prefs().locale = next
+      d.flushDevice()
+      d.reloadWindow()
     },
 
     /** 槽的开关归槽自己：`⌘⌥1/2` 与抬头按钮走同一条 */

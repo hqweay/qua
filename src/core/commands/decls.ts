@@ -237,6 +237,7 @@ export const COMMANDS: CommandDecl[] = [
 
   /* ---- 视图 ---- */
   { name: 'core.view/toggle-theme', title: t('cmd.view.toggle-theme'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['dark', 'light', 'theme'] },
+  { name: 'core.view/set-locale', title: t('cmd.view.set-locale'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { locale: { type: 'string', enum: ['zh', 'en'] } }, keywords: ['language', 'locale', 'english', t('ui.locale.zh')] },
   { name: 'core.view/set-theme', title: t('cmd.view.set-theme'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { mode: { type: 'string', enum: ['system', 'light', 'dark'] } }, keywords: ['dark', 'light', 'theme'] },
   { name: 'core.view/set-props-density', title: t('cmd.view.set-props-density'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { density: { type: 'string', enum: ['summary', 'list'] } }, keywords: ['property', 'density', 'layout', 'summary', 'list'] },
   { name: 'core.view/set-props-line-mode', title: t('cmd.view.set-props-line-mode'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, mode: { type: 'string', enum: ['summary', 'list', ''] } }, keywords: ['property', 'expand', 'collapse', 'density'], hidden: true },

@@ -7,6 +7,7 @@
  * 兄弟方法互相**直呼**（本片内的 function 声明）；panels 的三件（pickRef/pickTag/tagLabel）
  * 与 registry、pageDeps 都晚于本片装配——闭包运行期才解引用。
  */
+import { collatorLocale } from '../../core/infra/locale.ts'
 import { QueryTree } from '../../ui/query/query-tree.ts'
 import { ViewOptionsPanel } from '../../ui/views/view-options.ts'
 import { renderLinkComposer, renderNamePrompt } from '../../ui/overlay/panels.ts'
@@ -693,7 +694,7 @@ function showChildPropsPicker(blockId: string): void {
       ...kb.propDefs().map((d) => ({ id: d.id, label: propLabel(d) || blockLabel(d, kbGet) })),
       ...enginePropDefs().map((d) => ({ id: d.id, label: propLabel(d) })),
     ]
-    all.sort((x, y) => x.label.localeCompare(y.label, 'zh'))
+    all.sort((x, y) => x.label.localeCompare(y.label, collatorLocale()))
     const propRows = all.map((it) => ({
       id: `childprop/${it.id}`,
       label: it.label,

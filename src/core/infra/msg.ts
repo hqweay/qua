@@ -6,12 +6,15 @@
  *   2. **应用名也是文案**（`app.name` ＝ 中文「相」），不得硬编码 —— renderer 与 Electron 主进程共用这一份；
  *   3. 源码里**不许再有裸中文字面量**（白名单：注释、本文件、`seed.ts` 假数据、`console.*` 日志）。
  *
- * 为什么是「id 索引的扁平表」而不是 `t('中文原文')`：将来加语言＝加一份字典，不是全库翻。
- * v1 只有 zh ——但 id 从第一天就在。
+ * 为什么是「id 索引的扁平表」而不是 `t('中文原文')`：加语言＝加一份字典，不是全库翻。
+ * 两份字典共用同一份 `MsgId`，类型系统保证英文侧一字不漏（见 `msg-en.ts`）。
+ * 当前语言由 `setLocale` 设定——命令表在 import 时就取文案，所以引导顺序是硬约束
+ * （见 `src/app/boot/locale.ts`，必须是装配层的第一处 import）。
  *
  * 参数用 `{name}` 占位：`t('ui.atom.pageTitle', { label: '欢迎使用相' })`。
- * 本文件是**零依赖叶子**（不 import 任何东西）⇒ 任何层都可以 import 它（含 Electron 主进程）。
  */
+import { MSG_EN } from './msg-en.ts'
+
 
 export const MSG = {
   /* ---------------------------------------------------------------- 应用名 */
@@ -1372,6 +1375,11 @@ export const MSG = {
   'ui.settings.capture': '按新的键…',
   'ui.settings.customized': '自定义',
   'ui.settings.keysReset': '恢复默认',
+  'ui.settings.language': '界面语言',
+  'ui.settings.languageHint': '切换后重载窗口，整份界面（含菜单文案）一起换。默认跟随系统语言。',
+  'ui.locale.zh': '中文',
+  'ui.locale.en': 'English',
+  'cmd.view.set-locale': '设置界面语言（中文 / English）',
   'ui.settings.removed': '已摘掉',
   'ui.keys.needModifier': '要带 ⌘ / Alt 一类修饰键（裸键归打字）',
   'ui.keys.reserved': '这颗键归窗口（退出／关窗／新窗），改不了',
@@ -1795,12 +1803,28 @@ export type MsgId = keyof typeof MSG
 
 export type MsgParams = Record<string, string | number>
 
+/** 界面语言档位。只有两档：中文与英文；系统语言在装配层折算进来。 */
+export type Locale = 'zh' | 'en'
+
+let currentLocale: Locale = 'zh'
+
+/** 当前档位（设置面显示用；切换走装配层的整页重载） */
+export function getLocale(): Locale {
+  return currentLocale
+}
+
+/** 定档——只在装配层的第一处 import 里调用，命令表求值之前 */
+export function setLocale(locale: Locale): void {
+  currentLocale = locale
+}
+
 /**
  * 取文案。`{name}` 占位按 `params` 替换（没给到的占位原样留着，便于当场看出漏参数）。
  * 找不到 id 时返回 id 本身：兜底不抛（`MsgId` 联合类型已经挡在最前面）。
  */
 export function t(id: MsgId, params?: MsgParams): string {
-  const s = (MSG as Record<string, string>)[id] ?? id
+  const dict: Record<string, string> = currentLocale === 'en' ? MSG_EN : MSG
+  const s = dict[id] ?? id
   if (!params) return s
   return s.replace(/\{(\w+)\}/g, (m, k: string) => (k in params ? String(params[k]) : m))
 }

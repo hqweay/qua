@@ -210,6 +210,8 @@ export interface ViewDeps {
   /** 可直接改的偏好（装配层持有；设备状态，不进库） */
   prefs: () => {
     theme: ThemeMode
+    /** 界面语言（设备态）；null = 跟系统 */
+    locale: 'zh' | 'en' | null
     feedLayout: SecLayout
     dock: { left: { open: boolean }; right: { open: boolean } }
     /** 块下属性的**默认**密度（设备态）：`summary` 一行／`list` 一栏一行 */
@@ -234,6 +236,10 @@ export interface ViewDeps {
    * 不重排就会「可见区对了、滚动条不对」。与主题那种只换 token 的偏好不同。
    */
   refreshLayout: () => void
+  /** 换语言后整页重载——命令表在 import 时就取走了文案，就地换档只会换一半 */
+  reloadWindow: () => void
+  /** 切换语言这类「立刻重载」的动作：在重载前把防抖的设备写入发出去 */
+  flushDevice: () => void
   scheduleBadge: () => void
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
 }

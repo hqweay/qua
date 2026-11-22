@@ -26,6 +26,7 @@
  */
 import {
   appendEdge,
+  ALIASES_PROP,
   CHILD_PROPS_PROP,
   declareField,
   DEFAULT_PROP,
@@ -48,21 +49,49 @@ import {
   type MountEntry,
   type PropChoice,
 } from '../index.ts'
+import { writeBlockContent } from '../model/model.ts'
 import { ANNOTATES_PROP } from '../relations/annotates.ts'
-import { taskStatusVocabulary } from './task-vocabulary.ts'
-import { t } from '../infra/msg.ts'
+import { choicesOf } from '../props/choices.ts'
+import { taskStatusVocabulary, TASK_STATUS_LABEL } from './task-vocabulary.ts'
+import { getLocale, t } from '../infra/msg.ts'
 import type { Workspace } from '../infra/workspace.ts'
 import { DEFAULT_DOCK, type DockPrefs } from '../storage/prefs.ts'
 import type { DockEntry } from '../views/dock.ts'
 import { forest, longParagraph, LONG_EN, mkJournal, mkPage, resolveRefs, resolveSeedTags, SEED_AT } from './build.ts'
 import type { SeedBlock } from './inline.ts'
+import { SEED_EN, SEED_EN_LONG_PARAGRAPH } from './seed-en.ts'
+
+/* ------------------------------------------------------- 种子文案的 locale 分派 */
+
+/** 中文是默认；英文走整句映射，没翻到的整句原样留下（便于一眼看出漏项）。 */
+const s = (zh: string): string => (getLocale() === 'en' ? (SEED_EN[zh] ?? zh) : zh)
+
+/** 迷你 DSL 的正文与标签在种子层完成本地化，之后才交给 build.ts 解析成 run。 */
+function localizeSeed(node: SeedBlock): SeedBlock {
+  return {
+    ...node,
+    text: s(node.text),
+    tags: node.tags?.map(s),
+    children: node.children?.map(localizeSeed),
+  }
+}
+
+function seedJournal(date: string, seeds: SeedBlock[]) {
+  return mkJournal(date, seeds.map(localizeSeed))
+}
+
+function seedPage(title: string, icon: string | undefined, seeds: SeedBlock[], id?: string) {
+  return id === undefined
+    ? mkPage(s(title), icon, seeds.map(localizeSeed))
+    : mkPage(s(title), icon, seeds.map(localizeSeed), id)
+}
 
 /* --------------------------------------------------------------- 演示种子 */
 
 export function seedWorkspace(): Workspace {
   /* ------------------------------------------------------------ 今日：欢迎与上手 */
 
-  const journal = mkJournal(todayISO(), [
+  const journal = seedJournal(todayISO(), [
     {
       text: '欢迎来到相 —— 这一屏就是真的编辑面：下面每一行都能改、能拖、能撤销。',
       children: [
@@ -124,7 +153,7 @@ export function seedWorkspace(): Workspace {
 
   /* ------------------------------------------------------- 过去几天：像一份真实的日记 */
 
-  const yesterday = mkJournal(shiftISO(todayISO(), -1), [
+  const yesterday = seedJournal(shiftISO(todayISO(), -1), [
     {
       text: '读《卡片盒笔记法》摘了两段：',
       children: [
@@ -140,7 +169,7 @@ export function seedWorkspace(): Workspace {
     ]),
   ])
 
-  const dayBefore = mkJournal(shiftISO(todayISO(), -2), [
+  const dayBefore = seedJournal(shiftISO(todayISO(), -2), [
     {
       text: '把「想做的事」从日记里挑出来，排成一块看板：',
       children: [
@@ -157,22 +186,22 @@ export function seedWorkspace(): Workspace {
     ]),
   ])
 
-  const day3 = mkJournal(shiftISO(todayISO(), -3), [
+  const day3 = seedJournal(shiftISO(todayISO(), -3), [
     { text: '把最近的读书笔记整成一页：[[写作示范]]。' },
     { text: '引用是活的：那一页改了，这里看到的也是改后的。' },
   ])
-  const day4 = mkJournal(shiftISO(todayISO(), -4), [
+  const day4 = seedJournal(shiftISO(todayISO(), -4), [
     { text: '发现删除是可以反悔的：误删的一块在回收站里原样躺着，一键回来。' },
     { text: '于是开始放心大胆地整理了。' },
   ])
-  const day5 = mkJournal(shiftISO(todayISO(), -5), [
+  const day5 = seedJournal(shiftISO(todayISO(), -5), [
     { text: '开始用相记日记：默认落点就是今天，不用先找页面。' },
     { text: '往下滚就是更早的日子，日记流是完整的。' },
   ])
 
   /* -------------------------------------------------------------- 页：欢迎 / 写作 / 复盘 */
 
-  const p1 = mkPage('欢迎使用相', 'lucide:hand-heart', [
+  const p1 = seedPage('欢迎使用相', 'lucide:hand-heart', [
     {
       text: '相把每一段内容都当**块**：一行字可以打标签、加属性、被引用到任何地方。',
       children: [
@@ -229,7 +258,7 @@ export function seedWorkspace(): Workspace {
     { text: '最后一行是镜像示例：内容源头在 [[每周复盘]] 的「下一步」——在这里改，源头跟着变。' },
   ])
 
-  const p2 = mkPage('写作示范', 'lucide:pen-line', [
+  const p2 = seedPage('写作示范', 'lucide:pen-line', [
     {
       text: '行内的一切都是完整的单元：引用、提及、图片、外链，增删不会伤到旁边的字。',
       children: [
@@ -247,8 +276,8 @@ export function seedWorkspace(): Workspace {
     { text: '标记顺序不能错：==先高亮== 再 **后加粗**，两个区间都得落在自己那几个字上。' },
     { text: '这一页引用了 [[欢迎使用相]]——那一页右槽的「反链」里，来源就是这一页。' },
     { text: '一行里混着引用与图片也能继续打字：[[欢迎使用相]] ![[写作-第二张.png]]' },
-    { text: '降级样本 · 超长块：' + longParagraph() },
-    { text: '降级样本 · 全英文长行（不该溢出容器）：' + LONG_EN },
+    { text: s('降级样本 · 超长块：') + (getLocale() === 'en' ? SEED_EN_LONG_PARAGRAPH : longParagraph()) },
+    { text: s('降级样本 · 全英文长行（不该溢出容器）：') + LONG_EN },
     // 归属是**块级**的一格：正文里不出现 `#写作`，chip 仍在行尾——删字不摘标签
     { text: '标签写在正文之外：这一页打了个标签，归属落在行尾 chip 上，正文一个字没动。', tags: ['写作'] },
     { text: '备注是写在字上的批注：下面这句话带了一枚示例备注——选中一段字，从划选气泡里选「备注」就能做到。' },
@@ -260,7 +289,7 @@ export function seedWorkspace(): Workspace {
     // 确定性 id：演示盘（`seedDock()`）的快捷卡按 id 指到这一页——建库与设备状态分开调用，id 必须两边一致
   ], SEED_INPUT_NOTES_ID)
 
-  const p3 = mkPage('每周复盘', 'lucide:notebook-pen', [
+  const p3 = seedPage('每周复盘', 'lucide:notebook-pen', [
     {
       text: '每周一页：这周做了什么、卡在哪、下周做什么。',
       children: [
@@ -291,7 +320,7 @@ export function seedWorkspace(): Workspace {
     { text: '复盘只写「变了什么、为什么」，不抄流水账。', tags: ['复盘'] },
   ])
 
-  const p4 = mkPage(
+  const p4 = seedPage(
     'How I Learned to Stop Worrying and Love the Block-Based Document Model in Personal Knowledge Tools',
     'lucide:book-open',
     [
@@ -300,10 +329,16 @@ export function seedWorkspace(): Workspace {
     ],
   )
 
-  const p5 = mkPage('', undefined, [
+  const p5 = seedPage('', undefined, [
     { text: '无标题页：左槽、面包屑、引用 chip 都要有兜底文案' },
     { text: '引用一个无标题页：[[ ]]' },
   ])
+  if (getLocale() === 'en') {
+    const alias = (p5.page.props?.[ALIASES_PROP] as string[] | undefined)?.[0] ?? ''
+    if (alias.startsWith('未命名-')) {
+      p5.page.props = { ...p5.page.props, [ALIASES_PROP]: [`Untitled-${alias.slice(-6)}`] }
+    }
+  }
 
   const built = [journal, yesterday, dayBefore, day3, day4, day5, p1, p2, p3, p4, p5]
   const blocks = built.map((b) => b.page)
@@ -312,7 +347,7 @@ export function seedWorkspace(): Workspace {
    * **全部页面**＝一个查询块。要「所有页在一处看」的工作台，造的是**条件**（`role:'page'`
    * 问的就是「页」这份身份判据），不是第二个目录实体——列表本身能排序能切片，因为它是查询。
    */
-  const allPages = mkQueryBlock({ name: '全部页面', spec: { where: { role: 'page' } }, icon: 'lucide:list' })
+  const allPages = mkQueryBlock({ name: s('全部页面'), spec: { where: { role: 'page' } }, icon: 'lucide:list' })
   allPages.created = SEED_AT
   allPages.modified = SEED_AT
   blocks.push(allPages)
@@ -324,12 +359,12 @@ export function seedWorkspace(): Workspace {
    * ⚠️ 同「全部页面」：只造**条件与配置**，不预置结果——冻结是求值产生的。
    */
   const featureBoard = mkQueryBlock({
-    name: '功能看板',
-    spec: { where: { tag: FEATURE_TAG_LABEL } },
+    name: s('功能看板'),
+    spec: { where: { tag: s(FEATURE_TAG_LABEL) } },
     views: [
       {
         id: 'seed-kanban',
-        name: '看板',
+        name: s('看板'),
         kind: 'cards',
         // 看板＝卡片按值分列：组按选项 id 实时导出，呈现顺序钉成声明序
         groupBy: FEATURE_STATUS_PROP_ID,
@@ -337,14 +372,14 @@ export function seedWorkspace(): Workspace {
       },
       {
         id: 'seed-table',
-        name: '表格',
+        name: s('表格'),
         kind: 'table',
         displayProps: [FEATURE_STATUS_PROP_ID, FEATURE_DATE_PROP_ID],
       },
-      { id: 'seed-gallery', name: '画廊', kind: 'cards' },
+      { id: 'seed-gallery', name: s('画廊'), kind: 'cards' },
       {
         id: 'seed-calendar',
-        name: '日历',
+        name: s('日历'),
         kind: 'calendar',
         calendar: { dateBy: FEATURE_DATE_PROP_ID, showUndated: true },
       },
@@ -371,31 +406,32 @@ export function seedWorkspace(): Workspace {
 
   /* ---------------------------------------------- 要拿到已建块 id 才能写的样本 */
 
-  const nextStep = childByPlain(p3.page, '下一步')
+  const nextStep = childByPlain(p3.page, s('下一步'))
   // 镜像：p1 的宿主块指向 p3 的「下一步」（`view:''` ＝ 跟随源块的默认看法）
   if (nextStep) {
-    const mirror = mkBlock(textRuns('「下一步」的镜像'), {
+    const mirror = mkBlock(textRuns(s('「下一步」的镜像')), {
       props: { _embed: { block: nextStep.id, view: '' } },
       created: SEED_AT,
       modified: SEED_AT,
     })
     p1.page.children.push(mirror)
     // 算作：p2 的迁移笔记同时算作「下一步」的一员——多一条父边，树没有搬
-    const migrationNote = childByPlain(p2.page, '把内容搬去别的库之前')
+    const migrationNote = childByPlain(p2.page, s('把内容搬去别的库之前'))
     if (migrationNote) appendEdge(migrationNote, nextStep)
   }
 
   // **备注样本**：宿主是 p2 里那句话，顶层一枚备注块指向它身上的区间锚。
   // 锚的 id 用确定性 id：装配段的指向槽要拿到同一个 id（建块与指向分两步写）。
-  const annotated = childByPlain(p2.page, '第一次见面')
+  const annotated = childByPlain(p2.page, s('第一次见面'))
   if (annotated) {
+    const quote = s('第一次见面')
     const anno: Anno = {
       id: SEED_NOTE_ANNO_ID,
-      range: { start: 0, end: 5 },
-      quote: { exact: '第一次见面', prefix: '', suffix: '就能在字上写批注。' },
+      range: { start: 0, end: quote.length },
+      quote: { exact: quote, prefix: '', suffix: s('就能在字上写批注。') },
     }
     annotated.annos = [anno]
-    const note = mkBlock(textRuns('示例备注：批注跟着字走——字改了，它还认得自己标的是哪段。'), {
+    const note = mkBlock(textRuns(s('示例备注：批注跟着字走——字改了，它还认得自己标的是哪段。')), {
       props: { [ANNOTATES_PROP]: [{ block: annotated.id, anno: anno.id }] },
       created: SEED_AT,
       modified: SEED_AT,
@@ -460,7 +496,7 @@ export const SEED_TRAY_ID = derivedId('tray', 'seed/quick')
 function featureVocabulary(): { blocks: Block[]; tagId: string } {
   // 选项是**定义块上的记录**（`_choices`）：不进森林，数组序＝选项序
   const statusDef = mkPropDef(
-    FEATURE_STATUS_LABEL,
+    s(FEATURE_STATUS_LABEL),
     'select',
     // 缺省值住在定义上：实例没填这一栏时，面板读出来的就是它
     { [DEFAULT_PROP]: FEATURE_STATUS_EXPLORING_ID },
@@ -472,12 +508,12 @@ function featureVocabulary(): { blocks: Block[]; tagId: string } {
     icon: `lucide:${icon}`,
   })
   setChoices(statusDef, [
-    choice('探索中', FEATURE_STATUS_EXPLORING_ID, 'loader-circle'),
-    choice('已落地', FEATURE_STATUS_SHIPPED_ID, 'circle-check'),
-    choice('搁置', FEATURE_STATUS_SHELVED_ID, 'minus'),
+    choice(s('探索中'), FEATURE_STATUS_EXPLORING_ID, 'loader-circle'),
+    choice(s('已落地'), FEATURE_STATUS_SHIPPED_ID, 'circle-check'),
+    choice(s('搁置'), FEATURE_STATUS_SHELVED_ID, 'minus'),
   ])
-  const dateDef = mkPropDef(FEATURE_DATE_LABEL, 'date', {}, FEATURE_DATE_PROP_ID)
-  const tag = mkTagBlock(FEATURE_TAG_LABEL)
+  const dateDef = mkPropDef(s(FEATURE_DATE_LABEL), 'date', {}, FEATURE_DATE_PROP_ID)
+  const tag = mkTagBlock(s(FEATURE_TAG_LABEL))
   tag.props = { ...(tag.props ?? {}), _icon: 'lucide:sliders-horizontal' }
   declareField(tag, FEATURE_STATUS_PROP_ID)
   declareField(tag, FEATURE_DATE_PROP_ID)
@@ -507,22 +543,22 @@ function featureInstances(tagId: string): Block[] {
     return r
   }
   return [
-    record('命令面板', FEATURE_STATUS_SHIPPED_ID, '2026-09-30'),
-    record('行内图片', FEATURE_STATUS_SHIPPED_ID, '2026-10-27'),
-    record('多库与库根', FEATURE_STATUS_SHIPPED_ID, '2026-11-05'),
-    record('快速筛选', FEATURE_STATUS_SHIPPED_ID, '2026-11-05'),
-    record('回收站', FEATURE_STATUS_SHIPPED_ID, '2026-11-09'),
-    record('备注', FEATURE_STATUS_SHIPPED_ID, '2026-11-13'),
-    record('查询镜头', FEATURE_STATUS_SHIPPED_ID, '2026-11-14'),
-    record('多值与附件', FEATURE_STATUS_SHIPPED_ID, '2026-11-15'),
-    record('块取名', FEATURE_STATUS_SHIPPED_ID, '2026-11-18'),
-    record('视图显示与排序', FEATURE_STATUS_SHIPPED_ID, '2026-11-19'),
-    record('大文档秒开', FEATURE_STATUS_SHIPPED_ID, '2026-11-20'),
-    record('行内形状语言', FEATURE_STATUS_SHIPPED_ID, '2026-11-22'),
-    record('字段入口三面共用', FEATURE_STATUS_SHIPPED_ID, '2026-11-22'),
-    record('引用某一段', FEATURE_STATUS_EXPLORING_ID),
-    record('自动化'),
-    record('图库管理', FEATURE_STATUS_SHELVED_ID),
+    record(s('命令面板'), FEATURE_STATUS_SHIPPED_ID, '2026-09-30'),
+    record(s('行内图片'), FEATURE_STATUS_SHIPPED_ID, '2026-10-27'),
+    record(s('多库与库根'), FEATURE_STATUS_SHIPPED_ID, '2026-11-05'),
+    record(s('快速筛选'), FEATURE_STATUS_SHIPPED_ID, '2026-11-05'),
+    record(s('回收站'), FEATURE_STATUS_SHIPPED_ID, '2026-11-09'),
+    record(s('备注'), FEATURE_STATUS_SHIPPED_ID, '2026-11-13'),
+    record(s('查询镜头'), FEATURE_STATUS_SHIPPED_ID, '2026-11-14'),
+    record(s('多值与附件'), FEATURE_STATUS_SHIPPED_ID, '2026-11-15'),
+    record(s('块取名'), FEATURE_STATUS_SHIPPED_ID, '2026-11-18'),
+    record(s('视图显示与排序'), FEATURE_STATUS_SHIPPED_ID, '2026-11-19'),
+    record(s('大文档秒开'), FEATURE_STATUS_SHIPPED_ID, '2026-11-20'),
+    record(s('行内形状语言'), FEATURE_STATUS_SHIPPED_ID, '2026-11-22'),
+    record(s('字段入口三面共用'), FEATURE_STATUS_SHIPPED_ID, '2026-11-22'),
+    record(s('引用某一段'), FEATURE_STATUS_EXPLORING_ID),
+    record(s('自动化')),
+    record(s('图库管理'), FEATURE_STATUS_SHELVED_ID),
   ]
 }
 
@@ -605,7 +641,11 @@ function coreVocabulary(): { blocks: Block[]; featureTagId: string } {
   // 两边各造一份就会漂移（种子有的选项、按需物化的没有，查询就分叉）。
   // 选项 id 仍是核心词汇的**确定性 id**（`closureOf`／⌘↵／种子查询按 id 认「完成」）。
   const taskStatus = taskStatusVocabulary()
-  const task = mkTagBlock(TASK_TAG_LABEL)
+  if (getLocale() === 'en') {
+    writeBlockContent(taskStatus, textRuns(s(TASK_STATUS_LABEL)))
+    setChoices(taskStatus, choicesOf(taskStatus).map((c) => ({ ...c, label: s(c.label) })))
+  }
+  const task = mkTagBlock(s(TASK_TAG_LABEL))
   task.props = { ...(task.props ?? {}), _icon: 'lucide:check-square' }
   declareField(task, TASK_STATUS_PROP_ID)
   // 「功能」词汇只有种子这一个使用者（见 `featureVocabulary` 的注释），时刻由它自己盖

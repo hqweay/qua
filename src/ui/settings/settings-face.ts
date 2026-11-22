@@ -22,7 +22,9 @@ import { renderIcon } from '../../view/icons.ts'
  */
 interface SettingsPrefs {
   theme: 'system' | 'light' | 'dark'
-  /** 块下属性区的密度档（设备态） */
+  /** 界面语言（设备态）；null = 跟系统 */
+  locale: 'zh' | 'en' | null
+  /** 块下属性区的密度档 */
   propsDensity: 'summary' | 'list'
   keys: Record<string, string | null>
 }
@@ -76,7 +78,7 @@ export class SettingsFace {
   }
 
   render(): void {
-    this.root.replaceChildren(this.sectionTheme(), this.sectionPropsLine(), this.sectionKeys())
+    this.root.replaceChildren(this.sectionTheme(), this.sectionLanguage(), this.sectionPropsLine(), this.sectionKeys())
   }
 
   /* ---------------------------------------------------------- 外观 */
@@ -106,6 +108,41 @@ export class SettingsFace {
       row.append(b)
     }
     sec.append(row)
+    return sec
+  }
+
+  /* ---------------------------------------------------------- 界面语言 */
+
+  private sectionLanguage(): HTMLElement {
+    const sec = document.createElement('section')
+    sec.className = 'settings-sec'
+    const title = document.createElement('h2')
+    title.className = 'settings-sec-title'
+    title.textContent = t('ui.settings.language')
+    const hint = document.createElement('p')
+    hint.className = 'settings-hint'
+    hint.textContent = t('ui.settings.languageHint')
+    const row = document.createElement('div')
+    row.className = 'settings-theme'
+    row.dataset.settings = 'language'
+    const current = this.deps.prefs().locale
+    const options: readonly { locale: 'zh' | 'en'; label: 'ui.locale.zh' | 'ui.locale.en' }[] = [
+      { locale: 'zh', label: 'ui.locale.zh' },
+      { locale: 'en', label: 'ui.locale.en' },
+    ]
+    for (const opt of options) {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.className = 'ui-btn settings-theme-opt'
+      b.dataset.settingsLocale = opt.locale
+      b.textContent = t(opt.label)
+      if (current === opt.locale) b.classList.add('settings-theme-opt--on')
+      b.addEventListener('click', () => {
+        this.deps.invoke('core.view/set-locale', { locale: opt.locale })
+      })
+      row.append(b)
+    }
+    sec.append(title, hint, row)
     return sec
   }
 

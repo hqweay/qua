@@ -6,6 +6,9 @@
  * 菜单 / 斜杠 / 划选气泡同样只是 `resolveBindings(kind, ctx)` 的渲染结果；
  * 命令面板不经过绑定表——它枚举命令表本身（键位提示从 keymap 绑定取）。
  */
+// 文案字典在命令表求值时就要选好语言 ⇒ 定档必须是第一处 import
+import { LOCALE } from './app/boot/locale.ts'
+document.documentElement.lang = LOCALE === 'en' ? 'en' : 'zh-CN'
 import './styles.css'
 import { buildAdjacency, checkEdge, cloneSubtree, cyclePathLabels, danglingOf, findInForest, flatten, FEED_INITIAL, feedDays, hasLiveChildren, isJournal, journalId, locate, mkBlock, mkJournalBlock, pruneGone, todayISO, type Block, trashOf, withBlockOwnerData, type StoredViewKind, type UndoKind } from './core/index.ts'
 import { plainText } from './core/model/runs.ts'
@@ -1800,6 +1803,9 @@ const app: App = {
      */
     refreshLayout: () => ed.applyWindow(),
     scheduleBadge,
+    // 语言切换必须整页重载：命令表在 import 时就取走了文案
+    flushDevice: saveDeviceNow,
+    reloadWindow: () => window.location.reload(),
     toast: (text, kind) => app.toast(text, kind),
   }),
 
