@@ -144,7 +144,8 @@ export interface MenuOpts {
    * **这次打开的触发元素**（点的那颗按钮／右键的那颗块标）。给了它，
    * 同一颗触发器再触发一次＝**收起**（toggle）——入口按钮就是这张菜单的开关，
    * 「点了没反应」（拆掉重建再滑进来一次）在用户眼里等于坏了。
-   * 不给（菜单行二级入口、键盘入口）＝老行为：先关再开。
+   * 不给（菜单行二级入口、键盘入口）＝不能 toggle；若是在选中回调里同步开的
+   * 下一问，按「换题」处理（不重播入场，见 `pickActive`）。
    */
   trigger?: HTMLElement
 }
@@ -200,6 +201,11 @@ export class Layers {
   private confirmFocus: FocusReturn | null = null
   /** 划选气泡（顶部工具栏作废后的落点，2026-10-19）*/
   private selEl: HTMLElement | null = null
+  /**
+   * 一次「选中行 → 同步开下一问」的窗口（见 `pickActive`）。
+   * 窗口里开的菜单是下钻，不重播入场动画。
+   */
+  private picking = false
   open = false
 
   constructor(private isMac: () => boolean) {
@@ -302,6 +308,8 @@ export class Layers {
      * 用户点第二下是要换面，不是要在旧面上再叠一张。
      */
     this.closePopover()
+    /** 下钻（见 `pickActive`）：这次开的是同一张面换题，不重播入场 */
+    const replacing = this.picking
     this.menuTrigger = o.trigger ?? null
     /**
      * **焦点归还**：菜单会抢焦点（搜索框要能打字），关掉之后必须还回去。
@@ -316,6 +324,11 @@ export class Layers {
     const box = document.createElement('div')
     box.className = 'layer'
     box.setAttribute('role', 'dialog')
+    /**
+     * **换题不重播入场**：旧面在同一帧里已被摘掉，再淡入一次就是「闪一下」。
+     * 同一帧内完成替换时浏览器只画最终态，视觉上是干净的内容切换。
+     */
+    if (replacing) box.style.animation = 'none'
     if (o.title) {
       const head = document.createElement('div')
       head.className = 'layer-head'
@@ -491,7 +504,20 @@ export class Layers {
     const onPick = this.opts?.onPick
     const keep = this.opts?.keepOpen === true
     if (!keep) this.closeMenu()
-    onPick?.(row, mods)
+    /**
+     * **下钻＝同一张面换题，不是新面出生。**
+     *
+     * 选中回调常常立刻问下一问（选字段→选值、选触发器→选父块→问引用），
+     * 那次 `openMenu` 与这里在同一条同步调用栈上。旧面是在这之前瞬间摘掉的
+     * （菜单不退场），若新面再跑一遍 `overlay-in`，视觉就是「消失 → 从空白淡回来」，
+     * 读作闪烁。窗口只覆盖这一条调用栈：异步才开的下一面照常入场。
+     */
+    this.picking = true
+    try {
+      onPick?.(row, mods)
+    } finally {
+      this.picking = false
+    }
   }
 
   closeMenu(notify = true): void {
