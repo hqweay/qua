@@ -11774,6 +11774,13 @@ await check('T104 目录卡：页/标签走归属树、属性/自动化平铺且
   assert(tagFace.rows.includes('任务'), `标签树里 T 是根：${JSON.stringify(tagFace)}`)
   assert(!tagFace.rows.includes(ids.nameC), '页不进标签的归属树')
 
+  // 切面只换身体，不换卡壳：整槽重画过多少次，header 节点身份都该留着
+  await page.evaluate(() => {
+    for (const h of document.querySelectorAll('#dock-left .dock-card[data-card-id] .dock-card-head')) {
+      const id = h.closest('.dock-card')?.dataset.cardId
+      if (id === 'belongs' || id === 'calendar' || id === 'trash') h.dataset.probe = 'kept'
+    }
+  })
   // 四面齐全；身份两面按索引列表平铺，且不给身份块亮「归到它下面」的落点
   const faces = await page.evaluate(() =>
     [...document.querySelectorAll('#dock-left .belongs-tab')].map((b) => b.dataset.face))
@@ -11798,6 +11805,14 @@ await check('T104 目录卡：页/标签走归属树、属性/自动化平铺且
     assert(got.draggable === 0, `身份面不该可拖（加边写不进任何读路径）：${JSON.stringify(got)}`)
   }
 
+  const lostHeads = await page.evaluate(() =>
+    [...document.querySelectorAll('#dock-left .dock-card[data-card-id] .dock-card-head')]
+      .filter((h) => {
+        const id = h.closest('.dock-card')?.dataset.cardId
+        return (id === 'belongs' || id === 'calendar' || id === 'trash') && h.dataset.probe !== 'kept'
+      })
+      .map((h) => h.closest('.dock-card')?.dataset.cardId ?? '?'))
+  assert(lostHeads.length === 0, `整槽重画不该重建卡壳 header：${JSON.stringify(lostHeads)}`)
   await ctx.close()
   return `页/标签走归属树；属性/自动化按索引平铺且不可拖；四面齐全；点行打开、跨类只由属性区回答`
 })

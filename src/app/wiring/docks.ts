@@ -42,6 +42,7 @@ import {
   buildDockCard,
   buildDockTile,
   decorateDockCard,
+  syncDockCard,
   renderDockStack,
   type DockCard,
   type DockCardEntry,
@@ -149,6 +150,25 @@ export function setupDocks(deps: DocksDeps) {
    * 留在后台跟着每次编辑重查，是白付的账。
    */
   const mountCards = new Map<'left' | 'right', DockMountCard>()
+
+  /**
+   * 派生卡壳按「槽 + key」缓存：header 只依赖卡的身份与状态，不依赖身体里的视图状态。
+   * 切面/切日期只换身体——重建壳会让 header 闪一下，还会打断它上面正在进行的交互。
+   */
+  const derivedShells = new Map<string, HTMLElement>()
+
+  function shellFor(side: 'left' | 'right', key: string, spec: DockCard): HTMLElement {
+    const cacheKey = `${side}:${key}`
+    const hit = derivedShells.get(cacheKey)
+    const state = cardStateFor(side, key)
+    if (hit) {
+      syncDockCard(hit, spec, state)
+      return hit
+    }
+    const el = buildDockCard(spec, state)
+    derivedShells.set(cacheKey, el)
+    return el
+  }
 
   function ensureMountCard(side: 'left' | 'right'): DockMountCard {
     let inst = mountCards.get(side)
@@ -517,6 +537,12 @@ export function setupDocks(deps: DocksDeps) {
 
   function renderDocks(): void {
     pruneOnBoot()
+    // 卡被摘掉后清壳缓存：再加回来时才不会复用一个已经离槽的旧壳
+    const live = new Set<string>()
+    for (const side of ['left', 'right'] as const)
+      for (const c of deps.prefs().dock[side].cards)
+        if (c.kind === 'derived' && c.card !== 'inspect') live.add(`${side}:${c.card}`)
+    for (const k of derivedShells.keys()) if (!live.has(k)) derivedShells.delete(k)
     ensureCardDrops()
     ensureTileCols()
     const { left, right } = deps.getSlots()
@@ -913,7 +939,7 @@ export function setupDocks(deps: DocksDeps) {
     // 派生卡全部 quiet：正文自己报得出名字（月历、树、清单），卡头静置不再报第二遍
     const finish = (spec: DockCard): DockCardEntry => ({
       id: card,
-      el: buildDockCard({ ...spec, id: card, close, quietHead: true }, cardStateFor(side, card)),
+      el: shellFor(side, card, { ...spec, id: card, close, quietHead: true }),
     })
     // 穷举：`DERIVED_CARDS` 加一张、这里没接 ⇒ 编译期红（早先是三元链，漏了只是「点了没反应」）
     switch (card) {

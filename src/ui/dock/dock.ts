@@ -287,6 +287,34 @@ export function buildDockCard(card: DockCard, state: DockCardState): HTMLElement
 }
 
 /**
+ * 就地同步已存在的卡壳：只换身体与可变字段，**不重建 header**。
+ *
+ * header 只依赖卡的身份与状态；身体里的视图状态（面、日期）变化不该让它闪一下。
+ */
+export function syncDockCard(el: HTMLElement, card: DockCard, state: DockCardState): void {
+  el.dataset.cardId = card.id
+  el.hidden = card.hidden === true
+  if (card.quietHead) el.dataset.quietHead = '1'
+  else delete el.dataset.quietHead
+  const head = el.querySelector<HTMLElement>(':scope > .dock-card-head')
+  if (head) head.draggable = card.draggable !== false
+  const title = el.querySelector<HTMLElement>(':scope > .dock-card-head .dock-card-title')
+  if (title && title.textContent !== card.title) title.textContent = card.title
+  const oldCount = el.querySelector<HTMLElement>(':scope > .dock-card-head .dock-card-count')
+  if (card.count !== undefined) {
+    const count = oldCount ?? document.createElement('span')
+    if (!oldCount) {
+      count.className = 'dock-card-count'
+      title?.insertAdjacentElement('afterend', count)
+    }
+    if (count.textContent !== card.count) count.textContent = card.count
+  } else oldCount?.remove()
+  const body = el.querySelector<HTMLElement>(':scope > .dock-card-body')
+  if (body) body.replaceChildren(card.body)
+  applyDockCardState(el, state)
+}
+
+/**
  * 卡头的**点**与**右键**：左键头部空白（标题）＝折叠/展开，右键＝卡片菜单。
  *
  * 头上的按钮各有各的动作，点它们不算「点头」；拖动是 dragstart，与 click 互斥
