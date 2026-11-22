@@ -750,6 +750,8 @@ export class ViewHost {
         if (this.cards) this.cards.sync(ids)
         // 页签：成员数变了重建切换条；已有页签的正文变了就地改文案（重建会搬身体编辑器）
         if (this.tabs) this.tabs.sync(ids)
+        // 导图：碰到这棵树里的块才重铺（节点文字没有可局部改的格子）
+        if (this.mindmap) this.mindmap.sync(ids)
       }
     })
   }

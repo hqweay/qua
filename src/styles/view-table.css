@@ -1076,6 +1076,9 @@ button.queryview-chip:hover {
   flex-direction: column;
   gap: var(--ui-gap-2);
   overflow: auto;
+  /* 画布是**一铺面**不是一段文：导图高了仍要能就地横着拖，不能把横向滚动条
+     留在几千像素高的画布底下。内容比这矮时自然高，不出现第二条滚动语境。 */
+  max-height: min(78vh, 720px);
   /* 视图体嵌在页滚动里：滚到边界不把滚动传给外层 */
   overscroll-behavior: contain;
 }
@@ -1086,45 +1089,70 @@ button.queryview-chip:hover {
 }
 .vm-canvas {
   position: relative;
-  min-height: 12rem;
-  /* 根居中：整块从容器高的中线开始排（纵向坐标本来就是居中的） */
-  display: flex;
-  align-items: center;
+  flex: 0 0 auto;
+  margin-inline: auto;
 }
 .vm-edges {
   position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+  left: 0;
+  top: 0;
+  display: block;
+  overflow: visible;
   pointer-events: none;
 }
 .vm-edge {
   fill: none;
   stroke: var(--ui-border);
-  stroke-width: 1;
+  stroke-width: 1.5;
 }
+/* 节点是纸面上的**卡片**：Sunken 底板上再铺 Sunken 会读成「没有卡片」，
+   所以节点用 surface ＋ 细线 ＋ low 影浮起来；根用强调底色区分身份。 */
 .vm-node {
   position: absolute;
-  top: 50%;
-  left: 0;
-  height: calc(var(--ui-row-h) - 4px);
-  max-width: 9rem;
-  padding: 0 var(--ui-gap-2);
-  border: 0;
-  border-radius: var(--ui-radius-sm);
-  background: var(--ui-surface-sunken);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  padding: var(--ui-gap-2) var(--ui-gap-4);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-surface);
   color: var(--ui-text);
+  box-shadow: var(--ui-shadow-low);
   font-size: var(--ui-fs-sm);
+  line-height: 1.3;
   text-align: left;
   cursor: pointer;
-  white-space: nowrap;
+}
+.vm-node[data-dir='left'] {
+  text-align: right;
 }
 .vm-node:hover {
-  background: var(--ui-surface-raised);
+  border-color: var(--ui-border);
+  box-shadow: var(--ui-shadow-mid);
+}
+.vm-node[data-tier='1'] {
+  color: var(--ui-text);
+}
+.vm-node[data-tier='2'] {
+  color: var(--ui-text-secondary);
 }
 .vm-node[data-depth='0'] {
   background: var(--ui-accent-soft);
+  border-color: transparent;
+  box-shadow: none;
   font-weight: var(--ui-fw-medium);
+}
+.vm-node-text {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.vm-node-text--empty {
+  width: 100%;
+  color: var(--ui-text-tertiary);
+  text-align: center;
 }
 
 /* ---------------------------------------------------------------- 提及栏的候选引用 */

@@ -33555,6 +33555,88 @@ await check('T353 日记流临界位编辑一块：今天空面板不被钉成�
   return `临界位编辑 4 次，今天空面板 minHeight 始终为空、身体 80px`
 })
 
+await check('T355 思维导图：连线两端贴住节点边、长句在卡片内折行、根落在视口中间', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+
+  // 种子里的「每周复盘 → 候选功能」有子块：拿它当导图根（与真人从看法菜单点「思维导图」同一条路）
+  const setup = await page.evaluate(async () => {
+    const q = window.__qua
+    const p = q.pages().find((x) => (x.title ?? '') === '每周复盘')
+    if (!p) return { err: '种子里没有「每周复盘」页' }
+    await q.invoke('core.page/open', { pageId: p.id })
+    await new Promise((r) => setTimeout(r, 250))
+    const owner = q.allBlocks().find((b) => (b.text ?? '').trim() === '候选功能')
+    if (!owner) return { err: '「每周复盘」里没有「候选功能」块' }
+    await q.invoke('core.view/add', { owner: { kind: 'block', blockId: owner.id }, kind: 'mindmap' })
+    // 长句：节点要按卡片宽度折行（旧版 nowrap ＋ 内联省略，整段文字溢出卡片）
+    // 顺带验「往可见的导图里加子块会当场重画」——视图宿主的逐块通知每种 kind 一行，
+    // 漏接时节点数停在旧值（配置写进去了、屏幕不动）。
+    await q.invoke('core.tree/insert-child', {
+      parentId: owner.id,
+      text: '这是一句很长的标题，用来验证节点文字在卡片宽度内折行而不是溢出到卡片外面',
+    })
+    const raw = q.__editor.store.find(owner.id)
+    return { id: owner.id, kids: raw?.children.length ?? 0 }
+  })
+  assert(!setup.err, `前置：${setup.err ?? ''}`)
+  assert(setup.kids > 0, `前置：导图根要有子块：${JSON.stringify(setup)}`)
+  await page.waitForTimeout(600)
+
+  const geom = await page.evaluate(() => {
+    const vm = document.querySelector('.vm')
+    if (!vm) return { err: '没有 .vm' }
+    const nodes = [...vm.querySelectorAll('.vm-node')].map((el) => {
+      const r = el.getBoundingClientRect()
+      const text = el.querySelector('.vm-node-text')
+      return {
+        id: el.dataset.blockId,
+        d: el.dataset.depth,
+        l: r.left, r: r.right, t: r.top, b: r.bottom,
+        over: text ? text.scrollWidth - text.clientWidth : 0,
+      }
+    })
+    // 每条边的两个端点都在**页坐标**里量：SVG 若用另一套 viewBox 缩放，端点会离开卡片边
+    const edges = [...vm.querySelectorAll('.vm-edge')].map((p) => {
+      const m = p.getScreenCTM()
+      const at = (len) => {
+        const q = p.getPointAtLength(len)
+        return { x: m.a * q.x + m.c * q.y + m.e, y: m.b * q.x + m.d * q.y + m.f }
+      }
+      return [at(0), at(p.getTotalLength())]
+    })
+    const vr = vm.getBoundingClientRect()
+    return { nodes, edges, vm: { l: vr.left, w: vr.width, sw: vm.scrollWidth } }
+  })
+  assert(!geom.err, `前置：${geom.err ?? ''}`)
+  assert(geom.nodes.length === setup.kids + 1, `节点＝根 ＋ 子块：${geom.nodes.length} vs ${setup.kids + 1}`)
+  assert(geom.nodes.filter((n) => n.d === '0').length === 1, '有且只有一个根节点')
+  assert(geom.edges.length === setup.kids, `每个子块一条边：${geom.edges.length} vs ${setup.kids}`)
+
+  // ① 连线要**贴住卡片边**：旧版给 SVG 缩小 viewBox 让 `preserveAspectRatio` 撑满，
+  //    线被缩放而节点没有 ⇒ 每条线都落不到节点上（用户看到的就是一把散开的扇形）
+  const touches = (pt) =>
+    geom.nodes.some(
+      (n) => pt.y >= n.t - 1 && pt.y <= n.b + 1 && Math.min(Math.abs(pt.x - n.l), Math.abs(pt.x - n.r)) <= 1,
+    )
+  const bad = geom.edges.filter(([a, b]) => !touches(a) || !touches(b))
+  assert(bad.length === 0, `每条边的两端都要落在节点边上：${bad.length} 条落空，首条 ${JSON.stringify(bad[0])}`)
+
+  // ② 长句在卡片内折行：旧版 `white-space: nowrap` ＋ 内联省略，文字整段溢出卡片
+  const over = geom.nodes.filter((n) => n.over > 0)
+  assert(over.length === 0, `节点文字不许横向溢出：${over.length} 个溢出，首个 ${JSON.stringify(over[0])}`)
+
+  // ③ 图比面板宽时，横滚初始停在**根**上（默认停在最左＝用户先看到一条支线，根在屏幕外）
+  const root = geom.nodes.find((n) => n.d === '0')
+  if (geom.vm.sw > geom.vm.w) {
+    const drift = Math.abs((root.l + root.r) / 2 - (geom.vm.l + geom.vm.w / 2))
+    assert(drift <= 2, `根要落在视口中间（漂移 ${drift.toFixed(1)}px）`)
+  }
+
+  await ctx.close()
+  return `${geom.nodes.length} 节点 / ${geom.edges.length} 边：端点贴边、文字零溢出、根居中`
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 
