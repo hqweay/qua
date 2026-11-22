@@ -600,6 +600,17 @@ export function canDeleteBlock(b: Block | undefined): boolean {
 }
 
 /**
+ * **外观面认得的身份种类**（`identityTags` 的值域，一个块可同时命中多个）。
+ *
+ * 与查询面的 `{role}` 值域是**两个集合**：这里是「外观要挑出来的身份」，
+ * 查询面那边还多一格「查询专有用判据」（备注——它不是身份块）。
+ * 关系的机器表达在 `core/query.ts` 的两条类型断言里（身份 ⊆ 查询值域、差集恰好是那一格），
+ * 所以在这里加一种身份、却没在 `ROLE_KINDS` 里加对应值 ⇒ **编译报错**。
+ */
+export const IDENTITY_KINDS = ['page', 'tag', 'journal', 'schema', 'query', 'automation'] as const
+export type IdentityKind = (typeof IDENTITY_KINDS)[number]
+
+/**
  * **身份标记**（给外观与诊断面）：列表 ∪ 由数据派生的身份名。
  *
  * 为什么需要它，而不是直接用 `listsOf`：「日记」「定义」「查询」没有列表值，
@@ -612,8 +623,8 @@ export function canDeleteBlock(b: Block | undefined): boolean {
  * ⚠️ 别名**不进**这里：地址是「它叫什么」，不是外观要认的身份种类；把它塞进来
  *    会让每个有名内容块都长出一行 `data-role`，样式与冒烟都跟着被污染。
  */
-export function identityTags(b: Block | undefined): string[] {
-  const tags: string[] = [...listsOf(b)]
+export function identityTags(b: Block | undefined): IdentityKind[] {
+  const tags: IdentityKind[] = [...listsOf(b)]
   if (isJournalBlock(b)) tags.push('journal')
   if (isPropDefBlock(b)) tags.push('schema')
   if (isQueryBlock(b)) tags.push('query')

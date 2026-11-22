@@ -37,6 +37,10 @@ import {
   usesRefAny,
   isQueryNode,
   isQuerySpec,
+  identityTags,
+  IDENTITY_KINDS,
+  ROLE_KINDS,
+  type RoleKind,
   specChanged,
   queryByIndex,
   queryByIndexIds,
@@ -1625,4 +1629,75 @@ test('候选抽取：顶层精确日记一天一个；组合里的日记不去�
   const branch = probeOf({ where: { all: [{ role: 'journal' }, { text: { nonempty: true } }] } }, blocks)
   assert.equal(branch.candidate, 1)
   assert.deepEqual(branch.hits.map((x) => x.blockId), ['j2'], '组合里的日记是普通谓词，不去重')
+})
+
+/* ------------------------------------------------------------ 身份值域（{role}） */
+
+/**
+ * `{role}` 的七值必须都能问出来。
+ *
+ * 这里钉的是「加一个身份值只改判据」那条口径的**闭合性**：三张表（判据／候选／文案）
+ * 由 `Record<RoleKind, …>` 保证不漏，但「漏了会不会被用户看见」只有这条测试能回答。
+ */
+test('身份七值：schema／query／automation 与四种既有身份一样可查', () => {
+  const def = mkPropDef('状态', 'text', {}, 'def-1')
+  const auto = b('auto-1', '打标自动化', {
+    props: { _automation: { enabled: true, triggers: ['manual'], steps: [] } },
+  })
+  const view = b('view-1', '所有备注', { props: { _query: { where: { role: 'note' } } } })
+  const page = b('page-1', '页面', { props: { _aliases: ['页面'], _lists: ['page'] } })
+  const tag = mkTagBlock('标签一')
+  const journal = b('j-1', '', { props: { _date: '2026-11-21' } })
+  const note = b('note-1', '批注', { props: { _annotates: [{ block: 'page-1', anno: 'a1' }] } })
+  const blocks = [def, auto, view, page, tag, journal, note]
+  const ids = (role: RoleKind): string[] => runQuery({ where: { role } }, { blocks }).map((h) => h.blockId)
+
+  assert.deepEqual(ids('schema'), [def.id])
+  assert.deepEqual(ids('automation'), ['auto-1'])
+  assert.deepEqual(ids('query'), ['view-1'])
+  assert.deepEqual(ids('page'), ['page-1'])
+  assert.deepEqual(ids('tag'), [tag.id])
+  assert.deepEqual(ids('journal'), ['j-1'])
+  assert.deepEqual(ids('note'), ['note-1'])
+})
+
+/**
+ * 未知身份值：**不命中、不抛**。
+ *
+ * 这不是「非法输入」测试，是**持久化兼容性**测试：`isQueryNode` 只判「role 是字符串」，
+ * 用户库里的旧 JSON／手写 JSON／别的版本写进来的值都能走到求值器。判据表是
+ * `Record<RoleKind, …>`，**类型上**那个键一定在，**运行时**不一定——守卫必须收在求值侧，
+ * 否则一次 `ROLE_MATCHERS['bogus'](b)` 就把查询面板整个炸掉。
+ */
+test('未知身份值：恒不命中，且不抛（Record 表必须配运行时守卫）', () => {
+  const blocks = [b('x', '普通块'), mkTagBlock('标签一')]
+  const unknown = { role: 'bogus' } as unknown as QueryNode
+  assert.deepEqual(runQuery({ where: unknown }, { blocks }), [])
+  const nested = { all: [{ role: 'bogus' }, { text: { nonempty: true } }] } as unknown as QueryNode
+  assert.deepEqual(runQuery({ where: nested }, { blocks }), [])
+})
+
+test('身份兼位：一块同时是页与标签，两条身份条件都命中（不是二选一）', () => {
+  const both = b('both', '兼位块', { props: { _aliases: ['兼位块'], _lists: ['page', 'tag'] } })
+  const blocks = [both]
+  const ids = (role: RoleKind): string[] => runQuery({ where: { role } }, { blocks }).map((h) => h.blockId)
+  assert.deepEqual(ids('page'), ['both'])
+  assert.deepEqual(ids('tag'), ['both'])
+})
+
+/**
+ * 外观面与查询值是**两个集合**：身份标记的种类必须都能被 `{role}` 问到；
+ * 备注反过来是「可查但不出现在身份标记里」的那一格（它不是身份块）。
+ */
+test('外观身份 ⊆ 查询值域；备注可查但不是身份块', () => {
+  const known = new Set<string>(ROLE_KINDS)
+  for (const kind of IDENTITY_KINDS) assert.ok(known.has(kind), `身份标记「${kind}」必须能在 {role} 里问到`)
+
+  const note = b('note-1', '批注', { props: { _annotates: [{ block: 'x', anno: 'a1' }] } })
+  assert.deepEqual(identityTags(note), [], '备注不是身份块：外观面不该给它一个身份标记')
+  assert.deepEqual(
+    runQuery({ where: { role: 'note' } }, { blocks: [note] }).map((h) => h.blockId),
+    ['note-1'],
+    '但它是可查的（查询专有的那一格）',
+  )
 })

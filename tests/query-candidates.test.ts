@@ -27,6 +27,7 @@ import { candidatePlanSql } from '../src/core/storage/library-reads.ts'
 import { BlockStore } from '../src/core/model/store.ts'
 import { Workset } from '../src/core/storage/workset.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
+import { ROLE_KINDS, type RoleKind } from '../src/core/index.ts'
 import type { QuerySpec, QueryContext, Block } from '../src/core/index.ts'
 
 const TODAY = '2026-11-19'
@@ -100,6 +101,16 @@ function seed(): RowWrite[] {
     block('gone', null, null, { deleted: 7 }),
     block('g1', 'gone', null),
     block('DEF', null, null, { kind: 'text' }),
+    /**
+     * 三种**派生身份**各一块（`{role}` 的七值里三格要它们在场）。
+     * `BROKEN_Q` 是**合法状态**，不是坏数据：`_query` 的读侧刻意不判 corrupt
+     * （旧条件读不出是设计的降级态）⇒ 列非空、但 props 里没有可读的 `where`。
+     * 它就是「候选超集 ⊋ matcher」的活样本：`{role:'query'}` 不命中它，但 `query` 列非空。
+     */
+    block('Q_VIEW', null, null, { query: JSON.stringify({ where: { role: 'note' } }) }),
+    block('BROKEN_Q', null, null, { query: JSON.stringify({ oops: 1 }) }),
+    block('AUTO', null, null),
+    prop('AUTO', '_automation', 0, { enabled: true, triggers: ['manual'], steps: [] }),
     alias('标签A', 'TAG_A'),
     alias('标签B', 'TAG_B'),
     alias('X页', 'PAGE_X'),
@@ -285,6 +296,10 @@ const CASES: { name: string; spec: QuerySpec; opts?: { selfId?: string; today?: 
   { name: 'role: page', spec: { where: { role: 'page' } } },
   { name: 'role: journal', spec: { where: { role: 'journal' } } },
   { name: 'role: tag', spec: { where: { role: 'tag' } } },
+  { name: 'role: schema', spec: { where: { role: 'schema' } } },
+  { name: 'role: query', spec: { where: { role: 'query' } } },
+  { name: 'role: automation', spec: { where: { role: 'automation' } } },
+  { name: 'not: role query（列非空但读不出条件的块必须留在结果里）', spec: { where: { not: { role: 'query' } } } },
   { name: 'tag 成员（并集含子标签）', spec: { where: { tag: 'TAG_A' } } },
   { name: 'tag 子标签展开', spec: { where: { tag: { id: 'TAG_A', desc: true } } } },
   { name: 'is', spec: { where: { is: 'PAGE_X' } } },
@@ -490,5 +505,63 @@ test('mark／link 的「下推进页查询」与计划 SQL 同集（同一份谓
       const planned = [...new Set((db.prepare(q.sql).all(...q.params) as { id: unknown }[]).map((r) => String(r.id)))].sort()
       assert.deepEqual(paged, planned, `分页 SQL 与计划 SQL 必须同集：${JSON.stringify(spec.where)}`)
     }
+  })
+})
+
+/* ------------------------------------------------------------ 身份值的候选计划 */
+
+/**
+ * **计划形状**测试：`Record<RoleKind, …>` 只保证「有键」，不保证「计划精准」——
+ * 把某一支填成 `{k:'visible'}` 照样过编译，等式测试也照样绿（可见集本来就是超集）。
+ * 这条把「不许退化成全域」变成断言，并且比的是**完整对象**（`{k:'list', list:'tag'}`
+ * 的 `k` 也是 `list`，只比 `.k` 抓不到）。
+ */
+test('身份七值的候选计划：完整对象相等，且不许退化成 visible', () => {
+  const expected: Record<RoleKind, Record<string, unknown>> = {
+    journal: { k: 'journal' },
+    page: { k: 'list', list: 'page' },
+    tag: { k: 'list', list: 'tag' },
+    note: { k: 'note' },
+    schema: { k: 'kind' },
+    query: { k: 'query' },
+    automation: { k: 'prop', name: '_automation' },
+  }
+  for (const role of ROLE_KINDS) {
+    const plan = candidateBuildOf({ where: { role } }, undefined, [], {}).plan
+    assert.deepEqual(plan, expected[role], `「${role}」的候选计划形状不对（退化会静默变慢，等式测试抓不到）`)
+    assert.notEqual(plan.k, 'visible', `「${role}」不许退化成全域候选`)
+  }
+  // 未知值：候选多取、不崩（读入宽容，守卫在求值侧）
+  const unknown = candidateBuildOf({ where: { role: 'bogus' } as unknown as QuerySpec }, undefined, [], {}).plan
+  assert.equal(unknown.k, 'visible')
+})
+
+/**
+ * `{not:{role:'query'}}` 的差集必须**只减真命中**。
+ *
+ * `{k:'query'}` 的 SQL 是「`query` 列非空」，它是 matcher 的**真超集**（坏形状的旧条件
+ * 列非空但读不出）⇒ 一旦被 `planIsExact` 当成精确集，差集就会把 `BROKEN_Q` 从否定
+ * 查询的候选里挖掉——而它本该命中（它不是一个查询视图块）。
+ */
+test('{not:{role:query}} 不挖掉「列非空但条件读不出」的块（候选超集不是等价）', () => {
+  withDb((db) => {
+    const { forest, kb } = baseline(db)
+    const plan = (spec: QuerySpec) => candidateBuildOf(spec, undefined, forest, {}).plan
+    const notQuery = { where: { not: { role: 'query' } } } as QuerySpec
+    /**
+     * 退化发生在 **SQL 层**（`candidatePlanSql` 的 `notIn` 分支），不在计划形状上：
+     * 计划仍是 `notIn`，但子计划不精确 ⇒ SQL 退化成 `visible`、不许出现 `except`。
+     */
+    assert.equal(plan(notQuery).k, 'notIn')
+    const sql = candidatePlanSql(plan(notQuery))
+    assert.ok(!sql.sql.toLowerCase().includes('except'), '`query` 不精确 ⇒ 差集不许生效（否则会挖掉 BROKEN_Q）')
+    const { hits, candidates } = worksetEval(db, notQuery, forest, {})
+    assert.ok(new Set(hits).has('BROKEN_Q'), 'matcher 说 BROKEN_Q 不是查询视图块，它必须命中否定条件')
+    assert.ok(candidates.includes('BROKEN_Q'), '候选不许把它挖掉（差集减多一个就是漏行）')
+    assert.deepEqual(
+      [...new Set(hits)].sort(),
+      [...hitSet(kb, notQuery, {})].sort(),
+      '候选装载求值与整库求值必须一致',
+    )
   })
 })

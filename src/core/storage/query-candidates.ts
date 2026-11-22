@@ -21,12 +21,14 @@
  * 编译成空计划（`{k:'none'}`）——**不退回全库**：看不懂的指代不该变成大范围命中。
  */
 import {
+  isRoleKind,
   refKindsOf,
   resolveSelfSpec,
   usesSelf,
   type QueryNode,
   type QuerySpec,
   type QueryContext,
+  type RoleKind,
 } from '../query/query.ts'
 import { shiftISO } from '../identity/journal.ts'
 import { normMarks, type Marks } from '../model/runs.ts'
@@ -34,6 +36,26 @@ import type { Block } from '../model/model.ts'
 import type { CandidatePlan } from './library-reads.ts'
 
 const NONE: CandidatePlan = { k: 'none' }
+
+/**
+ * 身份值 → 候选计划的**穷尽表**。
+ *
+ * 为什么不是 if 链：旧写法的兜底是 `visible`（候选全域）——加一个值而忘了补分支时
+ * **不报错**，结果仍然对，只是每次查询都退化成全库扫（等式测试只比结果，抓不到）。
+ * 收成 `Record<RoleKind, …>` 后，漏一支是编译错误。
+ *
+ * 为什么是工厂而不是共享常量对象：计划对象下游目前只读，但没有 `readonly` 修饰，
+ * 共享一份可变对象是将来要付利息的形状。
+ */
+const ROLE_PLANS: Record<RoleKind, () => CandidatePlan> = {
+  journal: () => ({ k: 'journal' }),
+  page: () => ({ k: 'list', list: 'page' }),
+  tag: () => ({ k: 'list', list: 'tag' }),
+  note: () => ({ k: 'note' }),
+  schema: () => ({ k: 'kind' }),
+  query: () => ({ k: 'query' }),
+  automation: () => ({ k: 'prop', name: '_automation' }),
+}
 
 export interface CandidateBuild {
   plan: CandidatePlan
@@ -144,10 +166,9 @@ function planOf(
   if ('down' in node) return { k: 'ancestorsOf', plan: planOf(node.down, env, seen) }
   if ('near' in node) return { k: 'near', plan: planOf(node.near, env, seen) }
   if ('role' in node) {
-    if (node.role === 'page' || node.role === 'tag') return { k: 'list', list: node.role }
-    if (node.role === 'journal') return { k: 'journal' }
-    if (node.role === 'note') return { k: 'note' }
-    return { k: 'visible' }
+    // 未知值：维持旧行为——候选多取，matcher 判空。不收窄读入校验（见 `roleMatches` 的说明）
+    if (!isRoleKind(node.role)) return { k: 'visible' }
+    return ROLE_PLANS[node.role]()
   }
   if ('today' in node) {
     // 没有基准日 ⇒ matcher 也判不命中（见 matcher 的 `{today}` 支）：这里同样给空集

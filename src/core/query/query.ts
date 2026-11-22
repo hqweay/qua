@@ -11,7 +11,7 @@
  *    （候选迭代）共用同一份 matcher／`applySort`／回退判据；索引路径见 `index-port.ts`
  *    的 `queryByIndex`；`QuerySpec` 仍是那个 canonical JSON。
  */
-import { hasList, isJournalBlock, isPropDefBlock, type Block } from '../model/model.ts'
+import { hasList, isAutomationBlock, isJournalBlock, isPropDefBlock, isQueryBlock, type Block, type IdentityKind } from '../model/model.ts'
 import { MARK_KINDS, normMarks, plainText, type Content, type Marks } from '../model/runs.ts'
 import { walkForest } from '../model/walk.ts'
 import { findPath } from '../model/tree.ts'
@@ -89,8 +89,25 @@ export function refKindsOf(ref: string | RefTarget): readonly RefKind[] {
  * ——加一个值时要改的是**判据**，不是五张清单。缺一份的表现各不相同：少了守卫，
  * 条件树拆不动新值（退化成只读 JSON）；少了判据，行选得出来但恒不命中（更糟：不报错）。
  */
-export const ROLE_KINDS = ['journal', 'page', 'tag', 'note'] as const
+export const ROLE_KINDS = ['journal', 'page', 'tag', 'note', 'schema', 'query', 'automation'] as const
 export type RoleKind = (typeof ROLE_KINDS)[number]
+
+/**
+ * 编译期集合断言：**外观面身份 ⊆ 查询值域**，且查询专有的差集恰好只有备注一格。
+ *
+ * 加一种身份却忘了让它可查 ⇒ 编译错；多出一种「不是身份的查询专有值」⇒ 也编译错
+ * （要求显式决定它算不算身份）。
+ *
+ * ⚠️ 两条都是 `export` 的：`noUnusedLocals` 对未使用的 `type` 也报（TS6196），
+ *    「导出的类型契约」是让断言留在编译期、又不引入运行时死代码的唯一办法。
+ *    消费方就是编译器本身，没有运行时代码会 import 它们。
+ */
+export type Assert<T extends true> = T
+export type QueryOnlyRole = Exclude<RoleKind, IdentityKind>
+export type RoleKindsCoverIdentity = Assert<Exclude<IdentityKind, RoleKind> extends never ? true : false>
+export type QueryOnlyRolesAreJustNote = Assert<
+  Exclude<QueryOnlyRole, 'note'> extends never ? ('note' extends QueryOnlyRole ? true : false) : false
+>
 
 /** 是不是一个已知身份值（读侧对未知值降级成只读 JSON，不猜着拆） */
 export function isRoleKind(v: unknown): v is RoleKind {
@@ -195,6 +212,8 @@ export type QueryNode =
    *    page／tag 的判据只有「`_lists` 里有没有对应露面」——身份由数据推出，查询问的就是这份判据。
    *    `tag` 的续支由日记的内置栏「当日新建」兑现（它要问「今天开的页或标签」）。
    *    `note`（备注）的判据只有「`_annotates` 在不在」——与日记同构，不认类型标记。
+   *    `schema`／`query`／`automation` 是三种由数据派生的身份（`_kind`／`_query`／`_automation`）。
+   *    ⇒ 备注可查但**不是身份块**，所以它是查询专有的一格（见文件头的断言）。
    */
   | { role: RoleKind }
   /**
@@ -1011,13 +1030,34 @@ export function createMatcher(forest: readonly Block[] | undefined, env: QueryEn
   return { matches }
 }
 
-/** role 逐值分发到**既有唯一判据**，不另设第二份答案；进新值域时在此续支 */
-function roleMatches(role: RoleKind, b: Block): boolean {
-  if (role === 'journal') return isJournalBlock(b)
-  if (role === 'page') return hasList(b, 'page')
-  if (role === 'tag') return hasList(b, 'tag')
-  if (role === 'note') return annotatesPairsOf(b).length > 0
-  return false
+/**
+ * role 逐值分发到**既有唯一判据**（与 `identityTags` 调同一批叶子，不造第二份答案）。
+ *
+ * `Record<RoleKind, …>` 而不是 if 链：if 链 ＋ `return false` 兜底时，加一个值而忘了
+ * 补分支**不会报错**——那一格恒不命中，屏幕只表现为「查询结果不对」。收成表之后，
+ * 漏一支是编译错误。
+ */
+const ROLE_MATCHERS: Record<RoleKind, (b: Block) => boolean> = {
+  journal: isJournalBlock,
+  page: (b) => hasList(b, 'page'),
+  tag: (b) => hasList(b, 'tag'),
+  note: (b) => annotatesPairsOf(b).length > 0,
+  schema: isPropDefBlock,
+  query: isQueryBlock,
+  automation: isAutomationBlock,
+}
+
+/**
+ * 判据分发。
+ *
+ * ⚠️ 参数收 `string` 而不是 `RoleKind`：AST 声明它一定是 `RoleKind`，但**运行时不一定**——
+ * 用户库里的旧 JSON、手写 JSON、别的版本写进来的值都能通过读入校验（`isQueryNode`
+ * 只判「是字符串」）。不收窄读入校验是刻意的：一个坏值不该让整份条件读不出来。
+ * 所以守卫**收在求值侧**：未知值一律不命中，不抛。
+ */
+function roleMatches(role: string, b: Block): boolean {
+  if (!isRoleKind(role)) return false
+  return ROLE_MATCHERS[role](b)
 }
 
 /**

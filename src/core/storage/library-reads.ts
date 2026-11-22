@@ -386,6 +386,14 @@ export type CandidatePlan =
   | { k: 'ref'; to?: string; kinds: string[] }
   | { k: 'prop'; name: string }
   | { k: 'kind' }
+  /**
+   * **有 `_query`（查询视图块）**——`b.query` 是 `_query` 升出来的列。
+   *
+   * ⚠️ 这是 matcher 的**真超集**：`_query` 的读侧刻意不判 corrupt（旧条件读不出是
+   * 设计的降级态），所以「列非空但 props 里读不出条件」的块合法存在。⇒ 它**不进**
+   * `planIsExact` 的精确集（否则否定差集会从合法超集里挖掉命中行）。
+   */
+  | { k: 'query' }
   | { k: 'aliased' }
   | { k: 'tagged' }
   | { k: 'journalDay'; date: string }
@@ -426,6 +434,7 @@ export function isCandidatePlan(v: unknown, depth = 0): v is CandidatePlan {
     case 'none':
     case 'visible':
     case 'kind':
+    case 'query':
     case 'aliased':
     case 'tagged':
     case 'parents':
@@ -808,6 +817,8 @@ export function candidatePlanSql(
       )
     case 'kind':
       return wrap(`select b.id as id from ${B} b where b.kind is not null and ${visible('b')}`, [])
+    case 'query':
+      return wrap(`select b.id as id from ${B} b where b.query is not null and ${visible('b')}`, [])
     case 'aliased':
       return wrap(
         `select distinct a.block as id from ${A} a join ${B} b on b.id = a.block and ${visible('b')}`,
@@ -948,9 +959,16 @@ function planIsExact(plan: CandidatePlan, derived: boolean): boolean {
     case 'ancestorsOf':
     case 'near':
       return false
-    // 值比较（`prop`）与正文（`text`）的 SQL 都是超集，不是判定
+    /**
+     * 值比较（`prop`）与正文（`text`）的 SQL 都是超集，不是判定。
+     *
+     * `query` 同理，而且多一层理由：`_query` 的读侧**刻意不判 corrupt**（旧条件读不出
+     * 是设计的降级态），所以「列非空但 props 里读不出条件」的块合法存在 ⇒ 列非空 ⊋
+     * `isQueryBlock`。拿它去减，会把那些块从否定查询的候选里挖掉。
+     */
     case 'prop':
     case 'text':
+    case 'query':
       return false
     /**
      * 逐 run 问同一组键值：与 matcher 的判定集同集（可见性两处同源）⇒ 可信时精确。

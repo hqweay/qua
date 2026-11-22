@@ -42,6 +42,9 @@ const ROLE_TEXT: Record<RoleKind, MsgId> = {
   page: 'ui.query.role.page',
   tag: 'ui.query.role.tag',
   note: 'ui.query.role.note',
+  schema: 'ui.query.role.schema',
+  query: 'ui.query.role.query',
+  automation: 'ui.query.role.automation',
 }
 
 export function roleText(role: RoleKind): string {

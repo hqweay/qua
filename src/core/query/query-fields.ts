@@ -16,7 +16,7 @@
  * （`kind:'stamp'` 的时间范围行，值控件是「字段 ＋ 问法 ＋ 日期」，条件里落成毫秒区间）。
  * 混进字段下拉会得到一个「日期填进毫秒」的框——对不上，还不报错。
  */
-import { allPropDefs, propDisplayLabels, propKindOf, cardinalityOf, isEngineProp, systemQueryFieldLabel } from '../props/props.ts'
+import { allPropDefs, propDisplayLabels, propKindOf, cardinalityOf, isEngineProp, systemQueryFieldLabel, QUERYABLE_SYSTEM_PROPS } from '../props/props.ts'
 import type { PropKind } from '../props/props.ts'
 import type { Cardinality } from '../props/props.ts'
 import type { Block } from '../model/model.ts'
@@ -68,7 +68,7 @@ export function fieldCoverageOf(records: readonly { values: Readonly<Record<stri
  * `_tags` **不进**：「有任意标签」由标签行空值承载（拼回 `_tags exists`），
  * 而 `eq` 要标签块 id，用户填不出——下拉不给「必然填错」的入口。
  */
-const QUERY_FIELD_SYSTEM_SLOTS: readonly string[] = ['_date', '_aliases', '_type']
+const QUERY_FIELD_SYSTEM_SLOTS = ['_date', '_aliases', '_type'] as const satisfies readonly (typeof QUERYABLE_SYSTEM_PROPS)[number][]
 
 /** 条件树字段下拉：属性定义（先序）＋ 系统槽；顺序＝前者按库、后者固定 */
 export function queryFieldsOf(forest: readonly Block[], coverage?: FieldCoverage): QueryFieldOption[] {
@@ -96,7 +96,7 @@ export function queryFieldsOf(forest: readonly Block[], coverage?: FieldCoverage
    * 临时属性仍是合法条件，只是要往下滚。系统槽不参与排序也不标注（它对任何一批
    * 结果都可问，覆盖率不携带信息）。空结果在入口就回落了，这里不会有 0 推荐假聪明。
    */
-  const isSystem = new Set(QUERY_FIELD_SYSTEM_SLOTS)
+  const isSystem = new Set<string>(QUERY_FIELD_SYSTEM_SLOTS)
   const propDefs = defs.filter((f) => !isSystem.has(f.id))
   const slots = defs.filter((f) => isSystem.has(f.id))
   const withCoverage = propDefs

@@ -1124,7 +1124,7 @@ export function enginePropValue(block: Block, propId: string): unknown {
  * ⚠️ 白名单里的每一项都由 `readSystemField` 逐项问**模型里的唯一判据**，
  *    不许退回去读 `props` 裸键。加一项时两处一起加。
  */
-export const QUERYABLE_SYSTEM_PROPS: readonly string[] = [
+export const QUERYABLE_SYSTEM_PROPS = [
   '_date',
   '_kind',
   '_type',
@@ -1133,10 +1133,11 @@ export const QUERYABLE_SYSTEM_PROPS: readonly string[] = [
   BELONGS_TO_PROP,
   ENGINE_CREATED,
   ENGINE_MODIFIED,
-]
+] as const
 
 export function isQueryableSystemProp(propId: string): boolean {
-  return QUERYABLE_SYSTEM_PROPS.includes(propId)
+  // `as readonly string[]`：常量收窄成字面量元组后，`includes` 的参数也得是那几个字面量
+  return (QUERYABLE_SYSTEM_PROPS as readonly string[]).includes(propId)
 }
 
 /**
