@@ -85,11 +85,16 @@ export function refKindsOf(ref: string | RefTarget): readonly RefKind[] {
 }
 
 /**
- * **身份值域**（`{role}` 的封闭值域）。
+ * **语义判据值域**（`{role}` 的封闭值域）。
  *
- * 一份常量，五处消费（AST 联合、`roleMatches`、条件树解析守卫、`TreeRow`、值下拉）
+ * 一份常量，五处消费（AST 联合、`ROLE_MATCHERS`、条件树解析守卫、`TreeRow`、值下拉）
  * ——加一个值时要改的是**判据**，不是五张清单。缺一份的表现各不相同：少了守卫，
  * 条件树拆不动新值（退化成只读 JSON）；少了判据，行选得出来但恒不命中（更糟：不报错）。
+ *
+ * 顺序**就是**值下拉的顺序，所以它是显式写死的一份，不从集合拼接（拼接会把新值
+ * 挪到末尾，改变用户已经熟悉的相对次序）。
+ *
+ * 与外观面 `IDENTITY_KINDS` 的关系见文件下方的两条类型断言。
  */
 export const ROLE_KINDS = ['journal', 'page', 'tag', 'note', 'schema', 'query', 'automation'] as const
 export type RoleKind = (typeof ROLE_KINDS)[number]
