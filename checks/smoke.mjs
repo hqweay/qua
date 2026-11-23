@@ -31388,6 +31388,13 @@ await check(
       fx.host,
       { timeout: 4000 },
     )
+    /**
+     * **等这次前置写的防抖窗口过去再点**：上面五个 `invoke` 会各排一次属性面重画
+     * （60ms 防抖）。点击若落在这个窗口里，抽屉刚聚焦完那一栏就被那次重画换掉 DOM ⇒
+     * 焦点掉回 body（实测：`took:true` 但 `el.isConnected:false`）。这是**测例自己的
+     * 竞态**，不是「点计数要聚焦」这条契约的一部分——契约只在安静态下判定。
+     */
+    await page.waitForTimeout(150)
     const line = await page.evaluate(({ host, defId, labels }) => {
       const el = document.querySelector(`.blk[data-block-id="${host}"] > .blk-props-line`)
       const value = el?.querySelector('.blk-prop-value')
