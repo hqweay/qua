@@ -76,9 +76,16 @@ export interface Updater {
   menuLabel(): string
   /** 检查或下载中置灰：点了没反应比变灰更糟 */
   menuEnabled(): boolean
+  /** 当前下载进度（0..1）；没有下载时为 null——新建窗口据此补上系统进度条 */
+  progress(): number | null
 }
 
-export function createUpdater(opts: { userData: string; onChanged: () => void }): Updater {
+export function createUpdater(opts: {
+  userData: string
+  onChanged: () => void
+  /** 系统进度条（Dock／任务栏）；`null` ＝收掉。渲染进程不参与，也就不需要 IPC */
+  onProgress?: (progress: number | null) => void
+}): Updater {
   const cacheDir = join(opts.userData, 'cache')
   const cachePath = join(cacheDir, CACHE_FILE)
   const downloadDir = DOWNLOAD_DIR || app.getPath('downloads')
@@ -265,6 +272,7 @@ export function createUpdater(opts: { userData: string; onChanged: () => void })
     busy = true
     percent = 0
     opts.onChanged()
+    opts.onProgress?.(0)
 
     let path: string
     try {
@@ -276,6 +284,7 @@ export function createUpdater(opts: { userData: string; onChanged: () => void })
           if (next === percent) return
           percent = next
           opts.onChanged()
+          opts.onProgress?.(next / 100)
         },
       })
     } catch (e) {
@@ -284,6 +293,7 @@ export function createUpdater(opts: { userData: string; onChanged: () => void })
       busy = false
       percent = null
       opts.onChanged()
+      opts.onProgress?.(null)
       const r = await ask({
         type: 'warning',
         title: t('app.name'),
@@ -302,6 +312,7 @@ export function createUpdater(opts: { userData: string; onChanged: () => void })
     percent = null
     downloaded = { version: result.next, path }
     opts.onChanged()
+    opts.onProgress?.(null)
     await promptInstall()
   }
 
@@ -371,6 +382,9 @@ export function createUpdater(opts: { userData: string; onChanged: () => void })
     },
     menuEnabled(): boolean {
       return !busy
+    },
+    progress(): number | null {
+      return percent === null ? null : percent / 100
     },
   }
 }

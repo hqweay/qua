@@ -477,8 +477,17 @@ writeUpdateFeed(UPDATE_FEED_FAIL, `http://127.0.0.1:${updateServer.port}/fail.dm
  * `responses` 是弹窗回答队列（按顺序消费，用完后重复最后一个）。
  */
 async function clickUpdateAndWatch(app, responses) {
-  return app.evaluate(async ({ Menu, dialog }, res) => {
+  return app.evaluate(async ({ Menu, BrowserWindow, dialog }, res) => {
     globalThis.__updateBoxes = []
+    // 系统进度条（Dock／任务栏）：把 setProgressBar 换成录音机，验证下载真的驱动了它
+    globalThis.__progressBars = []
+    for (const win of BrowserWindow.getAllWindows()) {
+      const original = win.setProgressBar.bind(win)
+      win.setProgressBar = (progress, options) => {
+        globalThis.__progressBars.push(progress)
+        return original(progress, options)
+      }
+    }
     let n = 0
     dialog.showMessageBox = (...args) => {
       globalThis.__updateBoxes.push(args[args.length - 1])
@@ -506,7 +515,7 @@ async function clickUpdateAndWatch(app, responses) {
     // 菜单重建走一拍 setTimeout：等它落地再读终态，别把最后一帧读成下载中
     await new Promise((r) => setTimeout(r, 60))
     const after = read()
-    return { before, labels, boxes: globalThis.__updateBoxes, after }
+    return { before, labels, boxes: globalThis.__updateBoxes, after, progressBars: globalThis.__progressBars }
   }, responses)
 }
 
@@ -543,7 +552,16 @@ await check('E3e 应用内下载：安装包落到下载目录（字节数与摘
   assert(!existsSync(`${saved}.part`), '下载完成不该留下 .part')
   assert(run.after?.label === '更新已就绪 9.9.9…', `下载完菜单应当换成「更新已就绪 …」，实际「${run.after?.label}」`)
   assert(run.after?.enabled === true, '下载结束后菜单项应当可点')
-  return `「${run.before?.label}」→ 菜单序列 ${JSON.stringify(run.labels)} → 文件 ${UPDATE_BYTES.length}B（sha256 对上）→「${run.boxes[1].message}」→「${run.after?.label}」`
+  // 系统进度条：0 → 中间值 → 1 → -1（收掉）。0 和 1 是两端，中间值证明它跟着传输走
+  const bars = run.progressBars
+  assert(bars.length >= 3, `应当多次驱动系统进度条，实际 ${JSON.stringify(bars)}`)
+  assert(bars[0] === 0, `下载开始应当把进度条归零，实际 ${JSON.stringify(bars)}`)
+  assert(
+    bars.some((p) => typeof p === 'number' && p > 0 && p < 1),
+    `应当出现中间进度（0<p<1），实际 ${JSON.stringify(bars)}`,
+  )
+  assert(bars[bars.length - 1] === -1, `下载结束应当收掉系统进度条，实际 ${JSON.stringify(bars)}`)
+  return `「${run.before?.label}」→ 菜单序列 ${JSON.stringify(run.labels)} → 进度条 ${JSON.stringify(bars)} → 文件 ${UPDATE_BYTES.length}B（sha256 对上）→「${run.boxes[1].message}」→「${run.after?.label}」`
 })
 
 await check('E3f 下载失败：说清原因、不留半截文件、菜单回到「有新版 …」', async () => {
@@ -571,7 +589,11 @@ await check('E3f 下载失败：说清原因、不留半截文件、菜单回到
   assert(!existsSync(`${saved}.part`), '下载失败不该留下 .part')
   assert(run.after?.label === '有新版 9.9.9…', `失败后菜单应当回到「有新版 …」，实际「${run.after?.label}」`)
   assert(run.after?.enabled === true, '失败后菜单项应当可点（能重试）')
-  return `「${run.boxes[1].message}」/「${run.boxes[1].detail.split('\n')[0]}」；目录零残留；菜单「${run.after?.label}」`
+  // 失败也要收掉系统进度条：不能让 Dock/任务栏上挂一条永远不动的进度
+  const bars = run.progressBars
+  assert(bars.includes(0), `下载开始应当把进度条归零，实际 ${JSON.stringify(bars)}`)
+  assert(bars[bars.length - 1] === -1, `下载失败后应当收掉系统进度条，实际 ${JSON.stringify(bars)}`)
+  return `「${run.boxes[1].message}」/「${run.boxes[1].detail.split('\n')[0]}」；进度条 ${JSON.stringify(bars)}；目录零残留；菜单「${run.after?.label}」`
 })
 
 updateServer.server.closeAllConnections()

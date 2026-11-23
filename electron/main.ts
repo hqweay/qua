@@ -374,6 +374,10 @@ function createWindow(_libraryId?: string, title?: string): BrowserWindow {
     height: st.height,
   })
 
+  // 下载中新建的窗口也得接上系统进度条：进度是**应用级**的，窗口只是承载者
+  const downloading = updater.progress()
+  if (downloading !== null) w.setProgressBar(downloading)
+
   if (DEV_URL) {
     void w.loadURL(DEV_URL)
     w.webContents.openDevTools({ mode: 'detach' })
@@ -605,6 +609,13 @@ manager.installIpc()
 const updater: Updater = createUpdater({
   userData: USER_DATA,
   onChanged: () => setTimeout(() => Menu.setApplicationMenu(buildMenu()), 0),
+  /**
+   * 系统进度条：macOS 在 Dock 图标下、Windows 在任务栏按钮上。**渲染进程不参与**
+   * ——更新仍然只碰壳，也就不需要为一条进度开 IPC。
+   */
+  onProgress: (progress) => {
+    for (const win of BrowserWindow.getAllWindows()) win.setProgressBar(progress === null ? -1 : progress)
+  },
 })
 
 /* ------------------------------------------------------------ 选库（首次启动 / 菜单） */
