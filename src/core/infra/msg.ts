@@ -1605,10 +1605,10 @@ export const MSG = {
     '`when` 只读这套键。带 ◆ 的是被绑定表引用到的键；插件可用 acme.* 前缀扩展（core.* 保留）。',
   'ui.drawer.contextTableHead': '<tr><th>键</th><th>值</th><th>被哪些绑定引用</th></tr>',
   'ui.drawer.contextSnapshot': '当前求值快照（共 {commands} 条命令 / {bindings} 条绑定）',
-  'ui.drawer.bindingsTitle': '绑定表 · 一个机制五处复用',
+  'ui.drawer.bindingsTitle': '绑定表 · 一个机制四处复用',
   'ui.drawer.bindingsIntro1': '命令表 {commands} 条（不知道 UI）；绑定表 {bindings} 条（挂载点）。',
   'ui.drawer.bindingsIntro2':
-    '菜单 / 斜杠 / 工具栏 / 命令面板都是下面这张表的渲染结果，不是手写组件。绑定表不进 HTTP/MCP/CLI 面。',
+    '键位 / 块菜单 / 斜杠 / 划选气泡共用这张表；命令面板枚举命令表本身（列得出没有绑定的命令）。绑定表不进 HTTP/MCP/CLI 面。',
   'ui.drawer.bindingsTableHead': '<tr><th>键/分组</th><th>命令</th><th>when</th><th>层</th></tr>',
   'ui.drawer.shortcutsTitle': '键盘速查（键位只是加速器；命令面板才是兜底）',
   'ui.drawer.shortcutsTableHead': '<tr><th>键</th><th>命令</th><th>when</th></tr>',

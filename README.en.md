@@ -131,7 +131,7 @@ Tags answer "whose content is this"; field values answer "what does this content
 | `⌘T` / `⌘⇧R` | back to today's journal / review the last three days |
 | `⌘⌥1` / `⌘⌥2` | toggle the left / right dock |
 | `⌘⇧L` / `⌘,` | toggle theme / Settings (the interface language lives here too) |
-| `⌘⇧?` | keymap (every command's shortcut and when it applies) |
+| `⌘⇧?` | binding table (keymap / menu / slash / selection; commands without bindings are in `⌘P`) |
 
 Mouse: the block handle sits to the left of each row and turns into a drag grip on hover; left-click focuses, right-click opens the menu, drag reorders. `Shift+click` opens a window in the side dock, `⌥+click` shows property details in place. Rows in record views (table / cards / list / calendar) open the same block menu on right-click—the menu opens for the block you clicked, deletion and copying are undoable, and only actions that make sense for a block appear (indent/fold and other editor-dependent ones don't).
 

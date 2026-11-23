@@ -33707,9 +33707,9 @@ await check('T355 思维导图：连线两端贴住节点边、长句在卡片�
  * T356：「新建子块时」的触发器，父块选完立刻问一句「沿不沿引用」。
  *
  * 这一格不点开触发器菜单就永远看不见（行上只有一个后缀），而它决定规则按谁判定 ——
- * 藏在二级菜单里等于默认没人配。钉两件事：①选完父块**当场**就有这一问（不是要再点一次
- * 触发器）；②在这里选了「要」，落盘就是 `followRefs: true`、行上立刻出现后缀。
- * 反向验证：把第二问去掉、改回选完直接写 ⇒ 第一条断言红。
+ * 藏在二级菜单里等于默认没人配。钉三件事：①选完父块**当场**就有这一问（不是要再点一次
+ * 触发器）；②引用档选完紧接着问深度、此时还没写盘；③两档答完落盘 `followRefs: true`（无
+ * `directOnly`）、行上立刻出现后缀。反向验证：把第二问去掉、改回选完直接写 ⇒ 第一条断言红。
  */
 await check('T356 新建子块触发器：选完父块当场问「沿不沿引用」，选择直接落盘', async () => {
   const { ctx, page } = await freshPage(browser, base)
@@ -33755,17 +33755,21 @@ await check('T356 新建子块触发器：选完父块当场问「沿不沿引�
   assert(text.includes('父块是引用行时'), `选完父块就该问「沿不沿引用」：${text.slice(0, 200)}`)
   assert(text.includes('不，只看直接父块') && text.includes('要，沿引用展开'), '两档都要摆出来（默认档排第一）')
 
-  // ② 选「要」⇒ 落盘只有 true，行上立刻带后缀
+  // ② 选「要」⇒ 再答深度问「管，整棵子树都算」⇒ 落盘 followRefs:true、不落 directOnly
   await page.locator('text=要，沿引用展开').first().click()
+  await page.waitForTimeout(350)
+  const depthText = await page.locator('body').innerText()
+  assert(depthText.includes('这条规则管到孙块吗？') && depthText.includes('管，整棵子树都算'), `引用档选完还该当场问深度：${depthText.slice(0, 200)}`)
+  await page.locator('text=管，整棵子树都算').first().click()
   await page.waitForTimeout(600)
   const stored = await page.evaluate((id) => window.__qua.__editor.store.find(id)?.props?._automation?.triggers, ids.ruleId)
   const birth = (stored ?? []).find((t) => t !== 'manual')
-  assert(birth && birth.followRefs === true, `选「要」⇒ 触发器带 followRefs:true：${JSON.stringify(stored)}`)
+  assert(birth && birth.followRefs === true && birth.directOnly === undefined, `两档答完 ⇒ 落盘 followRefs:true 且不落 directOnly：${JSON.stringify(stored)}`)
   const chip = await page.locator(`${row} .blk-auto-chip.is-event[data-trigger="event"]`).first().textContent()
   assert(String(chip).includes('含传递引用'), `行上要看得见这一格是开的：${chip}`)
 
   await ctx.close()
-  return '父块选定 ⇒ 当场问沿不沿引用；选「要」⇒ 落盘 followRefs:true；行上后缀同步'
+  return '父块选定 ⇒ 当场问沿不沿引用；引用答完再问深度；两档答完落盘 followRefs:true、行上后缀同步'
 })
 
 /**

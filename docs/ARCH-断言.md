@@ -1,6 +1,6 @@
 # ARCH-断言 · 工程底座自己的账
 
-> 本仓有 **29** 条在跑的硬断言（覆盖禁裸中文、层级依赖、token 化、换肤不改 DOM 形状、
+> 本仓有 **33** 条在跑的硬断言（覆盖禁裸中文、层级依赖、token 化、换肤不改 DOM 形状、
 > 以及「视图配置只有一条写路径」这类拥有者模型的约束）。这份文档只回答三个问题：
 > **哪几条真的在跑**、**哪几条只能靠约定＋为什么**、**哪几条等内核**。
 >
@@ -16,7 +16,7 @@
 ## 0. 门禁入口
 
 ```bash
-pnpm gate         # 类型 + 单测 + 构建 + 静态断言 + 236 条浏览器冒烟 + 26 条布局断言 + 13 条真 Electron 冒烟
+pnpm gate         # 类型 + 单测 + 构建 + 静态断言 + 浏览器冒烟 + 布局断言 + 真 Electron 冒烟（条数以本次输出为准）
 pnpm gate:queued  # 同 gate，但文件锁串行＋在隔离 worktree 里构建已提交的 HEAD（多人/多任务共用一台机器）
 pnpm gate:fast    # 按这次改动的路径只跑碰得到的那几支（日常小改动用；不是收工门禁）
 pnpm gate:bundle  # gate + 4 条打包产物冒烟（要 .app，慢，所以单列）
@@ -59,12 +59,12 @@ pnpm arch:check   # 只跑静态那一层（秒级）
 | 表 | 文件 | 说明 |
 |---|---|---|
 | **命令表** | `src/core/commands/decls.ts` `COMMANDS` | 纯语义：`name/title/args/capability/undoable/version`。**没有 key、没有 context、没有 host** |
-| **绑定表** | `src/core/infra/bindings.ts` `BINDINGS` | `{command, kind: keymap\|menu\|slash\|toolbar\|palette, key?, when?, args?, group?, order?, layer}`，一个机制五处复用 |
+| **绑定表** | `src/core/infra/bindings.ts` `BINDINGS` | `{command, kind: keymap\|menu\|slash\|selection, key?, when?, args?, group?, order?, layer}`，一个机制四处复用（键位／块菜单／斜杠／划选气泡）；命令面板枚举命令表本身 |
 | **上下文键** | `src/view/editor/editor.ts` `ctxKeys()` ＋ `src/main.ts` `uiCtx()` | 开放键空间；`composing` 也是一个键（不是一个 if） |
 
 - `resolveKey()`：**从下往上求值，第一条 `key` ＋ `when` 都匹配的胜出**；层次序 `user > plugin > core`。
-- `resolveBindings(kind, ctx, {prefix, query})`：菜单/斜杠/工具栏/命令面板**都是它的渲染结果**（`src/ui/overlay/layers.ts` 一个渲染器）。
-- 命令面板列的是**命令表的全部命令**（51 条，其中大部分没有任何键位）——这就是键盘可达性的兜底。
+- `resolveBindings(kind, ctx, {prefix, query})`：块菜单／斜杠／划选气泡共用一个渲染器（`src/ui/overlay/layers.ts`）；键位由 `resolveKey()` 求值，命令面板枚举命令表本身。
+- 命令面板列的是**命令表的全部命令**（按 `^\s*\{ name: '` 结构锚点计，当前 198 条，其中大部分没有任何键位）——这就是键盘可达性的兜底。
 
 ### 核心模块的来源（**不许退化的部分**）
 
@@ -379,19 +379,19 @@ AST 遍历 `electron/**/*.ts`，按**白名单**判：只放行 `node:*`／`elec
 
 | # | 断言 | 为什么本轮不做 |
 |---|---|---|
-| 1 | 不得绕过 `DbClient`；不得写 SQL | 仓里根本没有 DbClient / 驱动 / SQL。静态扫 SQL 关键词只能扫到 `core.editor/insert-block` 这类英文命令名 ⇒ 假阳性工厂。内核落地后改成「新增 import 只允许 `db/client.ts`」＋真正的 SQL 扫描。 |
-| 5 | 授权/审计不入 KB 表；绑定入 KB | 这是**表结构**事实（哪张表放什么），现在没有表。 |
+| 1 | 不得绕过 `DbClient`；不得写 SQL | 桌面库已经用 `node:sqlite`（`electron/library/sqlite.ts`），主进程只做通用 SQL。静态扫 SQL 关键词会把命令名/字段名当假阳性；改成「新增 import 只允许经内核门面」要等静态检查能区分 SQL 字面量与文本，暂不假装在跑。 |
+| 5 | 授权/审计不入 KB 表；绑定入 KB | 这是**表结构**事实（哪张表放什么）：库表已在 `src/core/storage/db-rows.ts` 定死；静态检查不覆盖表语义，归运行时与 schema 断言。 |
 | 6 | ID 同型（32-hex UUIDv7） | 运行时/单测口径；静态只能证明 `uuidv7Hex()` 在，证明不了每个落库 id 同型。 |
-| 7 | 三寄存器存在、无单一 `hlc` 列 | 寄存器是 migration 里的事实，现在没有库、没有 migration。 |
+| 7 | 三寄存器存在、无单一 `hlc` 列 | 库已落地（`PRAGMA user_version` 16），寄存器是 migration 里的事实；静态检查证明不了列形状，归运行时/单测口径。 |
 | 8 | 写事务必产 op-log 批 | 现在**正文改动已经产 op**（`tx.patch` 报 `block.upsert{content}`），但**整份替换不产**（撤销/重做、换库、冷启动物化今日）⇒ append-only 日志里那一段是空洞。接的判据是「所有让库变化的路径都产 op」；`tests/op-log-timing.test.ts` 把「还没接」钉成负向断言。 |
 | 9 | 未 `expose` 的命令不出现在 HTTP／MCP／CLI 面 | 三个面都还没起，没有可断言的对象。 |
-| 10 | 派生索引可全量重建且与增量逐字节一致 | 派生索引（FTS 等）还没建；这条本质是**集成测试**，不是静态检查。 |
+| 10 | 派生索引可全量重建且与增量逐字节一致 | FTS 派生表已落地并有逐字节一致性断言；这条本质是集成测试，不进静态门禁——由 `tests/derived-*` 与 FTS 相关单测覆盖，此处只记「不进 `arch-check`」的原因。 |
 
 ---
 
 ## 5. 本轮发现的新问题（宁多勿少）
 
-1. **命令越界碰 DOM（真违规，未修）**：~~`src/app/handlers.ts` 的 `core.page/rename` 处理器直接碰 DOM~~ —— 已修：处理器现在只调
+1. **命令越界碰 DOM（曾是真违规，已修）**：~~`src/app/handlers.ts` 的 `core.page/rename` 处理器直接碰 DOM~~ —— 已修：处理器现在只调
    `app.focusTitle()`（装配层实现），并由 `[18]` 静态守住「handler 不得出现 `document`/`window`」。
 2. **`view.ts` 的 `LINE_H = 30` 与 CSS 的 `--line-h`（28/30，随皮肤变）不是同一个数**：虚拟化占位
    高度是按 30px × 行数算的，乙皮肤真实行高 24px ⇒ 占位与真实滚动高度有偏差。既有近似，
