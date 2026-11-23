@@ -15,7 +15,9 @@
  *     不加就是 GPU 进程反复崩到 `FATAL: GPU process isn't usable. Goodbye.`。
  */
 import { _electron } from 'playwright-core'
+import { createHash } from 'node:crypto'
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:http'
 import { join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -402,6 +404,178 @@ await check('E3d 更新提示：启动检查只换菜单文案，**不弹框**',
   assert(boxes === 0, `启动检查不许弹框（beta 用户可能正在写东西），实际弹了 ${boxes} 次`)
   return `菜单「${label}」，弹窗 0 次`
 })
+
+/* ═══════════════════════════════════════════════════ E3e/E3f 应用内下载 */
+
+/**
+ * 两条真断言（不联网：本地 HTTP 服务代替 GitHub 的资产 CDN）：
+ *   E3e  下载成功：菜单出现「正在下载更新 …%」→ 文件落到注入目录、字节数与摘要都对
+ *        → 弹「安装包已下载」→ 菜单换成「更新已就绪 …」
+ *   E3f  下载失败：服务端 500 ⇒ 说「下载失败」、不留半截文件、菜单回到「有新版 …」且可点
+ *
+ * 资产名按 `process.arch` 拼：挑包判据读的是**运行时**平台/架构，测试进程与 Electron 同一台机器。
+ * 下载目录用 `QUA_UPDATE_DOWNLOAD_DIR` 注入——自检不许往用户真实的「下载」文件夹里写东西。
+ */
+const UPDATE_BYTES = Buffer.from('fake-installer-bytes-for-smoke-'.repeat(2048))
+const UPDATE_ASSET = `Qua-9.9.9-${process.arch}.dmg`
+const UPDATE_DIGEST = createHash('sha256').update(UPDATE_BYTES).digest('hex')
+
+function startUpdateServer() {
+  const server = createServer((req, res) => {
+    if (req.url === '/ok.dmg') {
+      res.writeHead(200, {
+        'content-type': 'application/octet-stream',
+        'content-length': String(UPDATE_BYTES.length),
+      })
+      // 故意慢一拍：让「正在下载更新 …%」这个状态真的出现在菜单上，而不是一闪而过
+      const half = Math.floor(UPDATE_BYTES.length / 2)
+      res.write(UPDATE_BYTES.subarray(0, half))
+      setTimeout(() => res.end(UPDATE_BYTES.subarray(half)), 600)
+      return
+    }
+    res.writeHead(500)
+    res.end('no')
+  })
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => resolve({ server, port: server.address().port }))
+  })
+}
+
+function writeUpdateFeed(file, url) {
+  writeFileSync(
+    file,
+    JSON.stringify([
+      {
+        tag_name: 'v9.9.9',
+        draft: false,
+        prerelease: false,
+        html_url: 'https://example.com/release',
+        body: 'fixture notes',
+        published_at: '2026-01-01T00:00:00Z',
+        assets: [
+          {
+            name: UPDATE_ASSET,
+            browser_download_url: url,
+            size: UPDATE_BYTES.length,
+            digest: `sha256:${UPDATE_DIGEST}`,
+          },
+        ],
+      },
+    ]),
+  )
+}
+
+const updateServer = await startUpdateServer()
+const UPDATE_FEED_OK = join(CACHE, 'update-download-ok.json')
+const UPDATE_FEED_FAIL = join(CACHE, 'update-download-fail.json')
+writeUpdateFeed(UPDATE_FEED_OK, `http://127.0.0.1:${updateServer.port}/ok.dmg`)
+writeUpdateFeed(UPDATE_FEED_FAIL, `http://127.0.0.1:${updateServer.port}/fail.dmg`)
+
+/**
+ * 点菜单项并观察全过程。全放在一次 evaluate 里，是为了不让 Playwright 的往返把
+ * 「检查中置灰 / 下载中」这些短状态切碎——它们正是要看的。
+ * `responses` 是弹窗回答队列（按顺序消费，用完后重复最后一个）。
+ */
+async function clickUpdateAndWatch(app, responses) {
+  return app.evaluate(async ({ Menu, dialog }, res) => {
+    globalThis.__updateBoxes = []
+    let n = 0
+    dialog.showMessageBox = (...args) => {
+      globalThis.__updateBoxes.push(args[args.length - 1])
+      const response = res[Math.min(n, res.length - 1)]
+      n += 1
+      return Promise.resolve({ response, checkboxChecked: false })
+    }
+    const read = () => {
+      const item = Menu.getApplicationMenu().items[0].submenu.items.find((i) => i.id === 'app-check-update')
+      return item ? { label: item.label, enabled: item.enabled } : null
+    }
+    const before = read()
+    const item = Menu.getApplicationMenu().items[0].submenu.items.find((i) => i.id === 'app-check-update')
+    item.click()
+    const labels = []
+    let last = null
+    for (let i = 0; i < 400 && globalThis.__updateBoxes.length < 2; i += 1) {
+      await new Promise((r) => setTimeout(r, 20))
+      const label = read()?.label ?? null
+      if (label !== last) {
+        labels.push(label)
+        last = label
+      }
+    }
+    // 菜单重建走一拍 setTimeout：等它落地再读终态，别把最后一帧读成下载中
+    await new Promise((r) => setTimeout(r, 60))
+    const after = read()
+    return { before, labels, boxes: globalThis.__updateBoxes, after }
+  }, responses)
+}
+
+await check('E3e 应用内下载：安装包落到下载目录（字节数与摘要都对），菜单「更新已就绪」', async () => {
+  const dir = join(CACHE, 'update-download-ok')
+  rmSync(dir, { recursive: true, force: true })
+  const { app } = await launch('update-download-ok', {
+    env: {
+      QUA_UPDATE_FEED: UPDATE_FEED_OK,
+      QUA_UPDATE_DELAY_MS: '600000',
+      QUA_UPDATE_DOWNLOAD_DIR: dir,
+    },
+  })
+  let run
+  try {
+    run = await clickUpdateAndWatch(app, [0, 1])
+  } finally {
+    await app.close()
+  }
+
+  assert(run.before?.label === '检查更新…', `点之前菜单应当是「检查更新…」，实际「${run.before?.label}」`)
+  assert(run.boxes.length === 2, `应当先弹更新框、下载完再弹安装框，实际 ${run.boxes.length} 次`)
+  assert(run.boxes[0].buttons[0] === '下载安装包', `第一个按钮应当是「下载安装包」，实际「${run.boxes[0].buttons[0]}」`)
+  assert(
+    run.labels.some((l) => String(l).includes('正在下载更新')),
+    `应当观察到下载中状态，实际菜单序列 ${JSON.stringify(run.labels)}`,
+  )
+  assert(run.boxes[1].message === '安装包已下载', `下载完应当说「安装包已下载」，实际「${run.boxes[1].message}」`)
+  const saved = join(dir, UPDATE_ASSET)
+  assert(run.boxes[1].detail.includes(saved), `弹窗应当给出安装包路径「${saved}」，实际「${run.boxes[1].detail}」`)
+  assert(run.boxes[1].buttons[0] === '退出并打开安装包', `安装框第一个按钮应当问装不装，实际「${run.boxes[1].buttons[0]}」`)
+  assert(existsSync(saved), `安装包应当落到「${saved}」`)
+  assert(readFileSync(saved).equals(UPDATE_BYTES), '落盘的字节应当与载荷逐字一致')
+  assert(!existsSync(`${saved}.part`), '下载完成不该留下 .part')
+  assert(run.after?.label === '更新已就绪 9.9.9…', `下载完菜单应当换成「更新已就绪 …」，实际「${run.after?.label}」`)
+  assert(run.after?.enabled === true, '下载结束后菜单项应当可点')
+  return `「${run.before?.label}」→ 菜单序列 ${JSON.stringify(run.labels)} → 文件 ${UPDATE_BYTES.length}B（sha256 对上）→「${run.boxes[1].message}」→「${run.after?.label}」`
+})
+
+await check('E3f 下载失败：说清原因、不留半截文件、菜单回到「有新版 …」', async () => {
+  const dir = join(CACHE, 'update-download-fail')
+  rmSync(dir, { recursive: true, force: true })
+  const { app } = await launch('update-download-fail', {
+    env: {
+      QUA_UPDATE_FEED: UPDATE_FEED_FAIL,
+      QUA_UPDATE_DELAY_MS: '600000',
+      QUA_UPDATE_DOWNLOAD_DIR: dir,
+    },
+  })
+  let run
+  try {
+    run = await clickUpdateAndWatch(app, [0, 1])
+  } finally {
+    await app.close()
+  }
+
+  assert(run.boxes.length === 2, `应当弹更新框再弹失败框，实际 ${run.boxes.length} 次`)
+  assert(run.boxes[1].message === '下载失败', `失败时应当说「下载失败」，实际「${run.boxes[1].message}」`)
+  assert(run.boxes[1].detail.includes('500'), `失败说明应当带上原因（HTTP 500），实际「${run.boxes[1].detail}」`)
+  const saved = join(dir, UPDATE_ASSET)
+  assert(!existsSync(saved), '下载失败不该留下安装包')
+  assert(!existsSync(`${saved}.part`), '下载失败不该留下 .part')
+  assert(run.after?.label === '有新版 9.9.9…', `失败后菜单应当回到「有新版 …」，实际「${run.after?.label}」`)
+  assert(run.after?.enabled === true, '失败后菜单项应当可点（能重试）')
+  return `「${run.boxes[1].message}」/「${run.boxes[1].detail.split('\n')[0]}」；目录零残留；菜单「${run.after?.label}」`
+})
+
+updateServer.server.closeAllConnections()
+await new Promise((resolve) => updateServer.server.close(resolve))
 
 /* ═══════════════════════════════════════════════════ E4 窗口尺寸/位置记忆 */
 

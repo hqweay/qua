@@ -7,6 +7,7 @@
  *   ③ 预发布段的数字按**数值**比（`beta.10 > beta.6`），否则第 10 个 beta 会被判成旧版；
  *   ④ 比的是最高版本，不是列表首个（API 返回序不是契约）；
  *   ⑤ 坏载荷一律降级成 `unavailable`，**不抛**（启动路径不许因为 GitHub 改字段就断）。
+ * 外加 ⑥：安装包按平台/架构挑，挑不到只让 `asset` 为空，不推翻「有新版」。
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -94,4 +95,72 @@ test('⑤ 坏载荷降级成 unavailable，不抛', () => {
     kind: 'unavailable',
     reason: 'bad-payload',
   })
+})
+
+/**
+ * ⑥ 安装包挑选：mac 挑 arm64 dmg、Windows 挑 x64 exe；架构对不上／平台不认／载荷没 assets
+ *    都只让 `asset` 为空，**不推翻「有新版」本身**——调用方退回发布页，而不是推一个装不上的下载。
+ */
+test('⑥ 安装包按平台/架构挑，挑不到只影响 asset、不影响「有新版」', () => {
+  const tag = '0.1.0-beta.9'
+  const assets = [
+    {
+      name: `Qua-${tag}-arm64.dmg`,
+      browser_download_url: `https://example.com/${tag}-arm64.dmg`,
+      size: 111,
+      digest: 'sha256:AAAA',
+    },
+    { name: `Qua-${tag}-x64.exe`, browser_download_url: `https://example.com/${tag}-x64.exe`, size: 222 },
+    { name: `Qua-${tag}-x64.exe.blockmap`, browser_download_url: 'https://example.com/x.blockmap', size: 1 },
+    // 地址不是 http(s) ⇒ 不认（下载器只走 http/https）
+    { name: `Qua-${tag}-arm64.dmg`, browser_download_url: 'ftp://example.com/x.dmg', size: 333 },
+  ]
+  const feed = [rel(`v${tag}`, { assets })]
+
+  const mac = pickLatest(feed, '0.1.0-beta.8', { platform: 'darwin', arch: 'arm64' })
+  assert.equal(mac.kind, 'available')
+  assert.equal(mac.kind === 'available' && mac.asset?.name, `Qua-${tag}-arm64.dmg`)
+  assert.equal(mac.kind === 'available' && mac.asset?.size, 111)
+  assert.equal(mac.kind === 'available' && mac.asset?.digest, 'sha256:AAAA')
+
+  const win = pickLatest(feed, '0.1.0-beta.8', { platform: 'win32', arch: 'x64' })
+  assert.equal(win.kind, 'available')
+  assert.equal(win.kind === 'available' && win.asset?.name, `Qua-${tag}-x64.exe`)
+  // GitHub 没给摘要 ⇒ digest 为空，下载器只校验字节数
+  assert.equal(win.kind === 'available' && win.asset?.digest, null)
+
+  // 架构对不上、平台不认、载荷没 assets：都是「有新版，但没有可下载的包」
+  for (const target of [
+    { platform: 'darwin', arch: 'x64' },
+    { platform: 'linux', arch: 'x64' },
+    { platform: 'win32', arch: 'arm64' },
+  ]) {
+    const hit = pickLatest(feed, '0.1.0-beta.8', target)
+    assert.equal(hit.kind, 'available')
+    assert.equal(hit.kind === 'available' && hit.asset, null)
+  }
+  const noAssets = pickLatest([rel(`v${tag}`)], '0.1.0-beta.8', { platform: 'darwin', arch: 'arm64' })
+  assert.equal(noAssets.kind, 'available')
+  assert.equal(noAssets.kind === 'available' && noAssets.asset, null)
+
+  // 候选条目本身不像话（非 http 地址 / 字节数为 0）⇒ 等同挑不到，绝不推一个下不动的包
+  const badOnly = pickLatest(
+    [
+      rel(`v${tag}`, {
+        assets: [
+          { name: `Qua-${tag}-arm64.dmg`, browser_download_url: 'ftp://example.com/x.dmg', size: 333 },
+          { name: `Qua-${tag}-arm64.dmg`, browser_download_url: 'https://example.com/zero.dmg', size: 0 },
+        ],
+      }),
+    ],
+    '0.1.0-beta.8',
+    { platform: 'darwin', arch: 'arm64' },
+  )
+  assert.equal(badOnly.kind, 'available')
+  assert.equal(badOnly.kind === 'available' && badOnly.asset, null)
+
+  // 不传 target（旧调用点/纯版本判据）不挑资产，行为保留
+  const plain = pickLatest(feed, '0.1.0-beta.8')
+  assert.equal(plain.kind, 'available')
+  assert.equal(plain.kind === 'available' && plain.asset, null)
 })

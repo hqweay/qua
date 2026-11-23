@@ -1712,6 +1712,9 @@ export const MSG = {
   'menu.item.checkUpdate': '检查更新…',
   /* 有新版时菜单项换成这一句：常驻一行小字比弹一次模态框便宜（beta 用户可能正在写东西） */
   'menu.item.updateAvailable': '有新版 {version}…',
+  /* 下载中／已下载的常驻状态：菜单是用户唯一能看见进度的地方 */
+  'menu.item.updateDownloading': '正在下载更新 {percent}%…',
+  'menu.item.updateReady': '更新已就绪 {version}…',
   'menu.item.services': '服务',
   'menu.item.hide': '隐藏 {app}',
   'menu.item.hideOthers': '隐藏其他',
@@ -1741,12 +1744,21 @@ export const MSG = {
   'menu.item.zoom': '缩放',
   'menu.item.front': '前置全部窗口',
 
-  /* -------------------------------------------------- 更新提示（通知式：只告知，装由用户自己来） */
+  /* -------------------------------------------------- 更新（通知 ＋ 应用内下载） */
   'update.availableTitle': '发现新版本 {next}',
   'update.availableDetail': '当前 {current} → {next}\n\n{notes}\n\n装新版只会替换程序本身，不会动你的库；换数据格式时版本自己会先留一份快照。',
   'update.noNotes': '（这一版没有发布说明）',
   'update.upToDate': '已是最新版本',
   'update.upToDateDetail': '当前 {current} 就是已发布的最新版本。',
+  'update.download': '下载安装包',
+  'update.downloadHint': '点「下载安装包」会把它下到「下载」文件夹并自动打开；打开后按提示完成安装，装完重新打开相。',
+  'update.downloadedTitle': '安装包已下载',
+  'update.downloadedDetail': '安装包在：{path}\n\n现在退出相并打开安装包吗？退出后按提示完成安装。',
+  'update.quitAndOpen': '退出并打开安装包',
+  'update.downloadFailed': '下载失败',
+  'update.downloadFailedDetail': '没能下载安装包：{reason}\n\n可以打开发布页手动下载。',
+  'update.openFailed': '打不开安装包',
+  'update.openFailedDetail': '安装包在：{path}\n\n打开失败：{reason}',
   'update.openRelease': '打开发布页',
   'update.later': '稍后',
   'update.ok': '好',

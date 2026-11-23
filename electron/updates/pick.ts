@@ -5,10 +5,34 @@
  * 坏载荷），壳那一半只做编排。载荷一律当**外部输入**看待——GitHub 改字段不许让主进程抛。
  */
 
+/** 一个可下载的安装包（GitHub release asset 的够用投影） */
+export interface UpdateAsset {
+  name: string
+  url: string
+  size: number
+  /** `sha256:<hex>`；GitHub 没给时为空——那就只校验字节数 */
+  digest: string | null
+}
+
+/** 挑资产用的平台／架构。不引 NodeJS 类型：这个文件保持零依赖，单测直接跑 */
+export interface AssetTarget {
+  platform: string
+  arch: string
+}
+
 /** 一次检查的结论。`unavailable` 是**静默**的：连不上不算错，不该打扰用户 */
 export type UpdateCheck =
   | { kind: 'up-to-date'; current: string }
-  | { kind: 'available'; current: string; next: string; url: string; notes: string; publishedAt: string }
+  | {
+      kind: 'available'
+      current: string
+      next: string
+      url: string
+      notes: string
+      publishedAt: string
+      /** 这个平台装得上的安装包；挑不到就为 null（调用方退回发布页） */
+      asset: UpdateAsset | null
+    }
   | { kind: 'unavailable'; reason: 'no-release' | 'bad-payload' }
 
 export interface Version {
@@ -74,6 +98,35 @@ function compareIdentifier(x: string, y: string): number {
 }
 
 /**
+ * 从 release 的 assets 里挑「这个平台装得上」的那一个。
+ *
+ * 只认：扩展名对（mac `.dmg`／Windows `.exe`）、架构段对得上、地址与字节数像话。
+ * 挑不到返回 `null`——调用方退回「打开发布页」，而不是推一个装不上的下载。
+ * 这里不猜：`universal`／别的架构都不算命中，宁可让用户走发布页。
+ */
+export function pickAsset(raw: unknown, target: AssetTarget): UpdateAsset | null {
+  const ext = target.platform === 'darwin' ? '.dmg' : target.platform === 'win32' ? '.exe' : ''
+  if (!ext) return null
+  if (!Array.isArray(raw)) return null
+
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue
+    const item = entry as Record<string, unknown>
+    const name = typeof item.name === 'string' ? item.name : ''
+    const url = typeof item.browser_download_url === 'string' ? item.browser_download_url : ''
+    const size = typeof item.size === 'number' ? item.size : 0
+    if (!name.endsWith(ext)) continue
+    if (!name.includes(`-${target.arch}.`)) continue
+    if (!/^https?:\/\//.test(url)) continue
+    if (!Number.isFinite(size) || size <= 0) continue
+    // GitHub 的 sha256 摘要是可选字段：有就带上，没有就让下载器只校验字节数
+    const digest = typeof item.digest === 'string' && item.digest.startsWith('sha256:') ? item.digest : null
+    return { name, url, size, digest }
+  }
+  return null
+}
+
+/**
  * 从 GitHub 的 releases 载荷里挑出「该推给这个用户的那一条」。
  *
  * 三条判据（都要能被单测打红）：
@@ -81,8 +134,10 @@ function compareIdentifier(x: string, y: string): number {
  *   ② **通道是单向闸**：正式版用户不会被拉进预发布；beta 用户照样收得到更高的正式版
  *      （`0.1.0-beta.6 → 0.1.0` 正是要发生的事，挡住就等于把 beta 用户留在原地）；
  *   ③ 比的是**最高版本**，不是列表首个（API 的返回序不是契约）。
+ *
+ * 传了 `target` 才挑安装包：不传的调用点（单测的纯版本判据）保持原样，拿不到 `asset`。
  */
-export function pickLatest(raw: unknown, current: string): UpdateCheck {
+export function pickLatest(raw: unknown, current: string, target?: AssetTarget): UpdateCheck {
   const cur = parseVersion(current)
   if (!cur) return { kind: 'unavailable', reason: 'bad-payload' }
   if (!Array.isArray(raw)) return { kind: 'unavailable', reason: 'bad-payload' }
@@ -114,6 +169,7 @@ export function pickLatest(raw: unknown, current: string): UpdateCheck {
     url,
     notes: clipNotes(best.item.body),
     publishedAt: typeof best.item.published_at === 'string' ? best.item.published_at : '',
+    asset: target ? pickAsset(best.item.assets, target) : null,
   }
 }
 
