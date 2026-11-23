@@ -152,6 +152,7 @@ export const EN2 = {
   'ui.query.untitled': 'Untitled query',
   'ui.automation.untitled': 'Untitled automation',
   'ui.automation.created': 'Created automation "{name}"; disabled by default — enable it after writing the steps',
+  'ui.automation.menuEmptyHint': 'No automations yet — create one',
   'ui.automation.ran': 'Ran "{name}": {count} step(s)',
   'ui.automation.runFailed': 'Run failed (rolled back entirely, nothing was written): {message}',
   'ui.automation.blocked.disabled': '"{name}" is disabled — enable it before running',

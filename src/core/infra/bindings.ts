@@ -167,6 +167,12 @@ export const BINDINGS: Binding[] = [
   /* ---- 基本：两个子菜单入口（子菜单是行数据，不是命令） ---- */
   { kind: 'menu', submenu: 'blockCopy/', actsOn: 'block', when: 'blockMenuTarget', group: 'block/1-basic', order: 10, layer: 'core', label: t('menu.group.copy') },
   { kind: 'menu', submenu: 'blockInsert/', actsOn: 'editor', when: 'blockMenuTarget', group: 'block/1-basic', order: 20, layer: 'core', label: t('menu.group.insert') },
+  /**
+   * 「我的自动化…」：用户动作 hub（该块能跑哪些手动自动化）。
+   * 动态行由命令打开——绑定表是静态的，装不下「每个块不一样」的项；与「视图…」同一条缝。
+   * 放 basic 组：它是任务入口，不是新的语义分类。
+   */
+  { command: 'core.automation/menu', kind: 'menu', when: 'blockMenuTarget', group: 'block/1-basic', order: 30, layer: 'core', icon: 'lucide:zap', keywords: ['automation', 'action', 'run', t('menu.kw.automation')] },
   /* 复制（子菜单）：前四条是「同一块的几种味」，复制块是落进文档的副本 */
   { command: 'core.editor/copy-block', kind: 'menu', when: 'blockMenuTarget', group: 'blockCopy/1', order: 10, layer: 'core' },
   { command: 'core.editor/copy-block-text', kind: 'menu', when: 'blockMenuTarget', group: 'blockCopy/1', order: 20, layer: 'core' },

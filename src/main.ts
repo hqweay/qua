@@ -1078,6 +1078,7 @@ const {
   triggers,
   triggerState,
   showMenu,
+  openAutomationMenu,
   openTrigger,
   refreshSelectionBar,
   showSelectionRefPicker,
@@ -1930,6 +1931,7 @@ const app: App = {
     if (!quiet) layers.toast(text, kind)
   },
   showMenu,
+  openAutomationMenu,
   showPopover: (render, anchor) => layers.openPopover(render, anchor),
   closeLayers: () => {
     triggerState.triggerCh = null

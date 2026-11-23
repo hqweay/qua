@@ -74,6 +74,45 @@ export function setupRetrieval(deps: RetrievalDeps) {
     }))
   }
 
+  /**
+   * **块菜单「我的自动化…」**（命令 `core.automation/menu`）：对给定块列出手动自动化。
+   *
+   * 可运行的行走 `core.automation/run`；停用/条件不满足/没步骤/坏定义**不是死行**——
+   * 行走 `core.block/focus-block` 打开定义去修（同一份投影，只是状态不同）。
+   * 事件-only 不在投影里（没有手动触发＝不是手动动作）。
+   */
+  const openAutomationMenu = (blockId: string): void => {
+    if (blockId === '' || !kb.get(blockId)) return
+    const entries = projectManualAutomations(kb, blockId)
+    const rows: Row[] = entries.map((e) => ({
+      id: `automation/${e.automationId}`,
+      label: e.title,
+      icon: e.icon,
+      hint: e.reason ? t(`ui.automation.blocked.${e.reason}`, { name: e.title }) : '',
+      ...(e.runnable
+        ? { command: 'core.automation/run', args: { automationId: e.automationId, blockId } }
+        : { command: 'core.block/focus-block', args: { blockId: e.automationId } }),
+    }))
+    rows.push({
+      id: 'automation/new',
+      label: t('cmd.automation.create'),
+      icon: 'lucide:plus',
+      ...(entries.length === 0 ? { hint: t('ui.automation.menuEmptyHint') } : {}),
+      command: 'core.automation/create',
+    })
+    layers.openMenu({
+      rows,
+      anchor: getEd().blockEl(blockId)?.getBoundingClientRect() ?? null,
+      title: t('menu.cat.automation'),
+      searchable: false,
+      focusSearch: false,
+      onPick: (row) => {
+        if (!row.command) return
+        void getRegistry().invoke(row.command, (row.args as Record<string, unknown>) ?? {}, 'menu')
+      },
+    })
+  }
+
   // 会话状态（唯一持有者；外面经 triggerState 读写，不许复制成两份）
   let triggerCh: TriggerChar | null = null
   let stageTag: MemberTagRef | null = null
@@ -616,5 +655,14 @@ function showMenu(req: MenuRequest): void {
     set dismissed(v) { dismissed = v },
   }
 
-  return { triggers, triggerState, showMenu, openTrigger, refreshSelectionBar, showSelectionRefPicker, toggleColorAxis }
+  return {
+    triggers,
+    triggerState,
+    showMenu,
+    openAutomationMenu,
+    openTrigger,
+    refreshSelectionBar,
+    showSelectionRefPicker,
+    toggleColorAxis,
+  }
 }

@@ -12,6 +12,16 @@ export const AUTOMATION_HANDLERS: Record<string, Handler> = {
     app.createAutomation(S(a.name))
     return true
   },
+  /**
+   * 块菜单「我的自动化…」：目标优先用菜单请求显式给的 `blockId`（记录面没有光标）；
+   * 没有才退回当前块（键位/斜杠兜底）。打开菜单本身不写库。
+   */
+  'core.automation/menu': (a, app) => {
+    const blockId = S(a.blockId) || curBlock(app)
+    if (!blockId) return false
+    app.openAutomationMenu(blockId)
+    return true
+  },
   /** 手动链目标＝当前块（缺省）；显式给 `blockId` 的调用面照走同一份 guards */
   'core.automation/run': (a, app) => {
     const automationId = S(a.automationId)

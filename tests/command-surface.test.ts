@@ -118,6 +118,12 @@ test('块菜单：删除同位、复制/插入收子菜单、组标题人人有�
     ['blockCopy/:block', 'blockInsert/:editor'],
     '复制/插入两套行只从子菜单进来（子菜单是行数据，不是命令）',
   )
+  // 「我的自动化…」是 basic 组的任务 hub：动态行由命令打开（菜单 opener 需要目标，面板不裸列）
+  const hub = menu.find((b) => b.command === 'core.automation/menu')
+  assert.ok(hub, '块菜单要有「我的自动化…」入口')
+  assert.equal(hub!.group, 'block/1-basic', '它是 basic 组的任务 hub，不是新语义组')
+  assert.equal(hub!.when, 'blockMenuTarget')
+  assert.ok(COMMANDS.find((c) => c.name === 'core.automation/menu')?.hidden, '菜单 opener 需要目标，面板不裸列')
   // 「有目标块」不是「编辑器有焦点」：块菜单行只读 blockMenuTarget，记录面才借得到同一张表
   for (const b of menu) {
     assert.ok(!(b.when ?? '').includes('blockFocused'), `${b.submenu ?? b.command} 仍读 blockFocused`)

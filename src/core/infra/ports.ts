@@ -834,6 +834,13 @@ export interface App {
   ): void
   /** 「视图…」菜单：列出默认看法 ＋ 已有视图 ＋ 新建…（**纯 UI**，落在装配层） */
   openViewMenu(owner: ViewOwnerRef, anchor?: DOMRect | null, trigger?: HTMLElement): void
+  /**
+   * 块菜单「我的自动化…」：对给定块列出手动自动化。
+   *
+   * 可运行的行走 `core.automation/run`；停用/条件不满足/没步骤/坏定义的行打开定义去修。
+   * 事件-only 不列（没有手动触发＝不是手动动作）。
+   */
+  openAutomationMenu(blockId: string): void
   /** 打开**视图选项**面板（四轴一个面；块菜单入口与抬头「选项」共用这一台） */
   showViewOptions(owner: ViewOwnerRef): void
   /** 打开**条件构建器**（一个浮层；草稿改在本地，点「应用」才写一次） */

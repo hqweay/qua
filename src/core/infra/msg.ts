@@ -631,6 +631,7 @@ export const MSG = {
   /* ---- 自动化（命令块）---- */
   'ui.automation.untitled': '未命名自动化',
   'ui.automation.created': '已创建自动化「{name}」，默认停用——写好步骤后启用它',
+  'ui.automation.menuEmptyHint': '还没有自动化——新建一个',
   'ui.automation.ran': '已运行「{name}」：{count} 步',
   'ui.automation.runFailed': '运行失败（已整批回滚，没有写入任何东西）：{message}',
   'ui.automation.blocked.disabled': '「{name}」是停用的——先启用再运行',
@@ -1150,6 +1151,7 @@ export const MSG = {
   'cmd.query.insert': '插入查询块',
   'cmd.query.open-builder': '编辑查询条件…',
   'cmd.automation.create': '新建自动化…',
+  'cmd.automation.menu': '我的自动化…',
   'cmd.automation.run': '运行自动化',
   'cmd.automation.runBatch': '批量运行自动化',
   'cmd.automation.toggle': '启用／停用自动化',
