@@ -13,7 +13,7 @@ import { selectionRefRows } from '../../app/retrieval/selection-ref-rows.ts'
 import { resolveBindings, type Binding } from '../../core/infra/bindings.ts'
 import { type ActsOn, type MenuRequest, type MenuTarget, type Registry } from '../../core/commands/index.ts'
 import { blockMenuCtxOf, findInForest, inboundRefCount, type ColorAxis, type CtxKeys, type TriggerChar } from '../../core/index.ts'
-import { projectManualAutomations } from '../../core/automation/projection.ts'
+import { projectManualAutomations, type AutomationEntry } from '../../core/automation/projection.ts'
 import { Layers } from '../../ui/overlay/layers.ts'
 import type { BlockEditor } from '../../view/editor/editor.ts'
 import type { TriggerQuery } from '../../view/editor/editor-events.ts'
@@ -61,17 +61,58 @@ export function setupRetrieval(deps: RetrievalDeps) {
   const automationPaletteRows = (): Row[] => {
     const ed = getEd()
     const targetId = ed.sel?.aBlock ?? ed.caretBlock() ?? undefined
-    return projectManualAutomations(kb, targetId).map((e) => ({
+    const entries = projectManualAutomations(kb, targetId)
+    const group = `palette/${t('menu.cat.automation')}`
+    const pins = prefs().palettePins
+    const byId = new Map(entries.map((e) => [e.automationId, e]))
+    const pinned = pins.map((id) => byId.get(id)).filter((e): e is AutomationEntry => e !== undefined)
+    // 空 pins ＝ 未整理：全部平铺（兼容旧库/新用户）。一旦有固定，主列表只留固定项。
+    const curated = pinned.length > 0
+    const shown = curated ? pinned : entries
+    const rows: Row[] = shown.map((e, i) => ({
       id: e.id,
       label: e.title,
       // 灰行的 hint 说的是「为什么现在不能跑」；可运行的行不占提示位
       hint: e.reason ? t(`ui.automation.blocked.${e.reason}`, { name: e.title }) : '',
       icon: e.icon,
-      group: `palette/${t('menu.cat.automation')}`,
+      group,
+      order: curated ? i : undefined,
       command: 'core.automation/run',
       args: { automationId: e.automationId, ...(targetId !== undefined ? { blockId: targetId } : {}) },
       disabled: !e.runnable,
     }))
+    if (curated) {
+      const unpinned = entries.filter((e) => !pins.includes(e.automationId))
+      // 未固定的动作不在浏览列表里铺，但按名字搜时仍要出现——完整索引靠搜索兜底
+      for (const [i, e] of unpinned.entries()) {
+        rows.push({
+          id: e.id,
+          label: e.title,
+          hint: e.reason ? t(`ui.automation.blocked.${e.reason}`, { name: e.title }) : '',
+          icon: e.icon,
+          group,
+          order: 500 + i,
+          searchOnly: true,
+          command: 'core.automation/run',
+          args: { automationId: e.automationId, ...(targetId !== undefined ? { blockId: targetId } : {}) },
+          disabled: !e.runnable,
+        })
+      }
+      if (unpinned.length > 0) {
+        rows.push({
+          id: 'automation/more',
+          label: t('ui.automation.more'),
+          hint: targetId === undefined ? t('ui.automation.blocked.noTarget') : t('ui.automation.moreHint'),
+          icon: 'lucide:chevron-right',
+          group,
+          order: 999,
+          command: 'core.automation/menu',
+          args: targetId !== undefined ? { blockId: targetId } : {},
+          disabled: targetId === undefined,
+        })
+      }
+    }
+    return rows
   }
 
   /**

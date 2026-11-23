@@ -36,6 +36,7 @@ function assertDefaults(p: Prefs): void {
   assert.equal(p.virtualize, false)
   assert.equal(p.radius, 12)
   assert.equal(p.badgeOpen, false)
+  assert.deepEqual(p.palettePins, [], '面板固定缺省为空')
   assert.deepEqual(p.dock, {
     left: {
       open: true,
@@ -95,6 +96,11 @@ test('device: 派生栏的看法是设备状态：坏键/坏值丢掉，允许�
   assert.deepEqual(normalizePrefs(undefined).mountViews, {}, '缺字段 ⇒ 空')
 })
 
+test('device: 面板固定是库态 id 列表：非空串才收、去重、保序', () => {
+  const p = normalizePrefs({ palettePins: ['a', 'b', 'a', '', 3] as unknown as Prefs['palettePins'] })
+  assert.deepEqual(p.palettePins, ['a', 'b'])
+  assert.deepEqual(normalizePrefs(undefined).palettePins, [], '缺字段 ⇒ 空')
+})
 
 test('device: 存了再读 ⇒ 主题／槽宽／钉住都原样回来', async () => {
   resetMemoryLocalStorage()
@@ -427,7 +433,7 @@ test('库侧状态：dock/折叠/露面视图/日记栏**只**从库侧读；qua
   assert.equal(loaded.prefs.dock.left.width, null)
 })
 
-test('库侧状态：存了再读，四格从库侧回来；主题等设备格仍从设备键回来', async () => {
+test('库侧状态：存了再读，库格从库侧回来；主题等设备格仍从设备键回来', async () => {
   resetMemoryLocalStorage()
   const key = freshKey()
   const lib = fakeLibrary()
@@ -439,6 +445,7 @@ test('库侧状态：存了再读，四格从库侧回来；主题等设备格�
       dock: { ...DEFAULT_DOCK, left: { open: false, width: 260, cards: [...DEFAULT_DOCK.left.cards] } },
       mountViews: { 'journal:refs': 'table' },
       journalMounts: [{ id: 'j1', kind: 'derived', source: 'refs' }],
+      palettePins: ['a1'],
     },
     folded: { b1: true },
   })
@@ -447,13 +454,14 @@ test('库侧状态：存了再读，四格从库侧回来；主题等设备格�
   // 库侧字节确实落在库的 settings（这份键的第一个消费者）
   const raw = lib.map.get(LIBRARY_STATE_KEY)
   assert(typeof raw === 'string', '库侧状态应当写进库的 settings')
-  const parsed = JSON.parse(raw!) as { dock?: unknown; folded?: unknown; mountViews?: unknown; journalMounts?: unknown }
+  const parsed = JSON.parse(raw!) as { dock?: unknown; folded?: unknown; mountViews?: unknown; journalMounts?: unknown; palettePins?: unknown }
   assert.deepEqual(parsed.folded, { b1: true })
   assert.deepEqual(parsed.mountViews, { 'journal:refs': 'table' })
   assert.deepEqual(parsed.journalMounts, [{ id: 'j1', kind: 'derived', source: 'refs' }])
+  assert.deepEqual(parsed.palettePins, ['a1'])
   assert.ok((parsed.dock as { left?: { width?: unknown } }).left?.width === 260, 'dock 整格一起走（不拆形状）')
 
-  // 把设备键换成一份**没有**这四格的字节：四格仍从库侧回来，主题跟着设备键走
+  // 把设备键换成一份**没有**这些库格的字节：库格仍从库侧回来，主题跟着设备键走
   await createLocalStorageAdapter(key).commit({
     changes: [],
     payload: JSON.stringify({ prefs: { theme: 'light' } }),
@@ -466,6 +474,7 @@ test('库侧状态：存了再读，四格从库侧回来；主题等设备格�
   assert.deepEqual(loaded.folded, { b1: true })
   assert.deepEqual(loaded.prefs.mountViews, { 'journal:refs': 'table' })
   assert.deepEqual(loaded.prefs.journalMounts, [{ id: 'j1', kind: 'derived', source: 'refs' }])
+  assert.deepEqual(loaded.prefs.palettePins, ['a1'], '面板固定是库格：从库侧回来')
 })
 
 test('库侧状态：库侧写失败 ⇒ save 如实报失败（不许假装存上了）', async () => {

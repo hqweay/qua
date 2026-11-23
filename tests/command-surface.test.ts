@@ -124,6 +124,7 @@ test('块菜单：删除同位、复制/插入收子菜单、组标题人人有�
   assert.equal(hub!.group, 'block/1-basic', '它是 basic 组的任务 hub，不是新语义组')
   assert.equal(hub!.when, 'blockMenuTarget')
   assert.ok(COMMANDS.find((c) => c.name === 'core.automation/menu')?.hidden, '菜单 opener 需要目标，面板不裸列')
+  assert.ok(COMMANDS.find((c) => c.name === 'core.automation/pin')?.hidden, '固定命令由身体调用，面板不裸列')
   // 「有目标块」不是「编辑器有焦点」：块菜单行只读 blockMenuTarget，记录面才借得到同一张表
   for (const b of menu) {
     assert.ok(!(b.when ?? '').includes('blockFocused'), `${b.submenu ?? b.command} 仍读 blockFocused`)

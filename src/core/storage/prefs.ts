@@ -1,8 +1,9 @@
 /**
- * 本地偏好（**设备状态**：不进 KB、不参与同步）。
+ * 本地偏好：**按字段分两类**——设备态（主题／键位／最近…，不进库）与库态
+ * （dock／折叠／露面视图／日记栏／面板固定，由 `LibraryState` 挑走，住库的 settings 表）。
  *
- * 单独成文件的原因：偏好有它自己的形状兜底与默认值，和「库里有几块」完全是两件事。
- * `shape.ts` 只负责把这些字段拼进整份库；这里负责它们**各自的意义与默认**。
+ * 这里只负责形状兜底与默认；哪一格跟库走由 `device.ts` 的 `LibraryState` 决定。
+ * 与「库里有几块」无关：库字节里不带 `prefs`（`shape.ts` 保证），这里也不碰库形状。
  */
 
 /**
@@ -46,6 +47,17 @@ export interface Prefs {
    * 代价（登记）：日记面板的 local 栏不跨设备；要跨设备/共享就写成查询块（内容对象）。
    */
   journalMounts: MountEntry[]
+  /**
+   * 命令面板里**固定（常用）的手动自动化 id**，按固定先后排序。
+   *
+   * **库态**：它引用的是这个库的 automation id、回答「这个库里哪些动作常用」，
+   * 所以住 `LibraryState`（跟库同步），不进设备字节——换一台机器打开同一个库，
+   * 固定还在；换一个库才是另一套。
+   *
+   * 空数组＝没有固定：面板按未整理形态列出全部手动自动化（兼容旧库/新用户）；
+   * 一旦有固定，主列表只留固定项，其余进「更多自动化…」，完整列表永远可达。
+   */
+  palettePins: string[]
   /**
    * **派生栏（引用／同类／提及）的看法**（设备状态）。
    *
@@ -210,6 +222,7 @@ export const DEFAULT_PREFS: Prefs = {
   locale: null,
   feedLayout: 'column',
   journalMounts: [],
+  palettePins: [],
   mountViews: {},
   mountGroups: {},
   dock: DEFAULT_DOCK,
@@ -347,6 +360,11 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
     ? [...new Set(p.recentCommands.filter((n): n is string => typeof n === 'string' && n !== ''))].slice(0, 12)
     : []
 
+  // 面板固定：库态 id 列表，非空串才收、去重、保序（顺序就是用户固定的先后）
+  const palettePins = Array.isArray(p.palettePins)
+    ? [...new Set(p.palettePins.filter((id): id is string => typeof id === 'string' && id !== ''))]
+    : []
+
   // 最近使用的图标值：非空串才收，去重、封顶（24 ≈ 两屏网格的一行量）——它是选择器的快捷行
   const recentIcons = Array.isArray(p.recentIcons)
     ? [...new Set(p.recentIcons.filter((n): n is string => typeof n === 'string' && n !== ''))].slice(0, 24)
@@ -392,6 +410,7 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
     recentCommands,
     recentIcons,
     recentColors,
+    palettePins,
     dock: {
       // `legacyPinned` 只在归一内部用，不进落盘形状
       left: { open: left.open, width: left.width, cards: left.cards },

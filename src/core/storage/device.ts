@@ -3,10 +3,11 @@
  *
  * 归属判据一句话：**引用块 id 或指涉某个库布局的状态跟着库走；纯外观与设备能力留设备。**
  *
- *   · **跟库走**（dock 整格、折叠表、露面视图 `mountViews`、日记栏 `journalMounts`）：
- *     它们的值全是块 id 或「这个库的槽里摆了什么」——留在设备键上，第二个库一开就会
- *     把 A 库的 id 指到 B 库的行上。它们住**库的 `settings` 表**（`LIBRARY_STATE_KEY`，
- *     桌面宿主经库面读写；web 宿主是单库演示，没有第二个库，暂住设备键）。
+ *   · **跟库走**（dock 整格、折叠表、露面视图 `mountViews`、日记栏 `journalMounts`、
+ *     面板固定 `palettePins`）：它们的值全是块 id 或「这个库的槽里摆了什么」——留在
+ *     设备键上，第二个库一开就会把 A 库的 id 指到 B 库的行上。它们住**库的 `settings`
+ *     表**（`LIBRARY_STATE_KEY`，桌面宿主经库面读写；web 宿主是单库演示，没有第二个库，
+ *     暂住设备键）。
  *   · **留设备**（主题、虚拟化、badge、段排列等）：这台机器怎么看，与哪个库无关。
  *
  * 设备键里被搬走的字段**不再被读**（读侧只认库侧那份）：不迁移、不清除，自然孤儿化。
@@ -45,12 +46,14 @@ export interface LibrarySettingsPort {
   set(key: string, value: string): Promise<{ ok: true } | { ok: false; error: unknown }>
 }
 
-/** 库侧那份 JSON 的形状：只装「跟库走」的四格 */
+/** 库侧那份 JSON 的形状：只装「跟库走」的几格 */
 export interface LibraryState {
   dock: Prefs['dock']
   folded: FoldState
   mountViews: Prefs['mountViews']
   journalMounts: Prefs['journalMounts']
+  /** 命令面板固定（常用）的手动自动化 id；引用库对象，跟库走 */
+  palettePins: Prefs['palettePins']
 }
 
 /**
@@ -183,12 +186,13 @@ export function createDeviceStore(port: StoragePort, library?: LibrarySettingsPo
       }
       const r = await port.commit(batch)
       if (library) {
-        // 跟库走的四格写库侧：这份 JSON 是库 settings 的第一个消费者
+        // 跟库走的几格写库侧：这份 JSON 是库 settings 的第一个消费者
         const libState: LibraryState = {
           dock: state.prefs.dock,
           folded: state.folded,
           mountViews: state.prefs.mountViews,
           journalMounts: state.prefs.journalMounts,
+          palettePins: state.prefs.palettePins,
         }
         const lr = await library.set(LIBRARY_STATE_KEY, JSON.stringify(libState))
         if (!lr.ok) return { ok: false, error: lr.error }
@@ -201,9 +205,10 @@ export function createDeviceStore(port: StoragePort, library?: LibrarySettingsPo
 }
 
 /**
- * 有库面时的装载：那四格（dock／折叠／露面视图／日记栏）**只**从库侧那份 JSON 来，
- * 缺省为空/默认（不捡设备键里的孤儿——那是别的库留下的，捡了就是把 A 库的 id 指到 B 库）。
- * 设备格（主题等）照旧从设备字节来；形状兜底仍归 `normalizePrefs`／`normalizeFoldState`。
+ * 有库面时的装载：那几格（dock／折叠／露面视图／日记栏／面板固定）**只**从库侧那份
+ * JSON 来，缺省为空/默认（不捡设备键里的孤儿——那是别的库留下的，捡了就是把 A 库的 id
+ * 指到 B 库）。设备格（主题等）照旧从设备字节来；形状兜底仍归
+ * `normalizePrefs`／`normalizeFoldState`。
  */
 function mergeLibraryState(prefsRaw: Partial<Prefs> | undefined, lib: Partial<LibraryState> | null): DeviceState {
   return {
@@ -212,6 +217,7 @@ function mergeLibraryState(prefsRaw: Partial<Prefs> | undefined, lib: Partial<Li
       dock: lib?.dock as Prefs['dock'] | undefined,
       mountViews: lib?.mountViews as Prefs['mountViews'] | undefined,
       journalMounts: lib?.journalMounts as Prefs['journalMounts'] | undefined,
+      palettePins: lib?.palettePins as Prefs['palettePins'] | undefined,
     }),
     folded: normalizeFoldState(lib?.folded),
   }

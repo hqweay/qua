@@ -3470,6 +3470,28 @@
   border-color: var(--ui-border-subtle);
   cursor: default;
 }
+.blk-auto-pin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+}
+.blk-auto-pin:hover:not(:disabled) {
+  color: var(--ui-text-secondary);
+}
+.blk-auto-pin[aria-pressed='true'] {
+  color: var(--ui-accent);
+}
+.blk-auto-pin:disabled {
+  color: var(--ui-text-tertiary);
+  cursor: default;
+}
 .blk-auto-broken {
   font-size: var(--ui-fs-xs);
   color: var(--ui-text-tertiary);

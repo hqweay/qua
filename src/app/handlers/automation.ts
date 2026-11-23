@@ -22,6 +22,12 @@ export const AUTOMATION_HANDLERS: Record<string, Handler> = {
     app.openAutomationMenu(blockId)
     return true
   },
+  /** 固定到命令面板：库态偏好，跟库同步；不写块、不入撤销栈 */
+  'core.automation/pin': (a, app) => {
+    const automationId = S(a.automationId)
+    if (automationId === '') return false
+    return app.setAutomationPinned(automationId, a.on !== false)
+  },
   /** 手动链目标＝当前块（缺省）；显式给 `blockId` 的调用面照走同一份 guards */
   'core.automation/run': (a, app) => {
     const automationId = S(a.automationId)

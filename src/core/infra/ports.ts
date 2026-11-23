@@ -841,6 +841,13 @@ export interface App {
    * 事件-only 不列（没有手动触发＝不是手动动作）。
    */
   openAutomationMenu(blockId: string): void
+  /**
+   * 固定/取消固定一条手动自动化到命令面板。
+   *
+   * 库态（跟库同步），不是设备偏好：它回答「这个库里哪些动作常用」，引用的是库里的 id。
+   * 不写块、不入撤销栈；写的是 `LibraryState.palettePins`。
+   */
+  setAutomationPinned(automationId: string, on: boolean): boolean
   /** 打开**视图选项**面板（四轴一个面；块菜单入口与抬头「选项」共用这一台） */
   showViewOptions(owner: ViewOwnerRef): void
   /** 打开**条件构建器**（一个浮层；草稿改在本地，点「应用」才写一次） */

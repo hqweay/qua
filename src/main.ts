@@ -1463,6 +1463,7 @@ const { viewEvents, wireViewEditor } = createEditorEvents({
   refLabelOf,
   repaintBlock,
   viewMenus,
+  prefs,
   getPopovers: () => popovers,
   refPeek,
   shortId,
@@ -1932,6 +1933,14 @@ const app: App = {
   },
   showMenu,
   openAutomationMenu,
+  setAutomationPinned: (automationId, on) => {
+    const p = prefs()
+    const has = p.palettePins.includes(automationId)
+    if (has === on) return false
+    p.palettePins = on ? [...p.palettePins, automationId] : p.palettePins.filter((id) => id !== automationId)
+    scheduleDeviceSave()
+    return true
+  },
   showPopover: (render, anchor) => layers.openPopover(render, anchor),
   closeLayers: () => {
     triggerState.triggerCh = null

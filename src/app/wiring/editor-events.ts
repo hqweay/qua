@@ -71,6 +71,8 @@ export interface EditorEventsDeps {
     openAutomationParentBuilder(automationId: string, triggerIndex: number): void
   }
   shortId: (id: string) => string
+  /** 当前偏好（活引用；面板固定等库态格从这里读） */
+  prefs: () => import('../../core/storage/prefs.ts').Prefs
   getPanels: () => Pick<ReturnType<typeof import('../../app/wiring/panels.ts').setupPanels>, 'mountBlockView' | 'mountEmbedView' | 'propDeps'>
   getApp: () => import('../../core/infra/ports.ts').App
   focusSourceInMain: (blockId: string) => void
@@ -79,7 +81,7 @@ export interface EditorEventsDeps {
 }
 
 export function createEditorEvents(deps: EditorEventsDeps) {
-  const { getRegistry, layers, blocks, run, getPanels, getApp, focusSourceInMain, kb, kbGet, assets, clipboard, showMenu, triggerState, openPropsLineMenu, propsLineModeOf, refLabelOf, repaintBlock, viewMenus, getPopovers, refPeek, shortId, setEd, openTrigger, refreshSelectionBar, triggers } = deps
+  const { getRegistry, layers, blocks, run, getPanels, getApp, focusSourceInMain, kb, kbGet, assets, clipboard, showMenu, triggerState, openPropsLineMenu, propsLineModeOf, refLabelOf, repaintBlock, viewMenus, getPopovers, refPeek, shortId, prefs, setEd, openTrigger, refreshSelectionBar, triggers } = deps
 
 /**
  * **一台视图编辑器的完整事件表**：正文、挂载区、查询结果**共用这一份**。
@@ -194,6 +196,10 @@ function viewEvents(
       onRun: () => pickRunTarget(block.id),
       onToggle: (on) => {
         void getRegistry().invoke('core.automation/toggle-enabled', { automationId: block.id, on }, 'ui')
+      },
+      pinned: () => prefs().palettePins.includes(block.id),
+      onPin: (on) => {
+        void getRegistry().invoke('core.automation/pin', { automationId: block.id, on }, 'ui')
       },
       writeDef: (def) => {
         void getRegistry().invoke('core.automation/set-def', { automationId: block.id, def }, 'ui')

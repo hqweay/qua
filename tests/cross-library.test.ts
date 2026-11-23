@@ -11,8 +11,9 @@
  * ## 判据的落点（本仓已按这条切过一次）
  *
  * `core/storage/device.ts` 的归属判据：
- *   · **跟库走**：dock 整格、折叠表、露面视图 `mountViews`、日记栏 `journalMounts`
- *     —— 它们的值全是块 id 或「这个库的槽里摆了什么」⇒ 住库的 `settings` 表；
+ *   · **跟库走**：dock 整格、折叠表、露面视图 `mountViews`、日记栏 `journalMounts`、
+ *     面板固定 `palettePins` —— 它们的值全是块 id 或「这个库的槽里摆了什么」
+ *     ⇒ 住库的 `settings` 表；
  *   · **留设备**：主题、虚拟化、badge、段排列 —— 这台机器怎么看，与哪个库无关。
  *
  * 代码已经这么写了（`mergeLibraryState` 明确不捡设备键里的孤儿）。**但没有断言
@@ -119,6 +120,26 @@ test('切库：A 库的 dock 卡片与日记栏**不落到 B 库**', async () =>
     assert.equal(loadedB.prefs.dock.left.width, null, 'B 库的槽宽应是默认（不是 A 库的 333）')
     assert.equal(loadedB.prefs.dock.left.open, true, 'B 库的槽开关应是默认')
     assert.deepEqual(loadedB.prefs.journalMounts, [], 'B 库的日记栏不该有 A 库的块 id')
+  } finally {
+    a.close()
+    b.close()
+  }
+})
+
+test('切库：A 库固定的自动化 id **不落到 B 库**；A 库自己还在', async () => {
+  resetMemoryLocalStorage()
+  const key = freshDeviceKey()
+  const a = freshLibrary()
+  const b = freshLibrary()
+  try {
+    const sa = createDeviceStore(createLocalStorageAdapter(key), a.port)
+    await sa.save({ prefs: { ...DEFAULT_PREFS, palettePins: [A_BLOCK] }, folded: {} })
+
+    const sb = createDeviceStore(createLocalStorageAdapter(key), b.port)
+    const loadedB = await sb.load()
+    assert.deepEqual(loadedB.prefs.palettePins, [], 'B 库不该看到 A 库的固定 id')
+    const loadedA = await sa.load()
+    assert.deepEqual(loadedA.prefs.palettePins, [A_BLOCK], 'A 库读回自己的固定')
   } finally {
     a.close()
     b.close()

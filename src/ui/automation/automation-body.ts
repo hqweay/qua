@@ -61,6 +61,9 @@ export interface AutomationBodyDeps {
    */
   onRun(): void
   onToggle(on: boolean): void
+  /** 是否已固定到命令面板（库态偏好：跟库走；身体只读，写走 onPin） */
+  pinned(): boolean
+  onPin(on: boolean): void
   /** 整份定义写回（canonical 之后的；装配层负责事务、撤销与重画） */
   writeDef(def: AutomationDef): void
   /** 打开「如果」的条件编辑弹层（同一台条件树；应用写 `_automation.when`） */
@@ -110,7 +113,22 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
     // 没有手动触发 ⇒ 这条只能由事件跑；运行按钮是手动入口，置灰并说明
     run.disabled = !manual
     run.addEventListener('click', () => deps.onRun())
-    head.append(toggle, run)
+    // 固定到命令面板：库态偏好（跟库同步），只有手动动作才有意义
+    const pinned = deps.pinned()
+    const pin = document.createElement('button')
+    pin.type = 'button'
+    pin.className = 'blk-auto-pin'
+    pin.setAttribute('aria-pressed', pinned ? 'true' : 'false')
+    const pinTip = manual ? (pinned ? t('ui.automation.unpinFromPalette') : t('ui.automation.pinToPalette')) : t('ui.automation.pinNeedsManual')
+    pin.dataset.tip = pinTip
+    pin.setAttribute('aria-label', pinTip)
+    pin.disabled = !manual
+    renderIcon(pin, pinned ? 'lucide:pin' : 'lucide:pin-off', 'pin')
+    pin.addEventListener('click', () => {
+      deps.onPin(!pinned)
+      render()
+    })
+    head.append(toggle, run, pin)
     root.appendChild(head)
 
     // 坏形状：一句话指到定义（修复面＝打开那一块改 `_automation`；不静默消失）

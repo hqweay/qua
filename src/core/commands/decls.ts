@@ -288,6 +288,8 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.automation/create', title: t('cmd.automation.create'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.automation'), args: { name: { type: 'string' } }, keywords: ['automation', 'rule', t('menu.kw.automation')] },
   /** 块菜单「我的自动化…」：需要目标块，面板没有收集路径 ⇒ hidden；行由块菜单给 blockId */
   { name: 'core.automation/menu', title: t('cmd.automation.menu'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.automation'), hidden: true, actsOn: 'block' },
+  /** 固定/取消固定到命令面板：库态偏好（跟库走），不写块、不可撤销 */
+  { name: 'core.automation/pin', title: t('cmd.automation.pin'), capability: 'write', undoable: false, version: '1.0', category: t('menu.cat.automation'), args: { required: ['automationId'], automationId: { type: 'string', ref: 'block' }, on: { type: 'boolean' } }, hidden: true },
   { name: 'core.automation/run', title: t('cmd.automation.run'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.automation'), args: { required: ['automationId'], automationId: { type: 'string', ref: 'block' }, blockId: { type: 'string', ref: 'block' } }, hidden: true },
   /** 批量运行（补收存量）：目标集由「如果」圈定；每块独立事务、整批一步撤销 */
   { name: 'core.automation/run-batch', title: t('cmd.automation.runBatch'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.automation'), args: { required: ['automationId'], automationId: { type: 'string', ref: 'block' } }, hidden: true },

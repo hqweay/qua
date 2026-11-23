@@ -39,6 +39,16 @@ export interface Row {
   keyHint?: string
   disabled?: boolean
   /**
+   * 同一组内的排序位（只用于命令面板；缺省 100）。固定项排在前面、更多入口压轴，
+   * 靠它而不是靠标题字面量——标题会漂，序号不会。
+   */
+  order?: number
+  /**
+   * **只在有查询词时出现**（命令面板专用）：未固定的自动化不进空查询的浏览列表，
+   * 但用户按名字搜时仍要能搜到——完整索引靠搜索兜底，不靠把每一条都铺在主列表。
+   */
+  searchOnly?: boolean
+  /**
    * 「这一行选中了谁」——**浮层只报对象，不报动作**。
    *
    * 同一条 `#名` 行按 `Enter` 与 `⌥Enter` 是两个不同的结果（插进正文 / 归到本块），
@@ -1186,7 +1196,7 @@ export function paletteRows(
   opts: { recents?: string[]; query?: string; extra?: Row[] } = {},
 ): Row[] {
   const q = (opts.query ?? '').trim().toLowerCase()
-  const row = (d: CommandDecl, id: string) => ({
+  const row = (d: CommandDecl, id: string): Row => ({
     id,
     label: d.title,
     // hint 放**命令名**：命令面板列的是命令表本身，键位只是右边的一个提示
@@ -1205,11 +1215,19 @@ export function paletteRows(
           .filter((d): d is CommandDecl => d !== undefined)
           .map((d) => row(d, `recent//${d.name}`))
       : []
-  // 投影行（如自动化）与静态声明同一张列表、同一个过滤与排序——投影不是第二张命令表
-  const extra = (opts.extra ?? []).filter((r) => q === '' || r.label.toLowerCase().includes(q))
+  // 投影行（如自动化）与静态声明同一张列表、同一个过滤与排序——投影不是第二张命令表。
+  // `searchOnly` 行只在有查询词时出现：未固定的动作不铺在浏览列表里，但按名字仍搜得到。
+  const extra = (opts.extra ?? []).filter((r) =>
+    q === '' ? !r.searchOnly : r.label.toLowerCase().includes(q),
+  )
   const rest = [...visibleDecls
     .filter((d) => q === '' || `${d.title} ${d.name}`.toLowerCase().includes(q))
     .map((d) => row(d, d.name)), ...extra]
-    .sort((a, b) => (a.group ?? '').localeCompare(b.group ?? '') || a.label.localeCompare(b.label))
+    .sort(
+      (a, b) =>
+        (a.group ?? '').localeCompare(b.group ?? '') ||
+        (a.order ?? 100) - (b.order ?? 100) ||
+        a.label.localeCompare(b.label),
+    )
   return [...recent, ...rest]
 }

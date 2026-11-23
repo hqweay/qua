@@ -198,6 +198,7 @@ export const EN3 = {
   'cmd.query.open-builder': 'Edit query conditions...',
   'cmd.automation.create': 'New automation...',
   'cmd.automation.menu': 'My automations...',
+  'cmd.automation.pin': 'Pin to command palette',
   'cmd.automation.run': 'Run automation',
   'cmd.automation.runBatch': 'Run automations in batch',
   'cmd.automation.toggle': 'Enable / disable automation',
