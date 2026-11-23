@@ -38,6 +38,7 @@ export const MSG = {
   'cmd.editor.insert-block': '在下方插入块',
   'cmd.editor.insert-block-before': '在上方插入块',
   'cmd.editor.insert-child': '新建子块',
+  'cmd.editor.insert-parent-sibling': '在父级新建同级块',
   'cmd.editor.clear-block': '清空本块',
   'cmd.editor.insert-tag': '插入标签 #',
   'cmd.notes.create': '写备注',

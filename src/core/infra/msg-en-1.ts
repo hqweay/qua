@@ -20,6 +20,7 @@ export const EN1 = {
   'cmd.editor.insert-block': 'Insert block below',
   'cmd.editor.insert-block-before': 'Insert block above',
   'cmd.editor.insert-child': 'New child block',
+  'cmd.editor.insert-parent-sibling': 'Insert block at parent level',
   'cmd.editor.clear-block': 'Clear this block',
   'cmd.editor.insert-tag': 'Insert tag #',
   'cmd.notes.create': 'Write note',

@@ -4294,6 +4294,40 @@ await check('T26 Enter 四分支（块中同级拆/空块反缩进/块尾子块/
   return `带子块的块尾 ⇒ 子块（depth ${child.depth}）；叶子块尾 ⇒ 同级（depth ${after?.depth}）；点空白 ⇒ depth 1 子块；留白/块标不误建`
 })
 
+await check('T26b ⌥↵ 在父级新建同级块：从孙块出生在 A 的子位（自动化接得住），当前块不动', async () => {
+  const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 1200 } })
+  await openFirstPage(page)
+  const ids = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    const rootId = ed.doc.roots[0].id
+    const a = ed.insert.insertBlockAfter(rootId, '层级父A')
+    const b = ed.insert.insertBlockAfter(a, '层级子B')
+    ed.struct.indent(b)
+    const c = ed.insert.insertBlockAfter(b, '层级孙C')
+    ed.struct.indent(c)
+    return { a, b, c }
+  })
+  const snap = () => page.evaluate(() => window.__qua.blocks().map((b) => ({ id: b.id, text: b.text, children: b.children })))
+  const depthOf = (id) => page.evaluate((x) => Number(document.querySelector(`.blk[data-block-id="${x}"]`)?.dataset.depth ?? -1), id)
+  const kidsOf = (list, id) => list.find((b) => b.id === id)?.children
+  const before = await snap()
+  const bDepth = await depthOf(ids.b)
+
+  await page.evaluate((id) => window.__qua.focusBlock(id, 9999), ids.c)
+  await page.keyboard.press('Alt+Enter')
+  await page.keyboard.type('层级新块')
+  const after = await snap()
+  const fresh = after.find((b) => b.text === '层级新块')
+  assert(fresh, `⌥↵ 应建新块：${JSON.stringify(after.map((b) => b.text))}`)
+  const depth = await depthOf(fresh.id)
+  assert(depth === bDepth, `新块应落在父的同级层（depth ${bDepth}），不是孙块层：${depth}`)
+  assert(kidsOf(after, ids.a) === kidsOf(before, ids.a) + 1, '新块应出生在 A 的子位（A 的子块数 +1）')
+  assert(kidsOf(after, ids.b) === kidsOf(before, ids.b), '当前孙块的父 B 不该被移动')
+
+  await ctx.close()
+  return `⌥↵ 从孙块出生在 A 的子位（depth ${depth}）；B 的子块数不变`
+})
+
 await check('T30 聚焦块（section 根）文本中间 Enter ⇒ 左半留根、右半成首个子块', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)

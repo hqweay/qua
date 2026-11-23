@@ -929,18 +929,25 @@ export function indentBlock(doc: Doc, id: string): boolean {
 }
 
 /**
- * 反缩进的落点：变父的下一个兄弟（shift+tab）。
+ * 「父块的下一兄弟位」：从这一块向上跳一层时该落的槽。
  *
- * ⚠️ **父块自己就是装载根时没有落点**：窗口的 `roots` 不是森林的根
- *    （页视图只装自己那一行），插进去会得到一个「看得见、写不回去」的块 ——
- *    刷新就消失，而用户以为移动成功了。这与 `canOutdent`（空块 Enter）是同一条判据。
+ * 两件事共用它：在父块那一层插入新块（⌥↵）与反缩进搬当前块（shift+tab）——
+ * 同一个层、同一个位置，区别只在前者 `tx.insert` 新块、后者 `tx.move` 自己。
+ * 一条判据写一处，两个动作不许各算各的。
+ *
+ * ⚠️ 父块自己就是装载根时没有落点：窗口的 `roots` 不是森林的根，插/搬过去
+ *    会得到「看得见、写不回去」的块——刷新就消失。与 `canOutdent` 同源。
  */
-export function outdentMove(doc: Doc, id: string): MovePlan | null {
+export function parentSiblingSlot(doc: Doc, id: string): MovePlan | null {
   const loc = locate(doc, id)
   if (!loc || !loc.parent) return null
   const parentLoc = locate(doc, loc.parent.id)
   if (!parentLoc || !parentLoc.parent) return null
   return { parentId: parentLoc.parent.id, index: parentLoc.index + 1 }
+}
+
+export function outdentMove(doc: Doc, id: string): MovePlan | null {
+  return parentSiblingSlot(doc, id)
 }
 
 /** 取消缩进：变父的下一个兄弟（shift+tab） */

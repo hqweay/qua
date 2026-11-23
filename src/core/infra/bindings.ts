@@ -66,6 +66,9 @@ export const BINDINGS: Binding[] = [
   // 现改绑「新建子块」，仍是绑定，派发层照常 preventDefault，默认动作不会漏出来。
   // 与 ⇧⌘↵（上方插入）成对：⇧ 系在 Enter 上＝结构插入，方向由剩下的修饰键区分。
   { command: 'core.editor/insert-child', kind: 'keymap', key: 'shift+enter', when: 'editorTextFocus', layer: 'core' },
+  // ⌥↵：向上跳一层建块。Enter 家族第五键——先前特意留空是因为 ⌥ 用于检查/字段卡的
+  // 修饰身份，但那个身份从不占 ⌥↵；而「在父块那一层直接出生」是自动化创作的真实缺口。
+  { command: 'core.editor/insert-parent-sibling', kind: 'keymap', key: 'alt+enter', when: 'editorTextFocus', layer: 'core' },
   // ⌘A **必须接管**：Chrome 在「编辑区含 contenteditable=false 子树」时
   // 原生全选会退化成空选区（把 journal 行标成只读后实测到）⇒ 自己拼跨块 Range
   { command: 'core.editor/select-all', kind: 'keymap', key: 'mod+a', when: 'editorTextFocus', layer: 'core' },
@@ -199,6 +202,7 @@ export const BINDINGS: Binding[] = [
   { command: 'core.editor/move-block-down', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 40, layer: 'core' },
   // 「新建子块」与缩进相邻：两者是「让这块有子块」仅有的两条路径，菜单里也放一起
   { command: 'core.editor/insert-child', kind: 'menu', when: 'blockMenuTarget && blockCanTakeChildren', group: 'block/2-structure', order: 45, layer: 'core' },
+  { command: 'core.editor/insert-parent-sibling', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 47, layer: 'core' },
   { command: 'core.editor/indent-block', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 50, layer: 'core' },
   { command: 'core.editor/outdent-block', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 60, layer: 'core' },
   /**

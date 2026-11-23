@@ -50,6 +50,9 @@ export const COMMANDS: CommandDecl[] = [
   // 「新建子块」＝出生在目标块的首个子位（与块尾 Enter 的 child 支同形）；
   // 自动化的「新建子块」触发器只认出生 ⇒ 这是规则能接住第一个子块的唯一编辑入口
   { name: 'core.editor/insert-child', title: t('cmd.editor.insert-child'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['insert', 'child', 'sub', 'new block'] },
+  // ⌥↵：在父块的下一兄弟位建空块——从孙块直接给父块添同级项，新块在目标层出生，
+  // 自动化按父块圈范围时规则才会开火；走「先建子块再反缩进」会先以错误的层出生并写入。
+  { name: 'core.editor/insert-parent-sibling', title: t('cmd.editor.insert-parent-sibling'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['insert', 'parent', 'sibling', 'new block'] },
   { name: 'core.editor/clear-block', title: t('cmd.editor.clear-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor') },
   // 打归属的收集路径是选择器（`pick-tag`）；裸命令只会插一条固定名字的标签 ⇒ 不进面板
   { name: 'core.editor/insert-tag', title: t('cmd.editor.insert-tag'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { tag: { type: 'string' } }, keywords: ['tag', t('menu.kw.tag')], hidden: true },

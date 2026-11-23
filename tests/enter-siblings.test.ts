@@ -16,7 +16,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { enterKind, flatten, insertFirstChild, insertSiblingAfter, locate, outdentBlock, splitBlockBefore, splitBlockIntoFirstChild } from '../src/core/model/tree.ts'
+import { enterKind, flatten, insertFirstChild, insertSiblingAfter, locate, outdentBlock, outdentMove, parentSiblingSlot, splitBlockBefore, splitBlockIntoFirstChild } from '../src/core/model/tree.ts'
 import { writeBlockContent } from '../src/core/model/model.ts'
 import type { Block, Doc } from '../src/core/model/model.ts'
 import { plainText, textRuns } from '../src/core/model/runs.ts'
@@ -171,6 +171,15 @@ test('Enter（第四次修订）outdent 只搬自己（含子树），不做文�
   assert.equal(loc.index, 1, '应插在 a1 之后')
   assert.equal(plainText(loc.block.content), '')
   assert.equal(a11.id, 'a11', 'id 不变')
+})
+
+test('父级同级落点：孙块向上跳一层＝父块的下一兄弟位；父是装载根时无落点', () => {
+  const doc = fixture()
+  const slot = parentSiblingSlot(doc, 'a11')!
+  assert.deepEqual(slot, { parentId: 'a', index: 1 }, 'a11 的父 a1 的下一兄弟位＝a 下 index 1')
+  assert.deepEqual(outdentMove(doc, 'a11'), slot, '插入与反缩进共用同一条落点判据')
+  assert.equal(parentSiblingSlot(doc, 'a1'), null, '父是装载根 a 时无落点（写回去会丢）')
+  assert.equal(parentSiblingSlot(doc, 'a'), null, '根块自己没有父')
 })
 
 test('Enter split 分支只改两处：左半新块 + 原块右半，子树留在原块', () => {

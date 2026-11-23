@@ -14,6 +14,7 @@ import {
   upsertView,
   locate,
   insertSiteOf,
+  parentSiblingSlot,
   isBlankPlaceholder,
   mkBlock,
   mkQueryBlock,
@@ -232,6 +233,34 @@ export class InsertOps {
       return null
     }
     unfoldBlock(this.ed.doc, id)
+    this.ed.structTail({ id: b.id, off: 0 })
+    return b.id
+  }
+
+  /**
+   * 在当前块的**父块的下一兄弟位**插一个空块（⌥↵）。
+   *
+   * 面向自动化创作时的层跳转：站在孙块上要给 A 添一个子块、让「在 A 下新建子块」
+   * 规则开火，就必须在目标层**直接出生**。走「Enter 建同级 + Shift+Tab 反缩进」
+   * 会让新块先以 A 的子块身份出生，规则在移动之前就写完了——那正是要避开的误写。
+   *
+   * 落点复用 `parentSiblingSlot`（与反缩进同一条判据）；父是装载根时它没有落点，
+   * 这里返回 null，不造写不回去的块。
+   */
+  insertParentSibling(id: string): string | null {
+    if (!locate(this.ed.doc, id)) return null
+    const slot = parentSiblingSlot(this.ed.doc, id)
+    if (!slot) return null
+    const b = mkBlock('')
+    this.ed.beginUndoEntry()
+    const ok = this.ed.write((tx) => {
+      tx.insert(b, slot.parentId, slot.index)
+      return true
+    })
+    if (!ok) {
+      this.ed.abortUndoEntry()
+      return null
+    }
     this.ed.structTail({ id: b.id, off: 0 })
     return b.id
   }
