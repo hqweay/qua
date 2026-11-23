@@ -39,7 +39,7 @@ import type { QueryNode } from '../query/query.ts'
 import type { TagLookup } from '../kb/ensure-tag.ts'
 import type { Tx } from '../kb/types.ts'
 import type { TouchedBlock } from '../kb/diff.ts'
-import { readAutomation, followsRefs, type AutomationDef, type AutomationTrigger } from './automation.ts'
+import { readAutomation, followsRefs, isDirectOnly, type AutomationDef, type AutomationTrigger } from './automation.ts'
 import { triggerDeps, type TriggerDeps } from './trigger-query.ts'
 import { checkStepsInTx, runStepsInTx, type AutomationKb } from './run.ts'
 
@@ -189,8 +189,14 @@ export function createAutomationEngine(deps: AutomationEngineDeps) {
   /** 一侧求值：self 部分对主体，placement 部分对容纳链（链只在诞生时刻有） */
   const evalQuery = (c: CompiledTrigger, block: Block, chain: Block[] | null): boolean => {
     if (c.self !== null && !kb.matchesSpec({ where: c.self }, block, { blockLocalTags: true })) return false
+    const landing = chain === null ? undefined : chain[chain.length - 1]
     for (const p of c.placement) {
-      if (!chain || !chain.some((m) => kb.matchesSpec({ where: p }, m, { blockLocalTags: true }))) return false
+      // 缺省整条容纳链（「在这块下面」含孙块）；开了 directOnly 只认链尾＝新块真正落在谁下面
+      // 链是根在前，链尾才是直接父位；followRefs 展开引用行后链尾是它指向的目标
+      const hit = isDirectOnly(c.tr)
+        ? landing !== undefined && kb.matchesSpec({ where: p }, landing, { blockLocalTags: true })
+        : (chain?.some((m) => kb.matchesSpec({ where: p }, m, { blockLocalTags: true })) ?? false)
+      if (!hit) return false
     }
     return true
   }
@@ -339,5 +345,5 @@ export function isEventTrigger(tr: AutomationTrigger): tr is Exclude<AutomationT
 export function triggerKey(tr: AutomationTrigger): string {
   if (tr === 'manual') return 'manual'
   const axis = tr.on === 'changed' ? 'changed' : tr.birth === true ? `${tr.on}@birth` : tr.on
-  return `${axis}:${JSON.stringify(tr.query)}`
+  return `${axis}:${JSON.stringify(tr.query)}${followsRefs(tr) ? ':refs' : ''}${isDirectOnly(tr) ? ':direct' : ''}`
 }

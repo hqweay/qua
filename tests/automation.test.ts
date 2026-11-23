@@ -475,6 +475,36 @@ test('事件②：child.added——A 之下新建子块自动打标；重放与�
   )
 })
 
+test('事件②补：directOnly——孙块上不开火，直接子位照常；缺省仍含孙块', () => {
+  const aiTag = mkBlock('AI')
+  aiTag.props = { _aliases: ['AI'], _lists: ['tag'] }
+  const parentA = mkBlock('块A')
+  const childB = mkBlock('子块B')
+  parentA.children.push(childB)
+  const steps = [{ cmd: 'core.tags/add', args: { tagId: aiTag.id } }]
+  const wideRule = mkAutomationBlock({
+    name: 'A 之下打标',
+    def: { enabled: true, triggers: [{ on: 'entered', query: { up: { is: parentA.id } }, birth: true }], steps },
+  })
+  const narrowRule = mkAutomationBlock({
+    name: 'A 的直接子块打标',
+    def: { enabled: true, triggers: [{ on: 'entered', query: { up: { is: parentA.id } }, birth: true, directOnly: true }], steps },
+  })
+
+  const { kb: wide } = engineFixture([aiTag, parentA, wideRule])
+  const noteWide = mkBlock('备注C')
+  wide.tx((tx) => tx.insert(noteWide, childB.id, Number.MAX_SAFE_INTEGER))
+  assert.equal(hasTag(wide.get(noteWide.id)!, aiTag.id), true, '缺省含孙块：容纳链上 A 命中（现有行为不翻）')
+
+  const { kb: narrow } = engineFixture([aiTag, parentA, narrowRule])
+  const noteNarrow = mkBlock('备注C')
+  narrow.tx((tx) => tx.insert(noteNarrow, childB.id, Number.MAX_SAFE_INTEGER))
+  assert.equal(hasTag(narrow.get(noteNarrow.id)!, aiTag.id), false, 'directOnly：链首是 B 不是 A ⇒ 不开火')
+  const task = mkBlock('任务D')
+  narrow.tx((tx) => tx.insert(task, parentA.id, Number.MAX_SAFE_INTEGER))
+  assert.equal(hasTag(narrow.get(task.id)!, aiTag.id), true, '直接子位照常开火')
+})
+
 test('事件③：规则失败不牵连用户的写（reactor 不许抛）', () => {
   const numDef = mkPropDef('数量', 'number')
   const target = mkBlock('目标')

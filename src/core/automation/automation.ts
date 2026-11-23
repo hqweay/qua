@@ -40,7 +40,7 @@ export type AutomationTrigger =
    * 「看」可以默认还原意图（显示继承默认穿），「写」必须保守：规则不该因为一行引用
    * 把写入落到别处。只落 `true`，关＝删键（与既有的「开回默认＝删格」同口径）。
    */
-  | { on: TriggerOn; query: QueryNode; birth?: true; followRefs?: true }
+  | { on: TriggerOn; query: QueryNode; birth?: true; followRefs?: true; directOnly?: true }
 
 /** 步骤参数的值位：字面量，或一个引用（run 开始时解析） */
 export type ArgRef =
@@ -82,11 +82,12 @@ export function isAutomationTrigger(v: unknown): v is AutomationTrigger {
   if (!v || typeof v !== 'object') return false
   // 旧三种 kind（带 kind 槽）一律非法：读不出定义 ⇒ broken 灰态，不做兼容分支
   if ('kind' in v) return false
-  const t = v as { on?: unknown; query?: unknown; birth?: unknown; followRefs?: unknown }
+  const t = v as { on?: unknown; query?: unknown; birth?: unknown; followRefs?: unknown; directOnly?: unknown }
   if (t.on !== 'entered' && t.on !== 'left' && t.on !== 'changed') return false
   if (!(typeof t.query === 'object' && t.query !== null && isQueryNode(t.query))) return false
   // 只有「打开」需要落盘；`false` 不是合法值（关＝删键，读侧按缺省关）
   if (t.followRefs !== undefined && t.followRefs !== true) return false
+  if (t.directOnly !== undefined && t.directOnly !== true) return false
   // 结构判据只答「形状」；TriggerQuery 的合法子集（白名单／位置／诞生约束）在写侧
   // `validateTriggerQuery` 校验，运行时求值器不承担——QueryNode 是公共语言，
   // 触发器只是更严的消费者子集
@@ -136,6 +137,15 @@ export function followsRefs(tr: AutomationTrigger): boolean {
   return tr !== 'manual' && tr.followRefs === true
 }
 
+/**
+ * 这条触发器只认直接父位，还是认整条容纳链。
+ * 容纳链根在前，链尾＝新块真正落在谁下面；`followRefs` 展开引用行后链尾是它指向的目标，
+ * 所以两格同开时按目标判定，不需要另立形状。
+ */
+export function isDirectOnly(tr: AutomationTrigger): boolean {
+  return tr !== 'manual' && tr.directOnly === true
+}
+
 /** 有没有手动触发（决定它进不进命令面板投影；事件-only 的规则不进面板） */
 export function hasManualTrigger(def: AutomationDef): boolean {
   return def.triggers.some((tr) => tr === 'manual')
@@ -179,6 +189,7 @@ export function canonicalAutomation(def: AutomationDef): AutomationDef {
           query: canonicalNode(tr.query),
           ...(tr.birth === true ? { birth: true as const } : {}),
           ...(tr.followRefs === true ? { followRefs: true as const } : {}),
+          ...(tr.directOnly === true ? { directOnly: true as const } : {}),
         },
   )
   const steps = def.steps.map((s) => ({ cmd: s.cmd, args: { ...s.args } }))

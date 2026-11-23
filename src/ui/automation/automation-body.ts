@@ -30,7 +30,7 @@ import { DECL_BY_NAME } from '../../core/commands/decls.ts'
 import { STEP_COMMANDS } from '../../core/automation/run.ts'
 import { mentionsContentAtoms } from '../../core/automation/automation.ts'
 import { renderIcon } from '../../view/icons.ts'
-import { canonicalAutomation, followsRefs, readAutomation } from '../../core/automation/automation.ts'
+import { canonicalAutomation, followsRefs, isDirectOnly, readAutomation } from '../../core/automation/automation.ts'
 import { topUpOf, triggerQueryFromWhen, withUp } from '../../core/automation/trigger-query.ts'
 import { displayNameOf } from '../../core/identity/alias.ts'
 import type { QueryNode, QuerySpec } from '../../core/query/query.ts'
@@ -188,7 +188,8 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
     const base = triggerBaseText(tr)
     // 穿不穿引用是这条触发器的**态**，不是条件的措辞：同一个父块条件，开与关的
     // 判定面差一整层，行上不写出来就只剩「跑不跑」一个信号
-    return followsRefs(tr) ? base + t('ui.automation.trigger.refsSuffix') : base
+    const withRefs = followsRefs(tr) ? base + t('ui.automation.trigger.refsSuffix') : base
+    return isDirectOnly(tr) ? withRefs + t('ui.automation.trigger.directSuffix') : withRefs
   }
 
   const triggerBaseText = (tr: AutomationTrigger): string => {
@@ -315,6 +316,12 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
         hint: t('ui.automation.trigger.followRefsHint'),
         group: 'trigger/2',
       })
+      rows.push({
+        id: 'trigger/directonly',
+        label: t('ui.automation.trigger.directOnlyToggle', { on: t(isDirectOnly(tr) ? 'ui.automation.on' : 'ui.automation.off') }),
+        hint: t('ui.automation.trigger.directOnlyToggleHint'),
+        group: 'trigger/2',
+      })
     }
     deps.openMenu(rows, (row) => {
       if (row.id === 'trigger/remove') {
@@ -346,6 +353,18 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
             // 关＝删键（与「开回默认＝删格」同口径：只有打开才落盘）
             const { followRefs: _drop, ...rest } = x
             return next ? { ...rest, followRefs: true as const } : rest
+          }),
+        })
+        return
+      }
+      if (row.id === 'trigger/directonly') {
+        const next = !isDirectOnly(tr)
+        write({
+          ...def,
+          triggers: def.triggers.map((x, i): AutomationTrigger => {
+            if (i !== at || x === 'manual' || x.birth !== true) return x
+            const { directOnly: _drop, ...rest } = x
+            return next ? { ...rest, directOnly: true as const } : rest
           }),
         })
         return
@@ -458,11 +477,11 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
   }
 
   /**
-   * 建「新建子块」触发器的**第二问**：父块定了，紧接着问一句「沿不沿引用」。
+   * 建「新建子块」触发器的第二、三问：父块定了，紧接着问「沿不沿引用」与「管不管孙块」。
    *
-   * 为什么挪到创建流程里：这一格不点开触发器菜单就永远看不见（行上只有一个后缀），
-   * 而它决定规则按谁判定——藏在二级菜单里等于默认没人配。创建是低频动作，
-   * 多一次二选一比「半年后才发现有这个开关」便宜。默认项排第一个，回车即过。
+   * 为什么挪到创建流程里：这两格不点开触发器菜单就永远看不见（行上只有后缀），
+   * 而它们决定规则按谁判定——藏在二级菜单里等于默认没人配。创建是低频动作，
+   * 多两次二选一比「半年后才发现规则把备注写成了任务」便宜。缺省项排第一个，回车即过。
    */
   const addChildTrigger = (def: AutomationDef, query: QueryNode, after?: () => void): void => {
     deps.openMenu(
@@ -470,12 +489,21 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
         { id: 'off', label: t('ui.automation.trigger.followRefsOff'), hint: t('ui.automation.trigger.followRefsOffHint'), group: 'trigger/refs' },
         { id: 'on', label: t('ui.automation.trigger.followRefsOn'), hint: t('ui.automation.trigger.followRefsHint'), group: 'trigger/refs' },
       ],
-      (row) => {
-        write({
-          ...def,
-          triggers: [...def.triggers, { on: 'entered', query, birth: true, ...(row.id === 'on' ? { followRefs: true as const } : {}) }],
-        })
-        after?.()
+      (refRow) => {
+        deps.openMenu(
+          [
+            { id: 'subtree', label: t('ui.automation.trigger.directSubtree'), hint: t('ui.automation.trigger.directSubtreeHint'), group: 'trigger/depth' },
+            { id: 'direct', label: t('ui.automation.trigger.directOnly'), hint: t('ui.automation.trigger.directOnlyHint'), group: 'trigger/depth' },
+          ],
+          (depthRow) => {
+            const base = { on: 'entered' as const, query, birth: true as const }
+            const withRefs = refRow.id === 'on' ? { ...base, followRefs: true as const } : base
+            const trigger: AutomationTrigger = depthRow.id === 'direct' ? { ...withRefs, directOnly: true as const } : withRefs
+            write({ ...def, triggers: [...def.triggers, trigger] })
+            after?.()
+          },
+          t('ui.automation.trigger.directOnlyTitle'),
+        )
       },
       t('ui.automation.trigger.followRefsTitle'),
     )

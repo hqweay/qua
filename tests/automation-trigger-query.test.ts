@@ -26,6 +26,8 @@ test('形状：{on, query, birth?} 是合法触发器——birth 可省、birth 
   assert.equal(isAutomationDef(def([{ on: 'entered', query: { prop: { id: 'p1', exists: true } }, birth: true }])), true)
   assert.equal(isAutomationDef(def([{ on: 'entered', query: { up: { is: 'a1' } }, birth: true, followRefs: true }])), true, 'followRefs 只在打开了才算合法值')
   assert.equal(isAutomationDef(def([{ on: 'entered', query: { up: { is: 'a1' } }, birth: true, followRefs: false }])), false, '显式 false 是第二种形状，拒（关＝删键）')
+  assert.equal(isAutomationDef(def([{ on: 'entered', query: { up: { is: 'a1' } }, birth: true, directOnly: true }])), true, 'directOnly 只在打开了才算合法值')
+  assert.equal(isAutomationDef(def([{ on: 'entered', query: { up: { is: 'a1' } }, birth: true, directOnly: false }])), false, '显式 false 是第二种形状，拒（关＝删键）')
   assert.equal(isAutomationDef(def([{ on: 'left', query: { tag: 't1' } }])), true)
   assert.equal(isAutomationDef(def([{ on: 'changed', query: { prop: { id: 'p1', exists: true } } }])), true)
   assert.equal(isAutomationDef(def([{ on: 'frobnicate', query: { tag: 't1' } }])), false, '未知事件轴拒绝')
@@ -56,6 +58,11 @@ test('canonicalAutomation：统一形状键序固定（on/query/birth）、query
   const withFollow = canonicalAutomation({ enabled: true, triggers: [{ on: 'entered', query: { up: { is: 'a1' } }, birth: true, followRefs: true }], steps: [] })
   assert.equal((withFollow.triggers[0] as { followRefs?: unknown }).followRefs, true)
   assert.equal('followRefs' in noBirth.triggers[0], false)
+  const withDirect = canonicalAutomation({ enabled: true, triggers: [{ on: 'entered', query: { up: { is: 'a1' } }, birth: true, directOnly: true }], steps: [] })
+  const directTr = withDirect.triggers[0]
+  assert.ok(directTr !== undefined && directTr !== 'manual' && 'directOnly' in directTr, 'directOnly 跟着 canonical 活下来')
+  assert.equal(directTr.directOnly, true)
+  assert.equal('directOnly' in noBirth.triggers[0], false)
 })
 
 /* ------------------------------------------------------------ 校验器 */
