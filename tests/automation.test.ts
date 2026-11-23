@@ -7,8 +7,8 @@
  *     「复制自动化造出第二条同规则」这类静默回归）；
  *   · **真原子**：一笔 tx 包住全部步骤，任一步失败整组回滚（森林逐字节等于进门时）；
  *   · **步骤引用命令**：闭集之外的自然拒绝；参数引用（target／now）按 run 开始定格；
- *   · **投影规则**：禁用不列、事件-only 不列、不适用灰掉并说明——面板与 runner
- *     共用同一份 guards，两个答案不许分叉。
+ *   · **投影规则**：停用灰掉并说明、事件-only 不列、不适用灰掉并说明——面板与
+ *     runner 共用同一份 guards，两个答案不许分叉。
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -147,7 +147,7 @@ test('guards：禁用／事件-only／没有步骤／没有目标／自改／条
   assert.equal(
     manualRunGuards({ ...MANUAL_DEF, enabled: false }, aid, tid, true).reason,
     'disabled',
-    '停用的先于一切（面板根本不列它，这是运行前的最后闸）',
+    '停用的先于一切（面板灰着列出它，这是运行前的最后闸）',
   )
   assert.equal(
     manualRunGuards({ ...MANUAL_DEF, triggers: [{ on: 'entered', query: { prop: { id: 'p1', exists: true } } }] }, aid, tid, true).reason,

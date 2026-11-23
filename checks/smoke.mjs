@@ -33727,7 +33727,7 @@ await check('T356 新建子块触发器：选完父块当场问「沿不沿引�
   const stored = await page.evaluate((id) => window.__qua.__editor.store.find(id)?.props?._automation?.triggers, ids.ruleId)
   const birth = (stored ?? []).find((t) => t !== 'manual')
   assert(birth && birth.followRefs === true, `选「要」⇒ 触发器带 followRefs:true：${JSON.stringify(stored)}`)
-  const chip = await page.locator(`${row} .blk-auto-chip.is-event`).first().textContent()
+  const chip = await page.locator(`${row} .blk-auto-chip.is-event[data-trigger="event"]`).first().textContent()
   assert(String(chip).includes('含传递引用'), `行上要看得见这一格是开的：${chip}`)
 
   await ctx.close()

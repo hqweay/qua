@@ -3465,6 +3465,11 @@
   color: var(--ui-accent);
   border-color: var(--ui-accent);
 }
+.blk-auto-run:disabled {
+  color: var(--ui-text-tertiary);
+  border-color: var(--ui-border-subtle);
+  cursor: default;
+}
 .blk-auto-broken {
   font-size: var(--ui-fs-xs);
   color: var(--ui-text-tertiary);

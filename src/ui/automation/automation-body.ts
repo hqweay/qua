@@ -94,6 +94,7 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
     head.className = 'blk-auto-head'
     head.contentEditable = 'false'
     const enabled = def?.enabled === true
+    const manual = def?.triggers.some((tr) => tr === 'manual') ?? false
     const toggle = document.createElement('button')
     toggle.type = 'button'
     toggle.className = 'blk-auto-toggle'
@@ -105,7 +106,9 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
     run.className = 'blk-auto-run'
     if (enabled) run.dataset.enabled = '1'
     run.textContent = t('ui.automation.run')
-    run.title = t('ui.automation.runHint')
+    run.title = manual ? t('ui.automation.runHint') : t('ui.automation.noManualHint')
+    // 没有手动触发 ⇒ 这条只能由事件跑；运行按钮是手动入口，置灰并说明
+    run.disabled = !manual
     run.addEventListener('click', () => deps.onRun())
     head.append(toggle, run)
     root.appendChild(head)
@@ -231,15 +234,9 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
     const rows: HTMLElement[] = []
     const line = document.createElement('div')
     line.className = 'blk-auto-chips'
-    const hasAuto = def.triggers.some((tr) => tr !== 'manual')
-    if (!hasAuto) {
-      // 手动运行的 UI 之家是头部「运行…」按钮：当段只列自动触发器，没有就说一句
-      line.appendChild(chip(t('ui.automation.noAutoTrigger'), 'is-muted'))
-    }
     // 多触发是 OR：连接词显形（muted 文本，不是 chip）——与条件树 chip 的「或」同族
     let first = true
     def.triggers.forEach((tr, i) => {
-      if (tr === 'manual') return
       if (!first) {
         const or = document.createElement('span')
         or.className = 'blk-auto-or'
@@ -247,18 +244,43 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
         line.appendChild(or)
       }
       first = false
-      // 点已有的触发器 ⇒ 改／删它（菜单在装配层）
-      line.appendChild(chip(triggerText(tr), 'is-event', () => openTriggerMenu(def, i)))
+      // 点已有的触发器 ⇒ 改／删它（菜单在装配层）。手动是触发器之一，不是隐含底：
+      // 它在，就说明「这块是手动动作」（块菜单/面板可列）；摘掉它，就只剩事件。
+      const c = chip(triggerText(tr), 'is-event', () => openTriggerMenu(def, i))
+      c.dataset.trigger = tr === 'manual' ? 'manual' : 'event'
+      line.appendChild(c)
     })
     line.appendChild(chip(t('ui.automation.addTrigger'), 'is-edit', () => openTriggerAddMenu(def)))
     rows.push(line)
     return rows
   }
 
-  /** 已有事件触发器的菜单：删除；`child.added` 另给「改父块筛选」与「引用窗口」开关 */
+  /** 已有触发器的菜单：删除；`child.added` 另给「改父块筛选」与「引用窗口」开关 */
   const openTriggerMenu = (def: AutomationDef, at: number): void => {
     const tr = def.triggers[at]
-    if (tr === undefined || tr === 'manual') return
+    if (tr === undefined) return
+    if (tr === 'manual') {
+      // 手动是语义「是不是手动动作」的控制：摘掉它 = 块菜单/面板不再列这条。
+      // 但定义至少要有一个触发（形状判据），只剩它时不给摘。
+      const only = def.triggers.length <= 1
+      deps.openMenu(
+        [
+          {
+            id: 'trigger/remove-manual',
+            label: t('ui.automation.removeManual'),
+            hint: only ? t('ui.automation.trigger.keepOne') : '',
+            group: 'trigger/1',
+            disabled: only,
+          },
+        ],
+        (row) => {
+          if (row.id !== 'trigger/remove-manual' || only) return
+          write({ ...def, triggers: def.triggers.filter((x) => x !== 'manual') })
+        },
+        t('ui.automation.trigger.manual'),
+      )
+      return
+    }
     const rows: Row[] = [{ id: 'trigger/remove', label: t('ui.automation.removeTrigger'), group: 'trigger/1' }]
     // 父块条件槽：一个槽，三种填法是它的编辑动作（点名／条件筛／清空＝任意父块）——不是并列模式
     if (tr.birth === true && topUpOf(tr.query) !== undefined) {
@@ -313,15 +335,28 @@ export function createAutomationBody(deps: AutomationBodyDeps): AutomationBody {
     }, triggerText(tr))
   }
 
-  /** 加触发器：四种事件（属性变化／打标签／摘标签／新建子块）；手动是出生默认档 */
+  /** 加触发器：手动（出生默认，可摘后可再加回）＋四种事件（属性变化／打标签／摘标签／新建子块） */
   const openTriggerAddMenu = (def: AutomationDef): void => {
-    const rows: Row[] = [
+    const rows: Row[] = []
+    if (!def.triggers.some((tr) => tr === 'manual')) {
+      rows.push({
+        id: 'add/manual',
+        label: t('ui.automation.trigger.manual'),
+        hint: t('ui.automation.trigger.manualAddHint'),
+        group: 'trigger/1',
+      })
+    }
+    rows.push(
       { id: 'add/prop', label: t('ui.automation.trigger.addProp'), group: 'trigger/1' },
       { id: 'add/tagOn', label: t('ui.automation.trigger.addTagOn'), group: 'trigger/1' },
       { id: 'add/tagOff', label: t('ui.automation.trigger.addTagOff'), group: 'trigger/1' },
       { id: 'add/child', label: t('ui.automation.trigger.addChild'), group: 'trigger/1' },
-    ]
+    )
     deps.openMenu(rows, (row) => {
+      if (row.id === 'add/manual') {
+        write({ ...def, triggers: [...def.triggers, 'manual'] })
+        return
+      }
       if (row.id === 'add/prop') {
         pickPropForTrigger(def)
         return
