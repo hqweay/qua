@@ -570,8 +570,10 @@ export function setupPanels(deps: PanelsDeps) {
           onPick: (pick) => run('core.tags/add', { name: pick.name }),
         })
       },
-      removeBelong: (parentId) => run('core.belongs-to/remove', { parentId }),
-      pruneBelongs: () => run('core.belongs-to/prune'),
+      // 归属三条命令的载荷键是 `childId`（声明表口径），不是本作用域的 `blockId`：
+      // `run` 只补 `blockId`，漏传 `childId` 会被 handler 判成空串静默早退（零写入、零报错）
+      removeBelong: (parentId) => run('core.belongs-to/remove', { childId: blockId, parentId }),
+      pruneBelongs: () => run('core.belongs-to/prune', { childId: blockId }),
       /** 候选＝页＋标签，只选已有——配归属不该顺手造身份；已挂的不再出现在候选里 */
       pickBelong: (anchor, trigger) => {
         const cur = b()
@@ -589,7 +591,7 @@ export function setupPanels(deps: PanelsDeps) {
           idPrefix: 'propbelong',
           onPick: (pick) => {
             if (pick.kind !== 'block') return
-            run('core.belongs-to/add', { parentId: pick.id })
+            run('core.belongs-to/add', { childId: blockId, parentId: pick.id })
           },
         })
       },

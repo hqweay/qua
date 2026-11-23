@@ -33734,6 +33734,78 @@ await check('T356 新建子块触发器：选完父块当场问「沿不沿引�
   return '父块选定 ⇒ 当场问沿不沿引用；选「要」⇒ 落盘 followRefs:true；行上后缀同步'
 })
 
+/**
+ * T357｜**检视卡里加归属**：面板这一跳的载荷键是 `childId`（命令声明表口径），
+ * 不是面板作用域的 `blockId`。键名错配时 handler 把子块判成空串、零写入零报错，
+ * 用户看到的就是「加了没生效」。T52 只钉命令本身，钉不住装配层这一跳。
+ */
+await check('T357 检视卡加/摘归属：面板入口写进 _belongsTo，chip 当场出现与消失', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  const ids = await page.evaluate(() => {
+    const hex = (n) => n.toString(16).padStart(32, '0')
+    const tagId = hex(0xa35701)
+    const targetId = hex(0xa35702)
+    const mk = (id, content, props = {}) => ({ id, content, children: [], created: 1, modified: 1, props })
+    window.__qua.forceForest((forest) => {
+      forest.push(mk(tagId, [{ t: 'text', v: '归属探针' }], { _aliases: ['归属探针'], _lists: ['tag'] }))
+      forest.push(mk(targetId, [{ t: 'text', v: '归属目标块' }]))
+    })
+    return { tagId, targetId }
+  })
+  await page.waitForTimeout(300)
+  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), ids.targetId)
+  await page.waitForSelector('.props-belong-add', { timeout: 4000 })
+
+  // 点「＋」→ 从候选里选已有标签（面板入口不改身份，只写边）
+  await page.click('.props-belong-add')
+  await page.waitForSelector('.layer .layer-input', { timeout: 4000 })
+  await page.fill('.layer .layer-input', '归属探针')
+  await page.waitForTimeout(150)
+  await page.evaluate(() => {
+    const item = [...document.querySelectorAll('.layer-item')].find((el) => el.textContent?.includes('归属探针'))
+    item?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+  })
+  await page.waitForTimeout(250)
+
+  const added = await page.evaluate(
+    ({ targetId, tagId }) => ({
+      written: window.__qua.tagParents(targetId).includes(tagId),
+      parents: window.__qua.tagParents(targetId),
+      tagId,
+      chips: [...document.querySelectorAll('.prop-belongs .props-tag')].map((e) => ({
+        text: e.textContent ?? '',
+        id: e.dataset.belongsId ?? '',
+        dangling: e.dataset.dangling ?? '',
+      })),
+      tags: window.__qua.allBlocks().filter((x) => x.roles.includes('tag') && x.text === '归属探针').map((x) => x.id),
+    }),
+    ids,
+  )
+  assert(added.written, `检视卡加归属应写进子块的 _belongsTo：${JSON.stringify(added)}`)
+  assert(
+    added.chips.some((s) => s.text.includes('归属探针') && s.id === ids.tagId),
+    `加完这一行应当场出现上级 chip：${JSON.stringify(added)}`,
+  )
+
+  // 摘除走同一条边：点 chip 的 ×，模型与这一行一起回去
+  await page.click('.prop-belongs .props-tag .props-tag-x')
+  await page.waitForTimeout(250)
+  const removed = await page.evaluate(
+    ({ targetId, tagId }) => ({
+      written: window.__qua.tagParents(targetId).includes(tagId),
+      chips: document.querySelectorAll('.prop-belongs .props-tag').length,
+    }),
+    ids,
+  )
+  assert(!removed.written, `检视卡摘归属应清掉 _belongsTo：${JSON.stringify(removed)}`)
+  assert(removed.chips === 0, `摘掉后这一行不该留着 chip：${JSON.stringify(removed)}`)
+
+  await ctx.close()
+  return `面板「＋」选 #归属探针 ⇒ _belongsTo 写进去、chip 出现；点 × ⇒ 边与 chip 一起没了`
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 
