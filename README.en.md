@@ -26,7 +26,7 @@ Interested, have questions, or just want to chat? Join the QQ group "qua 双链�
 
 **Windows desktop app** (x64): download the latest `.exe` installer from [Releases](https://github.com/hqweay/qua/releases) and double-click to install. The installer is unsigned, so if SmartScreen blocks it, click More info → Run anyway.
 
-Both desktop apps use SQLite for storage and full-text search, with a more complete feature set than the browser version.
+Both desktop apps use SQLite for storage and full-text search, with a more complete feature set than the browser version. After installing **0.1.0-beta.9**, you can check for updates from the “Qua” menu and download future installers in-app (the final install step is still manual).
 
 ### About the beta
 
@@ -147,7 +147,7 @@ Mouse: the block handle sits to the left of each row and turns into a drag grip 
 ## Current limitations
 
 - No import/export (Markdown and other formats are not supported yet) and no cloud sync.
-- The desktop app is unsigned (on macOS, right-click → Open the first time) and does not update itself: it checks for a new version every 5 hours and mentions it in the "Qua" menu; installing it is up to you. Back up the library directory before upgrading.
+- The desktop app is unsigned (on macOS, right-click → Open the first time). It checks for a new version every 5 hours and mentions it in the “Qua” menu; from 0.1.0-beta.9 onward it can download the installer in-app, but installing it (and the final macOS drag step) is still up to you. Back up the library directory before upgrading.
 - Cross-block merging has unfinished edges: a cross-block selection that spans different parents, or whose first block is a section root (the first level of a page or daily note), can't be deleted or replaced yet.
 - Inline assets and attachments currently accept images only; an attachment value can also be an external link.
 - Automation actions are a small closed set of built-in operations—no scripting. Richer workflows will have to wait for a plugin system.
