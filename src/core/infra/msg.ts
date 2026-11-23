@@ -1349,6 +1349,7 @@ export const MSG = {
   'err.when.false': 'when 为假',
   'err.cmd.notRegistered': '未注册的命令：{name}',
   'err.cmd.failed': '命令失败：{name}｜{message}',
+  'err.cmd.missingArgs': '命令缺少必需参数：{name}｜{args}',
   'err.cmd.notGroupable': '命令不能并入批量操作（必须同步且声明为可撤销）：{name}',
   'err.clipboardFailed': '复制失败（浏览器未授权剪贴板）',
 

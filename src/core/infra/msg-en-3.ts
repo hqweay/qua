@@ -373,6 +373,7 @@ export const EN3 = {
   'err.when.false': 'when is false',
   'err.cmd.notRegistered': 'Unregistered command: {name}',
   'err.cmd.failed': 'Command failed: {name} | {message}',
+  'err.cmd.missingArgs': 'Command is missing required arguments: {name} | {args}',
   'err.cmd.notGroupable': 'Command cannot be batched (must be synchronous and declared undoable): {name}',
   'err.clipboardFailed': 'Copy failed (clipboard permission not granted)',
   'ui.link.rejectEmpty': 'The link is empty',

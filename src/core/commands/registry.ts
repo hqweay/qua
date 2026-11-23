@@ -23,17 +23,19 @@ export class Registry {
   last: { name: string; via: string; at: number; handled: boolean } | null = null
   log: { name: string; via: string; at: number }[] = []
 
+  private app: App
+
   /**
    * handlers 由装配层注入：**core 不认识 app 实现**，只认识 `Handler` 这个端口。
    *
    * `decls` 缺省是整张声明表；装配层可以传一份**被裁过的**表（例如产品构建剔掉
    * 开发命令）—— 这样「不注册」发生在唯一一张表里，而不是在每个调用点各判一次。
+   *
+   * ⚠️ 构造参数不用 parameter property：`node --test` 的 strip-only 模式不支持它，
+   *    而这张表（参数契约）必须能单独拉起来测。
    */
-  constructor(
-    private app: App,
-    handlers: Record<string, Handler>,
-    decls: readonly CommandDecl[] = COMMANDS,
-  ) {
+  constructor(app: App, handlers: Record<string, Handler>, decls: readonly CommandDecl[] = COMMANDS) {
+    this.app = app
     for (const d of decls) this.decls.set(d.name, d)
     for (const [n, h] of Object.entries(handlers)) this.handlers.set(n, h)
   }
@@ -62,6 +64,28 @@ export class Registry {
       this.log.push({ name, via: 'keymap(blocked:composing)', at: Date.now() })
       this.app.ed.probe.compositionSeq.push('blocked')
       return { ok: true, handled: false }
+    }
+    /**
+     * **声明为必需的参数缺了 ⇒ 这一条根本没法跑，必须响。**
+     *
+     * 不拦的话，handler 里的 `S(a.x, '')` + `if (!x) return false` 会把
+     * 「调用方键名传错」读成「没有目标」——零写入、零 toast（用户看到的是「点了没反应」）。
+     * 空串与缺键同义：handler 的宽容读法就是这么判的。静态那一半在 `arch-check [40]`。
+     */
+    const decl = this.decls.get(name)!
+    const required = decl.args?.required
+    const missing = Array.isArray(required)
+      ? required.filter(
+          (k): k is string =>
+            typeof k === 'string' && (args[k] === undefined || args[k] === null || args[k] === ''),
+        )
+      : []
+    if (missing.length > 0) {
+      const msg = t('err.cmd.missingArgs', { name, args: missing.join(', ') })
+      this.app.toast(msg, 'warn')
+      this.last = { name, via, at: Date.now(), handled: false }
+      this.log.push({ name, via, at: Date.now() })
+      return { ok: false, handled: false, error: msg }
     }
     let handled = true
     try {

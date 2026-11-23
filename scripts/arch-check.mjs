@@ -1875,6 +1875,139 @@ function commandDecls() {
 }
 
 /* ═══════════════════════════════════════════════════════╗
+   ║ 40 · 命令调用面的参数键对账                              ║
+   ╚═══════════════════════════════════════════════════════ */
+
+{
+  /**
+   * **调用点写出的参数键必须与声明表对得上。**
+   *
+   * 两次真事故（属性定义把属性名按 `propId` 传、归属把子块按 `blockId` 传，而命令读
+   * `label`／`childId`）同时满足：typecheck 全绿（两个 id 空间都是 `string`）、handler 早退、
+   * 零写入零报错。契约一直写在 `decls.ts`（`args` 的键与 `required`），只是没人对账。
+   *
+   * 判据：源码里 `('core.x', { … })` 形态的调用（第一条实参是命令名字面量、第二条是对象字面量）——
+   *   · 提供的键 ⊆ 声明的键：不认识的键＝调用方在用另一个 id 空间说话；
+   *   · 声明的 `required` ⊆ 提供的键（有 `...spread` 时跳过这一半：推不出展开里有什么）。
+   * `invokeGroup([{ name, args }])` 与持久化的自动化步骤不是这个形状——运行时由
+   * `Registry.invoke` 的 required 闸兜底。动态载荷（第二条实参不是对象字面量）也归运行时。
+   */
+  const declFile = tsFile(join(ROOT, 'src/core/commands/decls.ts'))
+  let commandsArr = null
+  for (const st of declFile.sf.statements) {
+    if (!ts.isVariableStatement(st)) continue
+    for (const d of st.declarationList.declarations) {
+      if (ts.isIdentifier(d.name) && d.name.text === 'COMMANDS' && d.initializer && ts.isArrayLiteralExpression(d.initializer)) {
+        commandsArr = d.initializer
+      }
+    }
+  }
+  const keyName = (p) => {
+    const n = p.name
+    return ts.isIdentifier(n) || ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) ? n.text : undefined
+  }
+  const contractOf = (argsNode) => {
+    const keys = new Set()
+    let required = []
+    let spread = false
+    for (const p of argsNode.properties) {
+      if (ts.isSpreadAssignment(p)) {
+        spread = true
+        continue
+      }
+      const k = keyName(p)
+      if (k === undefined) {
+        spread = true
+        continue
+      }
+      if (k === 'required' && ts.isPropertyAssignment(p) && ts.isArrayLiteralExpression(p.initializer)) {
+        required = p.initializer.elements.filter(ts.isStringLiteral).map((e) => e.text)
+        continue
+      }
+      keys.add(k)
+    }
+    return { keys, required, spread }
+  }
+  const contracts = new Map()
+  for (const el of commandsArr?.elements ?? []) {
+    if (!ts.isObjectLiteralExpression(el)) continue
+    const nameProp = el.properties.find(
+      (p) => ts.isPropertyAssignment(p) && keyName(p) === 'name' && ts.isStringLiteral(p.initializer),
+    )
+    if (!nameProp) continue
+    const argsProp = el.properties.find(
+      (p) => ts.isPropertyAssignment(p) && keyName(p) === 'args' && ts.isObjectLiteralExpression(p.initializer),
+    )
+    contracts.set(
+      nameProp.initializer.text,
+      argsProp ? contractOf(argsProp.initializer) : { keys: new Set(), required: [], spread: false },
+    )
+  }
+
+  const hits = []
+  let checked = 0
+  for (const f of srcFiles) {
+    const r = rel(f)
+    if (r === 'src/core/commands/decls.ts') continue
+    const { sf } = tsFile(f)
+    const visit = (n) => {
+      if (ts.isCallExpression(n) && n.arguments.length > 0) {
+        // 只认**转发命令的调用点**：`invoke` / 面板薄包装 `run` / 属性写 `propWrite`。
+        // 不按「首参是 core.* 字面量」一刀切——`startsWith('core.anno/toggle-')` 那种
+        // 字符串判断会被误收（真踩过一次）。
+        const callee = n.expression
+        const calleeName = ts.isPropertyAccessExpression(callee)
+          ? callee.name.text
+          : ts.isIdentifier(callee)
+            ? callee.text
+            : ''
+        const forwards = calleeName === 'invoke' || calleeName === 'propWrite' || calleeName === 'run'
+        const first = n.arguments[0]
+        const cmd =
+          ts.isStringLiteral(first) || ts.isNoSubstitutionTemplateLiteral(first) ? first.text : ''
+        if (forwards && cmd.startsWith('core.')) {
+          const line = sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1
+          const contract = contracts.get(cmd)
+          const second = n.arguments[1]
+          if (!contract) hits.push(`${r}:${line}  ${cmd} 不在声明表里`)
+          else if (!second) {
+            checked++
+            if (contract.required.length > 0) {
+              hits.push(`${r}:${line}  ${cmd} 缺少必需参数 ${contract.required.join(', ')}`)
+            }
+          } else if (ts.isObjectLiteralExpression(second)) {
+            checked++
+            const call = contractOf(second)
+            for (const k of call.keys) {
+              if (!contract.keys.has(k)) hits.push(`${r}:${line}  ${cmd} 传了未声明的参数 ${k}`)
+            }
+            if (!call.spread) {
+              const miss = contract.required.filter((k) => !call.keys.has(k))
+              if (miss.length > 0) hits.push(`${r}:${line}  ${cmd} 缺少必需参数 ${miss.join(', ')}`)
+            }
+          }
+        }
+      }
+      ts.forEachChild(n, visit)
+    }
+    ts.forEachChild(sf, visit)
+  }
+
+  add({
+    id: 40,
+    title: '命令调用的参数键与声明表对账：不多传未声明的键、不缺声明的必需键',
+    method: 'TypeScript AST 读 `COMMANDS` 的 `args` 键与 `required`，再扫转发器（`invoke`／`run`／`propWrite`）里第一个实参是 `core.*` 字面量、第二个是对象字面量的调用',
+    scope: `src/**/*.ts（命令名是字面量的调用 ${checked} 处；动态载荷与 \`invokeGroup\` 的数组步骤不在静态面）`,
+    whitelist:
+      '动态载荷（第二条实参不是对象字面量，含 `...spread` 里可能带的必需键）留给 `Registry.invoke` 的运行时闸；持久化的自动化步骤同理',
+    hits: hits.length,
+    detail: hits,
+    note:
+      '两次真事故（`propId` vs `label`、`blockId` vs `childId`）都是「键名对不上 ⇒ handler 静默早退」；契约在声明表里，这条只负责对账，不教新写法',
+  })
+}
+
+/* ═══════════════════════════════════════════════════════╗
    ║ 等内核（不假装在跑）                                     ║
    ╚═══════════════════════════════════════════════════════ */
 

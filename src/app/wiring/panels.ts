@@ -540,8 +540,16 @@ export function setupPanels(deps: PanelsDeps) {
    * `repaint` 由宿主给：面板＝刷自己的实例，弹窗＝整棵重绘自己。
    */
   const blockConfigOps = (blockId: string, repaint: () => void): ConfigSectionsCtx => {
+    /**
+     * **参数键由调用点写全，这里不注入任何寻址键。**
+     *
+     * 曾经这里包一层 `{ blockId, ...args }`：那条约定只对一半命令族成立——
+     * 归属三条的寻址键叫 `childId`，被注入的 `blockId` 不顶用，handler 拿到空串
+     * 静默早退（用户看到「点了没反应」）。约定藏在 helper 里、契约写在声明表里，
+     * 两者没有交汇点 ⇒ 现在每个调用点按 `decls.ts` 的键名写，`arch-check [40]` 对账。
+     */
     const run = (command: string, args: Record<string, unknown> = {}): void => {
-      void deps.getRegistry().invoke(command, { blockId, ...args }, 'ui')
+      void deps.getRegistry().invoke(command, args, 'ui')
       repaint()
     }
     const b = (): Block | undefined => findInForest(deps.getWs().blocks, blockId)
@@ -554,8 +562,8 @@ export function setupPanels(deps: PanelsDeps) {
       },
       toast: (text, kind) => app.toast(text, kind),
       shortId: (id) => shortId(id),
-      removeTag: (tagId) => run('core.tags/remove', { tagId }),
-      reorderTags: (orderedIds) => run('core.tags/reorder', { tagIds: orderedIds }),
+      removeTag: (tagId) => run('core.tags/remove', { blockId, tagId }),
+      reorderTags: (orderedIds) => run('core.tags/reorder', { blockId, tagIds: orderedIds }),
       /** 可搜可新建；新建与选中走同一条写路径（`core.tags/add` 自己处理复用同名页） */
       pickTag: (anchor, trigger) => {
         openTagChoice({
@@ -567,11 +575,9 @@ export function setupPanels(deps: PanelsDeps) {
           emptyText: t('ui.props.pickTagEmpty'),
           selectedIds: kb.tagsOf(blockId).map((x) => x.id),
           idPrefix: 'proptag',
-          onPick: (pick) => run('core.tags/add', { name: pick.name }),
+          onPick: (pick) => run('core.tags/add', { blockId, name: pick.name }),
         })
       },
-      // 归属三条命令的载荷键是 `childId`（声明表口径），不是本作用域的 `blockId`：
-      // `run` 只补 `blockId`，漏传 `childId` 会被 handler 判成空串静默早退（零写入、零报错）
       removeBelong: (parentId) => run('core.belongs-to/remove', { childId: blockId, parentId }),
       pruneBelongs: () => run('core.belongs-to/prune', { childId: blockId }),
       /** 候选＝页＋标签，只选已有——配归属不该顺手造身份；已挂的不再出现在候选里 */
@@ -609,11 +615,11 @@ export function setupPanels(deps: PanelsDeps) {
       /** 脸的写统一命令面；「最近」记账是设备态，归装配层 */
       setFace: (patch) => {
         if (patch.icon !== undefined) {
-          run('core.block/set-icon', { icon: patch.icon })
+          run('core.block/set-icon', { blockId, icon: patch.icon })
           recordRecentIcon(patch.icon)
         }
         if (patch.color !== undefined) {
-          run('core.block/set-color', { color: patch.color })
+          run('core.block/set-color', { blockId, color: patch.color })
           recordRecentColor(patch.color)
         }
       },
