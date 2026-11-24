@@ -9,8 +9,20 @@ import { S } from './shared.ts'
 
 export const PAGE_HANDLERS: Record<string, Handler> = {
   /* ---- 页面 ---- */
+  /**
+   * **用户面的「新建页」＝先问名字**：页的名字就是它的地址，先造一个未命名页再改名，
+   * 等于先占一个假地址再换人；中途取消，那个页还会漏在库里。
+   * 建页本身是 `core.page/create`（名字与页同一笔），`@` 建页与它是同一个构造。
+   */
   'core.page/new': (_a, app) => {
-    app.newPage()
+    app.openPagePicker()
+    return true
+  },
+  'core.page/create': (a, app) => {
+    const name = S(a.name)
+    // 带名字 ⇒ 按名字落页（同名地址在场就复用它并补 `page` 露面）；不带 ⇒ 未命名页
+    if (name === '') app.newPage()
+    else app.openOrCreatePage(name)
     return true
   },
   'core.page/open': (a, app) => {

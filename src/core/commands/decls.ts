@@ -187,7 +187,10 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.surface/open', title: t('cmd.surface.open'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { kind: { type: 'string', enum: ['derived', 'utility'] }, id: { type: 'string' } }, keywords: ['surface', 'panel', 'trash', t('menu.kw.surface')], hidden: true },
 
   /* ---- 页面 ---- */
-  { name: 'core.page/new', title: t('cmd.page.new'), capability: 'write', undoable: false, version: '1.0', category: t('menu.cat.page'), tile: { icon: 'lucide:plus' } },
+  // 用户面的「新建页」：先问名字（页的名字就是地址），再从候选里落一行 ⇒ 它自己只开面、不写
+  { name: 'core.page/new', title: t('cmd.page.new'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.page'), keywords: ['page', 'new', 'open'], tile: { icon: 'lucide:plus' } },
+  // 建页本身：名字与页同一笔（`@` 建页走同一个构造）。没有名字 ⇒ 未命名页，只给没有名字可给的调用方
+  { name: 'core.page/create', title: t('cmd.page.create'), capability: 'write', undoable: false, version: '1.0', category: t('menu.cat.page'), args: { name: { type: 'string' } }, hidden: true },
   // 跳页的收集路径是全局搜索（有地址的东西归它）；面板裸按没有 pageId 可给 ⇒ 不列
   { name: 'core.page/open', title: t('cmd.page.open'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.page'), args: { pageId: { type: 'string' } }, hidden: true },
   { name: 'core.page/next', title: t('cmd.page.next'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.page') },

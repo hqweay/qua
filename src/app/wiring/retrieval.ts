@@ -9,6 +9,7 @@
  */
 import { paletteRows, rowsFromBindings, type PickMods, type Row } from '../../ui/overlay/layers.ts'
 import { createTriggers, memberRows, type MemberTagRef, type TriggerDeps } from '../../app/retrieval/triggers.ts'
+import { pagePickerRows } from '../../app/retrieval/mention-rows.ts'
 import { selectionRefRows } from '../../app/retrieval/selection-ref-rows.ts'
 import { resolveBindings, type Binding } from '../../core/infra/bindings.ts'
 import { type ActsOn, type MenuRequest, type MenuTarget, type Registry } from '../../core/commands/index.ts'
@@ -419,6 +420,38 @@ function openMemberStage(tag: MemberTagRef): void {
 }
 
 /**
+ * **页候选浮层**（「新建页」这个键打开的那一面）：输入即找页，`↵` 落第一行。
+ *
+ * 与 `@` 共用同一份行投影（`pagePickerRows`）与同一颗输入外观，差别只在**没有插入点**：
+ * 选中一页＝打开它，选中「新建页面」＝建它并打开——都不往任何块里写引用。
+ *
+ * 名字先于页：取消（Esc／点外）一个字节都不写，所以「新建页」不再先造一个未命名页、
+ * 再靠改名把它变成想要的页。建页与 `@` 是同一个构造（`core.page/create`）。
+ */
+function openPagePicker(): void {
+  // 与 `showMenu` 同一条：被别的面取代时 `openMenu` 不回调 `onClose`，状态得在这里清
+  triggerCh = null
+  layers.openMenu({
+    rows: pagePickerRows('', triggerDeps),
+    anchor: null,
+    title: t('ui.page.pickerTitle'),
+    searchable: true,
+    focusSearch: true,
+    placeholder: t('ui.page.pickerPlaceholder'),
+    emptyText: t('ui.page.pickerEmpty'),
+    onQuery: (q) => layers.setRows(pagePickerRows(q, triggerDeps)),
+    onPick: (row) => {
+      const pick = row.pick
+      if (!pick) return
+      if (pick.kind === 'page') getRegistry().invoke('core.page/open', { pageId: pick.id })
+      // 「新建页面」行：同名的普通块／标签已经存在时也走这一条——与 `@` 的
+      // 「找到或创建」同一语义（地址全局唯一，不建第二个同名块）
+      else if (pick.kind === 'newPage') getRegistry().invoke('core.page/create', { name: pick.name })
+    },
+  })
+}
+
+/**
  * **选中之后做什么**：浮层只报「选中了谁 ＋ 按了什么键」，落点在这里决定。
  *
  * 这条分叉是拍板过的：同一条 `#名` 行按 `↵` 是「插进正文」（`ref` 露面，不写归属），
@@ -708,6 +741,7 @@ function showMenu(req: MenuRequest): void {
     showMenu,
     openAutomationMenu,
     openTrigger,
+    openPagePicker,
     refreshSelectionBar,
     showSelectionRefPicker,
     toggleColorAxis,

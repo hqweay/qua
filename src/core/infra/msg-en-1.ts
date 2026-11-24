@@ -115,6 +115,7 @@ export const EN1 = {
   'cmd.tab.next': 'Next tab',
   'cmd.tab.prev': 'Previous tab',
   'cmd.page.new': 'New page',
+  'cmd.page.create': 'Create page (by name)',
   'cmd.page.open': 'Open page',
   'cmd.page.next': 'Next page',
   'cmd.page.prev': 'Previous page',

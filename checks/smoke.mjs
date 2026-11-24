@@ -7643,7 +7643,7 @@ await check('T53 列表露面：输入名字建标签、同名页兼作标签、
 
   // ② 新页：地址是 `未命名-<短id>`；改正文只改描述，页名走别名编辑器。
   const reuseName = '复用页名'
-  await page.evaluate(() => window.__qua.invoke('core.page/new'))
+  await page.evaluate(() => window.__qua.invoke('core.page/create'))
   const pageId = await page.evaluate(() => window.__qua.snapshot().activeId)
   const created = await page.evaluate((id) => {
     const b = window.__qua.allBlocks().find((x) => x.id === id)
@@ -8985,7 +8985,7 @@ await check(
     await page.evaluate(() => window.__qua.quiet(true))
 
     // 新建一页（自带一个空首子块）再补一个子块，然后删页：删的是整棵子树
-    await page.evaluate(() => window.__qua.invoke('core.page/new'))
+    await page.evaluate(() => window.__qua.invoke('core.page/create'))
     await page.waitForTimeout(120)
     const created = await page.evaluate(() => {
       const ed = window.__qua.__editor
@@ -9620,7 +9620,7 @@ await check(
       roots: window.__qua.snapshot().topBlocks,
     }))
 
-    await page.evaluate(() => window.__qua.invoke('core.page/new'))
+    await page.evaluate(() => window.__qua.invoke('core.page/create'))
     await page.waitForTimeout(220)
 
     const created = await page.evaluate(() => {
@@ -9666,6 +9666,137 @@ await check(
     assert(after.pages === created.pages, `重开后页数应不变：${created.pages} → ${after.pages}`)
 
     return `新建页 ⇒ 页块 upsert{parent:null} ＋ 子块{parent:页}；恰好 2 条、不再建天；根数 ${before.roots}→${created.roots}；重开仍在`
+  },
+)
+
+await check(
+  'T364 「新建页」先问名字：页候选里输入名字 ↵ 建页（地址与正文同名）；输入已有页名 ↵ 去那一页；同名地址落在标签上 ⇒ 按同一行复用它成页；Esc 一个字节都不写',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+    const before = await page.evaluate(() => ({
+      pages: window.__qua.pages().map((p) => ({ id: p.id, title: p.title })),
+      roots: window.__qua.snapshot().topBlocks,
+    }))
+
+    // ① 打开：输入框就位、空查询就把已有的页铺出来（这一面同时是「跳页」）
+    await page.evaluate(() => window.__qua.invoke('core.page/new'))
+    await page.waitForTimeout(220)
+    const opened = await page.evaluate(() => ({
+      hasLayer: Boolean(document.querySelector('.layer')),
+      focused: document.activeElement?.className ?? '',
+      head: document.querySelector('.layer-head')?.textContent ?? '',
+      rows: [...document.querySelectorAll('.layer-item')].map((e) => e.querySelector('.layer-label')?.textContent ?? ''),
+    }))
+    assert(opened.hasLayer, '「新建页」应打开页候选浮层')
+    assert(opened.focused.includes('layer-input'), `输入框该拿到焦点：${JSON.stringify(opened)}`)
+    assert(opened.rows.length >= before.pages.length, `空查询应列出已有的页：${JSON.stringify(opened.rows.slice(0, 5))}`)
+
+    // ② 输入一个新名字 ⇒ 第一行是「新建页面」，↵ 建页并打开（名字与页同一笔）
+    await page.keyboard.type('新页甲')
+    await page.waitForTimeout(200)
+    const typed = await layerRows(page)
+    assert(typed[0] && typed[0].label.includes('新页甲') && typed[0].label.includes('新建页面'), `第一行应是新建页面：${JSON.stringify(typed.slice(0, 3))}`)
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(280)
+    const created = await page.evaluate(() => {
+      const root = window.__qua.__editor.doc.roots[0]
+      const plain = (b) => (b?.content ?? []).filter((r) => r.t === 'text').map((r) => r.v).join('')
+      return {
+        aliases: root?.props?._aliases ?? [],
+        text: plain(root),
+        pages: window.__qua.pages().length,
+        layer: Boolean(document.querySelector('.layer')),
+      }
+    })
+    assert(created.aliases[0] === '新页甲', `页名应进地址：${JSON.stringify(created)}`)
+    assert(created.text === '新页甲', `正文应与页名同名（带名建页同一笔）：${JSON.stringify(created)}`)
+    assert(created.pages === before.pages.length + 1, `页数应 +1：${before.pages.length} → ${created.pages}`)
+    assert(!created.layer, '选中之后浮层该收起')
+
+    // ③ 跳页：输入已有页名 ⇒ 第一行就是那一页（不产「新建页面」），↵ 打开它、不建第二个
+    const target = before.pages[0]
+    await page.evaluate(() => window.__qua.invoke('core.page/new'))
+    await page.waitForTimeout(200)
+    await page.keyboard.type(target.title)
+    await page.waitForTimeout(220)
+    const jump = await layerRows(page)
+    assert(!jump.some((r) => r.label.includes('新建页面')), `同名页已在场时不该出现「新建页面」行：${JSON.stringify(jump.slice(0, 3))}`)
+    assert(jump[0]?.label === target.title, `第一行应是那一页：${JSON.stringify(jump.slice(0, 3))}`)
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(280)
+    const jumped = await page.evaluate(() => ({
+      id: window.__qua.__editor.doc.roots[0]?.id ?? '',
+      pages: window.__qua.pages().length,
+    }))
+    assert(jumped.id === target.id, `↵ 应打开那一页：${JSON.stringify({ jumped, target })}`)
+    assert(jumped.pages === before.pages.length + 1, `跳页不该建页：期望 ${before.pages.length + 1}，实得 ${jumped.pages}`)
+
+    // ④ Esc：不建块、不占地址、不动森林
+    await page.evaluate(() => window.__qua.invoke('core.page/new'))
+    await page.waitForTimeout(200)
+    await page.keyboard.type('不该建')
+    await page.waitForTimeout(160)
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(220)
+    const cancelled = await page.evaluate(() => ({
+      pages: window.__qua.pages().length,
+      roots: window.__qua.snapshot().topBlocks,
+      layer: Boolean(document.querySelector('.layer')),
+      unnamed: window.__qua.pages().filter((p) => p.title.startsWith('未命名-')).length,
+    }))
+    assert(!cancelled.layer, 'Esc 应收起浮层')
+    assert(cancelled.pages === before.pages.length + 1, `Esc 不该建页：期望 ${before.pages.length + 1}，实得 ${cancelled.pages}`)
+    assert(cancelled.roots === before.roots + 1, `Esc 不该动森林（只该有第 ② 步那一页）：${before.roots + 1} vs ${cancelled.roots}`)
+
+    // ⑤ 同名地址落在一个**非页块**上（标签）：行上说「复用」，↵ 是给它补 page 露面，
+    //    不建第二个同名块——地址全局唯一，这一条与 `@` 的「找到或创建」同源
+    const tagId = await page.evaluate(() => {
+      const ed = window.__qua.__editor
+      const host = ed.doc.roots[0].children[0]?.id ?? ed.doc.roots[0].id
+      window.__qua.invoke('core.tags/add', { blockId: host, name: '兼位' })
+      const find = (list) => {
+        for (const b of list) {
+          if ((b.props?._aliases ?? []).includes('兼位')) return b.id
+          const got = find(b.children)
+          if (got) return got
+        }
+        return ''
+      }
+      return find(window.__qua.__editor.store.blocks)
+    })
+    assert(tagId !== '', '前置：应建出「兼位」标签块')
+    const pagesBeforeReuse = await page.evaluate(() => window.__qua.pages().length)
+    await page.evaluate(() => window.__qua.invoke('core.page/new'))
+    await page.waitForTimeout(200)
+    await page.keyboard.type('兼位')
+    await page.waitForTimeout(220)
+    const reuse = await layerRows(page)
+    assert(reuse[0] && reuse[0].label.includes('新建页面'), `第一行应是新建/复用那一行：${JSON.stringify(reuse.slice(0, 3))}`)
+    assert(reuse[0].hint.includes('复用'), `同名块在场时那一行要说复用：${JSON.stringify(reuse[0])}`)
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(300)
+    const reused = await page.evaluate(
+      (id) => {
+        const b = window.__qua.__editor.store.find(id)
+        return {
+          lists: b?.props?._lists ?? [],
+          aliases: b?.props?._aliases ?? [],
+          pages: window.__qua.pages().length,
+          opened: window.__qua.__editor.doc.roots[0]?.id ?? '',
+          layer: Boolean(document.querySelector('.layer')),
+        }
+      },
+      tagId,
+    )
+    assert(reused.aliases.includes('兼位'), `复用不改地址：${JSON.stringify(reused)}`)
+    assert(reused.lists.includes('tag') && reused.lists.includes('page'), `标签块应兼位成页：${JSON.stringify(reused)}`)
+    assert(reused.opened === tagId, `↵ 应打开那一块：${JSON.stringify(reused)}`)
+    assert(reused.pages === pagesBeforeReuse + 1, `复用即成为页，不该多建一个：${pagesBeforeReuse} → ${reused.pages}`)
+    assert(!reused.layer, '选中之后浮层该收起')
+
+    await ctx.close()
+    return `建页 ${before.pages.length}→${created.pages}（地址与正文同为「新页甲」）；跳页回「${target.title}」不新建；Esc 不动；同名标签被复用成页（${tagId}）`
   },
 )
 
@@ -10810,7 +10941,7 @@ await check(
      * 位置不是「可不可引用」的判据。判据落在「新建的那个页 id 在候选里」。
      */
     const before = await page.evaluate(() => window.__qua.pages().length)
-    await page.evaluate(() => window.__qua.invoke('core.page/new'))
+    await page.evaluate(() => window.__qua.invoke('core.page/create'))
     await page.waitForTimeout(250)
     const created = await page.evaluate(() => ({
       pages: window.__qua.pages().length,
@@ -16254,7 +16385,7 @@ const buildListTree = (page) =>
     const inv = (name, args = {}) => q.invoke(name, args)
     const focus = (id) => q.focusBlock(id, 0)
     const sel = () => q.__editor.sel?.aBlock ?? ''
-    inv('core.page/new')
+    inv('core.page/create')
     const root = q.__editor.doc.roots[0].id
     // 新页自带一个空首子块：先把它后面铺三行，再把这个空块删掉
     const stub = q.__editor.doc.roots[0].children[0].id
@@ -16726,7 +16857,7 @@ const buildEmbedTree = (page) =>
     const q = window.__qua
     const inv = (name, args = {}) => q.invoke(name, args)
     const sel = () => q.__editor.sel?.aBlock ?? ''
-    inv('core.page/new')
+    inv('core.page/create')
     const root = q.__editor.doc.roots[0].id
     const stub = q.__editor.doc.roots[0].children[0].id
     inv('core.editor/insert-block', { text: '源' })
@@ -21268,7 +21399,7 @@ await check('T208 两段式实例选择：⇧↵ 进成员搜索，新实例的�
   const setup = await page.evaluate(() => {
     const inv = (name, args = {}) => window.__qua.invoke(name, args)
     const sel = () => window.__qua.__editor.sel?.aBlock ?? ''
-    inv('core.page/new')
+    inv('core.page/create')
     inv('core.editor/insert-block', { text: 'switch 主机' })
     const m1 = sel()
     inv('core.tags/add', { blockId: m1, name: '玩具' })
@@ -21580,7 +21711,7 @@ await check(
       }, id)
 
     // ---- 页：删除组只有一行，且就叫「删除」
-    await page.evaluate(() => window.__qua.invoke('core.page/new'))
+    await page.evaluate(() => window.__qua.invoke('core.page/create'))
     await page.waitForTimeout(150)
     const ids = await page.evaluate(() => {
       const root = window.__qua.__editor.doc.roots[0]
@@ -28892,7 +29023,7 @@ await check('T292 完成态任务块：点块下属性行空白，正文槽不�
 const noteFx = async (page, texts) => {
   await page.evaluate(() => window.__qua.quiet(true))
   return page.evaluate((ts) => {
-    window.__qua.invoke('core.page/new')
+    window.__qua.invoke('core.page/create')
     const ed = window.__qua.__editor
     const root = ed.doc.roots[0]
     const ids = []

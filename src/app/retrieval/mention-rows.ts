@@ -33,7 +33,7 @@ import {
 import { t } from '../../core/infra/msg.ts'
 import { TRIGGER_QUERY_MAX } from '../../core/infra/trigger.ts'
 import { highlightSnippet, markTerms, termsMatch } from '../../core/search/query.ts'
-import { matchedNameOf } from '../../core/search/match-source.ts'
+import { matchedNameOf, type MatchedName } from '../../core/search/match-source.ts'
 import type { Row } from '../../ui/overlay/layers.ts'
 
 /** 每组最多列这么多：`@` 空查询就是「全部」，没有上限的话浮层永远滚不到底 */
@@ -90,6 +90,87 @@ function exactRowOf(b: Block, raw: string, deps: MentionDeps): Row {
   }
 }
 
+/**
+ * **页行**：`@` 的页组与页候选共用的唯一构造。
+ *
+ * 行显**命中的名字**：主名命中仍是主名（`blockLabel` 兜底防形状坏——页恒有地址）；
+ * 别名命中显别名——用户是用这个名字把它找出来的。别名点名时 `pick.anchor` 带上同一句
+ * （`@` 落进正文的引用就用它当显示字）；主名命中不带，引用继续跟随改名。
+ */
+function pageRowOf(b: Block, raw: string, named: MatchedName, forest: readonly Block[]): Row {
+  const name = named.isPrimary ? blockLabel(b, (id) => findInForest(forest, id)) : named.text
+  return {
+    id: `retrieval/page/${b.id}`,
+    label: name,
+    // 名字是短文本：不截窗，所有查询词都标出来（与块行的片段高亮同一份判据）
+    parts: markTerms(name, raw),
+    hint: addressesOf(b).find((a) => a.includes('/')) ?? '',
+    icon: 'lucide:file',
+    group: 'retrieval/1-page',
+    pick: { kind: 'page', id: b.id, name, ...(named.isPrimary ? {} : { anchor: named.text }) },
+  }
+}
+
+/**
+ * **「新建页面」行**（`@` 与页候选共用的构造）。
+ *
+ * 判据用**地址**而不是「这一屏有没有行」：正文命中了几行，不代表用户想点名的那个名字
+ * 已经存在；`Foo` 对 `Foobar` 只是正文包含，不能拦住建 `Foo` 这个页。
+ * 同名**页**已经存在 ⇒ 不产这一行（那一行就是已有页本身）；同名落在别的形态上
+ * （普通块 / 标签）⇒ 这一行改说「会复用」，落点仍是同一个「找到或创建」。
+ *
+ * `altHint` 只给有第二落点的面（`@` 的 `⌥↵` 建普通块）；没有插入点的地方没有第二落点。
+ */
+function newPageRowOf(raw: string, forest: readonly Block[], altHint?: string): Row | null {
+  if (raw === '') return null
+  if (findByAlias(forest, raw, (b) => hasList(b, 'page'))) return null
+  const existing = findByAlias(forest, raw)
+  return {
+    id: `retrieval/newPage/${raw}`,
+    label: t('ui.retrieval.newPage', { name: raw }),
+    hint: existing ? t('ui.retrieval.newPageReuseHint') : t('ui.retrieval.newPageHint'),
+    icon: 'lucide:plus',
+    group: 'retrieval/3-new',
+    ...(altHint === undefined ? {} : { keyHint: altHint }),
+    pick: { kind: 'newPage', name: raw },
+  }
+}
+
+/**
+ * **页候选**（`core.page/new` 打开的那一张面）：输入即找页、`↵` 去那儿；没有同名页时
+ * 多一行「新建页面」。
+ *
+ * 与 `@` 的页组共用同一份行构造与同一份判据（`matchedNameOf`），差别只有两条：
+ * ① 空查询列**最近改过的页**（这里要「一跳就走」；`@` 的空查询不承担这个职能）；
+ * ② 没有插入点，所以不产块行、也不画 `⌥↵` 徽标。
+ *
+ * 排序：**精确地址第一**（点名的对象比「名字里含这几个字」强），其余按 `modified` 新在前。
+ * 「新建页面」行排第一——按下这个键的默认意图是建；它只在没有同名页时出现，
+ * 所以「同名页已经在场」时第一条就是那一页，不会指错。
+ */
+export interface PagePickerDeps {
+  forest: () => readonly Block[]
+}
+
+export function pagePickerRows(query: string, deps: PagePickerDeps): Row[] {
+  const raw = query.trim().slice(0, TRIGGER_QUERY_MAX)
+  const forest = deps.forest()
+  const exactId = raw === '' ? undefined : findByAlias(forest, raw, (b) => hasList(b, 'page'))?.id
+  const hits: { row: Row; rank: number; modified: number }[] = []
+  walkForest(forest, (b) => {
+    if (!hasList(b, 'page')) return
+    // 空查询＝全部页（没有命中可标，也就不做名字匹配）；非空按名字命中收窄
+    const named: MatchedName | null =
+      raw === '' ? { text: displayNameOf(b), isPrimary: true } : matchedNameOf(b, raw)
+    if (!named) return
+    hits.push({ row: pageRowOf(b, raw, named, forest), rank: b.id === exactId ? 0 : 1, modified: b.modified })
+  })
+  hits.sort((a, b) => a.rank - b.rank || b.modified - a.modified)
+  const rows = hits.slice(0, MENTION_CAP).map((h) => h.row)
+  const newRow = newPageRowOf(raw, forest)
+  return newRow ? [newRow, ...rows] : rows
+}
+
 export function mentionRows(query: string, deps: MentionDeps): Row[] {
   const raw = query.trim().slice(0, TRIGGER_QUERY_MAX)
   const forest = deps.forest()
@@ -122,22 +203,7 @@ export function mentionRows(query: string, deps: MentionDeps): Row[] {
     const text = plainText(b.content)
     const named = hasList(b, 'page') ? matchedNameOf(b, raw) : null
     if (named) {
-      if (pages.length < MENTION_CAP) {
-        // 行显**命中的名字**：主名命中仍是主名（blockLabel 兜底防形状坏——页恒有地址）；
-        // 别名命中显别名——用户是用这个名字把它找出来的，选中之后落进正文的那一格
-        // 也该读这个名字（`anchor` 覆盖层由落点写入，主名路径不带、改名继续跟随）。
-        const name = named.isPrimary ? blockLabel(b, (id) => findInForest(deps.forest(), id)) : named.text
-        pages.push({
-          id: `retrieval/page/${b.id}`,
-          label: name,
-          // 名字是短文本：不截窗，所有查询词都标出来（与块行的片段高亮同一份判据）
-          parts: markTerms(name, raw),
-          hint: addressesOf(b).find((a) => a.includes('/')) ?? '',
-          icon: 'lucide:file',
-          group: 'retrieval/1-page',
-          pick: { kind: 'page', id: b.id, name, ...(named.isPrimary ? {} : { anchor: named.text }) },
-        })
-      }
+      if (pages.length < MENTION_CAP) pages.push(pageRowOf(b, raw, named, forest))
       return
     }
     if (hasList(b, 'tag') || isJournal(b)) return
@@ -181,29 +247,13 @@ export function mentionRows(query: string, deps: MentionDeps): Row[] {
     })
   })
   /**
-   * **无同名页 ⇒ 建页**。判据用「地址」而不是「这一屏有没有行」：
-   * 正文命中了几行，不代表用户想引用的那个名字已经存在；`Foo` 对 `Foobar`
-   * 只是正文包含，不能拦住建 `Foo` 这个页。
+   * **无同名页 ⇒ 建页**（`⇧↵`／`⌥↵` 的两种落点由按键区分，行只报「建这个页」）。
    *
-   * 同名地址已经存在（页 / 标签 / 普通块）⇒ 这一行改说「会复用」，不建第二个。
+   * `@` 的第一落点是「插一枚指向它/新建它的引用」，所以这里画 `⌥↵` 的第二种建法；
+   * 没有插入点的面（页候选）传 `altHint` 为空，那一格不画。
    */
-  const newRows: Row[] = []
-  if (raw !== '') {
-    const existingPage = findByAlias(forest, raw, (b) => hasList(b, 'page'))
-    if (!existingPage) {
-      const existing = findByAlias(forest, raw)
-      newRows.push({
-        id: `retrieval/newPage/${raw}`,
-        label: t('ui.retrieval.newPage', { name: raw }),
-        hint: existing ? t('ui.retrieval.newPageReuseHint') : t('ui.retrieval.newPageHint'),
-        icon: 'lucide:plus',
-        group: 'retrieval/3-new',
-        // 第二落点画在行上（↵ 建页是默认，不必说）；⌥↵ 建普通块，与划选转引用同键同义
-        keyHint: deps.newPageAltHint,
-        pick: { kind: 'newPage', name: raw },
-      })
-    }
-  }
+  const newRow = newPageRowOf(raw, forest, deps.newPageAltHint)
+  const newRows: Row[] = newRow ? [newRow] : []
   // 块组内：名字命中在前，正文命中在后；两组各自有上限，合并后再按组上限收一次
   const blocks = [...namedBlocks, ...textBlocks].slice(0, MENTION_CAP)
   return [...exactRows, ...pages, ...blocks, ...newRows]

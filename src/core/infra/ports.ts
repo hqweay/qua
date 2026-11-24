@@ -222,7 +222,23 @@ export interface App {
   /* 页面 */
   listPages(): { id: string; title: string; icon: string; blocks: number }[]
   activePageId(): string
+  /**
+   * 建一个未命名页并打开它（`未命名-<id>` 占位地址）。
+   *
+   * ⚠️ 用户面的「新建页」不直接调这里：那条先问名字（`openPagePicker`），
+   *    因为页的名字就是地址——先造一个未命名页再改名，等于先占一个假地址再换人。
+   *    按名字落页走 `openOrCreatePage`。
+   */
   newPage(): void
+  /** 页候选浮层（输入即找页，`↵` 建页或打开）：名字先于页，取消什么都不写 */
+  openPagePicker(): void
+  /**
+   * **按名字落一个页**：地址已经在场 ⇒ 复用它（补 `page` 露面），否则新建并打开。
+   *
+   * 一个判据供三个入口（`@` 的新建行、搜索面的创建、页候选的新建行）：地址全局唯一，
+   * 按名字建页必须先问「这个名字已经归谁」——各写一遍就会建出第二个同名块。
+   */
+  openOrCreatePage(name: string): void
   openPage(id: string): void
   /**
    * **删一块（按 id，软删可撤销）** —— 删除只有这一个入口，所有块同一份。

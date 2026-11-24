@@ -979,6 +979,32 @@ const faceEditorSlot = (): {
 }
 
 /**
+ * **按名字落一个页**：地址已经在场就复用它（补 `page` 露面），否则新建。
+ *
+ * 三个入口共用这一份判据——`@` 的「新建页面」行、搜索面无结果时的「创建」、
+ * 「新建页」候选里的新建行。地址全局唯一，任何一处按名字建页都必须先问「这个名字
+ * 已经归谁」；分头各写一遍，迟早有一处建出第二个同名块（那个块从此按名字引用不到）。
+ *
+ * 名字与页同一笔：新建走 `ensurePageInTx`，它用 `mkPageBlock` 造块 ⇒ 地址与正文同名。
+ */
+const openOrCreatePage = (name: string): void => {
+  // 归属还没问过库 ⇒ 问一次再重放（闸的语义见 `core/kb/alias-gate.ts`）
+  if (deferAliasGate(kb, name, () => openOrCreatePage(name))) return
+  let id = ''
+  try {
+    id = pageDeps.run((tx) => ensurePageInTx(kb, name, tx)?.id ?? '').result
+  } catch (e) {
+    // 名字被一个未装载的块占着 ⇒ 不新建；说一句实话
+    if (e instanceof AliasClaimError) {
+      app.toast(t('ui.toast.aliasUnloaded'), 'warn')
+      return
+    }
+    throw e
+  }
+  if (id !== '') app.openBlock(id, 'center')
+}
+
+/**
  * 搜索面的依赖：tab 宿主与诊断探针共用同一个产地。
  *
  * 这些依赖用闭包/取值函数——`run`／`scheduleSave` 在本节之后才装配（见文件顺序），
@@ -986,23 +1012,6 @@ const faceEditorSlot = (): {
  */
 const searchFaceDeps = (): SearchFaceDeps => {
   const slot = faceEditorSlot()
-  /** 搜索面无结果时的创建入口（公开形状与判据见 `searchFaceDeps` 里 `createPage` 的注释） */
-  const createPageIn = (name: string): void => {
-    // 归属还没问过库 ⇒ 问一次再重放（闸的语义见 `core/kb/alias-gate.ts`）
-    if (deferAliasGate(kb, name, () => createPageIn(name))) return
-    let id = ''
-    try {
-      id = pageDeps.run((tx) => ensurePageInTx(kb, name, tx)?.id ?? '').result
-    } catch (e) {
-      // 名字被一个未装载的块占着 ⇒ 不新建；说一句实话（搜索面的「创建」入口）
-      if (e instanceof AliasClaimError) {
-        app.toast(t('ui.toast.aliasUnloaded'), 'warn')
-        return
-      }
-      throw e
-    }
-    if (id !== '') app.openBlock(id, 'center')
-  }
 
   return {
     kb,
@@ -1038,7 +1047,7 @@ const searchFaceDeps = (): SearchFaceDeps => {
     // 晋升：把词写进 {text} 条件建查询块（与手建同一份创建路径，落森林顶层，一笔回滚）
     promote: (term) => app.createQuery(term, { where: { text: term } }),
     // 无结果的创建入口：找到或创建页（与引用浮层同一条创建路径），建好当场打开
-    createPage: createPageIn,
+    createPage: openOrCreatePage,
     copyRef: (id) => {
       void registry.invoke('core.editor/copy-block-ref', { blockId: id }, 'surface')
     },
@@ -1137,6 +1146,7 @@ const {
   showMenu,
   openAutomationMenu,
   openTrigger,
+  openPagePicker,
   refreshSelectionBar,
   showSelectionRefPicker,
   toggleColorAxis,
@@ -1910,6 +1920,10 @@ const app: App = {
   setBlockIcon: (blockId, icon) => setBlockIcon(blockId, icon),
   openBlockConfig: (blockId, opts) => panels.openBlockConfig(blockId, opts),
   openPropertiesDrawer: (blockId, focusPropId) => panels.openPropertiesDrawer(blockId, focusPropId),
+  /** 页候选（输入即找页、`↵` 建页或打开）：查空与落点都在检索那一侧，门面只转一手 */
+  openPagePicker: () => openPagePicker(),
+  /** 按名字落页（同名地址复用）：新建页候选的新建行与搜索面的「创建」同一条判据 */
+  openOrCreatePage: (name) => openOrCreatePage(name),
   setBlockType: (blockId, typeId) => applyBlockType(blockId, typeId),
   /** 复制一块到它自己后面；正文里沿用编辑器（落点结构判据），记录面走库级插入。 */
   duplicateBlock: (blockId) => {

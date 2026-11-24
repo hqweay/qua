@@ -16,7 +16,7 @@ const fx = await page.evaluate(() => {
   const inv = (name, args = {}) => q.invoke(name, args)
   const focus = (id) => q.focusBlock(id, 0)
   const sel = () => q.__editor.sel?.aBlock ?? ''
-  inv('core.page/new')
+  inv('core.page/create')
   const root = q.__editor.doc.roots[0].id
   const stub = q.__editor.doc.roots[0].children[0].id
   inv('core.editor/insert-block', { text: '名称' })

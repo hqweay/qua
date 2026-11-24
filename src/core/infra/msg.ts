@@ -133,6 +133,7 @@ export const MSG = {
   'cmd.tab.next': '下一个页签',
   'cmd.tab.prev': '上一个页签',
   'cmd.page.new': '新建页面',
+  'cmd.page.create': '新建页面（指定名字）',
   'cmd.page.open': '打开页面',
   'cmd.page.next': '下一页',
   'cmd.page.prev': '上一页',
@@ -1388,6 +1389,10 @@ export const MSG = {
   'ui.page.untitled': '无标题',
   // 空标题页的初始地址：它必须存在（在页列表里 ⇒ 至少有一个名字），但用户可以随时改
   'ui.page.untitledAlias': '未命名-{id}',
+  // 页候选（「新建页」那个键打开的面）：输入即找页；没有同名页时列「新建页面」那一行
+  'ui.page.pickerTitle': '页面',
+  'ui.page.pickerPlaceholder': '找页，或输入新名字',
+  'ui.page.pickerEmpty': '还没有页',
   /* ------------------------------------------------------------ 面包屑 / 上下文 */
   'ui.crumb.hint': '点击展开上下文 · ⌘/Ctrl 点击在新页签打开 · Shift 点击在右槽打开 · ⌘/Ctrl+Shift 点击在宽屏新页签打开',
   'ui.context.collapse': '收起上下文',
