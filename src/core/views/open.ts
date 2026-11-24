@@ -112,4 +112,12 @@ export interface OpenOpts {
   center?: 'focus' | 'keep'
   feed?: boolean
   restore?: 'saved' | 'none'
+  /**
+   * **导航收尾**：目标已经装载并画到屏上之后调用一次（装载失败不调）。
+   *
+   * 中心换屏是异步的（未装载的块先补子树），而「打开之后再对目标做一件事」的
+   * 调用方（反链栏激活、在父块中打开后定位）不能靠 rAF 猜。回调只在收尾处执行，
+   * 不参与装载判定。
+   */
+  after?: () => void
 }

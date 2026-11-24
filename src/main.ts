@@ -525,6 +525,50 @@ function dockWindowIds(device: DeviceState): string[] {
 const pendingDocs = new Map<string, Promise<void>>()
 
 /**
+ * **导航的读数与「别走丢」状态**（诊断面读，产品逻辑不读）：
+ *   · `openCalls` 外部打开次数（同一目标的递归装载不算第二次）；
+ *   · `loadAttempts` 真正去库里补子树的次数；
+ *   · `failures` 装载连续失败到上限的次数；
+ *   · `samples` 最近 50 次「点击 → 目标画上屏」的毫秒数。
+ *
+ * 计数器只回答「预取/加载态该不该做」这类问题，不参与任何导航判定。
+ */
+const navProbe = {
+  openCalls: 0,
+  loadAttempts: 0,
+  failures: 0,
+  openMs: 0,
+  openCount: 0,
+  samples: [] as number[],
+}
+/** 同一个目标连续装载失败的上限：超过就停手并说一句，不让异步循环空转 */
+const navAttempts = new Map<string, number>()
+/** 这次调用是「装载回调里的重入」还是「用户新的一次点击」：只有前者算重试 */
+const navRetry = new Set<string>()
+/** 点下到画上屏的起点（同一目标只记第一次；收尾时删） */
+const navStarted = new Map<string, number>()
+/** 每个目标自己的 pending 收尾（装载开始才建；成功/失败/放弃都要放） */
+const navEnders = new Map<string, () => void>()
+let navPendingCount = 0
+
+/**
+ * 导航装载的 pending 细线是**引用计数**：同屏可能有两处同时装载（中心 + 窗口卡），
+ * 任何一处收尾都不该把另一处的信号提前摘掉。
+ */
+function beginNavPending(): () => void {
+  navPendingCount += 1
+  chrome.setNavPending(true)
+  let ended = false
+  return () => {
+    if (ended) return
+    ended = true
+    navPendingCount -= 1
+    if (navPendingCount === 0) chrome.setNavPending(false)
+  }
+}
+
+
+/**
  * **按 id 装一批块进工作集**（导航装载的唯一咽喉）。
  *
  * 工作集装载下「`kb.get` 拿不到」只说明没装；打开/聚焦一个未装载的目标必须
@@ -1203,11 +1247,12 @@ popovers = setupAtomPopovers({
 const refPeek = createRefPeek({
   createArea: (target) => panels.createRefPeekArea(target),
   openAtBar: (id) => {
-    void registry.invoke('core.block/focus-block', { blockId: id }, 'ref-badge')
-    // 等 zoom 落定一帧：新段的挂载区实例由 renderMounts() 建好再激活
-    requestAnimationFrame(() => {
-      panels.activateRefsFor(id)
-      document.querySelector<HTMLElement>('#editor .sec-mount')?.scrollIntoView({ block: 'start' })
+    // 导航是异步的（未装载的目标先补子树）：收尾挂在这一条路由上，不再用 rAF 猜。
+    app.openBlock(id, 'center', {
+      after: () => {
+        panels.activateRefsFor(id)
+        document.querySelector<HTMLElement>('#editor .sec-mount')?.scrollIntoView({ block: 'start' })
+      },
     })
   },
 })
@@ -1685,18 +1730,77 @@ const app: App = {
    * ⚠️ `inspect` 放在最前：它是**目标自己的面**，不是「去哪」，先分流掉才不会落进导航。
    */
   openBlock: (id, action = 'center', opts) => {
+    const first = !navStarted.has(id)
+    if (first) {
+      navStarted.set(id, performance.now())
+      navProbe.openCalls += 1
+    }
+    const endPending = (): void => {
+      navEnders.get(id)?.()
+      navEnders.delete(id)
+    }
+    /** 收尾：记一次「点击 → 画上屏」，清掉重试计数与 pending，最后才跑调用方的 after。 */
+    const finish = (): void => {
+      const started = navStarted.get(id)
+      if (started !== undefined) {
+        const ms = performance.now() - started
+        navProbe.openMs += ms
+        navProbe.openCount += 1
+        navProbe.samples.push(ms)
+        if (navProbe.samples.length > 50) navProbe.samples.shift()
+        navStarted.delete(id)
+      }
+      navAttempts.delete(id)
+      navRetry.delete(id)
+      endPending()
+      if (!opts?.after) return
+      try {
+        opts.after()
+      } catch (e) {
+        console.warn('[nav] after callback failed:', e)
+      }
+    }
     // 工作集装载下「点一个未加载（或只装了裸块）的目标」＝先装子树再打开
     // （不丢点击、不把未加载当不存在，也不把「子树还没装」当成「真的没有子块」）
     if (kb.needsDoc(id)) {
-      ensureDocsLoaded([id], () => app.openBlock(id, action, opts))
+      /**
+       * 只有**装载回调里的重入**才计入重试；用户连点同一个目标不该被当成失败。
+       * 外部的第一次点击先清掉旧计数，给它一次干净的重试预算。
+       */
+      const retry = navRetry.has(id)
+      if (!retry) navAttempts.delete(id)
+      const attempts = retry ? (navAttempts.get(id) ?? 0) + 1 : 0
+      if (attempts > 0) navAttempts.set(id, attempts)
+      /**
+       * **失败不许空转**：装载没把目标补全时，回调会再次走到这里。
+       * 没有上限就是「读了失败 → 再读 → 再失败」的异步死循环——屏幕毫无反应，
+       * 也没有异常可看。三次仍不成就停手，留一句可见的话给用户。
+       */
+      if (attempts > 3) {
+        navAttempts.delete(id)
+        navRetry.delete(id)
+        navStarted.delete(id)
+        navProbe.failures += 1
+        endPending()
+        app.toast(t('ui.toast.openIncomplete'), 'warn')
+        return
+      }
+      if (!navEnders.has(id)) navEnders.set(id, beginNavPending())
+      navProbe.loadAttempts += 1
+      ensureDocsLoaded([id], () => {
+        navRetry.add(id)
+        app.openBlock(id, action, opts)
+      })
       return
     }
     if (action === 'inspect') {
       app.openPropertiesDrawer(id)
+      finish()
       return
     }
     if (action === 'dock' || action === 'dockSolo') {
       app.openInDock(id, 'right', action === 'dockSolo')
+      finish()
       return
     }
     if (action === 'tab' || action === 'tabWide') {
@@ -1704,11 +1808,38 @@ const app: App = {
       // 一次性进档只在「真的打开／切过去」时发生；档位住窗口，不跟 tab 走（布局归窗口、内容归 tab）
       const axis = openAxisOf(action)
       if (opened && axis) app.axisTo(axis)
+      finish()
       return
     }
     if (opts?.center === 'keep') app.openPage(id)
     else app.zoomTo(id, opts?.feed, opts?.restore)
+    finish()
   },
+  /**
+   * **在父块中打开并定位**：默认左键仍是打开目标本身；这一条是显式的上下文导航。
+   *
+   * 目标是顶层块／顶层页时没有父块：退回打开它自己（动作不静默失败）。
+   * 父块开好后先展开折起来的祖先，再滚到目标并闪一下——只调 reveal 会在
+   * 折叠的子树上找不到行，看起来像点了没反应。
+   */
+  openParent: (blockId) => {
+    const path = kb.pathOf(blockId)
+    if (path.length === 0 || path[path.length - 1]?.id !== blockId) return false
+    const parent = path.length > 1 ? path[path.length - 2] : undefined
+    if (!parent) {
+      app.openBlock(blockId, 'center')
+      return true
+    }
+    app.openBlock(parent.id, 'center', {
+      restore: 'none',
+      after: () => {
+        // 父块这一屏装不下目标（巨大页的窗口边界之外）⇒ 退回打开它自己，不假装定位成功
+        if (!app.revealBlock(blockId)) app.openBlock(blockId, 'center')
+      },
+    })
+    return true
+  },
+  revealBlock: (blockId) => mainEd.revealInContext(blockId),
   topWindow: (id) => topWindow(id),
   /** 「加到快捷」：缺省左槽；块菜单／命令面不认识侧槽，落点由装配层给 */
   addShortcut: (id, side) => addShortcut(side === 'right' ? 'right' : 'left', id),
@@ -2633,6 +2764,7 @@ diag = setupDiagnostics({
   activeBlock,
   pageTitle,
   nav,
+  navProbe,
   uiCtx,
   showMenu,
   openDrawerFor: popovers.openDrawerFor,

@@ -24,6 +24,12 @@ export const VIEW_HANDLERS: Record<string, Handler> = {
     app.zoomOut()
     return true
   },
+  // 默认左键仍是「打开目标本身」；这条是显式的上下文导航，落点与定位都归门面
+  'core.block/open-parent': (a, app) => {
+    const id = typeof a.blockId === 'string' && a.blockId !== '' ? a.blockId : app.ed.caretBlock()
+    if (!id) return false
+    return app.openParent(id)
+  },
   /* ---- tab ---- */
   'core.tab/new': (_a, app) => app.newTab(),
   'core.tab/close': (_a, app) => app.closeTab(),

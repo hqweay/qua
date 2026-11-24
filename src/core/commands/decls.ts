@@ -204,6 +204,7 @@ export const COMMANDS: CommandDecl[] = [
 
   /* ---- zoom（zoom 是视图配置，不是新对象，也不引入焦点栈） ---- */
   { name: 'core.block/focus-block', title: t('cmd.block.focus-block'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, feed: { type: 'boolean' }, restore: { type: 'boolean' }, newTab: { type: 'boolean' } }, keywords: ['zoom', 'focus', t('menu.kw.zoom')], actsOn: 'block' },
+  { name: 'core.block/open-parent', title: t('cmd.block.open-parent'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' } }, keywords: ['parent', 'context', 'open', 'locate'], actsOn: 'block' },
   { name: 'core.block/inspect', title: t('cmd.block.inspect'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, propId: { type: 'string' } }, keywords: ['props', 'property', 'inspect'], actsOn: 'block' },
   { name: 'core.block/zoom-out', title: t('cmd.block.zoom-out'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['zoom', 'out', 'back'] },
   { name: 'core.block/move-to', title: t('cmd.block.move-to'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { blockId: { type: 'string' }, targetId: { type: 'string' } }, keywords: ['move', 'move to', t('menu.kw.move')], actsOn: 'block' },

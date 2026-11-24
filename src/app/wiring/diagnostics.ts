@@ -108,6 +108,15 @@ export type DiagnosticsDeps = {
   activeBlock: () => Block
   pageTitle: (p: Block) => string
   nav: { back: { id: string; feed: boolean }[]; forward: { id: string; feed: boolean }[]; lock: boolean }
+  /** 导航装载的读数（计数只增；`samples` 是最近 50 次的毫秒数） */
+  navProbe: {
+    openCalls: number
+    loadAttempts: number
+    failures: number
+    openMs: number
+    openCount: number
+    samples: number[]
+  }
   uiCtx: () => CtxKeys
   showMenu: (req: MenuRequest) => void
   openDrawerFor: (kind: PanelKind) => void
@@ -849,6 +858,7 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
       editor: { ...mainEd.perfProbe },
       render: { ...mainEd.render.probe },
       store: { ...mainEd.store.probe },
+      nav: { ...deps.navProbe, samples: [...deps.navProbe.samples] },
       revision: mainEd.store.revision,
       flattenStacks: [...treeProbe.flattenStacks],
     }),
@@ -869,6 +879,12 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
       for (const k of Object.keys(mainEd.render.probe) as (keyof typeof mainEd.render.probe)[]) mainEd.render.probe[k] = 0
       mainEd.store.probe.rebuildCount = 0
       mainEd.store.probe.notifyCount = 0
+      deps.navProbe.openCalls = 0
+      deps.navProbe.loadAttempts = 0
+      deps.navProbe.failures = 0
+      deps.navProbe.openMs = 0
+      deps.navProbe.openCount = 0
+      deps.navProbe.samples.length = 0
     },
     /**
      * 自检用：把最近一次事务的 op 位置**派生**成下标（`prev` 现在排在兄弟列表第几位）。

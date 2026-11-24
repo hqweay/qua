@@ -67,6 +67,7 @@ import {
   type UndoKind,
   type VisibleRow,
 } from '../../core/index.ts'
+import { indexPathOf } from '../../core/infra/index-port.ts'
 import { copyTextOf, resolveRef, type FindBlock } from '../../core/relations/ref.ts'
 import type { RelationEdge } from '../../core/relations/relations.ts'
 import { inputSession } from './input-session.ts'
@@ -1509,6 +1510,29 @@ export class BlockEditor {
 
   reveal(id: string): void {
     this.render.reveal(id)
+  }
+
+  /**
+   * 把某一块**展开到可见并滚进视口**。
+   *
+   * 「在父块中打开」的收尾：父块那一屏可能把目标藏在一个折起来的祖先里 ——
+   * 只调 `reveal` 会静默找不到行（`blockEl` 为空），看起来像点了没反应。
+   * 先沿索引的祖先链展开折叠，再走同一份 reveal（滚到视口中央 ＋ 闪一下）。
+   *
+   * 返回 `false` ＝ 这一块不在当前这一屏（父块或窗口边界之外）；调用方可以
+   * 退回「打开目标本身」，不要假装定位成功。
+   */
+  revealInContext(id: string): boolean {
+    const path = indexPathOf(this.store.index, id)
+    let unfolded = false
+    for (const ancestor of path.slice(0, -1)) {
+      if (!isFolded(this.doc, ancestor.id)) continue
+      unfoldBlock(this.doc, ancestor.id)
+      unfolded = true
+    }
+    if (unfolded) this.renderAll()
+    this.reveal(id)
+    return this.blockEl(id) !== null
   }
 
   pulseBlocks(ids: readonly string[]): void {

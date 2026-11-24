@@ -640,6 +640,19 @@ export interface App {
    */
   openBlock(id: string, place?: OpenAction, opts?: OpenOpts): void
   /**
+   * **在父块中打开并定位**：中心换成目标的父块，再把目标滚进视口闪一下。
+   *
+   * 默认左键仍然是「打开目标本身」；这一条是显式的上下文导航，不占点击修饰键。
+   * 目标没有父块（顶层页／顶层块）时退回打开它自己，不让动作静默失败。
+   * 返回 `false` ＝ 目标解析不到（调用方按缺入口处理，不假装成功）。
+   */
+  openParent(blockId: string): boolean
+  /**
+   * 把某一块**展开到可见并滚进中心视口**（折叠的祖先会先展开）。
+   * 返回 `false` ＝ 这一块不在中心主编辑器的这一屏里（调用方可退回打开它自己）。
+   */
+  revealBlock(blockId: string): boolean
+  /**
    * **打开某一天的日记**（日历/复盘空天格子的唯一入口）。
    *
    * 与 `openBlock(journalId(date))` 的区别：那一天可能还不存在，而 `openWindow` 对

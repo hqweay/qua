@@ -1589,6 +1589,7 @@ export const MSG = {
   'ui.atomMenu.restoreTarget': '恢复「{name}」',
   'ui.atomMenu.rebuildTarget': '新建同名块「{name}」',
   'ui.atomMenu.openLink': '打开链接',
+  'ui.atomMenu.openInParent': '在父块中打开并定位',
   'ui.atomMenu.details': '查看详情',
   'ui.popover.assetHash': '资产 hash（内容寻址）',
   'ui.popover.size': '尺寸',
@@ -1645,6 +1646,7 @@ export const MSG = {
   'ui.boot.saveFailed': '保存失败：{message}。本次改动没有写入本地存储。',
 
   /* ---------------------------------------------------------------- toast */
+  'ui.toast.openIncomplete': '打不开这一块（装载没有完成），再点一次可重试',
   'ui.toast.blockDuplicated': '已复制块（含子树，**新 id**）',
   'ui.toast.deleted': '已删除',
   'ui.toast.refRestored': '已恢复引用目标',
@@ -1755,6 +1757,7 @@ export const MSG = {
   'menu.item.devTools': '开发者工具',
   'menu.item.actualSize': '实际大小',
   'cmd.block.focus-block': '聚焦到此块（zoom in）',
+  'cmd.block.open-parent': '在父块中打开并定位',
   'cmd.block.inspect': '看属性（侧边抽屉）',
   'cmd.block.zoom-out': '退回上一级',
   'menu.kw.zoom': '聚焦',

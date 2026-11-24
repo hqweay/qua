@@ -98,6 +98,11 @@ export interface Chrome {
   renderEmptyHint: (roots: Block[]) => void
   /** 启动级持久告警（数据只读 / 保存失败）；传 null 收起 */
   showNotice: (text: string | null) => void
+  /**
+   * **导航装载中的细线**：只在装载超过一帧（120ms）还没回来时才可见，
+   * 短装载不会闪一下。它只染顶栏下缘，不占布局、不改任何按钮的可用态。
+   */
+  setNavPending: (on: boolean) => void
 }
 
 function must<T extends HTMLElement>(id: string): T {
@@ -112,6 +117,7 @@ export function createChrome(onCrumb?: (blockId: string, place: OpenAction) => v
   const trailEl = must('crumbs-trail')
   const scrollEl = must('scroll')
   const editorEl = must('editor')
+  const topbarEl = must('topbar')
   const emptyHintEl = must('empty-hint')
   const noticeEl = must('boot-notice')
   const inspectCardEl = must('inspect-card')
@@ -198,6 +204,10 @@ export function createChrome(onCrumb?: (blockId: string, place: OpenAction) => v
     renderDebugState,
     renderEmptyHint,
     showNotice,
+    setNavPending: (on: boolean) => {
+      if (on) topbarEl.dataset.navPending = '1'
+      else delete topbarEl.dataset.navPending
+    },
     editorEl,
     scrollEl,
     blankAreaEl: scrollEl,

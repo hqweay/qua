@@ -198,6 +198,8 @@ export const BINDINGS: Binding[] = [
    */
   { command: 'core.editor/clear-closure', kind: 'menu', when: 'blockMenuTarget && blockType == "closure"', group: 'block/2-structure', order: 15, layer: 'core' },
   { command: 'core.editor/toggle-collapse', kind: 'menu', when: 'blockMenuTarget && blockFoldable', group: 'block/2-structure', order: 20, layer: 'core', label: t('menu.label.toggleCollapse') },
+  // 「在父块中打开」是上下文导航：顶层块没有父块，隐藏这一行；默认左键仍是打开它自己
+  { command: 'core.block/open-parent', kind: 'menu', when: 'blockMenuTarget && !blockIsRoot', group: 'block/2-structure', order: 25, layer: 'core', icon: 'lucide:corner-up-left' },
   { command: 'core.editor/move-block-up', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 30, layer: 'core' },
   { command: 'core.editor/move-block-down', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 40, layer: 'core' },
   // 「新建子块」与缩进相邻：两者是「让这块有子块」仅有的两条路径，菜单里也放一起

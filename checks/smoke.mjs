@@ -33844,6 +33844,66 @@ await check('T357 检视卡加/摘归属：面板入口写进 _belongsTo，chip 
   return `面板「＋」选 #归属探针 ⇒ _belongsTo 写进去、chip 出现；点 × ⇒ 边与 chip 一起没了`
 })
 
+/**
+ * T358｜**在父块中打开并定位**：默认左键打开目标本身，这一条是显式的上下文导航。
+ *
+ * 判据落在「中心换成了谁」＋「目标行是否真的可见并给了落地反馈」两半：
+ *   · 只断言 activeId ⇒ 目标被折叠祖先藏住时照样绿；
+ *   · 只断言行在 DOM ⇒ 中心没换成父块也照样绿。
+ */
+await check('T358 在父块中打开：子块 ⇒ 中心换成父块，目标行可见并闪一下', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  await page.waitForTimeout(250)
+
+  // 首屏里找一对真实的父子行；种子首屏若没有嵌套，就现建一对（父块 → 子块）
+  const pair = await page.evaluate(async () => {
+    const ed = window.__qua.__editor
+    const findPair = () => {
+      const rows = ed.rows()
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i]
+        if (row.depth === 0) continue
+        for (let j = i - 1; j >= 0; j--) {
+          if (rows[j].depth === row.depth - 1) return { parent: rows[j].block.id, child: row.block.id }
+        }
+      }
+      return null
+    }
+    const found = findPair()
+    if (found) return found
+    const root = ed.doc.roots[0]
+    if (!root) return null
+    await window.__qua.invoke('core.tree/insert-child', { parentId: root.id, text: '父块定位探针' })
+    const mid = window.__qua.allBlocks().find((b) => b.text === '父块定位探针')?.id
+    if (!mid) return null
+    await window.__qua.invoke('core.tree/insert-child', { parentId: mid, text: '子块定位探针' })
+    const child = window.__qua.allBlocks().find((b) => b.text === '子块定位探针')?.id
+    return child ? { parent: mid, child } : null
+  })
+  assert(pair, `前置：应能拿到一对父子块：${JSON.stringify(pair)}`)
+
+  await page.evaluate((id) => window.__qua.invoke('core.block/open-parent', { blockId: id }), pair.child)
+  await page.waitForTimeout(350)
+  const out = await page.evaluate(({ child }) => {
+    const el = document.querySelector(`#editor .blk[data-block-id="${child}"]`)
+    return {
+      active: window.__qua.snapshot().activeId,
+      childVisible: Boolean(el),
+      flash: el?.dataset.flash ?? '',
+      nav: window.__qua.perf().nav,
+    }
+  }, pair)
+  assert(out.active === pair.parent, `open-parent 应把中心换成父块：${out.active} ≠ ${pair.parent}`)
+  assert(out.childVisible, `父块这一屏应能看见目标行（折叠的祖先要展开）：${JSON.stringify(out)}`)
+  assert(out.flash === '1', `定位应收尾在目标行上闪一下：${JSON.stringify(out)}`)
+  assert(out.nav.openCalls >= 1 && out.nav.openCount >= 1, `导航读数应记下这一次打开：${JSON.stringify(out.nav)}`)
+
+  await ctx.close()
+  return `子块 ⇒ 父块 ${pair.parent.slice(-6)} 成为当前对象，子块可见并闪了一下`
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

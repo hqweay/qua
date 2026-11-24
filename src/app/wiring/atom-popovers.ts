@@ -327,6 +327,7 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
       const isObj = targetBlock !== undefined && tagIdsOf(targetBlock).length > 0
       if (target) {
         add('atom/open', t('ui.popover.openPage'), 'core.block/focus-block', { blockId: target }, 'lucide:arrow-up-right')
+        add('atom/open-parent', t('ui.atomMenu.openInParent'), 'core.block/open-parent', { blockId: target }, 'lucide:corner-up-left')
         add('atom/open-dock', t('cmd.dock.open-block'), 'core.dock/open-block', { blockId: target, side: 'right' }, 'lucide:panel-right')
       }
       /**
