@@ -215,6 +215,8 @@ export class Layers {
   private popTriggerKey: string | undefined = undefined
   /** 抽屉打开之前焦点在哪（同上） */
   private drawerFocus: FocusReturn | null = null
+  /** 这一张抽屉是从**宿主面**里开出来的（压着宿主；Esc 先收它，见构造器里的 Esc 分层） */
+  private drawerOverHost = false
   /** 确认框（背板 ＋ 盒子）；打开之前的焦点同上 */
   private confirmEl: HTMLElement | null = null
   private confirmFocus: FocusReturn | null = null
@@ -294,6 +296,17 @@ export class Layers {
           e.preventDefault()
           e.stopPropagation()
           this.closeConfirm()
+          return
+        }
+        /**
+         * **宿主面上的抽屉压着宿主**：这时视觉上最上面的是抽屉，`Esc` 先收它。
+         * 普通抽屉在下、浮层在上（抽屉开在浮层之前的常态），照旧先收浮层 ——
+         * 判据是**视觉层级**，不是打开的先后。
+         */
+        if (this.drawerEl && this.drawerOverHost) {
+          e.preventDefault()
+          e.stopPropagation()
+          this.closeDrawer()
           return
         }
         if (this.popEl) {
@@ -1029,8 +1042,15 @@ export class Layers {
 
   openDrawer(title: string, render: (host: HTMLElement) => void): void {
     this.closeDrawer(false)
+    /**
+     * **宿主面上的抽屉**：搜索面里点一行属性会开属性抽屉——它是在这一面里做事，
+     * 不能压到宿主底下去（搜索浮层的 z 比抽屉高，整块抽屉会被盖住＝点了没反应）。
+     * 与菜单同一条判据（见 `openMenu`），只是派生面换成了抽屉。
+     */
+    const overHost = this.popEl !== null && this.popHostsMenus
     const box = document.createElement('div')
     box.className = 'drawer'
+    if (overHost) box.classList.add('drawer-over-host')
     box.setAttribute('role', 'dialog')
     const head = document.createElement('div')
     head.className = 'drawer-head'
@@ -1048,12 +1068,14 @@ export class Layers {
     box.append(head, body)
     document.body.appendChild(box)
     this.drawerEl = box
+    this.drawerOverHost = overHost
     this.drawerFocus = captureFocus()
   }
 
   closeDrawer(animate = true): void {
     const box = this.drawerEl
     this.drawerEl = null
+    this.drawerOverHost = false
     // 状态立即归零（drawerOpen/Esc 判据不再看它）；DOM 走完退场动画再摘。
     // 紧接着要开下一张（openDrawer 先关再开）时不动画：两张同屏交叉滑没有意义。
     if (box) {

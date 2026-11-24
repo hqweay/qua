@@ -34175,6 +34175,139 @@ await check('T360 搜索浮层里删页：确认框压在浮层之上、Esc 先�
   return '确认框压住宿主、Esc 先收问句'
 })
 
+/**
+ * **T361：搜索浮层里删掉「唯一那一块」——不补空行、不抢正文。**
+ *
+ * 预览的 `doc.roots` 是**结果集**。走摘行那条路时 `structural.remove` 的 rootRemoveFill
+ * 会给它补一块空根（那块**真落进库**），随后 `structTail` → `focusSourceInMain` 把中心
+ * 抢到新空块上——用户看到的是「删了，人却被丢进正文一个新空行」。判据三条：
+ * 库体量减一（没补块）、当前对象没换（没导航）、浮层还在；外加一次撤销把块带回来。
+ */
+await check('T361 搜索浮层里删唯一一块：库体量减一、不补空行、不抢正文、浮层留着、可撤销', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  await page.waitForTimeout(150)
+  // 空块＝recents 里能选到的「一个空块」（原报障就是这么一块）
+  const probeId = await plantProbe(page, '')
+  assert(probeId, '前置：空块要建出来')
+
+  await page.evaluate(() => window.__qua.invoke('core.search/open', {}, 'api'))
+  await page.waitForSelector('.popover.search-overlay .search-row', { timeout: 4000 })
+  const picked = await page.evaluate((id) => {
+    const row = document.querySelector(`.popover.search-overlay .search-row[data-search-row="${id}"] .search-row-select`)
+    if (row) row.click()
+    return Boolean(row)
+  }, probeId)
+  assert(picked, '前置：recents 里要有这一块')
+  await page.waitForFunction(
+    (id) => document.querySelector('.popover.search-overlay .search-face-preview .blk[data-block-id]')?.dataset.blockId === id,
+    probeId,
+    { timeout: 3000 },
+  )
+  await page.waitForTimeout(120)
+  const before = await page.evaluate(() => ({
+    total: window.__qua.allBlocks().length,
+    activeId: window.__qua.snapshot().activeId,
+    empties: window.__qua.allBlocks().filter((b) => b.text.trim() === '' && b.roles.length === 0).map((b) => b.id),
+  }))
+
+  await page.click(`.popover.search-overlay .search-face-preview .blk[data-block-id="${probeId}"] .tx`, { button: 'right' })
+  await page.waitForSelector('.layer [data-id^="core.block/delete"]', { timeout: 3000 })
+  await page.click('.layer [data-id^="core.block/delete"]')
+  await page.waitForTimeout(500)
+
+  const after = await page.evaluate(({ pid, total, activeId, empties }) => {
+    const now = window.__qua.allBlocks()
+    return {
+      overlay: Boolean(document.querySelector('.popover.search-overlay')),
+      deletedStillVisible: Boolean(now.find((b) => b.id === pid)),
+      total: now.length,
+      totalWas: total,
+      activeId: window.__qua.snapshot().activeId,
+      activeIdWas: activeId,
+      newEmpties: now.filter((b) => b.text.trim() === '' && b.roles.length === 0 && !empties.includes(b.id)).map((b) => b.id),
+      previewNow: document.querySelector('.popover.search-overlay .search-face-preview .blk[data-block-id]')?.dataset.blockId ?? null,
+    }
+  }, { pid: probeId, total: before.total, activeId: before.activeId, empties: before.empties })
+  assert(after.overlay, `删这一块不该把搜索浮层带走：${JSON.stringify(after)}`)
+  assert(!after.deletedStillVisible, `块要真的删掉：${JSON.stringify(after)}`)
+  assert(after.total === after.totalWas - 1, `库体量只减一（没补一块空根）：${JSON.stringify(after)}`)
+  assert(after.newEmpties.length === 0, `不该凭空多出空块：${JSON.stringify(after)}`)
+  assert(after.activeId === after.activeIdWas, `中心对象不该被换成补出来的空块：${JSON.stringify(after)}`)
+  assert(after.previewNow !== probeId, `预览要换到下一条（不是继续画已删的那块）：${JSON.stringify(after)}`)
+
+  // 一次撤销把块带回可见集（走库级软删，就一步可回）
+  await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+  await page.waitForTimeout(350)
+  const undone = await page.evaluate((id) => ({
+    back: Boolean(window.__qua.allBlocks().find((b) => b.id === id)),
+    overlay: Boolean(document.querySelector('.popover.search-overlay')),
+  }), probeId)
+  assert(undone.back, `一次撤销应把块带回来：${JSON.stringify(undone)}`)
+  assert(undone.overlay, `撤销也不该关掉搜索浮层：${JSON.stringify(undone)}`)
+
+  await ctx.close()
+  return '删唯一一块：-1 无补块、不换当前对象、浮层留着、⌘Z 复原'
+})
+
+/**
+ * **T362：搜索浮层里开属性抽屉——抽屉压在宿主之上，Esc 先收抽屉。**
+ *
+ * 搜索预览里点一行属性会打开属性抽屉（`.drawer` z=65）。搜索浮层是 `.popover`（z=70），
+ * 抽屉会被整块盖住——窄窗口里几乎完全看不见，读作「点了没反应」。派生面的层级判据
+ * 与菜单同一份：宿主面上的面住到 `--ui-z-over-host`，Esc 按**视觉层级**退。
+ */
+await check('T362 搜索浮层里开属性抽屉：抽屉压在宿主之上、Esc 先收抽屉、浮层还在', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  await page.waitForTimeout(150)
+  await page.evaluate(() => window.__qua.invoke('core.search/open', {}, 'api'))
+  await page.waitForSelector('.popover.search-overlay .search-row', { timeout: 4000 })
+  const pid = await page.evaluate(() => document.querySelector('.popover.search-overlay .search-face-preview .blk[data-block-id]')?.dataset.blockId ?? '')
+  assert(pid, '前置：预览里要有一块')
+
+  const opened = await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), pid)
+  assert(opened?.ok === true, `前置：属性抽屉要打开：${JSON.stringify(opened)}`)
+  await page.waitForSelector('.drawer', { timeout: 3000 })
+  await page.waitForTimeout(150)
+
+  const st = await page.evaluate(() => {
+    const drawer = document.querySelector('.drawer')
+    const ov = document.querySelector('.popover.search-overlay')
+    const rd = drawer?.getBoundingClientRect()
+    const ro = ov?.getBoundingClientRect()
+    let hit = null
+    if (rd && ro) {
+      // 两块矩形的交集里取一点：只有抽屉压着浮层，这一点才命中抽屉
+      const x = (Math.max(rd.left, ro.left) + Math.min(rd.right, ro.right)) / 2
+      const y = (Math.max(rd.top, ro.top) + Math.min(rd.bottom, ro.bottom)) / 2
+      hit = document.elementFromPoint(x, y)
+    }
+    return {
+      overlay: Boolean(ov),
+      drawer: Boolean(drawer),
+      drawerOnTop: Boolean(hit?.closest?.('.drawer')),
+      hit: hit?.className ?? null,
+    }
+  })
+  assert(st.overlay, `开属性抽屉不该拆掉搜索浮层：${JSON.stringify(st)}`)
+  assert(st.drawerOnTop, `抽屉要压在宿主浮层之上（否则整块被盖住）：${JSON.stringify(st)}`)
+
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !document.querySelector('.drawer'), null, { timeout: 3000 })
+  assert(
+    await page.evaluate(() => Boolean(document.querySelector('.popover.search-overlay'))),
+    'Esc 第一下只收抽屉，搜索浮层还在',
+  )
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !document.querySelector('.popover.search-overlay'), null, { timeout: 3000 })
+
+  await ctx.close()
+  return '抽屉压住宿主、Esc 先收抽屉'
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

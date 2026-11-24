@@ -2069,15 +2069,16 @@ const app: App = {
        * **焦点不许逃出浮层**：`layerOpen()` 只停命令派发，挡不住 Tab／点击把焦点
        * 交给覆盖层之外——那之后按键会落到底下的编辑器上（用户看不到，却在改正文）。
        *
-       * ⚠️ 判据不是「在不在 `box` 内」：块菜单、`#` 标签选择器、确认框这些**派生覆盖层**
-       * 挂在 `body`（`.layer` / `.selbar` / `.confirm-backdrop`），焦点一进去就把搜索浮层
-       * 关掉——用户只是点了个菜单或确认了一句，整个搜索面却消失了。所以放行本浮层的派生覆盖层。
+       * ⚠️ 判据不是「在不在 `box` 内」：块菜单、`#` 标签选择器、属性抽屉、确认框这些
+       * **派生覆盖层**挂在 `body`（`.layer` / `.selbar` / `.drawer` / `.confirm-backdrop`），
+       * 焦点一进去就把搜索浮层关掉——用户只是点了个菜单、开了一下属性或确认了一句，
+       * 整个搜索面却消失了。所以放行本浮层的派生覆盖层。
        */
       onFocusIn = (e) => {
         const target = e.target as Node | null
         if (!target) return
         if (box.contains(target)) return
-        if (target instanceof Element && target.closest('.layer, .selbar, .confirm-backdrop')) return
+        if (target instanceof Element && target.closest('.layer, .selbar, .drawer, .confirm-backdrop')) return
         layers.closePopover()
       }
       document.addEventListener('focusin', onFocusIn, true)

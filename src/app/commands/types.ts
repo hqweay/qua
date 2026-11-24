@@ -47,6 +47,18 @@ export interface PageDeps {
    */
   spliceOut: (id: string) => boolean
   /**
+   * 这一块是**派生面**（`structuralScope === 'roots'`：搜索预览、查询结果、页签身体
+   * 这类「根＝结果集」的编辑器）此刻装载的**唯一根**吗。
+   *
+   * 删除判据用它：那一面没有「可写落点」要补——摘行会补出来的那块空根是**真落进库**的
+   * （`structural.remove` 的 rootRemoveFill），删一块变两块；而面自己会换下一条
+   * （预览的 `onDrop`、视图的回落），所以这种删除走库级软删，不摘行、不换根。
+   *
+   * ⚠️ 与 `rootIds`（中心编辑器）不是一回事：删的是**哪一台编辑器里**的那一行，
+   * 就按**那一台**的根算。
+   */
+  derivedRoot: (id: string) => boolean
+  /**
    * 插一棵子树（`block` 自带 children）——与 `removeBlock` 对称的**结构写入口**。
    *
    * 命令层不许自己 `blocks().push`：结构写必须走事务产 op，否则「这块在库里」

@@ -69,7 +69,14 @@ interface Stub {
  */
 function stub(
   forest: Block[],
-  opts: { pages?: Block[]; activeId?: string; roots?: string[]; parent?: (id: string) => Block | undefined } = {},
+  opts: {
+    pages?: Block[]
+    activeId?: string
+    roots?: string[]
+    parent?: (id: string) => Block | undefined
+    /** 「这一块是派生面（根＝结果集）此刻的唯一根」：模拟搜索预览/查询结果那一台编辑器 */
+    derivedRoot?: (id: string) => boolean
+  } = {},
 ): Stub {
   const log: string[] = []
   /** 活的森林与页清单：删掉就从两个清单里退场（读门面就是这么回答的，软删的块不算页） */
@@ -83,7 +90,11 @@ function stub(
       pages: () => pages,
       parentOf: (id: string) => opts.parent?.(id),
     },
-    spliceOut: () => false,
+    spliceOut: () => {
+      log.push('splice')
+      return false
+    },
+    derivedRoot: (id) => opts.derivedRoot?.(id) ?? false,
     removeBlock: (id: string) => {
       log.push(`remove:${id}`)
       live = live.filter((b) => b.id !== id)
@@ -195,6 +206,25 @@ test('聚焦根是顶层块（没有父块）⇒ 回落到页清单三档', () =
   deleteCommands(s.deps, landing(s)).deleteBlock(lone.id)
   assert.ok(s.log.includes(`active:${other.id}`), '没有父块就用页清单兜底')
   assert.ok(!s.log.includes('today'), '还有页就不回今日')
+})
+
+test('派生面里的唯一根：库级软删，不摘行、不换落点（删搜索结果不该补一块空行）', () => {
+  /**
+   * 搜索预览/查询结果这类面的 `doc.roots` 是**结果集**，「删这一行」等于删这块内容。
+   * 摘行那条路会给它补一块空根（`structural.remove` 的 rootRemoveFill：补的块真落进库），
+   * 还会 structTail 到新块上 → `focusSourceInMain` 把中心抢过去。所以这种删除只做软删。
+   */
+  const content = mkBlock('内容块')
+  const other = mkBlock('别处')
+  const s = stub([content, other], { derivedRoot: (id) => id === content.id })
+  const cmds = deleteCommands(s.deps, landing(s))
+  assert.equal(cmds.deleteBlock(content.id), true)
+  assert.ok(s.log.includes(`remove:${content.id}`), `走库级软删：${JSON.stringify(s.log)}`)
+  assert.ok(!s.log.includes('splice'), `不摘行（摘行会补一块真落进库的空根）：${JSON.stringify(s.log)}`)
+  assert.ok(
+    !s.log.some((x) => x.startsWith('active:') || x.startsWith('load:') || x === 'today' || x.startsWith('parent:')),
+    `不换落点、不抢中心：${JSON.stringify(s.log)}`,
+  )
 })
 
 test('journalId 是确定性派生的：删除后复活靠它认同一块（这里只钉住「同一天同一个 id」）', () => {

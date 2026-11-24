@@ -639,6 +639,21 @@ export function setupPages(deps: PagesDeps) {
       const ed = deps.getEd()
       return locate(ed.doc, id) !== null && ed.struct.remove(id)
     },
+    /**
+     * 派生面（根＝结果集）里的**唯一根**：删除不该摘行（摘行会给它补一块空根，
+     * 那块是**真落进库**的），也不该换根（换根会把中心抢过去）。判据落在**当前活动
+     * 编辑器**上——删的是哪一台里的那一行，就按那一台的根算。`allowRootRemove`
+     * 关掉的岛（侧槽窗口的钉锚）不在此列：那类面的收尾是关窗，不是删块。
+     */
+    derivedRoot: (id) => {
+      const ed = deps.getEd()
+      return (
+        ed.structuralScope === 'roots' &&
+        ed.allowRootRemove &&
+        ed.doc.roots.length === 1 &&
+        ed.doc.roots[0]?.id === id
+      )
+    },
     insertBlock: (block, parentId, index) => {
       // 与 `removeBlock` 对称的结构写入口：插一棵子树（含自带的首子块），
       // op 由事务产出——每个后代报它们自己的 parent/index，换库后行行有落点。

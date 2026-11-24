@@ -84,6 +84,20 @@ export function deleteCommands(d: PageDeps, x: DeleteDeps): Pick<App, 'deleteBlo
       d.saveNow()
       return true
     }
+    /**
+     * **派生面（根＝结果集）里的唯一根**：搜索预览、查询结果这类面，删掉唯一那一行
+     * 不该补空位——`structural.remove` 补的空根是**真落进库**的（删一块变两块），
+     * 换根还会把中心编辑器抢过去（用户从搜索结果里删一块，人被丢进正文一个新空行）。
+     * 面自己会换下一条（预览 `onDrop`、视图回落），所以这里走库级软删：不摘行、不导航。
+     * 放在 `spliceOut` 之前——那条路正是补空根的地方。
+     */
+    if (d.derivedRoot(b.id) && removableBySplice(b)) {
+      d.removeBlock(b.id)
+      d.refreshList()
+      d.refreshTitle()
+      d.saveNow()
+      return true
+    }
     // ① 这一屏里的行：编辑器摘。装载根也走这里——它自己补空位/换根。
     if (d.spliceOut(b.id)) return true
     // ②③ 摘不到的（有身份的装载根、或根本不在这一屏）：库级软删 ＋ 落点
