@@ -21511,15 +21511,14 @@ await check('T208 两段式实例选择：⇧↵ 进成员搜索，新实例的�
 
 /**
  * **可写容器至少一格**：journal 的日期行只读，一天没有看得见的子块就**没有地方落光标**
- * （「打得开却打不了字」）。删除恰恰能造出这个状态，所以补格发生在写出口：删与补是同一笔。
- *
- * 这条断言在旧实现上必然红：删除是**原位软删**，块还在 `children` 里 ⇒
- *   · `children.length` 说「有一个孩子」，屏幕上却一行都没有；
- *   · 「点空白复用末尾空块」抓到那个看不见的块 ⇒ `placeCaret` 找不到节点、静默返回；
- *   · 装载边界也判 `children.length === 0` ⇒ 重开一次也补不回来。
+ * （「打得开却打不了字」）。写入漏斗（`keepWritableSlots`）在任何一次写之后补格；
+ * 但「删除」是最常见的造出这个状态的入口，静默删了再补 = 「删了又回来」。
+ * 所以那一个块**不许删**：删除入口先拒绝并说清原因，库里这一块原样留着、仍能直接打字。
+ * T363 钉的是菜单那一行写明原因且点不动、命令拒绝并 toast；本条钉的是「留着的这一格
+ * 真的还能写、重开不多补、存量全软删的天打开仍自愈」——三者是同一不变量的三个面。
  */
 await check(
-  'T209 删掉 journal 天最后一个子块 ⇒ 同一笔事务补一格并落光标（能直接打字）；⌘Z 一次回到删之前；重开不再补第二格；存量「子块全软删」的天打开即修',
+  'T209 journal 天最后一个子块删不掉：原块留着且能直接打字、不许补第二格；存量「子块全软删」的天打开仍自愈一格',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -21548,42 +21547,27 @@ await check(
     )
     const only = before.kids[0].id
 
-    // 删掉唯一那一格
+    // 删掉唯一那一格：命令层拒绝，原块原样留着（不软删、不换块、不补格）
     await page.evaluate((id) => window.__qua.focusBlock(id, 0), only)
-    await page.evaluate(() => window.__qua.invoke('core.block/delete'))
+    const refused = await page.evaluate((id) => window.__qua.invoke('core.block/delete', { blockId: id }), only)
     await page.waitForTimeout(250)
     const after = await read(date)
-    const live = after.kids.filter((k) => !k.deleted)
-    assert(live.length === 1, `删完之后应仍有恰好一格可写（而不是零格）：${JSON.stringify(after.kids)}`)
-    const fresh = live[0].id
-    assert(fresh !== only, `补的应是一块新块（旧的那块进回收站）：${JSON.stringify(after.kids)}`)
-    assert(after.sel === fresh, `光标应落在补出来的那一格：${JSON.stringify({ sel: after.sel, fresh })}`)
+    assert(refused?.handled === false, `最后一块的删除要被拒绝：${JSON.stringify(refused)}`)
+    assert(
+      after.kids.length === 1 && after.kids[0].id === only && !after.kids[0].deleted,
+      `拒绝就不许动库：原块原样留着（不软删、不补一块新的）：${JSON.stringify(after.kids)}`,
+    )
+    assert(
+      JSON.stringify(after.ops) === JSON.stringify(before.ops),
+      `拒绝走不到写出口，lastOps 停在打开那一笔（不是「删＋补」同笔）：${JSON.stringify({ before: before.ops, after: after.ops })}`,
+    )
     assert(
       after.rows.filter((id) => id !== after.dayId).length === 1,
-      `屏幕上应有一行可写的子块（日期行之外）：${JSON.stringify(after.rows)}`,
-    )
-    // 同**一笔**事务：删（exist）＋ 补（upsert），一次 ⌘Z 就能整笔回退
-    assert(
-      after.ops.length === 2 &&
-        after.ops.some((o) => o.e === 'block' && o.op === 'exist') &&
-        after.ops.some((o) => o.e === 'block' && o.op === 'upsert' && o.parent === after.dayId),
-      `删除与补格应同属一笔事务（exist ＋ upsert{parent:天块}）：${JSON.stringify(after.ops)}`,
+      `屏幕上仍是一行可写子块（日期行之外）：${JSON.stringify(after.rows)}`,
     )
 
-    // 一次 ⌘Z：回到删之前（旧块回来、补的那格消失）
-    await page.keyboard.press(kbd('mod+z'))
-    await page.waitForTimeout(300)
-    const undone = await read(date)
-    const liveBack = undone.kids.filter((k) => !k.deleted)
-    assert(
-      liveBack.length === 1 && liveBack[0].id === only,
-      `一次撤销应整笔回到删之前（只剩原来那一格）：${JSON.stringify(undone.kids)}`,
-    )
-
-    // 再删一次，然后**直接打字**：补出来的那格是真的能写，不是「看得见、打不进」
+    // 原块真的能直接打字（不是「看得见、打不进」）
     await page.evaluate((id) => window.__qua.focusBlock(id, 0), only)
-    await page.evaluate(() => window.__qua.invoke('core.block/delete'))
-    await page.waitForTimeout(250)
     await page.keyboard.type('甲')
     await page.waitForTimeout(250)
     const typed = await page.evaluate((dt) => {
@@ -21593,7 +21577,7 @@ await check(
         .filter((b) => !b.props?._deletedAt)
         .map((b) => (b.content ?? []).filter((r) => r.t === 'text').map((r) => r.v).join(''))
     }, date)
-    assert(typed.length === 1 && typed[0] === '甲', `补出来的那一格应能直接打字：${JSON.stringify(typed)}`)
+    assert(typed.length === 1 && typed[0] === '甲', `留着的那一格应能直接打字：${JSON.stringify(typed)}`)
 
     // 重开这一天：已有的活子块 ⇒ 零补格（别每次打开都多一块）
     const beforeReopen = await page.evaluate(() => window.__qua.lastOps())
@@ -21613,7 +21597,7 @@ await check(
       `重开零事务（已有活子块就不补）：${JSON.stringify({ before: beforeReopen.length, after: reopened.ops.length })}`,
     )
 
-    // 存量库：天在库里、子块全被软删（旧实现留下的状态）⇒ 打开这一次就修好
+    // 存量库：天在库里、子块全被软删（旧实现留下的状态）⇒ 打开这一次就写出口自愈补一格
     const repaired = await page.evaluate((dt) => {
       window.__qua.forceForest((forest) => {
         const day = forest.find((b) => b.props?._date === dt)
@@ -21637,7 +21621,7 @@ await check(
     )
 
     await ctx.close()
-    return `删空 ⇒ 同笔 [exist ＋ upsert] 补一格、光标在内、能直接打字；一次 ⌘Z 整笔回退；重开零事务；存量软删天打开即补`
+    return '最后一块删不掉：原块留着能直接打字、零事务；重开不补第二格；存量全软删的天打开自愈一格'
   },
 )
 
