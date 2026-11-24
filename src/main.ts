@@ -1839,7 +1839,7 @@ const app: App = {
     })
     return true
   },
-  revealBlock: (blockId) => mainEd.revealInContext(blockId),
+  revealBlock: (blockId) => mainEd.landInContext(blockId),
   topWindow: (id) => topWindow(id),
   /** 「加到快捷」：缺省左槽；块菜单／命令面不认识侧槽，落点由装配层给 */
   addShortcut: (id, side) => addShortcut(side === 'right' ? 'right' : 'left', id),

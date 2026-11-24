@@ -174,6 +174,26 @@
     background: transparent;
   }
 }
+/* 落地闪光：从别处「在父块中打开」到目标行。与 data-flash 分开是因为时序不同——
+   它等目标真正进入视口后才挂（JS 侧 IntersectionObserver），且比就地展开的闪更长：
+   先保持一段底色，再淡出。减少动态下不闪，滚动到位本身就是反馈。 */
+.blk[data-land='1'] {
+  animation: blk-land 1600ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .blk[data-land='1'] {
+    animation: none;
+  }
+}
+@keyframes blk-land {
+  0%,
+  35% {
+    background: var(--ui-accent-soft);
+  }
+  100% {
+    background: transparent;
+  }
+}
 /* 剪切确认抖动：⌘X 本身不改文档（移动发生在粘贴那一刻），屏幕上什么都没变，
    抖一下是「这几块已经抓进剪贴板」；不另配文字提示——画面上的反应就是答复。
    抖**正文**不抖整行：行前的轨线与块标是结构 chrome，跟着抖读成整行没对齐 */

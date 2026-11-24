@@ -1513,16 +1513,20 @@ export class BlockEditor {
   }
 
   /**
-   * 把某一块**展开到可见并滚进视口**。
+   * 把某一块**展开到可见、滚进视口，并在它真正进入视口后给一段落地闪光**。
    *
    * 「在父块中打开」的收尾：父块那一屏可能把目标藏在一个折起来的祖先里 ——
    * 只调 `reveal` 会静默找不到行（`blockEl` 为空），看起来像点了没反应。
-   * 先沿索引的祖先链展开折叠，再走同一份 reveal（滚到视口中央 ＋ 闪一下）。
+   * 先沿索引的祖先链展开折叠，再滚到视口中央。
+   *
+   * ⚠️ **闪光不能跟滚动同时开始**：平滑滚动要几百毫秒，目标还没进视口时那 900ms
+   *    已经烧掉大半，用户看到的是「到了但没闪」。这里等 IntersectionObserver
+   *    报「已进入视口」再挂 `data-land`，CSS 侧把它拉长到 1.6s。
    *
    * 返回 `false` ＝ 这一块不在当前这一屏（父块或窗口边界之外）；调用方可以
    * 退回「打开目标本身」，不要假装定位成功。
    */
-  revealInContext(id: string): boolean {
+  landInContext(id: string): boolean {
     const path = indexPathOf(this.store.index, id)
     let unfolded = false
     for (const ancestor of path.slice(0, -1)) {
@@ -1531,8 +1535,47 @@ export class BlockEditor {
       unfolded = true
     }
     if (unfolded) this.renderAll()
-    this.reveal(id)
-    return this.blockEl(id) !== null
+    const el = this.blockEl(id)
+    if (!el) return false
+    const smooth = !matchMedia('(prefers-reduced-motion: reduce)').matches
+    el.scrollIntoView({ block: 'center', behavior: smooth ? 'smooth' : 'auto' })
+    this.flashWhenVisible(el)
+    return true
+  }
+
+  /**
+   * 目标进入视口后再闪；环境没有 IntersectionObserver 时立即闪。
+   * 兜底计时器防「元素已在视口里但观察器没回调」与隐藏元素（不闪也不算错）。
+   */
+  private flashWhenVisible(el: HTMLElement): void {
+    let started = false
+    const start = (): void => {
+      if (started) return
+      started = true
+      if (!el.isConnected) return
+      el.dataset.land = '1'
+      window.setTimeout(() => {
+        if (el.isConnected) delete el.dataset.land
+      }, 1800)
+    }
+    if (typeof IntersectionObserver === 'undefined') {
+      start()
+      return
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return
+        io.disconnect()
+        start()
+      },
+      { threshold: 0.6 },
+    )
+    io.observe(el)
+    // 长滚动也应在观察器回调里先到；这里只兜底不回调的环境
+    window.setTimeout(() => {
+      io.disconnect()
+      start()
+    }, 1500)
   }
 
   pulseBlocks(ids: readonly string[]): void {

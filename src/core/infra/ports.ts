@@ -648,7 +648,7 @@ export interface App {
    */
   openParent(blockId: string): boolean
   /**
-   * 把某一块**展开到可见并滚进中心视口**（折叠的祖先会先展开）。
+   * 把某一块**展开到可见、滚进中心视口，并在它真正进入视口后给一段落地闪光**。
    * 返回 `false` ＝ 这一块不在中心主编辑器的这一屏里（调用方可退回打开它自己）。
    */
   revealBlock(blockId: string): boolean

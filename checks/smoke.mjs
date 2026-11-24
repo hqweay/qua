@@ -33885,19 +33885,27 @@ await check('T358 在父块中打开：子块 ⇒ 中心换成父块，目标行
   assert(pair, `前置：应能拿到一对父子块：${JSON.stringify(pair)}`)
 
   await page.evaluate((id) => window.__qua.invoke('core.block/open-parent', { blockId: id }), pair.child)
-  await page.waitForTimeout(350)
+  // 落地闪等目标进入视口后才挂（平滑滚动完成前不挂）；测试等属性出现，不猜固定延时
+  await page.waitForFunction(
+    ({ child }) => {
+      const el = document.querySelector(`#editor .blk[data-block-id="${child}"]`)
+      return el?.dataset.land === '1'
+    },
+    pair,
+    { timeout: 2500 },
+  )
   const out = await page.evaluate(({ child }) => {
     const el = document.querySelector(`#editor .blk[data-block-id="${child}"]`)
     return {
       active: window.__qua.snapshot().activeId,
       childVisible: Boolean(el),
-      flash: el?.dataset.flash ?? '',
+      land: el?.dataset.land ?? '',
       nav: window.__qua.perf().nav,
     }
   }, pair)
   assert(out.active === pair.parent, `open-parent 应把中心换成父块：${out.active} ≠ ${pair.parent}`)
   assert(out.childVisible, `父块这一屏应能看见目标行（折叠的祖先要展开）：${JSON.stringify(out)}`)
-  assert(out.flash === '1', `定位应收尾在目标行上闪一下：${JSON.stringify(out)}`)
+  assert(out.land === '1', `定位应收尾在目标行上闪一下：${JSON.stringify(out)}`)
   assert(out.nav.openCalls >= 1 && out.nav.openCount >= 1, `导航读数应记下这一次打开：${JSON.stringify(out.nav)}`)
 
   await ctx.close()
