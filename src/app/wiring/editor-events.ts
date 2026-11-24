@@ -78,10 +78,12 @@ export interface EditorEventsDeps {
   focusSourceInMain: (blockId: string) => void
   /** 打开/挂载一块前补子树（工作集：裸块的 children 还没读） */
   loadDocThen: (ids: readonly string[], then: () => void) => void
+  /** 当前中心编辑器是不是只装了这一块且它是内容块（右键删除要提示退出聚焦） */
+  isFocusRoot: (id: string) => boolean
 }
 
 export function createEditorEvents(deps: EditorEventsDeps) {
-  const { getRegistry, layers, blocks, run, getPanels, getApp, focusSourceInMain, kb, kbGet, assets, clipboard, showMenu, triggerState, openPropsLineMenu, propsLineModeOf, refLabelOf, repaintBlock, viewMenus, getPopovers, refPeek, shortId, prefs, setEd, openTrigger, refreshSelectionBar, triggers } = deps
+  const { getRegistry, layers, blocks, run, getPanels, getApp, focusSourceInMain, kb, kbGet, assets, clipboard, showMenu, triggerState, openPropsLineMenu, propsLineModeOf, refLabelOf, repaintBlock, viewMenus, getPopovers, refPeek, shortId, prefs, setEd, openTrigger, refreshSelectionBar, triggers, isFocusRoot } = deps
 
 /**
  * **一台视图编辑器的完整事件表**：正文、挂载区、查询结果**共用这一份**。
@@ -619,6 +621,8 @@ function viewEvents(
         // 两条都显式给 group：看法是配置（归视图组），移除是删除（归删除组）——
         // 无 group 的尾随行会继承上一组标题，正是「看法掉进删除组」的成因。
         // 删除块行在露面面收起：它会删源；删除只留命名准确的「移除这次露面」。
+        // 聚焦的唯一内容根另有一档：删完会退出聚焦到父块，行上预告后果——
+        // 不弹确认框（代价按连带算，空块零连带），但点在删除前就知道屏幕上会发生什么。
         ...(appearanceHost
           ? {
               omitCommands: ['core.block/delete'],
@@ -639,7 +643,20 @@ function viewEvents(
                 },
               ],
             }
-          : {}),
+          : isFocusRoot(blockId)
+            ? {
+                omitCommands: ['core.block/delete'],
+                extraRows: [
+                  {
+                    id: 'delete-focus-root',
+                    label: t('menu.delete.focusRoot'),
+                    hint: t('menu.delete.focusRootHint'),
+                    group: 'block/6-delete',
+                    command: 'core.block/delete',
+                  },
+                ],
+              }
+            : {}),
         onPick: (row) => {
           if (row.id === 'appearance-views') {
             const embed = appearanceHost ? blocks.find(appearanceHost) : undefined

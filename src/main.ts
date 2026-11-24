@@ -10,7 +10,7 @@
 import { LOCALE } from './app/boot/locale.ts'
 document.documentElement.lang = LOCALE === 'en' ? 'en' : 'zh-CN'
 import './styles.css'
-import { buildAdjacency, checkEdge, cloneSubtree, cyclePathLabels, danglingOf, findInForest, flatten, FEED_INITIAL, feedDays, hasLiveChildren, isJournal, journalId, locate, mkBlock, mkJournalBlock, pruneGone, todayISO, type Block, trashOf, withBlockOwnerData, type StoredViewKind, type UndoKind } from './core/index.ts'
+import { buildAdjacency, checkEdge, cloneSubtree, cyclePathLabels, danglingOf, findInForest, flatten, FEED_INITIAL, feedDays, hasLiveChildren, isJournal, journalId, locate, mkBlock, mkJournalBlock, pruneGone, removableBySplice, todayISO, type Block, trashOf, withBlockOwnerData, type StoredViewKind, type UndoKind } from './core/index.ts'
 import { plainText } from './core/model/runs.ts'
 import { BlockStore } from './core/model/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
@@ -1514,6 +1514,10 @@ const { viewEvents, wireViewEditor } = createEditorEvents({
   shortId,
   focusSourceInMain,
   getApp: () => app,
+  isFocusRoot: (id) => {
+    const roots = mainEd.doc.roots
+    return roots.length === 1 && roots[0]?.id === id && removableBySplice(roots[0])
+  },
   setEd: (e) => {
     ed = e
   },
@@ -1644,10 +1648,16 @@ const app: App = {
   // 日记与页共用同一份依赖（今日是落点，不是特例代码路径）
   ...journalCommands(pageDeps),
   /**
-   * 删除：一份实现、一个入口。落点的第三档要回「今日日记流」——那是日记命令的事，
-   * 所以这里传一个**函数**而不是命令对象（`app` 在这一行还没赋值，真正调用在删除那一刻）。
+   * 删除：一份实现、一个入口。两个落点都是**函数**而不是命令对象
+   * （`app` 在这一行还没赋值，真正调用在删除那一刻）：
+   *   · 今日日记流是落点的最后一档；
+   *   · 聚焦内容块删完退出到父块——落点在命令层算好（含无父块的页清单兜底），
+   *     这里只换当前对象，不把删除塞进导航。
    */
-  ...deleteCommands(pageDeps, { openTodayFeed: () => app.journalToday() }),
+  ...deleteCommands(pageDeps, {
+    openTodayFeed: () => app.journalToday(),
+    openParent: (id) => app.zoomTo(id, false, 'saved'),
+  }),
   ...zoomCommands(pageDeps),
   ...moveCommands(pageDeps),
   ...mountCommands({

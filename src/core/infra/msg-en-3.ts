@@ -342,6 +342,8 @@ export const EN3 = {
   'menu.kw.untodo': 'untodo',
   'menu.label.views': 'Views...',
   'menu.kw.views': 'views',
+  'menu.delete.focusRoot': 'Delete and exit focus',
+  'menu.delete.focusRootHint': 'Return to the parent block; no blank block is added in place',
   'menu.kw.query': 'query',
   'menu.kw.automation': 'automation',
   'menu.kw.embed': 'embed',

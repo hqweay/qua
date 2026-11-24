@@ -67,7 +67,10 @@ interface Stub {
  * 最小 PageDeps：只装删除用得到的那几个读函数与写入口。
  * 删不掉的路径（spliceOut）默认返回 false —— 删除那一份就该走库级软删。
  */
-function stub(forest: Block[], opts: { pages?: Block[]; activeId?: string; roots?: string[] } = {}): Stub {
+function stub(
+  forest: Block[],
+  opts: { pages?: Block[]; activeId?: string; roots?: string[]; parent?: (id: string) => Block | undefined } = {},
+): Stub {
   const log: string[] = []
   /** 活的森林与页清单：删掉就从两个清单里退场（读门面就是这么回答的，软删的块不算页） */
   let live = [...forest]
@@ -78,6 +81,7 @@ function stub(forest: Block[], opts: { pages?: Block[]; activeId?: string; roots
       get: (id: string) => live.find((b) => b.id === id),
       roots: () => live,
       pages: () => pages,
+      parentOf: (id: string) => opts.parent?.(id),
     },
     spliceOut: () => false,
     removeBlock: (id: string) => {
@@ -102,6 +106,11 @@ function stub(forest: Block[], opts: { pages?: Block[]; activeId?: string; roots
   return { deps, log }
 }
 
+/** 落点注入：今日流与父块都记进同一本账，断言读一份日志 */
+const landing = (s: Stub) => ({
+  openTodayFeed: () => void s.log.push('today'),
+  openParent: (id: string) => void s.log.push(`parent:${id}`),
+})
 test('落点三档：邻页 → 任一页 → 今日日记流（删掉最后一页落在今日，不是空白）', () => {
   const a = page('A')
   const b = page('B')
@@ -110,8 +119,7 @@ test('落点三档：邻页 → 任一页 → 今日日记流（删掉最后一�
   // 邻页：删 X（装载中）⇒ 换到邻位那一页
   {
     const s = stub([a, b, gone], { pages: [a, gone, b], activeId: gone.id, roots: [gone.id] })
-    const { openTodayFeed } = { openTodayFeed: () => void s.log.push('today') }
-    deleteCommands(s.deps, { openTodayFeed }).deleteBlock(gone.id)
+    deleteCommands(s.deps, landing(s)).deleteBlock(gone.id)
     assert.ok(s.log.includes(`active:${b.id}`), `应换到邻位页：${JSON.stringify(s.log)}`)
     assert.ok(!s.log.includes('today'), '还有页就不回今日')
   }
@@ -120,7 +128,7 @@ test('落点三档：邻页 → 任一页 → 今日日记流（删掉最后一�
   {
     const only = page('唯一')
     const s = stub([only], { pages: [only], activeId: only.id, roots: [only.id] })
-    deleteCommands(s.deps, { openTodayFeed: () => void s.log.push('today') }).deleteBlock(only.id)
+    deleteCommands(s.deps, landing(s)).deleteBlock(only.id)
     assert.ok(s.log.includes('today'), `没有页可落 ⇒ 回今日日记流：${JSON.stringify(s.log)}`)
   }
 })
@@ -129,7 +137,7 @@ test('准入：今天删不掉（说得出口地拒绝），过去的日记天�
   const today = mkBlock('', { props: { _date: todayISO() } })
   const past = mkBlock('', { props: { _date: '2020-01-02' } })
   const s = stub([today, past])
-  const cmds = deleteCommands(s.deps, { openTodayFeed: () => void s.log.push('today') })
+  const cmds = deleteCommands(s.deps, landing(s))
 
   assert.equal(cmds.deleteBlock(today.id), false)
   assert.ok(s.log.some((x) => x.startsWith('toast:')), '拒绝要给一句实话，不是静默什么都没发生')
@@ -146,7 +154,7 @@ test('准入：今天删不掉（说得出口地拒绝），过去的日记天�
     const today2 = mkBlock('', { props: { _date: '2020-01-03' } })
     const a = page('A')
     const s2 = stub([a, today2], { activeId: today2.id, roots: [today2.id] })
-    deleteCommands(s2.deps, { openTodayFeed: () => void s2.log.push('today') }).deleteBlock(today2.id)
+    deleteCommands(s2.deps, landing(s2)).deleteBlock(today2.id)
     assert.ok(s2.log.includes('today'), `删掉正在看的一天 ⇒ 回日记流：${JSON.stringify(s2.log)}`)
   }
 })
@@ -154,12 +162,39 @@ test('准入：今天删不掉（说得出口地拒绝），过去的日记天�
 test('确认按代价：有连带就问一次，问完才删', () => {
   const p = withKids(page('大页'), 3)
   const s = stub([p])
-  const cmds = deleteCommands(s.deps, { openTodayFeed: () => void s.log.push('today') })
+  const cmds = deleteCommands(s.deps, landing(s))
   assert.equal(cmds.deleteBlock(p.id), true)
   const iConfirm = s.log.indexOf('confirm')
   const iRemove = s.log.indexOf(`remove:${p.id}`)
   assert.ok(iConfirm >= 0, '有子块 ⇒ 要问')
   assert.ok(iRemove > iConfirm, `问完才删：${JSON.stringify(s.log)}`)
+})
+
+test('聚焦根删除：库级软删并退出到父块，不在原处补空块', () => {
+  const host = mkBlock('父块')
+  const focus = mkBlock('')
+  host.children.push(focus)
+  const other = page('另一页')
+  const s = stub([host, focus, other], {
+    pages: [other],
+    activeId: focus.id,
+    roots: [focus.id],
+    parent: (id) => (id === focus.id ? host : undefined),
+  })
+  deleteCommands(s.deps, landing(s)).deleteBlock(focus.id)
+  assert.ok(s.log.includes(`remove:${focus.id}`), '真删（库级软删），不是视图摘行')
+  assert.ok(s.log.includes(`parent:${host.id}`), '退出聚焦回父块，不是页清单邻位')
+  assert.ok(!s.log.includes('today'), '有父块就不回今日流')
+  assert.ok(!s.log.includes(`active:${other.id}`), '有父块就不甩到另一页')
+})
+
+test('聚焦根是顶层块（没有父块）⇒ 回落到页清单三档', () => {
+  const lone = mkBlock('')
+  const other = page('另一页')
+  const s = stub([lone, other], { pages: [other], activeId: lone.id, roots: [lone.id] })
+  deleteCommands(s.deps, landing(s)).deleteBlock(lone.id)
+  assert.ok(s.log.includes(`active:${other.id}`), '没有父块就用页清单兜底')
+  assert.ok(!s.log.includes('today'), '还有页就不回今日')
 })
 
 test('journalId 是确定性派生的：删除后复活靠它认同一块（这里只钉住「同一天同一个 id」）', () => {

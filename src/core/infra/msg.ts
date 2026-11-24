@@ -1321,6 +1321,8 @@ export const MSG = {
   'menu.kw.untodo': '取消待办',
   'menu.label.views': '视图…',
   'menu.kw.views': '视图',
+  'menu.delete.focusRoot': '删除并退出聚焦',
+  'menu.delete.focusRootHint': '回到父块，不在原处补空块；没有父块就换页',
   'menu.kw.query': '查询',
   'menu.kw.automation': '自动化',
   'menu.kw.embed': '露面',

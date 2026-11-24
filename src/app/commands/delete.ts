@@ -16,6 +16,9 @@
  *
  * ③ 的第三档就是原来那条「至少留一页」前置的替代。禁令保护的东西其实是「删完没落点」，
  * 而落点可以补完 —— 补完之后删掉最后一页是合法且可预期的操作，不是被拦住的操作。
+ *
+ * 唯一例外：聚焦的内容块是**唯一装载根**时，为避免「删掉又补一块空根」的假删除，
+ * 走 ② 的库级软删并退出聚焦到父块（没有父块才回落到 ③ 的页清单）。
  */
 import {
   deletionCostOf,
@@ -25,6 +28,7 @@ import {
   journalDate,
   needsConfirm,
   plainText,
+  removableBySplice,
   todayISO,
   whereOf,
   type Block,
@@ -35,8 +39,13 @@ import { rootsFor } from './roots.ts'
 import type { PageDeps } from './types.ts'
 
 export interface DeleteDeps {
-  /** 落点的第三档：没有页可落了就回今日日记流（与冷启动「装不到就回落今日」同一条路） */
+  /** 落点第三档：没有页可落了就回今日日记流（与冷启动「装不到就回落今日」同一条路） */
   openTodayFeed: () => void
+  /**
+   * 删聚焦根后退出聚焦到父块——**不是** `reland` 的页清单邻位。
+   * 内容块的「家」是它的父块；页清单只在没有父块时兜底。
+   */
+  openParent: (id: string) => void
 }
 
 export function deleteCommands(d: PageDeps, x: DeleteDeps): Pick<App, 'deleteBlock'> {
@@ -58,6 +67,23 @@ export function deleteCommands(d: PageDeps, x: DeleteDeps): Pick<App, 'deleteBlo
 
   /** 真的删（已经没有准入与确认的事了） */
   const deleteOne = (b: Block): boolean => {
+    /**
+     * 聚焦的内容块是**唯一装载根**时，摘行那条路会给它补一块空根——删了又补，
+     * 视觉上等于没删。走库级软删（和删页同一条机制），再退出聚焦：
+     * 有父块回父块，没有父块才落到页清单三档。有身份的根仍走原来的摘不到分支。
+     */
+    const roots = d.rootIds()
+    if (roots.length === 1 && roots[0] === b.id && removableBySplice(b)) {
+      const parent = d.kb.parentOf(b.id)
+      const pageIndex = d.kb.pages().findIndex((p) => p.id === b.id)
+      d.removeBlock(b.id)
+      if (parent) x.openParent(parent.id)
+      else reland(pageIndex)
+      d.refreshList()
+      d.refreshTitle()
+      d.saveNow()
+      return true
+    }
     // ① 这一屏里的行：编辑器摘。装载根也走这里——它自己补空位/换根。
     if (d.spliceOut(b.id)) return true
     // ②③ 摘不到的（有身份的装载根、或根本不在这一屏）：库级软删 ＋ 落点

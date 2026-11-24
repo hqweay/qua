@@ -33953,6 +33953,98 @@ await check('T358 在父块中打开：子块 ⇒ 中心换成父块，目标行
   return `子块 ⇒ 父块 ${pair.parent.slice(-6)} 成为当前对象，子块可见并闪了一下；⌘/Ctrl+⌥+点块标同一条路`
 })
 
+
+/**
+ * 聚焦的唯一内容根删除：删完必须真的离开这一屏（不是补一块同形的空根）。
+ * 断言三件事——菜单在删之前说清后果、库里带删除标记、落点是父块而不是页清单。
+ * 反向证据：把删除分支改回 spliceOut，第一件事就红——屏幕停在补出来的空根上。
+ */
+await check('T359 删聚焦空块：菜单预告退出聚焦，删完软删并回到父块，不在原处补空块', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  await page.waitForTimeout(200)
+
+  // 现造一对父子，并 zoom 到子块（菜单判据看的是主编辑器唯一根，不是 debug focusBlock）
+  const pair = await page.evaluate(async () => {
+    const ed = window.__qua.__editor
+    const root = ed.doc.roots[0]
+    if (!root) return null
+    await window.__qua.invoke('core.tree/insert-child', { parentId: root.id, text: '删除落点父块' })
+    const parent = window.__qua.allBlocks().find((b) => b.text === '删除落点父块')?.id
+    if (!parent) return null
+    await window.__qua.invoke('core.tree/insert-child', { parentId: parent, text: '聚焦待删' })
+    const child = window.__qua.allBlocks().find((b) => b.text === '聚焦待删')?.id
+    if (!child) return null
+    window.__qua.invoke('core.block/focus-block', { blockId: child })
+    return { parent, child }
+  })
+  assert(pair, `前置：应造出父子块并聚焦子块：${JSON.stringify(pair)}`)
+  await page.waitForTimeout(250)
+
+  const before = await page.evaluate(({ child, parent }) => ({
+    roots: window.__qua.__editor.doc.roots.map((r) => r.id),
+    parentKids: window.__qua.__editor.store.find(parent)?.children?.length ?? -1,
+    childVisible: Boolean(window.__qua.__editor.store.find(child)),
+    focusRoot: child,
+  }), pair)
+  assert(before.roots.length === 1 && before.roots[0] === pair.child, `前置：子块应是唯一装载根：${JSON.stringify(before)}`)
+
+  // 右键菜单：删除行的 label/hint 在删之前说明「退出聚焦」
+  const menu = await page.evaluate((id) => {
+    const el = document.querySelector(`.blk[data-block-id="${id}"] .handle`)
+    el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+    return [...document.querySelectorAll('.layer-item')].map((e) => ({
+      label: e.querySelector('.layer-label')?.textContent ?? '',
+      hint: e.querySelector('.layer-hint')?.textContent ?? '',
+    }))
+  }, pair.child)
+  const del = menu.find((r) => r.label.startsWith('删除'))
+  assert(del?.label.includes('退出聚焦'), `聚焦根删除应在菜单上说清后果：${JSON.stringify(menu)}`)
+  assert(del.hint.includes('回到父块'), `hint 要说出落点：${JSON.stringify(del)}`)
+  await page.keyboard.press('Escape')
+
+  await page.evaluate((id) => window.__qua.invoke('core.block/delete', { blockId: id }), pair.child)
+  await page.waitForTimeout(300)
+
+  const after = await page.evaluate(({ child, parent }) => {
+    let deleted = null
+    const walk = (list) => {
+      for (const b of list) {
+        if (b.id === child) deleted = Boolean(b.props?._deletedAt)
+        walk(b.children)
+      }
+    }
+    walk(window.__qua.__editor.store.blocks)
+    const ed = window.__qua.__editor
+    return {
+      deleted,
+      active: window.__qua.snapshot().activeId,
+      roots: ed.doc.roots.map((r) => r.id),
+      childVisible: Boolean(ed.store.find(child)),
+      parentKids: ed.store.find(parent)?.children?.filter((b) => !b.props?._deletedAt).length ?? -1,
+      entryDepth: ed.entryDepth,
+    }
+  }, pair)
+  assert(after.deleted === true, `应是库级软删（带标记留在库里）：${JSON.stringify(after)}`)
+  assert(!after.childVisible, '删掉的行不该还在可见读里')
+  assert(after.roots.length === 1 && after.roots[0] === pair.parent, `应退出聚焦回到父块：${JSON.stringify(after)}`)
+  assert(after.active === pair.parent, `当前对象应换成父块：${JSON.stringify(after)}`)
+  assert(after.parentKids === before.parentKids - 1, `父块下不该补一格空块：${JSON.stringify(after)}`)
+  assert(after.entryDepth === 0, `删除不该留下未收口的撤销条目：${JSON.stringify(after)}`)
+
+  // ⌘Z 一次复原：块回到可见读、仍在父块下
+  await page.evaluate(() => window.__qua.invoke('core.history/undo'))
+  await page.waitForTimeout(250)
+  const undone = await page.evaluate((id) => ({
+    visible: Boolean(window.__qua.__editor.store.find(id)),
+  }), pair.child)
+  assert(undone.visible, `一次撤销应把删掉的块带回来：${JSON.stringify(undone)}`)
+
+  await ctx.close()
+  return `聚焦根删除：菜单预告退出聚焦；软删带标记、回到父块、原处无补格；⌘Z 复原`
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 
