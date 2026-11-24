@@ -33908,8 +33908,35 @@ await check('T358 在父块中打开：子块 ⇒ 中心换成父块，目标行
   assert(out.land === '1', `定位应收尾在目标行上闪一下：${JSON.stringify(out)}`)
   assert(out.nav.openCalls >= 1 && out.nav.openCount >= 1, `导航读数应记下这一次打开：${JSON.stringify(out.nav)}`)
 
+  /**
+   * 键盘路径：焦点回到子块，按 ⌘⌥↵（Ctrl+Alt+Enter）⇒ 同一落点。
+   * 这条钉的是「任意块」这一半：不靠引用探针、不靠菜单，光标在哪块就开哪块的父块。
+   */
+  const focused = await page.evaluate(({ child }) => {
+    const el = document.querySelector(`#editor .blk[data-block-id="${child}"]`)
+    if (el) delete el.dataset.land
+    window.__qua.focusBlock(child, 0)
+    return Boolean(el)
+  }, pair)
+  assert(focused, '前置：目标行应仍在当前屏')
+  await page.keyboard.press('ControlOrMeta+Alt+Enter')
+  await page.waitForFunction(
+    ({ child }) => document.querySelector(`#editor .blk[data-block-id="${child}"]`)?.dataset.land === '1',
+    pair,
+    { timeout: 2500 },
+  )
+  const byKey = await page.evaluate(
+    ({ child }) => ({
+      active: window.__qua.snapshot().activeId,
+      land: document.querySelector(`#editor .blk[data-block-id="${child}"]`)?.dataset.land ?? '',
+    }),
+    pair,
+  )
+  assert(byKey.active === pair.parent, `快捷键应保持父块为中心：${JSON.stringify(byKey)}`)
+  assert(byKey.land === '1', `快捷键应收尾在目标行上闪一下：${JSON.stringify(byKey)}`)
+
   await ctx.close()
-  return `子块 ⇒ 父块 ${pair.parent.slice(-6)} 成为当前对象，子块可见并闪了一下`
+  return `子块 ⇒ 父块 ${pair.parent.slice(-6)} 成为当前对象，子块可见并闪了一下；⌘⌥↵ 同一条路`
 })
 
 const known = results.filter((r) => !r.ok && r.known)
