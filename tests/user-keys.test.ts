@@ -4,10 +4,8 @@
  * 这里钉的是三件界面上很难看清的事：
  *   ① 覆盖在读的时候生效：resolveKey 按新键命中、摘掉的按键不再命中；
  *   ② 身份＝命令＋参数：同一条命令因参数不同而有的多个动作各改各的；
- *   ③ 校验判据：裸键与保留键进不来（设置了也白设的键位不发给用户）。
+ *   ③ 校验判据：裸键与保留键进不来（设置了也白设的键位不发发给用户）。
  */
-import { test } from 'node:test'
-import assert from 'node:assert/strict'
 import {
   BINDINGS,
   bindingIdOf,
@@ -15,11 +13,16 @@ import {
   effectiveKey,
   keymapRows,
   keymapSettingsRows,
+  keyOwnerOf,
   resolveKey,
+  setKeyActions,
+  setLibraryKeys,
   setUserKeys,
   validateUserKey,
   type Binding,
 } from '../src/core/infra/bindings.ts'
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
 import type { CtxKeys } from '../src/core/index.ts'
 
 const keyOf = (command: string, args?: unknown): Binding | undefined =>
@@ -96,4 +99,40 @@ test('校验：裸键与保留键进不来；带修饰键的归一化通过', ()
   const ok = validateUserKey('mod+alt+u')
   assert.equal(ok.ok, true)
   assert.equal(ok.ok && ok.key, canonKey('mod+alt+u'))
+})
+
+test('装配注入的动作表：无默认键配了就能命中；投影归库态、两份覆盖互不盖', () => {
+  const plainId = 'core.view/axis-up|null'
+  const autoId = 'core.automation/run|{"automationId":"auto-1"}'
+  setUserKeys({})
+  setLibraryKeys({})
+  setKeyActions([
+    { id: plainId, command: 'core.view/axis-up', title: '进一档', defaultKey: null, scope: 'device' },
+    { id: autoId, command: 'core.automation/run', title: '每周整理', args: { automationId: 'auto-1' }, defaultKey: null, scope: 'library' },
+  ])
+  const ev = (key: string, mods: Partial<KeyboardEvent> = {}) =>
+    ({ key, metaKey: true, ctrlKey: false, altKey: false, shiftKey: false, ...mods }) as KeyboardEvent
+  const before = keymapSettingsRows()
+  assert.deepEqual(before.map((r) => [r.id, r.scope, r.keys]), [
+    [plainId, 'device', []],
+    [autoId, 'library', []],
+  ], '设置面按动作表列全部可配键行，无默认键给空')
+  assert.equal(resolveKey(ev('w', { altKey: true }), ctx(), true).hit, null, '没配之前按不动')
+
+  // 静态命令写设备态、投影写库态：身份不同，两份覆盖都按读取时生效
+  setUserKeys({ [plainId]: 'mod+alt+w' })
+  setLibraryKeys({ [autoId]: 'mod+alt+r' })
+  assert.equal(resolveKey(ev('w', { altKey: true }), ctx(), true).hit?.command, 'core.view/axis-up')
+  const autoEv = { key: 'r', metaKey: true, ctrlKey: false, altKey: true, shiftKey: false } as KeyboardEvent
+  assert.deepEqual(resolveKey(autoEv, ctx(), true).hit?.args, { automationId: 'auto-1' })
+  assert.equal(keyOwnerOf('mod+alt+r'), autoId, '冲突提示报出绑定身份')
+
+  // 换库：设备那份还在，库那份换掉（装配层注入新表即可，这里验两份互不覆盖）
+  setLibraryKeys({})
+  assert.equal(resolveKey(autoEv, ctx(), true).hit, null, '库态摘掉后投影行按不动')
+  assert.equal(resolveKey(ev('w', { altKey: true }), ctx(), true).hit?.command, 'core.view/axis-up', '设备态不受影响')
+
+  setKeyActions([])
+  setUserKeys({})
+  setLibraryKeys({})
 })

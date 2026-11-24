@@ -1421,6 +1421,9 @@ export const MSG = {
   'ui.settings.removed': '已摘掉',
   'ui.keys.needModifier': '要带 ⌘ / Alt 一类修饰键（裸键归打字）',
   'ui.keys.reserved': '这颗键归窗口（退出／关窗／新窗），改不了',
+  'ui.keys.scope.device': '这台机器',
+  'ui.keys.scope.library': '跟着这个库',
+  'ui.keys.conflict': '「{key}」已被「{name}」占用；再按一遍确认盖掉它',
 
   /* ---------------------------------------------------------------- 空态提示 */
   'ui.emptyHint': '按 <kbd>/</kbd> 呼出斜杠命令 · <kbd>⌘P</kbd> 打开命令面板 · <kbd>⌘B</kbd> 给选区加粗',

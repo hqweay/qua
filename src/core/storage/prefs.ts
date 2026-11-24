@@ -37,15 +37,7 @@ export interface Prefs {
    * 值域首版只认 `column`／`row`（grid 轴已定、入口未做）。
    */
   feedLayout: SecLayout
-  /**
-   * **日记面板的那几栏**（local／derived；与 `feedLayout` 同层）。
-   *
-   * 为什么是设备状态而不是一个隐藏配置块：日记表面是**系统视图**，不是块 ——
-   * 它不可寻址、不进回收站、不参与复制。拿一个块当它的拥有者，
-   * 就是用一个不可寻址的对象存「这一台设备怎么看」，而 `feedLayout` 就在旁边。
-   *
-   * 代价（登记）：日记面板的 local 栏不跨设备；要跨设备/共享就写成查询块（内容对象）。
-   */
+  /** 日记面板的那几栏（local／derived；与 `feedLayout` 同层）。 */
   journalMounts: MountEntry[]
   /**
    * 命令面板里**固定（常用）的手动自动化 id**，按固定先后排序。
@@ -59,11 +51,7 @@ export interface Prefs {
    */
   palettePins: string[]
   /**
-   * **派生栏（引用／同类／提及）的看法**（设备状态）。
-   *
-   * 派生栏没有拥有者：它不拥有条件、也不拥有视图列表。给它造一个 owner 会把
-   * 「这一台设备怎么看这一栏」变成内容 —— 换个设备就跟着走，还会多一份能分叉的配置。
-   * 键的形状见 `mountViewKey`（块宿主带块 id、日记宿主不带）。
+   * 派生栏（引用／同类／提及）的看法；键的形状见 `mountViewKey`。
    */
   mountViews: Record<string, DerivedViewKind>
   /**
@@ -86,6 +74,12 @@ export interface Prefs {
    * 生效在**读绑定表的时候**（`core/infra/bindings.ts`），这里只存用户写下的那份。
    */
   keys: Record<string, string | null>
+  /**
+   * 自动化投影的键位覆盖（**库态**）：绑定身份的 args 里带 `automationId`（库对象），
+   * 换一台机器打开同一个库还认、换库不带过来。与 `keys`（静态命令）身份不重叠。
+   * 由 `LibraryState.keys` 挑走，不进设备字节。
+   */
+  libraryKeys: Record<string, string | null>
   /**
    * 命令面板「最近执行」的名单（设备态：这一台机器上跑过什么，不进库、不参与同步）。
    * 只记**从面板成功执行**的命令名，最新在前、去重封顶；形状归 `normalizePrefs`。
@@ -230,6 +224,7 @@ export const DEFAULT_PREFS: Prefs = {
   radius: 12,
   badgeOpen: false,
   keys: {},
+  libraryKeys: {},
   recentCommands: [],
   recentIcons: [],
   recentColors: [],
@@ -347,13 +342,17 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
   }
 
   // 用户键位覆盖：身份非空、值是键位串或「摘掉」（null）。别的形状丢掉，不猜
-  const keys: Record<string, string | null> = {}
-  if (p.keys && typeof p.keys === 'object' && !Array.isArray(p.keys)) {
-    for (const [id, key] of Object.entries(p.keys)) {
+  const keyShape = (p: unknown): Record<string, string | null> => {
+    const out: Record<string, string | null> = {}
+    const src = p && typeof p === 'object' && !Array.isArray(p) ? (p as Record<string, unknown>) : {}
+    for (const [id, key] of Object.entries(src)) {
       if (typeof id !== 'string' || id === '') continue
-      if (key === null || (typeof key === 'string' && key !== '')) keys[id] = key
+      if (key === null || (typeof key === 'string' && key !== '')) out[id] = key
     }
+    return out
   }
+  const keys = keyShape(p.keys)
+  const libraryKeys = keyShape(p.libraryKeys)
 
   // 最近执行的命令名：非空串才收，去重、封顶——它只是面板顶部的「再来一次」名单
   const recentCommands = Array.isArray(p.recentCommands)
@@ -407,6 +406,7 @@ export function normalizePrefs(raw: Partial<Prefs> | undefined): Prefs {
     mountViews,
     mountGroups,
     keys,
+    libraryKeys,
     recentCommands,
     recentIcons,
     recentColors,

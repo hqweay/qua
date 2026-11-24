@@ -54,6 +54,8 @@ export interface LibraryState {
   journalMounts: Prefs['journalMounts']
   /** 命令面板固定（常用）的手动自动化 id；引用库对象，跟库走 */
   palettePins: Prefs['palettePins']
+  /** 自动化投影的键位覆盖（身份带 automationId，引用库对象，跟库走） */
+  keys: Prefs['libraryKeys']
 }
 
 /**
@@ -193,6 +195,7 @@ export function createDeviceStore(port: StoragePort, library?: LibrarySettingsPo
           mountViews: state.prefs.mountViews,
           journalMounts: state.prefs.journalMounts,
           palettePins: state.prefs.palettePins,
+          keys: state.prefs.libraryKeys,
         }
         const lr = await library.set(LIBRARY_STATE_KEY, JSON.stringify(libState))
         if (!lr.ok) return { ok: false, error: lr.error }
@@ -218,6 +221,7 @@ function mergeLibraryState(prefsRaw: Partial<Prefs> | undefined, lib: Partial<Li
       mountViews: lib?.mountViews as Prefs['mountViews'] | undefined,
       journalMounts: lib?.journalMounts as Prefs['journalMounts'] | undefined,
       palettePins: lib?.palettePins as Prefs['palettePins'] | undefined,
+      libraryKeys: lib?.keys as Prefs['libraryKeys'] | undefined,
     }),
     folded: normalizeFoldState(lib?.folded),
   }

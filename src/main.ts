@@ -10,7 +10,8 @@
 import { LOCALE } from './app/boot/locale.ts'
 document.documentElement.lang = LOCALE === 'en' ? 'en' : 'zh-CN'
 import './styles.css'
-import { buildAdjacency, checkEdge, cloneSubtree, cyclePathLabels, danglingOf, findInForest, flatten, FEED_INITIAL, feedDays, hasLiveChildren, isJournal, journalId, locate, mkBlock, mkJournalBlock, pruneGone, removableBySplice, todayISO, type Block, trashOf, withBlockOwnerData, type StoredViewKind, type UndoKind } from './core/index.ts'
+import { buildAdjacency, checkEdge, cloneSubtree, cyclePathLabels, danglingOf, findInForest, flatten, FEED_INITIAL, feedDays, hasLiveChildren, isJournal, journalId, locate, mkBlock, mkJournalBlock, pruneGone, removableBySplice, todayISO, trashOf, withBlockOwnerData, type Block, type StoredViewKind, type UndoKind } from './core/index.ts'
+import { readAutomation, automationName } from './core/automation/automation.ts'
 import { plainText } from './core/model/runs.ts'
 import { BlockStore } from './core/model/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
@@ -22,6 +23,11 @@ import { editorRun } from './view/editor/editor-run.ts'
 import { fillBlockText } from './view/editor/block-dom.ts'
 import {
   setUserKeys,
+  setLibraryKeys,
+  setKeyActions,
+  bindingIdOf,
+  BINDINGS,
+  type KeyAction,
 } from './core/infra/bindings.ts'
 import {
   ALL_COMMANDS,
@@ -828,6 +834,7 @@ const prefs = (): Prefs => device.prefs
 
 // 用户改过的键位启动即注入（读时生效；之后每次改动由设置面的写回调再注入）
 setUserKeys(prefs().keys)
+setLibraryKeys(prefs().libraryKeys)
 
 /** 提示表与上下文键收在 wiring/keys；pages 分片的四件晚于此处 ⇒ getter，运行时现取 */
 const { keyHints, uiCtx } = setupKeys({
@@ -1056,14 +1063,20 @@ const settingsFaceDeps = (): SettingsFaceDeps => ({
   invoke: (name, args) => {
     void registry.invoke(name, args, 'settings')
   },
-  commandTitle: (name) => registry.decl(name)?.title ?? name,
+  // 设置面每次打开都重建动作表（自动化增删改后清单与解析同步）
+  refreshKeyActions: () => setKeyActions(buildKeyActions()),
   /**
-   * 键位覆盖的**唯一写点**：进 prefs（落盘）＋ 注入绑定层（读时生效）。
+   * 键位覆盖的**唯一写点**：按行的派生归属进对应的那份偏好（落盘）＋ 注入绑定层（读时生效）。
    * 注入和保存必须同时发生——只存不注入，改完的键位要重启才认。
    */
-  patchKeys: (next) => {
-    prefs().keys = next
-    setUserKeys(next)
+  patchKeys: (scope, next) => {
+    if (scope === 'library') {
+      prefs().libraryKeys = next
+      setLibraryKeys(next)
+    } else {
+      prefs().keys = next
+      setUserKeys(next)
+    }
     scheduleDeviceSave()
   },
   toast: (text, kind) => app.toast(text, kind),
@@ -2664,6 +2677,58 @@ registry = new Registry(
   // 产物——这里只管把装配面那一份交出去，不再自己过滤一遍。
   ALL_COMMANDS,
 )
+
+/**
+ * 可配键动作表——按键解析、速查、设置面共用这一份（不存在「配了但按不动」）。
+ *
+ * 来源两路：① 命令面板可见命令（与 `paletteRows` 同口径 `!hidden`）＋绑定表里带参的
+ * 额外动作（同一命令不同参数各是一个身份）；② 手动自动化的投影行（args 带
+ * automationId ⇒ 库态归属）。显式键位从绑定表读，投影行无默认键。
+ */
+function buildKeyActions(): KeyAction[] {
+  const actions = new Map<string, KeyAction>()
+  const add = (a: KeyAction): void => {
+    if (!actions.has(a.id)) actions.set(a.id, a)
+  }
+  for (const b of BINDINGS) {
+    if (b.kind !== 'keymap' || !b.command) continue
+    const decl = registry.decl(b.command)
+    if (decl?.hidden) continue
+    add({
+      id: bindingIdOf(b),
+      command: b.command,
+      title: decl?.title ?? b.command,
+      args: b.args as Record<string, unknown> | undefined,
+      defaultKey: b.key ?? null,
+      scope: 'device',
+    })
+  }
+  for (const decl of registry.list()) {
+    if (decl.hidden) continue
+    add({
+      id: `${decl.name}|null`,
+      command: decl.name,
+      title: decl.title,
+      defaultKey: null,
+      scope: 'device',
+    })
+  }
+  for (const b of kb.automations()) {
+    const def = readAutomation(b)
+    if (!def || !def.triggers.includes('manual')) continue
+    const args = { automationId: b.id }
+    add({
+      id: `core.automation/run|${JSON.stringify(args)}`,
+      command: 'core.automation/run',
+      title: automationName(b) || b.id,
+      args,
+      defaultKey: null,
+      scope: 'library',
+    })
+  }
+  return [...actions.values()]
+}
+setKeyActions(buildKeyActions())
 
 // 让「块菜单」这类命令也能从面板/键盘走到
 ed.events.mounted = () => {

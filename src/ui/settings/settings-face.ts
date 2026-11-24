@@ -11,6 +11,7 @@ import {
   eventKeyId,
   keyLabel,
   keymapSettingsRows,
+  keyOwnerOf,
   validateUserKey,
 } from '../../core/infra/bindings.ts'
 import { t, type MsgId } from '../../core/infra/msg.ts'
@@ -27,6 +28,8 @@ interface SettingsPrefs {
   /** 块下属性区的密度档 */
   propsDensity: 'summary' | 'list'
   keys: Record<string, string | null>
+  /** 自动化投影的键位覆盖（库态）；按行的派生归属读写 */
+  libraryKeys: Record<string, string | null>
 }
 
 export interface SettingsFaceDeps {
@@ -34,11 +37,11 @@ export interface SettingsFaceDeps {
   prefs: () => SettingsPrefs
   /** 命令面（主题直选走既有命令） */
   invoke: (name: string, args: Record<string, unknown>) => void
-  /** 命令的显示名（快捷键行读它，不在这里再建一份命令名表） */
-  commandTitle: (name: string) => string
-  /** 写键位覆盖（装配层：进 prefs、注入绑定层、落盘；整表替换） */
-  patchKeys: (next: Record<string, string | null>) => void
-  /** 校验不过给一句实话（保留键／裸键） */
+  /** 打开快捷键区前重建动作表（自动化可能新建/改名/删掉）；装配层给 */
+  refreshKeyActions?: () => void
+  /** 写键位覆盖（装配层：进对应那份偏好、注入绑定层、落盘；整表替换）；scope 派生自行的归属 */
+  patchKeys: (scope: 'device' | 'library', next: Record<string, string | null>) => void
+  /** 校验不过给一句实话（保留键／裸键／占用冲突） */
   toast?: (text: string, kind?: 'ok' | 'warn' | 'info') => void
 }
 
@@ -59,6 +62,8 @@ export class SettingsFace {
   private readonly deps: SettingsFaceDeps
   /** 正在捕获新键的行（同一时刻至多一行）；Esc 或失焦取消 */
   private capturingId: string | null = null
+  /** 捕获冲突时已提示过的占用者（再按一遍才确认）；换行或取消即作废 */
+  private confirmConflict: string | null = null
   private readonly isMac = /Mac|iPhone|iPad/.test(navigator.platform)
 
   constructor(deps: SettingsFaceDeps) {
@@ -74,6 +79,7 @@ export class SettingsFace {
 
   dispose(): void {
     this.capturingId = null
+    this.confirmConflict = null
     this.root.replaceChildren()
   }
 
@@ -188,6 +194,8 @@ export class SettingsFace {
   /* ---------------------------------------------------------- 快捷键 */
 
   private sectionKeys(): HTMLElement {
+    // 自动化可能新建/改名/删掉：打开这一区时重建动作表，清单与解析都跟当前库一致
+    this.deps.refreshKeyActions?.()
     const sec = document.createElement('section')
     sec.className = 'settings-sec'
     const title = document.createElement('h2')
@@ -213,8 +221,14 @@ export class SettingsFace {
 
     const name = document.createElement('span')
     name.className = 'settings-key-name ui-ellipsis'
-    name.textContent = this.deps.commandTitle(row.command)
+    name.textContent = row.title
     el.append(name)
+
+    // 归属是派生事实（引用了什么），不是开关：一行小字说明，用户改不了
+    const scope = document.createElement('span')
+    scope.className = 'settings-key-scope ui-ellipsis'
+    scope.textContent = t(row.scope === 'library' ? 'ui.keys.scope.library' : 'ui.keys.scope.device')
+    el.append(scope)
 
     if (row.override !== undefined) {
       const mark = document.createElement('span')
@@ -251,9 +265,10 @@ export class SettingsFace {
       reset.setAttribute('aria-label', t('ui.settings.keysReset'))
       renderIcon(reset, 'lucide:rotate-ccw', 'rotate-ccw')
       reset.addEventListener('click', () => {
-        const next = { ...this.deps.prefs().keys }
+        const p = this.deps.prefs()
+        const next = { ...(row.scope === 'library' ? p.libraryKeys : p.keys) }
         delete next[row.id]
-        this.deps.patchKeys(next)
+        this.deps.patchKeys(row.scope, next)
         this.render()
       })
       el.append(reset)
@@ -293,6 +308,7 @@ export class SettingsFace {
       e.stopPropagation()
       if (e.key === 'Escape') {
         this.capturingId = null
+        this.confirmConflict = null
         this.render()
         return
       }
@@ -301,13 +317,28 @@ export class SettingsFace {
         this.deps.toast?.(t(v.reason), 'warn')
         return
       }
-      this.deps.patchKeys({ ...this.deps.prefs().keys, [rowId]: v.key })
+      // 冲突不硬拦：第一次按下先说清会盖掉谁，再按一遍才算确认（同键多义是允许的）
+      const owner = keyOwnerOf(v.key)
+      if (owner !== null && owner !== rowId) {
+        const target = keymapSettingsRows().find((r) => r.id === owner)
+        const name = target?.title ?? owner
+        if (this.confirmConflict !== owner) {
+          this.confirmConflict = owner
+          this.deps.toast?.(t('ui.keys.conflict', { key: keyLabel(v.key, this.isMac), name }), 'warn')
+          return
+        }
+      }
+      const scope = keymapSettingsRows().find((r) => r.id === rowId)?.scope ?? 'device'
+      const p = this.deps.prefs()
+      this.deps.patchKeys(scope, { ...(scope === 'library' ? p.libraryKeys : p.keys), [rowId]: v.key })
+      this.confirmConflict = null
       this.capturingId = null
       this.render()
     })
     chip.addEventListener('blur', () => {
       if (this.capturingId !== rowId) return
       this.capturingId = null
+      this.confirmConflict = null
       this.render()
     })
     // 渲染在游离树里 focus 不到：等进文档再要焦点（与搜索面同一时刻差）

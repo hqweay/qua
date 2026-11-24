@@ -377,10 +377,16 @@ export const BINDINGS: Binding[] = [
  * 用户改过的键位。键＝**绑定身份**（命令＋参数：一条命令可以因参数不同而有多个动作，
  * 覆盖的是「这个动作」而不是「这条命令」）；值＝新键位，`null` ＝ 摘掉。
  *
- * 覆盖是**设备状态**（不进库、不参与同步）：键位回答「这一台机器怎么用」，不是内容。
- * 表本身保持静态；覆盖在**读的时候**生效（`effectiveKey`），启动与每次修改由装配层注入。
+ * 两份表按**引用了什么**分家（归属派生，不给用户开关）：
+ *   · `userKeys` —— 静态命令，引用的是命令名 ⇒ 设备态，换库不变；
+ *   · `libraryKeys` —— 自动化投影，args 里带 `automationId`（库对象）⇒ 库态，跟库走。
+ * 身份不重叠（投影行的 args 必带 automationId），所以解析时两份都读、不会互相盖。
+ *
+ * 覆盖是设备/库各自状态；表本身保持静态；覆盖在**读的时候**生效（`effectiveKey`），
+ * 启动与每次修改由装配层注入。
  */
 const userKeys = new Map<string, string | null>()
+const libraryKeys = new Map<string, string | null>()
 
 /** 键位绑定的身份（keymap 没有 group：命令＋参数就是全部） */
 export function bindingIdOf(b: Binding): string {
@@ -389,19 +395,91 @@ export function bindingIdOf(b: Binding): string {
 
 /** 整表替换用户覆盖（调用方给的是偏好里那份的现值；坏形状的项丢掉） */
 export function setUserKeys(next: Record<string, string | null> | undefined): void {
-  userKeys.clear()
+  replaceKeys(userKeys, next)
+}
+
+/** 整表替换库态键位（自动化投影）；与设备那份互不重叠 */
+export function setLibraryKeys(next: Record<string, string | null> | undefined): void {
+  replaceKeys(libraryKeys, next)
+}
+
+function replaceKeys(target: Map<string, string | null>, next: Record<string, string | null> | undefined): void {
+  target.clear()
   if (!next || typeof next !== 'object') return
   for (const [id, key] of Object.entries(next)) {
     if (typeof id !== 'string' || id === '') continue
-    if (key === null || typeof key === 'string') userKeys.set(id, key)
+    if (key === null || typeof key === 'string') target.set(id, key)
   }
 }
 
-/** 这条绑定**此刻生效**的键位；`null` ＝ 用户摘掉了（按键不再命中它） */
+/**
+ * 这条绑定**此刻生效**的键位；`null` ＝ 用户摘掉了（按键不再命中它）。
+ * 两份覆盖表都查：静态命令读设备那份，投影行读库那份。
+ */
 export function effectiveKey(b: Binding): string | null {
-  const overridden = userKeys.get(bindingIdOf(b))
-  if (overridden !== undefined) return overridden
-  return b.key ?? null
+  const id = bindingIdOf(b)
+  const own = libraryKeys.get(id) ?? userKeys.get(id)
+  return own !== undefined ? own : b.key ?? null
+}
+
+/** 可配键的动作（设置面一行 ＋ 解析时一条候选）——装配层从命令表＋投影现算 */
+export interface KeyAction {
+  /** 与 `bindingIdOf` 同形的身份 */
+  id: string
+  command: string
+  title: string
+  args?: Record<string, unknown>
+  /** 绑定表里的默认键（没有则 null） */
+  defaultKey: string | null
+  /** 归属：由 args 是否引用库对象派生，设置面照此显示、写入照此分家 */
+  scope: 'device' | 'library'
+}
+
+let keyActions: KeyAction[] | null = null
+
+/**
+ * 注入全部可配键动作（命令面板可见命令 ＋ 自动化投影）。
+ *
+ * 它同时喂三处：按键解析（`resolveKey` 据此找到无默认键、但被配了键的动作）、
+ * 速查表、设置面清单——三处共用一份，不会出现「配了但按不动」。
+ */
+export function setKeyActions(actions: KeyAction[]): void {
+  keyActions = actions
+}
+
+function actionsOf(): KeyAction[] {
+  if (keyActions) return keyActions
+  // 未装配（纯逻辑测试）：退到绑定表的 keymap 行
+  return BINDINGS.filter((b) => b.kind === 'keymap' && b.command).map((b) => ({
+    id: bindingIdOf(b),
+    command: b.command!,
+    title: b.command!,
+    args: b.args as Record<string, unknown> | undefined,
+    defaultKey: b.key ?? null,
+    scope: 'device',
+  }))
+}
+
+/** 参与按键解析的 keymap 行：静态表 ＋ 「本来没键、但用户配了键」的动作 */
+function keymapBindings(): Binding[] {
+  const staticRows = BINDINGS.filter((b) => b.kind === 'keymap')
+  const actions = actionsOf()
+  if (!keyActions) return staticRows
+  const staticIds = new Set(staticRows.map(bindingIdOf))
+  const extra: Binding[] = actions
+    .filter((a) => !staticIds.has(a.id))
+    .map((a) => ({ command: a.command, args: a.args, kind: 'keymap', layer: 'user', when: '' }))
+  return [...staticRows, ...extra]
+}
+
+/** 这颗键此刻归哪条绑定（捕获时给一句实话；同名多义只报第一处） */
+export function keyOwnerOf(key: string): string | null {
+  const id = canonKey(key)
+  for (const b of keymapBindings()) {
+    const eff = effectiveKey(b)
+    if (eff !== null && canonKey(eff) === id) return bindingIdOf(b)
+  }
+  return null
 }
 
 /**
@@ -569,8 +647,8 @@ export function resolveKey(e: KeyboardEvent, ctx: CtxKeys, isMac: boolean): KeyR
   // ：**所有键位绑定自动派生 `!composing`**（组合期一律不命中；Enter 归 IME 提交）
   if (ctx.composing) return { hit: null, attempts: [], id: `${id} (blocked:composing)` }
   // 排成「自下而上」：core → plugin → user（同层按表序），随后**反向遍历** ⇒ 第一条匹配的胜出
-  const ordered = BINDINGS.map((b, i) => ({ b, i }))
-    .filter((x) => x.b.kind === 'keymap')
+  const ordered = keymapBindings()
+    .map((b, i) => ({ b, i }))
     .sort((x, y) => layerWeight(x.b.layer) - layerWeight(y.b.layer) || x.i - y.i)
     .map((x) => x.b)
   const attempts: KeyAttempt[] = []
@@ -593,11 +671,11 @@ export function resolveKey(e: KeyboardEvent, ctx: CtxKeys, isMac: boolean): KeyR
 export function keymapRows(): { key: string; command: string; when: string; layer: Layer }[] {
   const out: { key: string; command: string; when: string; layer: Layer }[] = []
   const seen = new Set<string>()
-  for (const b of BINDINGS) {
-    if (b.kind !== 'keymap' || !b.command) continue
+  for (const b of keymapBindings()) {
+    if (!b.command) continue
     const eff = effectiveKey(b)
     if (eff === null) continue
-    // 同一身份的多条表项覆盖后共用同一个键：速查表只报一行，不把同一个键念两遍
+    // 同一身份覆盖后共用同一个键：速查表只报一行，不把同一个键念两遍
     const dedupe = `${bindingIdOf(b)}|${eff}`
     if (seen.has(dedupe)) continue
     seen.add(dedupe)
@@ -606,11 +684,15 @@ export function keymapRows(): { key: string; command: string; when: string; laye
   return out
 }
 
-/** 设置界面的键位清单：**一条绑定身份一行**（改键位改的是身份，不是表里的某一行） */
+/** 设置界面的键位清单：**一条动作身份一行**（可配键全集来自装配层，无默认键的命令也在） */
 export interface KeymapSettingsRow {
   /** 绑定身份（`bindingIdOf`；写覆盖与重置都按它说话） */
   id: string
   command: string
+  /** 显示名（命令 title；投影行是自动化名） */
+  title: string
+  /** 归属（派生，不改）：device ＝ 跟设备；library ＝ 跟库 */
+  scope: 'device' | 'library'
   /** 生效键位（已归一；「已摘掉」＝ 空数组） */
   keys: string[]
   /** 用户覆盖：`undefined` ＝ 没动过；`null` ＝ 摘掉；字符串 ＝ 新键 */
@@ -619,19 +701,21 @@ export interface KeymapSettingsRow {
 }
 
 export function keymapSettingsRows(): KeymapSettingsRow[] {
-  const byId = new Map<string, KeymapSettingsRow>()
-  for (const b of BINDINGS) {
-    if (b.kind !== 'keymap' || !b.command) continue
-    const id = bindingIdOf(b)
-    let row = byId.get(id)
-    if (!row) {
-      row = { id, command: b.command, keys: [], override: userKeys.get(id), when: b.when ?? '' }
-      byId.set(id, row)
-    }
-    const eff = effectiveKey(b)
-    if (eff !== null && !row.keys.includes(eff)) row.keys.push(eff)
+  const rows: KeymapSettingsRow[] = []
+  for (const a of actionsOf()) {
+    const own = (a.scope === 'library' ? libraryKeys : userKeys).get(a.id)
+    const eff = own !== undefined ? own : a.defaultKey
+    rows.push({
+      id: a.id,
+      command: a.command,
+      title: a.title,
+      scope: a.scope,
+      keys: eff === null ? [] : [eff],
+      override: own,
+      when: '',
+    })
   }
-  return [...byId.values()]
+  return rows
 }
 
 /** 给「Inspect Context Keys」用：把 ctx 里被绑定表引用到的键标出来 */
