@@ -83,33 +83,28 @@ src/**               编辑器、命令表、绑定表、localStorage           
 
 | | Chrome（浏览器标签页） | Electron（这个 app） |
 |---|---|---|
-| `⌘P` | **打印**（浏览器接管） | 本 app 的全文搜索（绑定表里 `mod+p`，Electron 里没有打印这个默认动作）；命令面板在 `⌘⇧P` |
+| `⌘P` | **打印**（浏览器接管） | 本 app 的**命令面板**（绑定表里 `mod+p`）；全文搜索在 `⌘K`。Electron 里没有打印这个默认动作 |
 | `⌘R` / `⇧⌘R` | 刷新 | **dev 才有**（菜单里 `role: reload/forceReload`）；打包后菜单里没有这两项 |
 | `⌥⌘I` / `F12` | 无（或打开浏览器 devtools） | 开发者工具；`F12` 还额外挂了 `before-input-event`（不依赖菜单） |
 | `⌘+` / `⌘-` / `⌘0` | 浏览器缩放整页 | 同样缩放整页（`webContents.setZoomFactor`）——实测 `zoomFactor=1.5` 时 `innerWidth 1400→933`、`devicePixelRatio=2` |
 | `⌘W` | 关标签页 | `role: close` 关窗口（macOS 惯例：窗口关了 app 留在 Dock） |
 | `⌘Q` / `⌘H` / `⌘M` | 无 | `role: quit/hide/minimize`，键等价物由 NSMenu 注册 |
 | `⌘F` | 浏览器查找栏 | **什么都不发生**（无绑定，预留给就地查找；见 ③②） |
-| `⌘A` | 全选页面 | **原生全选**（见 ③①），**没有**被本 app 接管 |
-| `⌘Z` | 浏览器无所谓 | ⚠️ **菜单里 `role: undo/redo` 和 app 自己的 `⌘Z` 绑定在抢**，见下面 1.2.1 |
+| `⌘A` | 全选页面 | 编辑器聚焦时绑到 `core.editor/select-all`（见 ③①）；失焦时落给原生全选 |
+| `⌘Z` | 浏览器无所谓 | 菜单**不放** `role: undo/redo`；撤销／重做只走 renderer 的 `core.history/undo|redo`，见下面 1.2.1 |
 
-#### 1.2.1 一个必须知道的冲突：菜单 `role: undo` vs app 自己的 `⌘Z`
+#### 1.2.1 旧冲突已收口：菜单不放 `role: undo/redo`，`⌘Z` 只走 app 自己的栈
 
-`main.ts` 的「编辑」菜单按 macOS 规范放了 `role: undo/redo`（键等价物 `⌘Z` / `⇧⌘Z`）。
-app 的绑定表里**也**有 `core.history/undo`（自己的撤销栈：按事务记动过的那几块）。
-在 macOS 上 **NSMenu 的键等价物先于 web contents 处理**，所以：
+macOS 上 NSMenu 的键等价物先于 web contents 处理。菜单若注册 `role: undo/redo`，`⌘Z` 就会落进
+contenteditable 的原生文本撤销栈——那个栈不懂块结构（拆块／缩进／行内原子都会被打散），
+与 app 自己按事务记「动过哪几块」的 `core.history/undo|redo` 是两套。
 
-- 用户按 `⌘Z` 时，**大概率走菜单 role**（= `webContents.undo()`，即 contenteditable 的原生撤销栈），
-  而**不是** app 自己的 `core.history/undo`（块树 ＋ 行内内容的回滚，只写动过的块）。
-- 这两个撤销栈是**两套**。原生那个只知道 DOM 文本编辑，不知道块结构与行内内容。
+**现在的形状**：`main.ts` 的「编辑」菜单刻意不注册这两项，`⌘Z` / `⇧⌘Z` 由 renderer 的绑定表
+→ `core.history/undo|redo` → 模型快照栈单独接管。
+代价（诚实登记）：菜单栏「编辑」里不再显示撤销／重做两项——这是取舍，不是漏配。
 
-**这次没有改它**（改「编辑」菜单会牵动「哪一套才算真撤销」这个产品决定，不该由壳来定）。
-**留给下一步的必须回答**：要么把「编辑 → 撤销/重做」换成 `click: () => 转发给 renderer 的 core.history/undo`，
-要么把 app 的 `⌘Z` 绑定摘掉、认原生那一套。**现在这个状态是「两套撤销栈并存」，属于已知缺陷。**
-
-> 实测边界说清楚：这条**没有**用真实按键验（TCC 不许注入系统按键，见 ④.6），
-> 是从「菜单键等价物注册情况（E3 实测）」＋「macOS 的 NSMenu 优先顺序」推出来的。
-> **标为「高度可疑、需人工按键复核」。**
+> 边界：没有用真实系统按键复验冲突本身（注入按键受系统权限限制），
+> 结论来自菜单键等价物的实测 ＋ macOS 的 NSMenu 优先顺序 ＋ 现在源码里 role 缺席。
 
 ### 1.3 菜单
 
@@ -319,8 +314,9 @@ FATAL:content/browser/gpu/gpu_data_manager_impl_private.cc:417] GPU process isn'
 > ② 自研查找（原生 `Cmd+F` 查不到未挂载内容）③ 自绘选区高亮层 ④ 组合期两段式。
 > 下面是**在真 Electron 里**（`pnpm check:electron`）量到的现状，不是推演。
 
-### ① `⌘A`：**完全没接管，而且现在这个状态是「危险地半通」**
+### ① `⌘A`：**接管前的「危险地半通」**（已修，见下注）
 
+> **现状更新**：绑定表现在有 `mod+a`（编辑器聚焦时 → `core.editor/select-all`），块选区由模型持有、跨块删改走一次事务。下面这段是接管**之前**的探针记录，留作「为什么要接管」的证据，不代表现在缺能力。
 - 绑定表里**没有** `mod+a`（`grep` 过），所以 `⌘A` 落给 Chromium 的原生全选：
   - **DOM 侧**：`rangeCount=1`，选区**跨 16 个 `.blk`**（全部挂载的块），DOM 文本 503 字，锚点在 `#editor` 内 ✅
   - **模型侧**：`__qua.snapshot().selection` **仍是单块**（`aBlock/hBlock` 是同一块），命令日志增量 **0**
@@ -337,7 +333,7 @@ FATAL:content/browser/gpu/gpu_data_manager_impl_private.cc:417] GPU process isn'
 
 ### ② `⌘F`：**零反应**（没有绑定，也没有查找 UI）
 
-> 2026-11-05 注：全文检索已落地、键位是 `⌘P`；`⌘F` 仍**故意不绑定**，预留给就地查找/替换。
+> 2026-11-05 注：全文检索已落地、键位是 `⌘K`；`⌘P` 是命令面板；`⌘F` 仍**故意不绑定**，预留给就地查找/替换。
 > 下面这段是当年的探针记录（当时搜索功能尚不存在），不代表现在缺能力。
 
 - 按 `⌘F`：命令日志增量 **0**、`document.querySelector('input[type=search], .find-bar, [class*=find]')` 为 **null**、

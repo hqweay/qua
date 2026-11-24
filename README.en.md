@@ -74,7 +74,7 @@ Switching views never rearranges content, and changing a view never touches data
 
 ## What you can do
 
-**Write**: the body is an editable tree of blocks. Bold, italic, highlight, inline code, text color, and background color all travel with the text; `[[references]]`, `#tags`, `@names`, external links, and images are self-contained inline units, so adding or deleting them never damages the characters nearby—deleting at the end of a line won't break a reference into stray characters, and deleting text won't turn a tag into a handful of `#` symbols. Pasting a bare URL automatically turns it into a link. Shortcuts step aside during IME composition, so Chinese input is never interrupted. Select a span of text to add a **note** (comments follow the text) or set a color from the selection bubble; cross-block selections under the same parent block can be deleted or edited directly (the first and last paragraphs merge into one). Select several blocks to drag them as a group, delete them in bulk, or indent them—`⌘⇧A` upgrades "this line's text" to "these blocks".
+**Write**: the body is an editable tree of blocks. Bold, italic, highlight, inline code, text color, and background color all travel with the text; `[[references]]`, `#tags`, `@names`, external links, and images are self-contained inline units, so adding or deleting them never damages the characters nearby—deleting at the end of a line won't break a reference into stray characters, and deleting text won't turn a tag into a handful of `#` symbols. Shortcuts step aside during IME composition, so Chinese input is never interrupted. Select a span of text to add a **note** (comments follow the text) or set a color from the selection bubble; cross-block selections under the same parent block can be deleted or edited directly (the first and last paragraphs merge into one). Select several blocks to drag them as a group, delete them in bulk, or indent them—`⌘⇧A` upgrades "this line's text" to "these blocks".
 
 ![Slash menu: type / at the start of a line to insert a to-do, query block, reference, date, or image in place](shots/overlay-斜杠菜单.png)
 
@@ -92,7 +92,7 @@ Deletion has a single entry point: a block, a day, a page, a tag, a field defini
 
 ![Condition tree: one condition per line, each reading like a sentence; nothing is written until you click Apply](shots/query-条件树.png)
 
-**Find**: full-text search on the desktop runs on a SQLite full-text index (Chinese word segmentation + pinyin); `⌘K` finds blocks by keyword, with hits you can preview and edit in place, and the `⌘P` command palette runs every command—no need to memorize shortcuts. The search surface can live permanently as a dock card or a center tab, and a set of search results can be "promoted into a query block" right where it is, becoming a view that refreshes itself. All keybindings can be changed in Settings.
+**Find**: full-text search on the desktop runs on a SQLite full-text index (Chinese word segmentation + pinyin); `⌘K` finds blocks by keyword, with hits you can preview and edit in place, and the `⌘P` command palette runs every command—no need to memorize shortcuts. The search surface can live permanently as a dock card or a center tab, and a set of search results can be "promoted into a query block" right where it is, becoming a view that refreshes itself. Keybindings for command-palette commands can all be changed in Settings—some follow this machine, others follow this workspace.
 
 ---
 
@@ -119,6 +119,7 @@ Tags answer "whose content is this"; field values answer "what does this content
 |---|---|
 | `Enter` / `⇧Enter` | create the next sibling / a child at the insertion point |
 | `⌥Enter` (`Alt+Enter` on Windows) | create a sibling at the current block's parent level |
+| `⌘⇧N` | new page (asks for a name first; an existing page with that name opens instead of creating a duplicate) |
 | `Tab` / `⇧Tab` | indent / outdent |
 | `⌘⏎` | toggle to-do completion |
 | `⌘B` / `⌘I` / `⌘E` / `` ⌘` `` | bold / italic / highlight / inline code (select text first) |
@@ -126,7 +127,7 @@ Tags answer "whose content is this"; field values answer "what does this content
 | `⌘.` | fold / unfold the current block |
 | `⌘Z` / `⌘⇧Z` | undo / redo (while the editor has focus) |
 | `⌘⇧A` | select this line → these blocks |
-| `⌘P` | command palette (also holds actions without a keybinding, such as the wide layout) |
+| `⌘P` | command palette (also holds actions without a keybinding; palette commands can all be assigned keys in Settings) |
 | `⌘K` | global search (always available; inserting a link lives in the slash menu and block menu) |
 | `⌘T` / `⌘⇧R` | back to today's journal / review the last three days |
 | `⌘⌥1` / `⌘⌥2` | toggle the left / right dock |
