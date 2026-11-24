@@ -654,6 +654,8 @@ export function setupPages(deps: PagesDeps) {
         ed.doc.roots[0]?.id === id
       )
     },
+    /** 判据只有一份：在编辑器上（`daySoleBlock` 与 `keepWritableSlots` 同源） */
+    daySoleBlock: (id) => deps.getEd().daySoleBlock(id),
     insertBlock: (block, parentId, index) => {
       // 与 `removeBlock` 对称的结构写入口：插一棵子树（含自带的首子块），
       // op 由事务产出——每个后代报它们自己的 parent/index，换库后行行有落点。

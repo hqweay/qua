@@ -34308,6 +34308,113 @@ await check('T362 搜索浮层里开属性抽屉：抽屉压在宿主之上、Es
   return '抽屉压住宿主、Esc 先收抽屉'
 })
 
+/**
+ * **T363：一天的最后一个块——删不掉，而且说得出为什么。**
+ *
+ * 日期行是只读投影，一天没有子块就没有可写的行 ⇒ 写入漏斗（`keepWritableSlots`）会在
+ * 同一笔里补一块空块。照删不拒＝「删了又回来」：块软删了，屏幕却换了一块长一样的空块。
+ * 判据三处：菜单那一行**点不动且写明原因**、点它模型不变、键位/API 走命令层会拒绝并 toast。
+ */
+await check('T363 一天的最后一块：菜单行写明原因且点不动、命令拒绝并说一句、模型不变', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  await page.waitForTimeout(200)
+
+  const day = await page.evaluate(() => window.__qua.allBlocks().find((b) => b.roles.includes('journal'))?.id ?? '')
+  assert(day, '前置：库里要有日记天')
+  // 把这一天裁到只剩一个空块（原报障就是这一块）
+  const childId = await page.evaluate(async (id) => {
+    const b = window.__qua.__editor.store.find(id)
+    const live = b.children.filter((c) => !c.props?._deletedAt)
+    for (const c of live.slice(1)) window.__qua.invoke('core.block/delete', { blockId: c.id })
+    return live[0]?.id ?? ''
+  }, day)
+  assert(childId, '前置：这一天要留下一个块')
+  await page.waitForFunction(
+    (id) => window.__qua.__editor.store.find(id)?.children.filter((c) => !c.props?._deletedAt).length === 1,
+    day,
+    { timeout: 4000 },
+  )
+  await page.waitForTimeout(200)
+
+  // 在搜索浮层里预览这一天，展开到看见那个空块
+  await page.evaluate(() => window.__qua.invoke('core.search/open', {}, 'api'))
+  await page.waitForSelector('.popover.search-overlay .search-row', { timeout: 4000 })
+  const picked = await page.evaluate((id) => {
+    const row = document.querySelector(`.popover.search-overlay .search-row[data-search-row="${id}"] .search-row-select`)
+    if (row) row.click()
+    return Boolean(row)
+  }, day)
+  assert(picked, '前置：recents 里要有这一天')
+  await page.waitForFunction(
+    (id) => document.querySelector('.popover.search-overlay .search-face-preview .blk[data-block-id]')?.dataset.blockId === id,
+    day,
+    { timeout: 4000 },
+  )
+  const foldSel = `.popover.search-overlay .search-face-preview .fold[data-fold-for="${day}"]`
+  if (await page.$(foldSel)) await page.click(foldSel)
+  await page.waitForFunction(
+    (id) => Boolean(document.querySelector(`.popover.search-overlay .search-face-preview .blk[data-block-id="${id}"]`)),
+    childId,
+    { timeout: 4000 },
+  )
+
+  const before = await page.evaluate(() => ({
+    total: window.__qua.allBlocks().length,
+  }))
+  await page.click(`.popover.search-overlay .search-face-preview .blk[data-block-id="${childId}"] .tx`, { button: 'right' })
+  await page.waitForSelector('.layer', { timeout: 3000 })
+  await page.waitForTimeout(120)
+  const menu = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('.layer .layer-item')]
+    const del = rows.find((e) => String(e.getAttribute('data-id')).startsWith('core.block/delete'))
+    const dayLast = rows.find((e) => e.getAttribute('data-id') === 'delete-day-last')
+    return {
+      enabledDelete: Boolean(del && !del.disabled),
+      dayLastDisabled: Boolean(dayLast?.disabled),
+      dayLastHint: dayLast?.querySelector('.layer-hint')?.textContent ?? '',
+    }
+  })
+  assert(!menu.enabledDelete, `这一块不该有可点的「删除块」：${JSON.stringify(menu)}`)
+  assert(menu.dayLastDisabled, `删除行要写明原因并点不动：${JSON.stringify(menu)}`)
+  assert(menu.dayLastHint.includes('至少要留一个块'), `原因要写在行上（不是点完才说）：${JSON.stringify(menu)}`)
+
+  // 点那一行：模型与浮层都不动
+  const dead = await page.$('.layer [data-id="delete-day-last"]')
+  if (dead) await dead.click({ force: true }).catch(() => {})
+  await page.waitForTimeout(300)
+  const afterClick = await page.evaluate(({ cid, total }) => ({
+    childAlive: Boolean(window.__qua.allBlocks().find((b) => b.id === cid)),
+    total: window.__qua.allBlocks().length,
+    totalWas: total,
+    overlay: Boolean(document.querySelector('.popover.search-overlay')),
+  }), { cid: childId, total: before.total })
+  assert(afterClick.childAlive, `点那行不许删掉它：${JSON.stringify(afterClick)}`)
+  assert(afterClick.total === afterClick.totalWas, `点那行不许改库（更不能补一块）：${JSON.stringify(afterClick)}`)
+  assert(afterClick.overlay, `点那行不该关浮层：${JSON.stringify(afterClick)}`)
+
+  // 键位/API 走命令层：拒绝并给一句实话（菜单里提前说了，键位这条路要说出来）
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => document.querySelectorAll('.layer').length === 0, null, { timeout: 3000 })
+  await page.evaluate(() => window.__qua.quiet(false))
+  const refused = await page.evaluate((cid) => window.__qua.invoke('core.block/delete', { blockId: cid }), childId)
+  await page.waitForTimeout(250)
+  const afterApi = await page.evaluate(({ cid, total }) => ({
+    handled: null,
+    childAlive: Boolean(window.__qua.allBlocks().find((b) => b.id === cid)),
+    total: window.__qua.allBlocks().length,
+    totalWas: total,
+    toast: document.querySelector('.toasts')?.textContent ?? '',
+  }), { cid: childId, total: before.total })
+  assert(refused?.handled === false, `命令要拒绝（不是报成功）：${JSON.stringify(refused)}`)
+  assert(afterApi.childAlive && afterApi.total === afterApi.totalWas, `拒绝就不许改库：${JSON.stringify(afterApi)}`)
+  assert(afterApi.toast.includes('至少要留一个块'), `键位/API 这条路要说出来：${JSON.stringify(afterApi)}`)
+
+  await ctx.close()
+  return '最后一块删不掉：菜单行写明原因、点不动；命令拒绝并 toast；库不变'
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

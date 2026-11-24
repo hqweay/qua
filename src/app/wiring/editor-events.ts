@@ -23,6 +23,7 @@ import {
   isPropDef,
   openAxisOf,
   readEmbed,
+  removableBySplice,
   resolveEmbed,
   singleValueOf,
   valueListOf,
@@ -623,6 +624,9 @@ function viewEvents(
         // 删除块行在露面面收起：它会删源；删除只留命名准确的「移除这次露面」。
         // 聚焦的唯一内容根另有一档：删完会退出聚焦到父块，行上预告后果——
         // 不弹确认框（代价按连带算，空块零连带），但点在删除前就知道屏幕上会发生什么。
+        // 一天的最后一个块是第三档：删了写入漏斗会当场补一块空块（日期行不接光标），
+        // 保留原名入口只会让用户以为「删了又回来」⇒ 换成「写明原因、点不动」的一行。
+        // 判据与删除入口同一份：只拦**会触发补块**的内容块（有身份的块走库级软删）。
         ...(appearanceHost
           ? {
               omitCommands: ['core.block/delete'],
@@ -656,7 +660,20 @@ function viewEvents(
                   },
                 ],
               }
-            : {}),
+            : ed.daySoleBlock(blockId) && removableBySplice(blocks.find(blockId))
+              ? {
+                  omitCommands: ['core.block/delete'],
+                  extraRows: [
+                    {
+                      id: 'delete-day-last',
+                      label: t('menu.label.delete'),
+                      hint: t('menu.delete.dayLastHint'),
+                      group: 'block/6-delete',
+                      disabled: true,
+                    },
+                  ],
+                }
+              : {}),
         onPick: (row) => {
           if (row.id === 'appearance-views') {
             const embed = appearanceHost ? blocks.find(appearanceHost) : undefined

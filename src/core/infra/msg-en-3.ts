@@ -344,6 +344,7 @@ export const EN3 = {
   'menu.kw.views': 'views',
   'menu.delete.focusRoot': 'Delete and exit focus',
   'menu.delete.focusRootHint': 'Return to the parent block; no blank block is added in place',
+  'menu.delete.dayLastHint': 'A day keeps at least one block (the date row cannot take a caret)',
   'menu.kw.query': 'query',
   'menu.kw.automation': 'automation',
   'menu.kw.embed': 'embed',

@@ -138,6 +138,21 @@ export function deleteCommands(d: PageDeps, x: DeleteDeps): Pick<App, 'deleteBlo
       d.toast(t('ui.toast.todayUndeletable'), 'warn')
       return false
     }
+    /**
+     * **一天的最后一个块**：拒绝，并说清为什么。
+     *
+     * 日期行是只读投影，一天没有子块就没有可写的行 ⇒ 写入漏斗（`keepWritableSlots`）
+     * 会在同一笔事务里补一块空块。照删不拒的结果是「删了又回来」：块确实软删了，
+     * 但屏幕上换了一块长一样的空块，看起来像没删。与其静默换一块，不如不接这一下——
+     * 和「今天删不掉」同一类准入（删了会回来的入口不给），只是这条走键位/API 时要说出来。
+     *
+     * 只拦**会触发补块**的那一类（内容块）：有身份的块走库级软删，写入漏斗不补块，
+     * 那句「删了会当场补回来」对它不成立，不能拿它挡。
+     */
+    if (removableBySplice(b) && d.daySoleBlock(id)) {
+      d.toast(t('ui.toast.dayLastBlock'), 'warn')
+      return false
+    }
 
     const cost = deletionCostOf(b, d.kb.roots())
     const go = (): void => {

@@ -76,6 +76,8 @@ function stub(
     parent?: (id: string) => Block | undefined
     /** 「这一块是派生面（根＝结果集）此刻的唯一根」：模拟搜索预览/查询结果那一台编辑器 */
     derivedRoot?: (id: string) => boolean
+    /** 「这一块是一天的最后一个可写块」：模拟日期行那一屏 */
+    daySoleBlock?: (id: string) => boolean
   } = {},
 ): Stub {
   const log: string[] = []
@@ -85,7 +87,19 @@ function stub(
   const deps = {
     kb: {
       isLoaded: () => true,
-      get: (id: string) => live.find((b) => b.id === id),
+      // 按 id 找块要**走进子树**：一天的最后一个块是那一天的子块，只看顶层会当成「不存在」
+      get: (id: string) => {
+        let hit: Block | undefined
+        const walk = (list: readonly Block[]): void => {
+          for (const b of list) {
+            if (hit) return
+            if (b.id === id) hit = b
+            else walk(b.children)
+          }
+        }
+        walk(live)
+        return hit
+      },
       roots: () => live,
       pages: () => pages,
       parentOf: (id: string) => opts.parent?.(id),
@@ -95,6 +109,7 @@ function stub(
       return false
     },
     derivedRoot: (id) => opts.derivedRoot?.(id) ?? false,
+    daySoleBlock: (id) => opts.daySoleBlock?.(id) ?? false,
     removeBlock: (id: string) => {
       log.push(`remove:${id}`)
       live = live.filter((b) => b.id !== id)
@@ -225,6 +240,31 @@ test('派生面里的唯一根：库级软删，不摘行、不换落点（删�
     !s.log.some((x) => x.startsWith('active:') || x.startsWith('load:') || x === 'today' || x.startsWith('parent:')),
     `不换落点、不抢中心：${JSON.stringify(s.log)}`,
   )
+})
+
+test('一天的最后一块：拒绝并说一句（删了写入漏斗会当场补回来）', () => {
+  /**
+   * 日期行只读 ⇒ 一天至少留一个可写的块（`keepWritableSlots`）。照删不拒的结果是
+   * 「删了又回来」：块确实软删了，屏幕上却换了一块长一样的空块。准入改成拒绝，
+   * 并按「说得出口」给一句 toast（键位/API 走同一句；菜单里由那一行提前写明）。
+   */
+  const day = mkBlock('', { props: { _date: '2020-01-02' } })
+  const only = mkBlock('')
+  day.children.push(only)
+  const s = stub([day], { daySoleBlock: (id) => id === only.id })
+  const cmds = deleteCommands(s.deps, landing(s))
+  assert.equal(cmds.deleteBlock(only.id), false, '拒绝，不报成功')
+  assert.ok(s.log.some((x) => x.startsWith('toast:')), `拒绝要说得出口：${JSON.stringify(s.log)}`)
+  assert.ok(!s.log.includes(`remove:${only.id}`), `拒绝就不许真删：${JSON.stringify(s.log)}`)
+  assert.ok(!s.log.includes('splice'), `也不许走摘行（摘行会在同一笔里补空块）：${JSON.stringify(s.log)}`)
+
+  // 同一天里还有别的块时照常可删（准入只挡最后一块）
+  const second = mkBlock('还有别的')
+  const day2 = mkBlock('', { props: { _date: '2020-01-02' } })
+  const other = mkBlock('')
+  day2.children.push(second, other)
+  const s2 = stub([day2], { daySoleBlock: (id) => id === other.id })
+  assert.equal(deleteCommands(s2.deps, landing(s2)).deleteBlock(second.id), true)
 })
 
 test('journalId 是确定性派生的：删除后复活靠它认同一块（这里只钉住「同一天同一个 id」）', () => {

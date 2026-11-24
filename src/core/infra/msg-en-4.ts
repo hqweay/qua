@@ -206,6 +206,7 @@ export const EN4 = {
   'ui.move.refuseSame': 'It is already in this container',
   'ui.move.refuseJournal': 'The journal line cannot be moved (it represents a specific day)',
   'ui.toast.todayUndeletable': 'Today cannot be deleted: it comes back on every start',
+  'ui.toast.dayLastBlock': 'A day keeps at least one block; deleting it would bring one right back',
   'ui.toast.journalReadonly': 'A journal date is read-only (to change it, delete and recreate)',
   'ui.toast.refCopied': 'Reference copied (entity id + quote snapshot exact/prefix/suffix)',
   'ui.toast.noteDeleted': 'Note deleted (⌘Z to undo)',

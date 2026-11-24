@@ -59,6 +59,14 @@ export interface PageDeps {
    */
   derivedRoot: (id: string) => boolean
   /**
+   * 这一块是不是**「一天」的最后一块**（删了这一天就没有可写的行了）。
+   *
+   * 判据在活动编辑器上（`BlockEditor.daySoleBlock`）：日期行只读，一天没有子块就没有
+   * 落点，写入漏斗会在同一笔里补一块空块——删除入口必须先拒绝并说清原因，
+   * 不能让用户看到「删了又回来」。
+   */
+  daySoleBlock: (id: string) => boolean
+  /**
    * 插一棵子树（`block` 自带 children）——与 `removeBlock` 对称的**结构写入口**。
    *
    * 命令层不许自己 `blocks().push`：结构写必须走事务产 op，否则「这块在库里」

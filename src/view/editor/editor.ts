@@ -33,6 +33,7 @@ import {
   typeDeclOf,
   selToTextRanges,
   isFolded,
+  isJournal,
   focusRootOf,
   isEmbedBlock,
   toggleChildrenCollapsed,
@@ -3765,6 +3766,24 @@ export class BlockEditor {
     if (!hits || !blockId) return null
     const span = spanAt(hits.spans.get(blockId) ?? [], this.caretOffset())
     return span ? { to: hits.to, start: span.start, end: span.end } : null
+  }
+
+  /**
+   * 这一块是不是**「一天」的最后一块**——删了，这一天就没有可写的行了。
+   *
+   * 判据必须与 `struct.keepWritableSlots` **同源**：那个不变量只在「这一天是**这一台**
+   * 的装载根」时补块，所以这里也只认这一台的装载根。日期行是只读投影，一天没有子块就
+   * 没有落点 ⇒ 写入漏斗会在**同一笔**事务里补一块空块，用户看到的是「删了又回来」。
+   *
+   * 谁用：删除入口拿它**先拒绝并说清原因**（而不是让写入漏斗静默换一块）；
+   * 块菜单拿它把那行改成「写明原因、点不动」的一行（菜单里对准了就说，不等点完）。
+   */
+  daySoleBlock(id: string): boolean {
+    const loc = locate(this.doc, id)
+    if (!loc || !loc.parent || !isJournal(loc.parent)) return false
+    if (!this.doc.roots.some((r) => r.id === loc.parent!.id)) return false
+    const live = liveChildren(loc.parent)
+    return live.length === 1 && live[0]!.id === id
   }
 
   ctxKeys(): CtxKeys {
