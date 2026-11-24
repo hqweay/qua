@@ -6,7 +6,9 @@
  * （实测：槽里的行认 Shift 不认 ⌘，而文档头面包屑正好相反）。
  * 事件层只把鼠标上的修饰键交进来（`clickModsOf`），分流由装配层按这唯一一份判据做。
  *
- * 六档与优先级（自上而下）：
+ * 七档与优先级（自上而下）：
+ *   · `⌘/Ctrl + ⌥`（不带 Shift）→ `parent`：**在父块中打开并定位**（目标所在的
+ *     那一块换成父块，再把目标滚进视口）。这是「换一层看」，不是新落点。
  *   · `Shift + ⌥`（不带 ⌘/Ctrl）→ `dockSolo`：在右槽开一个窗口，**并单卡（只看这一张）**。
  *   · `⌥` → `inspect`：**看这一处自己的第二层**（有 run 的露面＝那一枚的详情；
  *     块级指针＝这一块的属性面板）。
@@ -15,18 +17,18 @@
  *   · `⌘/Ctrl` → `tab`：在新页签打开（另开一处看）。
  *   · 无修饰 → `center`：默认动作（打开/聚焦）。
  *
- * ⚠️ **两键组合只承认两个，且都是「加强」不是新落点**：`tabWide` 是 `tab` 的加强
- *    （同一落点 ＋ 一次性给足空间），`dockSolo` 是 `dock` 的加强（同一落点 ＋ 进入单卡）。
- *    单卡本来就是一个已有的槽状态，「进去就只看这张」不新增落点种类；
+ * ⚠️ **两键组合只承认三个，且都是「加强／换层」不是新落点**：`tabWide` 是 `tab`
+ *    的加强（同一落点 ＋ 一次性给足空间），`dockSolo` 是 `dock` 的加强（同一落点
+ *    ＋ 进入单卡），`parent` 是 `⌥` 族里的「换到父层看」（不改落点种类）。
  *    其余组合仍按优先级归一，不开「两两组合」的矩阵。
  * ⚠️ **`⌥` 不是落点**：它不改「你在哪」，只把这一处自己的东西展开一层。
  *    所以 `inspect` 与另外几档的区别是**生命周期**（瞬态 vs 常驻），不是位置；
  *    `Shift+⌥` 里再带 `⌘/Ctrl` 时不认加强，仍归 `inspect`。
  */
-export type OpenAction = 'center' | 'dock' | 'dockSolo' | 'tab' | 'inspect' | 'tabWide'
+export type OpenAction = 'center' | 'dock' | 'dockSolo' | 'tab' | 'inspect' | 'tabWide' | 'parent'
 
-/** 三个真正的落点（`inspect` 不是「去哪」；`tabWide`/`dockSolo` 是加强，不是新落点）。 */
-export type OpenPlace = Exclude<OpenAction, 'inspect' | 'tabWide' | 'dockSolo'>
+/** 三个真正的落点（`inspect`／`parent` 不是「去哪」；`tabWide`/`dockSolo` 是加强，不是新落点）。 */
+export type OpenPlace = Exclude<OpenAction, 'inspect' | 'tabWide' | 'dockSolo' | 'parent'>
 
 export interface OpenMods {
   shiftKey?: boolean
@@ -71,13 +73,15 @@ export function clickModsOf(e: {
 }
 
 /**
- * 一次点击的动作：`Shift+⌥`（不带 ⌘/Ctrl）优先，其次 `⌥`，再次 `⌘/Ctrl + Shift`，
- * 再 `Shift`，最后 `⌘/Ctrl`。
+ * 一次点击的动作：`⌘/Ctrl + ⌥`（不带 Shift）优先，其次 `Shift+⌥`（不带 ⌘/Ctrl），
+ * 再 `⌥`，再 `⌘/Ctrl + Shift`，再 `Shift`，最后 `⌘/Ctrl`。
  *
- * 组合键只产生一种语义，不让用户去记两两组合；被承认的两个组合都是
- * 「已有落点的加强」：`tabWide` 加强 `tab`，`dockSolo` 加强 `dock`。
+ * 组合键只产生一种语义，不让用户去记两两组合；被承认的三个组合都是
+ * 「已有语义的加强／换层」：`tabWide` 加强 `tab`，`dockSolo` 加强 `dock`，
+ * `parent` 是 `⌥` 族里的「去父层看」（不是又一个落点）。
  */
 export function openActionOf(mods: OpenMods = {}): OpenAction {
+  if ((mods.metaKey === true || mods.ctrlKey === true) && mods.altKey === true && mods.shiftKey !== true) return 'parent'
   if (mods.shiftKey && mods.altKey && !mods.metaKey && !mods.ctrlKey) return 'dockSolo'
   if (mods.altKey) return 'inspect'
   if ((mods.metaKey === true || mods.ctrlKey === true) && mods.shiftKey === true) return 'tabWide'
@@ -93,7 +97,9 @@ export function openActionOf(mods: OpenMods = {}): OpenAction {
  * 为什么不把 axis 做成每个入口多传的一个参数：那些入口的修饰键结构被抄窄过三次
  * （见 `ClickMods` 注释），多一个必传字段就多一处静默退化的机会。
  */
-export function openPlaceOf(action: OpenAction): Exclude<OpenAction, 'tabWide' | 'dockSolo'> {
+export function openPlaceOf(
+  action: Exclude<OpenAction, 'parent'>,
+): Exclude<OpenAction, 'tabWide' | 'dockSolo' | 'parent'> {
   if (action === 'tabWide') return 'tab'
   if (action === 'dockSolo') return 'dock'
   return action

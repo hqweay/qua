@@ -1721,13 +1721,15 @@ const app: App = {
   /**
    * **所有「点一下就打开」的入口共用这一条路由**（`action` 由 `openActionOf` 算）。
    *
-   * 它不新增导航语义，只把六档动作组合起来：
+   * 它不新增导航语义，只把七档动作组合起来：
+   *   · parent   → `openParent`（换成父块并定位目标；不改落点种类）
    *   · inspect  → `openPropertiesDrawer`（看这一块自己的第二层；不改中心、不动槽、不入历史）
    *   · dock     → `openInDock`（不换中心、不入历史；`dockSolo` 同一落点，另外进入单卡）
    *   · tab      → `openInNewTab`（`tabWide` 同一落点，另外一次性进宽屏）
    *   · center   → 内容面 `zoomTo`（聚焦）；导航面 `openPage`（不抢焦点）
    *
-   * ⚠️ `inspect` 放在最前：它是**目标自己的面**，不是「去哪」，先分流掉才不会落进导航。
+   * ⚠️ `parent`／`inspect` 放在最前：它们是**目标自己的面**或**换层看**，
+   *    不是「去哪」，先分流掉才不会落进导航。
    */
   openBlock: (id, action = 'center', opts) => {
     const first = !navStarted.has(id)
@@ -1793,6 +1795,11 @@ const app: App = {
       })
       return
     }
+    if (action === 'parent') {
+      // 换层看：父块自己走一条完整的打开；收尾（含 after）挂在它身上
+      if (!app.openParent(id, finish)) finish()
+      return
+    }
     if (action === 'inspect') {
       app.openPropertiesDrawer(id)
       finish()
@@ -1821,13 +1828,14 @@ const app: App = {
    * 目标是顶层块／顶层页时没有父块：退回打开它自己（动作不静默失败）。
    * 父块开好后先展开折起来的祖先，再滚到目标并闪一下——只调 reveal 会在
    * 折叠的子树上找不到行，看起来像点了没反应。
+   * `after` 在父块画上屏、目标定位收尾之后调用一次（与 `openBlock` 的收尾同义）。
    */
-  openParent: (blockId) => {
+  openParent: (blockId, after) => {
     const path = kb.pathOf(blockId)
     if (path.length === 0 || path[path.length - 1]?.id !== blockId) return false
     const parent = path.length > 1 ? path[path.length - 2] : undefined
     if (!parent) {
-      app.openBlock(blockId, 'center')
+      app.openBlock(blockId, 'center', { after })
       return true
     }
     app.openBlock(parent.id, 'center', {
@@ -1835,6 +1843,7 @@ const app: App = {
       after: () => {
         // 父块这一屏装不下目标（巨大页的窗口边界之外）⇒ 退回打开它自己，不假装定位成功
         if (!app.revealBlock(blockId)) app.openBlock(blockId, 'center')
+        after?.()
       },
     })
     return true

@@ -1130,7 +1130,8 @@ export function bindEditorEvents(br: EditorBridge): () => void {
     }
     const marker = path.find((n): n is HTMLElement => n instanceof HTMLElement && 'focusFor' in n.dataset)
     if (marker?.dataset.focusFor) {
-      // Shift+左键 ⇒ 右槽；⌘/Ctrl+左键 ⇒ 新页签；⌥+左键 ⇒ 看这一块的属性。
+      // Shift+左键 ⇒ 右槽；⌘/Ctrl+左键 ⇒ 新页签；⌥+左键 ⇒ 看这一块的属性；
+      // ⌘/Ctrl+⌥+左键 ⇒ 在父块中打开并定位（同一份 openActionOf）。
       // 动作由 `openActionOf` 算，落点/面板由装配层的同一条路由分流。
       zoomOrOpen(marker.dataset.focusFor)
     }

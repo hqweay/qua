@@ -210,6 +210,7 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
    *
    * · 左键 ⇒ 打开目标块（`focus-block`，嵌套块也能进）；
    * · **Shift+左键** ⇒ 同一个「打开」，换到右槽（一张窗口）；中心不换、历史不记；
+   * · **⌘/Ctrl+⌥+左键** ⇒ 在父块中打开并定位（换一层看，不是又一个落点）；
    * · `⌥` 点击 ⇒ 弹详情浮层（诊断信息、删除引用都还在那里）；
    * · 图片 / 外链 / dangling / 目标缺失 ⇒ 只弹浮层，**不静默失败**。
    *
@@ -222,8 +223,10 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
    */
   const handleRefClick = (ref: RefClickHit, mods: RefClickMods, el?: HTMLElement): void => {
     const target = ref.to !== '' && findInForest(deps.getWs().blocks, ref.to) ? ref.to : undefined
-    if (target && (!mods.altKey || !ref.run)) {
-      deps.openBlockRoute(target, openActionOf(mods))
+    const action = openActionOf(mods)
+    // ⌥ 是「看这一枚自己的第二层」；⌘⌥ 已归 parent，不该被这里当成详情
+    if (target && (action !== 'inspect' || !ref.run)) {
+      deps.openBlockRoute(target, action)
       return
     }
     if (ref.run && el) showAtomPopover(ref.run, anchorOf(el), { trigger: { el, key: ref.run.id } })

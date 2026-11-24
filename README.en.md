@@ -133,7 +133,7 @@ Tags answer "whose content is this"; field values answer "what does this content
 | `⌘⇧L` / `⌘,` | toggle theme / Settings (the interface language lives here too) |
 | `⌘⇧?` | binding table (keymap / menu / slash / selection; commands without bindings are in `⌘P`) |
 
-Mouse: the block handle sits to the left of each row and turns into a drag grip on hover; left-click focuses, right-click opens the menu, drag reorders. `Shift+click` opens a window in the side dock, `⌥+click` shows property details in place. Rows in record views (table / cards / list / calendar) open the same block menu on right-click—the menu opens for the block you clicked, deletion and copying are undoable, and only actions that make sense for a block appear (indent/fold and other editor-dependent ones don't).
+Mouse: the block handle sits to the left of each row and turns into a drag grip on hover; left-click focuses, right-click opens the menu, drag reorders. `Shift+click` opens a window in the side dock, `⌥+click` shows property details in place, and `⌘⌥+click` (`Ctrl+Alt+click` on Windows/Linux) opens the block in its parent and scrolls to it. Rows in record views (table / cards / list / calendar) open the same block menu on right-click—the menu opens for the block you clicked, deletion and copying are undoable, and only actions that make sense for a block appear (indent/fold and other editor-dependent ones don't).
 
 ---
 

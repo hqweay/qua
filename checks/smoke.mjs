@@ -6306,7 +6306,7 @@ await check('T205 取消待办：摘掉这一栏就真的不是任务了（`/待
   return `普通块：切换待办 → 取消待办（栏整条摘掉、可一步撤销）；#任务 成员：值清掉、状态仍来自标签`
 })
 
-await check('T44 左键点引用直接打开目标；⌥ 才弹详情；dangling 弹详情；图片左键 lightbox', async () => {
+await check('T44 左键点引用直接打开目标；⌥ 才弹详情；⌘/Ctrl+⌥ 走父块打开；dangling 弹详情；图片左键 lightbox', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
 
@@ -6334,6 +6334,19 @@ await check('T44 左键点引用直接打开目标；⌥ 才弹详情；dangling
   assert(opened.active === r.targetTitle, `左键应打开目标：${JSON.stringify({ want: r.targetTitle, got: opened.active })}`)
   assert(opened.popover === 0, '左键不该弹详情浮层')
   assert(opened.total === r.total, `打开引用不该建块：${r.total} → ${opened.total}`)
+
+  // ⌘/Ctrl+⌥：不弹详情，走「在父块中打开并定位」；目标是页根 ⇒ 打开目标本身
+  const mod = process.platform === 'darwin' ? 'Meta' : 'Control'
+  await openFirstPage(page)
+  await page.waitForTimeout(100)
+  await page.locator(`#editor .atom-page[data-atom-id="${r.atomId}"]`).click({ modifiers: [mod, 'Alt'] })
+  await page.waitForTimeout(200)
+  const byParent = await page.evaluate(() => ({
+    active: window.__qua.snapshot().activePage,
+    popover: document.querySelectorAll('.popover').length,
+  }))
+  assert(byParent.popover === 0, `⌘/Ctrl+⌥ 点引用不该弹详情浮层：${JSON.stringify(byParent)}`)
+  assert(byParent.active === r.targetTitle, `⌘/Ctrl+⌥ 应打开目标本身（页根没有父块）：${JSON.stringify(byParent)}`)
 
   // ⌥：仍弹原来的详情（含删除引用）
   await openFirstPage(page)
@@ -33909,34 +33922,34 @@ await check('T358 在父块中打开：子块 ⇒ 中心换成父块，目标行
   assert(out.nav.openCalls >= 1 && out.nav.openCount >= 1, `导航读数应记下这一次打开：${JSON.stringify(out.nav)}`)
 
   /**
-   * 键盘路径：焦点回到子块，按 ⌘⌥↵（Ctrl+Alt+Enter）⇒ 同一落点。
-   * 这条钉的是「任意块」这一半：不靠引用探针、不靠菜单，光标在哪块就开哪块的父块。
+   * 修饰键+左键：点**块标**（不是菜单、不是命令）⇒ 同一落点。
+   * 这条钉的是「任意块」这一半：块标每一行都有，⌘/Ctrl+⌥+左键就是「去父层看」。
    */
-  const focused = await page.evaluate(({ child }) => {
+  const marker = page.locator(`#editor .blk[data-block-id="${pair.child}"] .marker`).first()
+  assert((await marker.count()) > 0, '前置：目标行的块标应在当前屏')
+  await page.evaluate(({ child }) => {
     const el = document.querySelector(`#editor .blk[data-block-id="${child}"]`)
     if (el) delete el.dataset.land
-    window.__qua.focusBlock(child, 0)
-    return Boolean(el)
   }, pair)
-  assert(focused, '前置：目标行应仍在当前屏')
-  await page.keyboard.press('ControlOrMeta+Alt+Enter')
+  const mod = process.platform === 'darwin' ? 'Meta' : 'Control'
+  await marker.click({ modifiers: [mod, 'Alt'] })
   await page.waitForFunction(
     ({ child }) => document.querySelector(`#editor .blk[data-block-id="${child}"]`)?.dataset.land === '1',
     pair,
     { timeout: 2500 },
   )
-  const byKey = await page.evaluate(
+  const byClick = await page.evaluate(
     ({ child }) => ({
       active: window.__qua.snapshot().activeId,
       land: document.querySelector(`#editor .blk[data-block-id="${child}"]`)?.dataset.land ?? '',
     }),
     pair,
   )
-  assert(byKey.active === pair.parent, `快捷键应保持父块为中心：${JSON.stringify(byKey)}`)
-  assert(byKey.land === '1', `快捷键应收尾在目标行上闪一下：${JSON.stringify(byKey)}`)
+  assert(byClick.active === pair.parent, `⌘/Ctrl+⌥+点块标应保持父块为中心：${JSON.stringify(byClick)}`)
+  assert(byClick.land === '1', `⌘/Ctrl+⌥+点块标应收尾在目标行上闪一下：${JSON.stringify(byClick)}`)
 
   await ctx.close()
-  return `子块 ⇒ 父块 ${pair.parent.slice(-6)} 成为当前对象，子块可见并闪了一下；⌘⌥↵ 同一条路`
+  return `子块 ⇒ 父块 ${pair.parent.slice(-6)} 成为当前对象，子块可见并闪了一下；⌘/Ctrl+⌥+点块标同一条路`
 })
 
 const known = results.filter((r) => !r.ok && r.known)

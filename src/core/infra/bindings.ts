@@ -69,9 +69,6 @@ export const BINDINGS: Binding[] = [
   // ⌥↵：向上跳一层建块。Enter 家族第五键——先前特意留空是因为 ⌥ 用于检查/字段卡的
   // 修饰身份，但那个身份从不占 ⌥↵；而「在父块那一层直接出生」是自动化创作的真实缺口。
   { command: 'core.editor/insert-parent-sibling', kind: 'keymap', key: 'alt+enter', when: 'editorTextFocus', layer: 'core' },
-  // ⌘⌥↵：在父块中打开并定位——与 ⌥↵ 同族（父层动作），加 ⌘ 表示「不是建块，是去父层看」。
-  // 不占浏览器/系统常见快捷键（⌘⇧O 在 Chrome 是书签管理器，网页端会被截走）。
-  { command: 'core.block/open-parent', kind: 'keymap', key: 'mod+alt+enter', when: 'editorTextFocus', layer: 'core' },
   // ⌘A **必须接管**：Chrome 在「编辑区含 contenteditable=false 子树」时
   // 原生全选会退化成空选区（把 journal 行标成只读后实测到）⇒ 自己拼跨块 Range
   { command: 'core.editor/select-all', kind: 'keymap', key: 'mod+a', when: 'editorTextFocus', layer: 'core' },
