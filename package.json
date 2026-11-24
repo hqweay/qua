@@ -1,6 +1,6 @@
 {
   "name": "qua",
-  "version": "0.1.0-beta.10",
+  "version": "0.1.0-beta.11",
   "type": "module",
   "description": "相（Qua）：块级 DOM 大纲笔记 ＋ 自研区间锚点 ＋ 命令/绑定表；Electron 壳，主进程不含业务逻辑",
   "author": "hqweay",
