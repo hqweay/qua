@@ -19420,13 +19420,13 @@ await check('C1 相对日期：树上存表达式；锚只在日记页里出现�
   return '相对态 chip ＋ 表达式落库；锚出现/可 toggle；切回固定日期后往返成绝对形状'
 })
 
-/* ---------------------------------------------------------------- 卡头 → 中心/全屏 */
+/* ---------------------------------------------------------------- 卡头 → 中心/宽屏 */
 
 /**
- * **卡-中心-全屏是同一份内容的三种落点**：卡头菜单「全屏打开」＝中心开同一份内容
- * 并进全屏档，**卡留在槽里**（退出全屏它还在）——移动是导航，不是搬运。
+ * **卡-中心-宽屏是同一份内容的三种落点**：卡头菜单「宽屏打开」＝中心开同一份内容
+ * 并进宽屏档，**卡留在槽里**（退出宽屏它还在）——移动是导航，不是搬运。
  */
-await check('M4 卡头「全屏打开」：中心开同一份内容并进全屏；退出后卡还在槽里', async () => {
+await check('M4 卡头「宽屏打开」：中心开同一份内容并进宽屏；退出后卡还在槽里', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
@@ -19446,7 +19446,7 @@ await check('M4 卡头「全屏打开」：中心开同一份内容并进全屏�
     )
   assert(await cardThere(), '前置：右槽应有这张窗口卡')
 
-  // 卡头右键 ⇒ 菜单里有「全屏打开」（只认这张卡的头，槽里可能还有别的卡）
+  // 卡头右键 ⇒ 菜单里有「宽屏打开」（只认这张卡的头，槽里可能还有别的卡）
   await page.evaluate(
     (id) => {
       const head = document.querySelector(`.dock-card[data-card-id="${id}"] .dock-card-head`)
@@ -19458,33 +19458,31 @@ await check('M4 卡头「全屏打开」：中心开同一份内容并进全屏�
   const rows = await page.evaluate(() =>
     [...document.querySelectorAll('.layer-item')].map((e) => e.textContent ?? ''),
   )
-  assert(rows.some((r) => r.includes('全屏打开')), `卡头菜单要有「全屏打开」：${JSON.stringify(rows)}`)
+  assert(rows.some((r) => r.includes('宽屏打开')), `卡头菜单要有「宽屏打开」：${JSON.stringify(rows)}`)
 
-  await page.locator('.layer-item', { hasText: '全屏打开' }).first().click()
+  await page.locator('.layer-item', { hasText: '宽屏打开' }).first().click()
   await page.waitForTimeout(500)
-  const full = await page.evaluate(() => ({
+  const wide = await page.evaluate(() => ({
     axis: document.body.dataset.axis ?? '',
     active: window.__qua.snapshot().activeId,
     exitShown: Boolean(document.querySelector('.axis-exit')) && !document.querySelector('.axis-exit')?.hidden,
   }))
-  assert(full.axis === 'full', `全屏打开要进全屏档：${JSON.stringify(full)}`)
-  assert(full.active === targetId, `中心要打开同一份内容（实际 active=${full.active}）`)
-  assert(full.exitShown, '全屏档要给退出口')
+  assert(wide.axis === 'wide', `宽屏打开要进宽屏档：${JSON.stringify(wide)}`)
+  assert(wide.active === targetId, `中心要打开同一份内容（实际 active=${wide.active}）`)
+  assert(wide.exitShown, '宽屏档要给退出口')
 
-  // Esc 沿轴退：全屏 → 宽屏 → 常规；回到常规后卡还在槽里（留在槽里，不是搬走了）
-  await page.keyboard.press('Escape')
-  await page.waitForTimeout(300)
-  const wide = await page.evaluate(() => document.body.dataset.axis ?? '')
-  assert(wide === 'wide', `Esc 要退到宽屏（实际 ${wide}）`)
+  // Esc 沿轴退：宽屏 → 常规；回到常规后卡还在槽里（留在槽里，不是搬走了）
+
   await page.keyboard.press('Escape')
   await page.waitForTimeout(300)
   const back = await page.evaluate(() => document.body.dataset.axis ?? 'normal')
-  assert(back === 'normal', `再退要回常规（实际 ${back}）`)
-  assert(await cardThere(), '退出全屏后卡要还在槽里（移动是导航不是搬运）')
+  assert(back === 'normal', `退要回常规（实际 ${back}）`)
+  assert(await cardThere(), '退出宽屏后卡要还在槽里（移动是导航不是搬运）')
 
   await ctx.close()
-  return '全屏打开：body[data-axis=full] ＋ 中心同一块；Esc 两步退回后卡仍在槽'
+  return '宽屏打开：body[data-axis=wide] ＋ 中心同一块；Esc 退回后卡仍在槽'
 })
+
 
 /* ---------------------------------------------------------------- 设置（⌘,） */
 
@@ -23451,17 +23449,21 @@ const axisState = (page) =>
     exitHidden: document.querySelector('.axis-exit')?.hidden ?? true,
   }))
 
-await check('T231 档位轴三档：进一档循环到全屏再回常规；宽屏收双槽、阅读宽度放开、切 tab 仍在全屏；Esc 两步还原原样', async () => {
+await check('T231 档位轴两档：进一档常规→宽屏→常规循环；宽屏收双槽、正文与容器一起吃满、抬头 tab 条不藏；Esc 一步还原', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
+  const chromeBefore = await page.evaluate(() => ({
+    crumbs: getComputedStyle(document.getElementById('crumbs-trail')).display,
+    tabs: getComputedStyle(document.querySelector('.center-tabs')).display,
+  }))
 
-  // 前置：进入前手动收起左槽（用户自己的设备状态——退出后要原样回来）
+  // 前置：进入前手动收起左槽（用户自己的设备状态——退出后要按 prefs 回来）
   await page.evaluate(() => window.__qua.invoke('core.dock/toggle-left', {}, 'api'))
   const before = await axisState(page)
   assert(before.axis === '', '前置：常规档不写 data-axis')
   assert(before.left === 'closed', '前置：左槽已手动收起')
   assert(before.right === 'open', '前置：右槽开着')
-  assert(before.docW <= 760, `前置：常规档阅读宽度在档内（${before.docW}）`)
+  assert(before.docW <= 760, `前置：常规档宽度在档内（${before.docW}）`)
 
   // 进档走命令（键位让给了上方插入，面板照常可达）；Esc 退档仍是键盘
   const axisUp = () => page.evaluate(() => window.__qua.invoke('core.view/axis-up', {}, 'api'))
@@ -23469,53 +23471,52 @@ await check('T231 档位轴三档：进一档循环到全屏再回常规；宽�
   let now = await axisState(page)
   assert(now.axis === 'wide', `进一档 ⇒ 宽屏：${now.axis}`)
   assert(now.left === 'closed' && now.right === 'closed', `宽屏收起双槽：${now.left}/${now.right}`)
-  assert(now.docW > 760, `宽屏放开阅读/视图宽度上限：${now.docW}`)
+  assert(now.docW > 760, `宽屏正文容器吃满中心：${now.docW}`)
   const wideW = now.docW
   assert(now.exitHidden === false, '宽屏给退出口')
 
-  await axisUp()
-  now = await axisState(page)
-  assert(now.axis === 'full', `再进一档 ⇒ 全屏：${now.axis}`)
-  const hidden = await page.evaluate(() => ({
-    crumbs: getComputedStyle(document.getElementById('crumbs-trail')).display === 'none',
-    tabs: getComputedStyle(document.querySelector('.center-tabs')).display === 'none',
-  }))
-  assert(hidden.crumbs && hidden.tabs, '全屏再藏抬头与 tab 条（只剩内容与退出口）')
+  // 文字行跟容器一起宽（正文里内嵌看板时两种宽度会割裂）
+  const textW = await page.evaluate(() =>
+    Math.round(document.querySelector('#editor .blk > .tx')?.getBoundingClientRect().width ?? 0))
+  assert(textW > 718, `宽屏正文文字跟着容器变宽：${textW}`)
 
-  // 档位住窗口不住 tab：全屏中回今日（⌘T）仍在全屏
+  // 抬头与 tab 条不再随宽度档隐藏（纵向 chrome 的沉浸档已撤）：与进入前逐项比对
+  const chromeAfter = await page.evaluate(() => ({
+    crumbs: getComputedStyle(document.getElementById('crumbs-trail')).display,
+    tabs: getComputedStyle(document.querySelector('.center-tabs')).display,
+  }))
+  assert(chromeAfter.crumbs === chromeBefore.crumbs && chromeAfter.tabs === chromeBefore.tabs,
+    `宽屏档不改抬头与 tab 条的可见性：${JSON.stringify(chromeBefore)} → ${JSON.stringify(chromeAfter)}`)
+
+  // 档位住窗口不住 tab：宽屏中回今日（⌘T）仍在宽屏
   await page.keyboard.press(kbd('mod+t'))
   await page.waitForTimeout(120)
   now = await axisState(page)
-  assert(now.axis === 'full', `全屏中回今日仍在全屏：${now.axis}`)
+  assert(now.axis === 'wide', `宽屏中回今日仍在宽屏：${now.axis}`)
 
-  await page.keyboard.press('Escape')
+  // 两档循环：宽屏再进 ⇒ 常规（不是死键，也不是进到一个已撤的第三档）
+  await axisUp()
   now = await axisState(page)
-  assert(now.axis === 'wide', `Esc 沿轴退一档 ⇒ 宽屏：${now.axis}`)
-
-  await page.keyboard.press('Escape')
-  now = await axisState(page)
-  assert(now.axis === '', `再退 ⇒ 常规：${now.axis}`)
-  assert(now.left === 'closed', `退出后原样：进前手动收过的左槽仍收着（${now.left}）`)
-  assert(now.right === 'open', `退出后原样：右槽回到开（${now.right}）`)
-  assert(now.exitHidden === true, '常规档没有退出口')
-  assert(now.docW <= 760, `常规档阅读宽度收回（${now.docW}）`)
-
-  // 进一档是三档循环：全屏再进 ⇒ 常规（不是死键）；回常规走的是与 Esc 退档同一份 overlay 判据
-  await axisUp() // 常规 → 宽屏
-  await axisUp() // 宽屏 → 全屏
-  await axisUp() // 全屏 → 常规（循环）
-  now = await axisState(page)
-  assert(now.axis === '', `全屏再进一档 ⇒ 常规（三档循环）：${now.axis}`)
-  assert(now.left === 'closed' && now.right === 'open', `循环回常规也原样还原槽：${now.left}/${now.right}`)
+  assert(now.axis === '', `宽屏再进一档 ⇒ 常规（两档循环）：${now.axis}`)
+  assert(now.left === 'closed' && now.right === 'open', `循环回常规按 prefs 还原槽：${now.left}/${now.right}`)
   assert(now.exitHidden === true, '循环回常规没有退出口')
-  assert(now.docW <= 760, `循环回常规阅读宽度收回（${now.docW}）`)
-  // 退档不循环：常规档按 Esc 不该反向跳进全屏（Esc 落在关浮层那层）
+  assert(now.docW <= 760, `循环回常规宽度收回（${now.docW}）`)
+
+  // 退档不循环：常规档按 Esc 不该反向跳进宽屏（Esc 落在关浮层那层）
   await page.keyboard.press('Escape')
   now = await axisState(page)
   assert(now.axis === '', `常规档 Esc 不反向进档：${now.axis}`)
 
+  // Esc 一步从宽屏回常规，未动过的槽按 prefs 还原
+  await axisUp()
+  await page.keyboard.press('Escape')
+  now = await axisState(page)
+  assert(now.axis === '', `Esc 从宽屏 ⇒ 常规：${now.axis}`)
+  assert(now.left === 'closed' && now.right === 'open', `退出后按 prefs 还原：${now.left}/${now.right}`)
+  assert(now.docW <= 760, `退出后宽度收回（${now.docW}）`)
+
   await ctx.close()
-  return `两步进到全屏、Esc 两步还原、再走一圈回常规；宽屏宽 ${before.docW}→${wideW}`
+  return `两档循环、Esc 一步还原、抬头 tab 条不藏；宽屏宽 ${before.docW}→${wideW}、文字 ${textW}`
 })
 
 await check('T232 Esc 浮层优先于退档；档位期间手动开槽以他为准，退出后保持他的样子', async () => {

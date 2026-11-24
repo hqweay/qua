@@ -160,7 +160,7 @@ export const EN1 = {
   'ui.dock.closeOtherWindows': 'Close other windows',
   'ui.dock.closeAllWindows': 'Close all windows',
   'ui.dock.focusInEditor': 'Open in main editor',
-  'ui.dock.openFull': 'Open fullscreen (card stays in dock)',
+  'ui.dock.openWide': 'Open wide (card stays in dock)',
   'ui.dock.closeWindow': 'Close this window (block is not deleted)',
   'ui.dock.closeWidget': 'Close this card (content is not deleted)',
   'ui.dock.closeCard': 'Close this card; add it back from "Add tile" when needed',

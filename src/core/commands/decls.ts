@@ -249,13 +249,13 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.view/set-props-line-mode', title: t('cmd.view.set-props-line-mode'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, mode: { type: 'string', enum: ['summary', 'list', ''] } }, keywords: ['property', 'expand', 'collapse', 'density'], hidden: true },
   { name: 'core.dock/toggle-left', title: t('cmd.dock.toggle-left'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['dock', 'left', 'panel'] },
   { name: 'core.dock/toggle-right', title: t('cmd.dock.toggle-right'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['dock', 'right', 'panel'] },
-  // 档位轴：进一档在三档间循环（常规→宽屏→全屏→常规），Esc 退一档到底不动。
-  // 宽屏＝双槽收起＋阅读宽度放开；全屏＝再藏抬头与 tab 条；档位只住窗口：不写偏好、不跨会话。
-  // 键位换主后（⌘⇧↵ 归「上方插入」）进档走命令面板、退档仍是 Esc；「全屏打开」这类
+  // 档位轴：进一档在常规/宽屏两档间循环（常规→宽屏→常规），Esc 退一档到底不动。
+  // 宽屏＝双槽默认收起＋正文容器吃满可用宽度；槽的可见性可被用户手动覆盖；档位只住窗口。
+  // 键位换主后（⌘⇧↵ 归「上方插入」）进档走命令面板、退档仍是 Esc；「宽屏打开」这类
   // 一步到位的入口还要一条直选（进/退两条走不到的语义）。
-  { name: 'core.view/axis-up', title: t('cmd.view.axisUp'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['wide', 'fullscreen', 'focus', t('menu.kw.wide'), t('menu.kw.fullscreen')] },
+  { name: 'core.view/axis-up', title: t('cmd.view.axisUp'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), keywords: ['wide', 'focus', t('menu.kw.wide')] },
   { name: 'core.view/axis-down', title: t('cmd.view.axisDown'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), hidden: true },
-  { name: 'core.view/axis-to', title: t('cmd.view.axisTo'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), hidden: true, args: { mode: { type: 'string', enum: ['wide', 'full'] } } },
+  { name: 'core.view/axis-to', title: t('cmd.view.axisTo'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), hidden: true, args: { mode: { type: 'string', enum: ['wide'] } } },
   { name: 'core.dock/open-block', title: t('cmd.dock.open-block'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, side: { type: 'string' } }, keywords: ['dock', 'open', 'window', 'sidebar'], actsOn: 'block' },
   { name: 'core.dock/add-shortcut', title: t('cmd.dock.add-shortcut'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' }, side: { type: 'string' } }, keywords: ['shortcut', 'dock', 'quick', 'bookmark'], actsOn: 'block' },
   { name: 'core.dock/top-window', title: t('cmd.dock.topWindow'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { blockId: { type: 'string' } }, keywords: ['dock', 'pin', 'top', 'window', 'sidebar'] },

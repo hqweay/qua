@@ -113,7 +113,7 @@ export const VIEW_HANDLERS: Record<string, Handler> = {
     app.toggleDock('right')
     return true
   },
-  /* ---- 档位轴（进一档三档循环；Esc 沿轴退一档，到底不动）---- */
+  /* ---- 档位轴（进一档两档循环；Esc 沿轴退一档，到底不动）---- */
   'core.view/axis-up': (_a, app) => {
     app.axisStep(1)
     return true
@@ -123,9 +123,9 @@ export const VIEW_HANDLERS: Record<string, Handler> = {
     return true
   },
   'core.view/axis-to': (a, app) => {
-    const mode = a.mode === 'full' ? 'full' : a.mode === 'wide' ? 'wide' : null
-    if (!mode) return false
-    return app.axisTo(mode)
+    // 已撤的档位明确拒绝，不静默换算成宽屏：旧调用不该假装生效
+    if (a.mode !== 'wide') return false
+    return app.axisTo('wide')
   },
   /**
    * 在侧槽打开一个块：**不换中心、不入历史**。

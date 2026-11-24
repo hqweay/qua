@@ -24,7 +24,7 @@ export interface KeysDeps {
   activeBlock: () => Block
   canGoBack: () => boolean
   canGoForward: () => boolean
-  /** 档位轴现在在哪一档（宽屏/全屏 ⇒ Esc 绑定的 `axisActive` 为真）；晚于本节装配 ⇒ getter */
+  /** 档位轴现在在哪一档（宽屏 ⇒ Esc 绑定的 `axisActive` 为真）；晚于本节装配 ⇒ getter */
   axisActive: () => boolean
 }
 

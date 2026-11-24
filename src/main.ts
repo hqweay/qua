@@ -922,7 +922,7 @@ const { chrome, editorEl, applyChrome, paintTopbarNav, resolvedTheme, dockMinWid
 })
 
 /**
- * 档位轴（常规→宽屏→全屏）：状态只住窗口、不写 prefs。
+ * 档位轴（常规↔宽屏）：状态只住窗口、不写 prefs。
  * 装配在 chrome 之后（换档要经它重画），早于一切运行时调用（槽可见性判据都问它）。
  */
 const axis = setupAxis({

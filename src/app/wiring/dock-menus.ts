@@ -125,7 +125,7 @@ export function setupCardMenus(deps: DockMenusDeps) {
           ]
         : []),
       ...(centerOpenable && !isWindow ? [{ id: 'center', label: t('cmd.surface.open') }] : []),
-      ...(centerOpenable ? [{ id: 'openFull', label: t('ui.dock.openFull') }] : []),
+      ...(centerOpenable ? [{ id: 'openWide', label: t('ui.dock.openWide') }] : []),
       { id: 'closeOthers', label: t('ui.dock.closeOtherWindows'), disabled: windows.length <= 1 },
       { id: 'closeAll', label: t('ui.dock.closeAllWindows'), disabled: windows.length === 0 },
       { id: 'foldAll', label: anyExpanded ? t('ui.dock.foldAll') : t('ui.dock.unfoldAll') },
@@ -174,11 +174,11 @@ export function setupCardMenus(deps: DockMenusDeps) {
           case 'center':
             openSurface()
             return
-          case 'openFull':
-            // 全屏是**同一份内容换个大点的落点**：中心先打开（块窗口走既有导航），再落档位
+          case 'openWide':
+            // 宽屏打开是**同一份内容换个大点的落点**：中心先打开（块窗口走既有导航），再落档位
             if (entry?.kind === 'block') void deps.getRegistry().invoke('core.block/focus-block', { blockId }, 'dock')
             else openSurface()
-            void deps.getRegistry().invoke('core.view/axis-to', { mode: 'full' }, 'dock')
+            void deps.getRegistry().invoke('core.view/axis-to', { mode: 'wide' }, 'dock')
             return
           case 'closeOthers':
             deps.closeOtherWindows(side, key)

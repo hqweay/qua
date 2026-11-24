@@ -179,7 +179,7 @@ export const MSG = {
   'ui.dock.closeOtherWindows': '关闭其他窗口',
   'ui.dock.closeAllWindows': '关闭全部窗口',
   'ui.dock.focusInEditor': '在正文中打开',
-  'ui.dock.openFull': '全屏打开（卡留在槽里）',
+  'ui.dock.openWide': '宽屏打开（卡留在槽里）',
   'ui.dock.closeWindow': '关闭这个窗口（块本身不删）',
   'ui.dock.closeWidget': '关闭这张卡（内容不删）',
   'ui.dock.closeCard': '关闭这张卡；需要时在「添加卡片」里加回来',
@@ -1789,14 +1789,12 @@ export const MSG = {
   'update.failed': '现在检查不了更新',
   'update.failedDetail': '连不上发布源，或者发布源返回了读不懂的内容。稍后再试一次。',
 
-  /* ------------------------------------------------------ 档位轴（常规／宽屏／全屏，三档循环） */
-  'cmd.view.axisUp': '进一档（宽屏 / 全屏 / 常规，循环）',
+  /* ------------------------------------------------------ 档位轴（常规／宽屏，两档循环） */
+  'cmd.view.axisUp': '进一档（宽屏 / 常规，循环）',
   'cmd.view.axisDown': '退一档',
   'cmd.view.axisTo': '直选档位',
   'menu.kw.wide': '宽屏',
-  'menu.kw.fullscreen': '全屏',
   'ui.axis.exitWide': '退出宽屏（Esc）',
-  'ui.axis.exitFull': '退出全屏（Esc）',
 
   /* ------------------------------------------------------ 中心表面（派生/工具面 tab） */
   'cmd.surface.open': '在中心打开',

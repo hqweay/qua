@@ -269,18 +269,17 @@ body[data-dock-right='closed'] #dock-right {
 }
 
 /*
-  档位轴（body[data-axis]）：**叠在设备偏好上的一层**——进入不写 prefs，
-  退出自动回到进入前的样子，所以这里只管「这一档长什么样」，不管还原。
-  宽屏＝双槽收起（槽的可见性由装配层按档位判据写 data-dock-*，不在这里另写列宽）
-  ＋ 阅读/视图宽度上限放开；全屏＝再藏文档头与 tab 条，退出口浮在顶栏之下。
+  档位轴（body[data-axis='wide']）：**叠在设备偏好上的一层**——进入不写 prefs，
+  退出清释放表、可见性交回 prefs，所以这里只管「宽屏长什么样」，不管还原。
+  宽屏＝双槽默认收起（槽的可见性由装配层按档位判据写 data-dock-*，不在这里另写列宽）
+  ＋ 正文容器吃满中心宽度；文本行另守自己的有效阅读宽，不跟着容器一起拉宽。
 */
-body[data-axis='wide'],
-body[data-axis='full'] {
+body[data-axis='wide'] {
   --ui-editor-w: var(--ui-editor-w-wide);
 }
-body[data-axis='full'] #crumbs-trail,
-body[data-axis='full'] .center-tabs {
-  display: none;
+/* 宽屏正文容器（连同正文文字）吃满中心可用宽度，留 doc-pad */
+body[data-axis='wide'] #doc {
+  width: calc(100% - var(--ui-doc-pad) * 2);
 }
 /* 退出口：档位收起了槽之后，Esc 之外的鼠标回路只有这一颗；落在顶栏之下不遮工具 */
 .axis-exit {

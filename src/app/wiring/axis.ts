@@ -26,8 +26,8 @@ export function setupAxis(deps: AxisDeps) {
   const slotOpen = (side: 'left' | 'right'): boolean => axisSlotOpen(deps.prefs().dock, mode, released, side)
 
   /**
-   * 退出口：宽屏收起了双槽、全屏再藏抬头与 tab 条——Esc 之外的鼠标回路只有这一颗。
-   * 点它＝沿轴退一档（宽屏→常规；全屏→宽屏）。
+   * 退出口：宽屏收起了双槽，Esc 之外的鼠标回路只有这一颗；落在顶栏之下不遮工具。
+   * 点它＝退回常规（两档轴）。
    */
   const exitEl = document.createElement('button')
   exitEl.type = 'button'
@@ -41,10 +41,10 @@ export function setupAxis(deps: AxisDeps) {
 
   function apply(): void {
     if (mode === 'normal') delete document.body.dataset.axis
-    else document.body.dataset.axis = mode
+    else document.body.dataset.axis = 'wide'
     exitEl.hidden = mode === 'normal'
     if (mode !== 'normal') {
-      const label = t(mode === 'full' ? 'ui.axis.exitFull' : 'ui.axis.exitWide')
+      const label = t('ui.axis.exitWide')
       exitEl.dataset.tip = label
       exitEl.setAttribute('aria-label', label)
     }
@@ -64,7 +64,7 @@ export function setupAxis(deps: AxisDeps) {
   }
 
   /**
-   * 沿轴进/退一档：进档走满全屏后回到常规（三档循环，判据在 core）；退档到常规 ⇒ false。
+   * 沿轴进/退一档：进档在常规与宽屏间循环；退档回到常规 ⇒ false。
    * false ＝ 这次按键没有效果（不报错也不 toast），常规档的 Esc 才能落到关浮层那层。
    */
   function step(dir: 1 | -1): boolean {
@@ -74,7 +74,7 @@ export function setupAxis(deps: AxisDeps) {
     return true
   }
 
-  /** 直接落到某一档（「全屏打开」这类一步到位的入口用它，不必逐档走） */
+  /** 直接落到宽屏（「宽屏打开」这类一步到位的入口用它，不必逐档走） */
   function to(next: AxisMode): boolean {
     if (!isAxisMode(next) || next === mode) return false
     setMode(next)
