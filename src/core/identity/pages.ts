@@ -27,14 +27,21 @@ import {
 import { t } from '../infra/msg.ts'
 
 /**
- * 一个空页块：正文空（描述）、名字进 `_aliases`、身份是 `_lists:['page']`。
+ * 一个新页块：名字同时落进正文、`_aliases` 与 `_lists:['page']`。
  *
+ * ⚠️ **正文＝名字，与「把一块带字的块标成页」同形**：那条路径（`addBlockRole`）拿正文
+ *    当主名、并且**不动正文** ⇒ 一个写了字的普通块变成页之后，别名与正文就是同一句话。
+ *    新建入口若留空正文，同一个对象就有了两种形状，取决于它是怎么变成页的 ——
+ *    读者得先知道「这页是哪条路生出来的」才知道正文是什么。正文此后是描述：
+ *    改名只写 `_aliases`，不追正文（两个槽各走各的）。
+ * ⚠️ **无名字的页正文留空**：快捷键新建时名字还没出现（只是 `未命名-<id>` 占位），
+ *    把占位名写进正文，等于替用户先写了一句他不想要的话。
  * ⚠️ **不写默认图标**：页的 file 图标是角色信号（渲染时回落，见 `identity/faces.ts`），
  *    落盘会把「用户明确选了 file」与「默认 file」焊成不可区分。
  */
 export function mkPageBlock(name?: string): Block {
-  const b = mkBlock('')
   const title = (name ?? '').trim()
+  const b = mkBlock(title)
   const alias = title === '' ? t('ui.page.untitledAlias', { id: b.id.slice(-6) }) : title
   return {
     ...b,

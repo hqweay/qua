@@ -1,27 +1,30 @@
 /**
  * **页块**的构造与「按名字找到或创建」。
  *
- * 这里钉住两条容易分叉的口径：
- *   · 空页必须自带一个可编辑的首子块（页名行是名字，不是写正文的地方）；
+ * 这里钉住三条容易分叉的口径：
+ *   · 名字同时落进地址与正文（与「把带字的块标成页」同形），并自带一个可编辑的首子块；
+ *   · 没有名字时不往正文里塞占位名；
  *   · 同名地址优先复用、只补 `page` 露面 —— 不建第二个同名块（地址全局唯一）。
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { ensurePageDirect, hasList, mkBlock, mkPageBlock, mkTagBlock, nearestPageInChain } from '../src/core/index.ts'
+import { ensurePageDirect, hasList, mkBlock, mkPageBlock, mkTagBlock, nearestPageInChain, plainText } from '../src/core/index.ts'
 
-test('mkPageBlock：名字进地址、带 page 露面与一个可写的空首子块', () => {
+test('mkPageBlock：名字同时进地址与正文、带 page 露面与一个可写的空首子块', () => {
   const p = mkPageBlock('甲')
   assert.deepEqual(p.props?._aliases, ['甲'])
   assert.deepEqual(p.props?._lists, ['page'])
+  assert.equal(plainText(p.content), '甲')
   assert.equal(p.children.length, 1)
   assert.equal(p.children[0]?.content.length, 0)
 })
 
-test('mkPageBlock：空名字仍有地址（未命名-短 id），不落非法形状', () => {
+test('mkPageBlock：空名字仍有地址（未命名-短 id），正文留空', () => {
   const p = mkPageBlock()
   const name = p.props?._aliases?.[0] ?? ''
   assert.match(name, /^未命名-/)
   assert.ok(name.length > 4)
+  assert.equal(plainText(p.content), '')
 })
 
 test('ensurePageDirect：同名标签 ⇒ 复用它并补 page 露面，不建第二个块', () => {
