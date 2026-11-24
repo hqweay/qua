@@ -195,6 +195,15 @@ export class Layers {
   /** 信息浮层打开之前焦点在哪（同上） */
   private popFocus: FocusReturn | null = null
   /**
+   * 这个浮层是**宿主面**：从它里面开出的菜单住在它上面，开菜单不拆它。
+   *
+   * 判据是「这一层是不是一块常驻的工作面」——搜索浮层里住着一台真编辑器，右键块、
+   * `#` 补全这些菜单是**在它内部做事**，不是换一个议题。按「瞬时面互斥」把它们一起
+   * 拆掉，用户右键一下，整面结果与右边正在编辑的那一块就一起没了。
+   * 普通信息浮层（视图选项、原子详情）仍按互斥处理：从它们里开菜单是换面。
+   */
+  private popHostsMenus = false
+  /**
    * 信息浮层关闭前的回调（宿主拆自己的人）。
    * 为什么挂在 Layers 而不是让调用方自己监听：浮层的关闭有一条又一条出口
    * （Esc／点外部／被另一个浮层顶掉／锚点消失），漏掉任何一条，宿主就漏拆。
@@ -246,7 +255,14 @@ export class Layers {
     document.addEventListener('mousedown', (e) => {
       if (!this.open) return
       const t = e.target as Node
-      if (this.el?.contains(t) || this.popEl?.contains(t)) return
+      if (this.el?.contains(t)) return
+      /**
+       * 按住**宿主面**里的别处（另一个结果行、预览的空白）＝换一件事 ⇒ 菜单该收起。
+       * 宿主面不随菜单一起拆（见 `openMenu`），所以它此刻还在文档里 —— 不能因为
+       * 「在浮层里」就放过，否则菜单会一直挂着，用户点下一处时还挡着。
+       * 普通信息浮层维持老口径（它们通常就是菜单的触发处，点回去不关）。
+       */
+      if (this.popEl?.contains(t) && !this.popHostsMenus) return
       // 按在触发元素上不算「点到外面」：关与开都归触发器自己的 handler
       //（同触发器再点一次＝toggle，判据在 `openMenu`）。这里抢先关掉的话，
       // click 到 handler 时菜单已经没了，toggle 判据永远落空。
@@ -310,14 +326,19 @@ export class Layers {
     }
     this.closeMenu(false)
     /**
-     * **菜单与信息浮层是同一类「瞬时面」：同屏只留最后打开的那一个。**
+     * **宿主面上的菜单**：浮层声明了 `hostsMenus`（搜索面这种常驻工作面）⇒ 菜单是
+     * 在它内部做事，宿主留着，菜单住到它上面（`.layer-over-host` 抬高一层）。
+     * 不这么分的后果是「右键一下，整面结果先没了」——那时菜单虽然开出来，命令的落点
+     * 也已经随宿主一起拆掉，改的是别的一块（或什么都没改）。
      *
+     * 其余情况维持**瞬时面互斥**：菜单与信息浮层同屏只留最后打开的那一个。
      * 两层各有各的 z（浮层 70 > 菜单 60），同时开着时新打开的那一层反而被旧的盖住：
      * 「编辑默认」从视图选项浮层里开子块属性选择器，结果选择器在浮层 **下面**，
      * 看起来灰着、按了也没反应。替换而不是叠放，理由与「菜单是一次性动作面板」同一条：
      * 用户点第二下是要换面，不是要在旧面上再叠一张。
      */
-    this.closePopover()
+    const overHost = this.popEl !== null && this.popHostsMenus
+    if (!overHost) this.closePopover()
     /** 下钻（见 `pickActive`）：这次开的是同一张面换题，不重播入场 */
     const replacing = this.picking
     this.menuTrigger = o.trigger ?? null
@@ -333,6 +354,8 @@ export class Layers {
     this.gate = new QueryGate()
     const box = document.createElement('div')
     box.className = 'layer'
+    // 宿主面上的菜单要压住宿主（`.popover` 的 z 比普通菜单高），语义与取值见 CSS token
+    if (overHost) box.classList.add('layer-over-host')
     box.setAttribute('role', 'dialog')
     /**
      * **换题不重播入场**：旧面在同一帧里已被摘掉，再淡入一次就是「闪一下」。
@@ -854,6 +877,9 @@ export class Layers {
    *
    * ⚠️ 两种形态的差别是**只在桌面端才显形**的：Web 上很少拖窗口边、也很少在浮层开着
    *    时滚动整页；桌面应用这两件事都是日常动作。
+   *
+   * `opts.hostsMenus` ＝ 这一层是**宿主面**（住着真编辑器的工作面，如搜索浮层）：
+   * 从它里面开出的菜单住在它上面，开菜单不拆它。普通信息浮层不要传。
    */
   openPopover(
     render: (host: HTMLElement) => void,
@@ -861,6 +887,7 @@ export class Layers {
     onClose?: () => void,
     trigger?: { el?: HTMLElement; key?: string },
     placement: 'below' | 'left' | 'right' = 'below',
+    opts?: { hostsMenus?: boolean },
   ): void {
     /**
      * **同一颗触发器再点一次＝收起**（toggle）：入口按钮就是这层浮层的开关，
@@ -890,6 +917,7 @@ export class Layers {
     render(box)
     document.body.appendChild(box)
     this.popEl = box
+    this.popHostsMenus = opts?.hostsMenus === true
     this.popClose = onClose ?? null
     this.popAnchor = typeof anchor === 'function' ? anchor : anchor ? () => anchor : null
     this.popPlacement = placement
@@ -967,6 +995,7 @@ export class Layers {
     this.popAnchor = null
     this.popPlacement = 'below'
     this.popEl = null
+    this.popHostsMenus = false
     this.popTriggerEl = null
     this.popTriggerKey = undefined
     // 先回调、后摘 DOM：宿主在这时面对的还是仍在文档里的编辑器（收尾不靠游离节点）

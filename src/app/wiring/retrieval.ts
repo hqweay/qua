@@ -590,6 +590,12 @@ function showMenu(req: MenuRequest): void {
    */
   triggerCh = null
   if (req.kind === 'palette') {
+    /**
+     * 命令面板是**整窗级**的一面：它替换掉浮在下面的搜索面，而不是叠在上面
+     * （两个搜索框同屏，谁也说不清哪一个在接按键）。宿主面默认不会被菜单拆掉
+     * （见 `Layers.openMenu`），所以这条替换要在这里显式做。
+     */
+    layers.closePopover()
     const ctx = req.ctx ?? uiCtx()
     // 空查询带「最近执行」段、有查询词收起——收放判据在 `paletteRows`，这里只传话
     const buildRows = (q: string): Row[] =>

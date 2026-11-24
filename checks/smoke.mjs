@@ -25144,50 +25144,118 @@ await check('T249 搜索面两档布局：≥900 左右分栏、<900 上下堆�
 
 
 /**
- * **T250：浮层里的派生覆盖层不被焦点守卫误关。**
+ * **T250：搜索浮层里的块菜单——浮层不拆、菜单在最上、命令落在这块、Esc 按层退。**
  *
- * 焦点逃逸守卫原先只认「在不在浮层 box 内」：块菜单／`#` 选择器挂在 `body`（`.layer`），
- * 焦点一进去就把整个搜索浮层关掉。判据要扩到「本浮层及其派生覆盖层」，且 Esc 按层退。
+ * 搜索浮层是**宿主面**（住着一台真编辑器）：右键块、`#` 补全这些菜单是在它内部做事，
+ * 不是换一个议题。按「瞬时面互斥」把宿主一起拆掉，用户右键一下整面结果与预览就没了；
+ * 而且菜单命令的落点（`curBlock`）也跟着退回正文光标，改的是**另一块**。
+ * 普通信息浮层仍按互斥处理（视图选项 → 子块选择器，见 T340）。
  */
-await check('T250 浮层焦点守卫：块菜单替换搜索面（瞬时面互斥）、Esc 按层退、关闭后焦点回正文', async () => {
+await check('T250 浮层里右键块：浮层留着、菜单压在上面、按的是这一块、Esc 按层退', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const probeId = await plantProbe(page, '菜单探针HIJ')
   assert(probeId, '前置：探针块要建出来')
-
-  // 打开前先把焦点放进正文（关闭时要还到这里，而不是浮层里的输入框）
-  const pre = await page.evaluate(() => {
+  // 预览根要**有子块**：菜单里才会出现折叠行，折这件事也才在预览里看得见
+  const childId = await page.evaluate((pid) => {
     const ed = window.__qua.__editor
-    window.__qua.focusBlock(ed.doc.roots[0].id, 0)
-    return { inEditor: Boolean(document.activeElement?.closest('#editor')) }
+    const child = ed.insert.insertChild(pid)
+    if (child) ed.insert.setText(child, '子块HIJ')
+    return child
+  }, probeId)
+  assert(childId, '前置：探针块要有子块')
+
+  // 正文光标停在一块**没有子块**的块上：菜单若按正文光标算上下文，就没有折叠行
+  const caret = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    const id = ed.insert.insertBlockAfter(ed.doc.roots[0].id, '正文光标QQ')
+    window.__qua.focusBlock(id, 0)
+    return id
   })
-  assert(pre.inEditor, `前置：焦点先在正文里：${JSON.stringify(pre)}`)
+  assert(caret, '前置：正文光标块要建出来')
+  await page.waitForTimeout(150)
 
   await page.evaluate(() => window.__qua.invoke('core.search/open', {}, 'api'))
   await page.fill('.popover.search-overlay .search-face-input', '菜单探针HIJ')
-  await page.waitForFunction(() => Boolean(document.querySelector('.popover.search-overlay .search-face-preview .blk')), null, { timeout: 3000 })
+  await page.waitForFunction(
+    (pid) => Boolean(document.querySelector(`.popover.search-overlay .search-face-preview .blk[data-block-id="${pid}"]`)),
+    probeId,
+    { timeout: 3000 },
+  )
 
-  // 右键预览里的块：菜单与浮层是同一类「瞬时面」，同屏只留最后打开的那一个
-  // （替换而非叠放——新面被旧面盖住读作「点了没反应」，见 T340 的同一条拍板）
-  await page.click(`.popover.search-overlay .search-face-preview .blk[data-block-id="${probeId}"] .tx`, { button: 'right' })
-  await page.waitForSelector('.layer', { timeout: 3000 })
-  const both = await page.evaluate(() => ({
-    overlay: Boolean(document.querySelector('.popover.search-overlay')),
-    layers: document.querySelectorAll('.layer').length,
-  }))
-  assert(both.layers > 0, `右键要真的开块菜单：${JSON.stringify(both)}`)
-  assert(!both.overlay, `开菜单要替换掉搜索浮层（瞬时面互斥，不叠放）：${JSON.stringify(both)}`)
+  const openBlockMenu = async () => {
+    await page.click(`.popover.search-overlay .search-face-preview .blk[data-block-id="${probeId}"] .tx`, { button: 'right' })
+    await page.waitForSelector('.layer', { timeout: 3000 })
+    await page.waitForTimeout(120)
+  }
 
-  // Esc：关掉菜单；菜单当初替换了浮层 ⇒ 浮层已不在，Esc 后两层都空
+  await openBlockMenu()
+  const opened = await page.evaluate((pid) => {
+    const row = document.querySelector('.layer [data-id^="core.editor/toggle-collapse"]')
+    const r = row?.getBoundingClientRect()
+    const hit = r ? document.elementFromPoint(r.left + Math.min(40, r.width / 2), r.top + r.height / 2) : null
+    return {
+      overlay: Boolean(document.querySelector('.popover.search-overlay')),
+      previewInDoc: Boolean(document.querySelector(`.popover.search-overlay .search-face-preview .blk[data-block-id="${pid}"]`)),
+      hasCollapse: Boolean(row),
+      rowOnTop: Boolean(hit?.closest?.('.layer-item')),
+      caretInMain: window.__qua.__editor.sel?.aBlock ?? null,
+    }
+  }, probeId)
+  assert(opened.overlay, `开菜单不该拆掉搜索浮层（宿主面）：${JSON.stringify(opened)}`)
+  assert(opened.previewInDoc, `预览那块还在（不是只剩一张壳）：${JSON.stringify(opened)}`)
+  assert(
+    opened.hasCollapse,
+    `菜单按右键的那一块算上下文（它有子块 ⇒ 有折叠行；正文光标那块没有）：${JSON.stringify(opened)}`,
+  )
+  assert(opened.rowOnTop, `菜单要压在宿主浮层之上（否则看不见、点不到）：${JSON.stringify(opened)}`)
+
+  // Esc 按层退：第一下只收菜单，宿主浮层留着
   await page.keyboard.press('Escape')
   await page.waitForFunction(() => document.querySelectorAll('.layer').length === 0, null, { timeout: 3000 })
   assert(
+    await page.evaluate(() => Boolean(document.querySelector('.popover.search-overlay'))),
+    'Esc 第一下只收菜单，搜索浮层还在',
+  )
+
+  // 再开一次，选「折叠/展开」：命令落在预览这一块（子块按展开状态现身）
+  await openBlockMenu()
+  await page.click('.layer [data-id^="core.editor/toggle-collapse"]')
+  await page.waitForTimeout(300)
+  const afterPick = await page.evaluate(
+    ({ pid, cid, mainCaret }) => ({
+      overlay: Boolean(document.querySelector('.popover.search-overlay')),
+      childVisible: Boolean(document.querySelector(`.popover.search-overlay .search-face-preview .blk[data-block-id="${cid}"]`)),
+      mainCaretNow: window.__qua.__editor.sel?.aBlock ?? null,
+      mainCaret,
+      previewFolded: Boolean(document.querySelector(`.popover.search-overlay .search-face-preview .blk[data-block-id="${pid}"][data-collapsed]`)),
+    }),
+    { pid: probeId, cid: childId, mainCaret: opened.caretInMain },
+  )
+  assert(afterPick.overlay, `选完菜单项，浮层还在（还能接着看结果）：${JSON.stringify(afterPick)}`)
+  assert(!afterPick.previewFolded && afterPick.childVisible, `折的是预览里的这一块（子块现身）：${JSON.stringify(afterPick)}`)
+  assert(afterPick.mainCaretNow === afterPick.mainCaret, `正文光标没被这次菜单改掉：${JSON.stringify(afterPick)}`)
+
+  // 菜单已被选掉：这一下 Esc 才轮到浮层
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !document.querySelector('.popover.search-overlay'), null, { timeout: 3000 })
+
+  /**
+   * 反方向的判据：**整窗级的面仍然替换宿主**。
+   * 命令面板自带一个搜索框，叠在搜索浮层上面就会「两个搜索框同屏、说不清谁接按键」；
+   * 宿主面不被**菜单**拆掉（上面那条），但命令面板是显式替换（见 `showMenu` 的 palette 支）。
+   */
+  await page.evaluate(() => window.__qua.invoke('core.search/open', {}, 'api'))
+  await page.waitForSelector('.popover.search-overlay .search-face-input', { timeout: 3000 })
+  await page.evaluate(() => window.__qua.openPalette())
+  await page.waitForSelector('.layer .layer-input', { timeout: 3000 })
+  assert(
     !(await page.evaluate(() => Boolean(document.querySelector('.popover.search-overlay')))),
-    '菜单被 Esc 关掉后搜索浮层也不该回来（它已被替换）',
+    '命令面板要替换掉搜索浮层（不叠两个搜索框）',
   )
 
   await ctx.close()
-  return '菜单替换浮层、Esc 收菜单、瞬时面同屏只留一个'
+  return '宿主面留着、菜单在最上、折叠落在预览这一块、Esc 按层退、命令面板仍替换'
 })
 
 /**
@@ -34043,6 +34111,68 @@ await check('T359 删聚焦空块：菜单预告退出聚焦，删完软删并�
 
   await ctx.close()
   return `聚焦根删除：菜单预告退出聚焦；软删带标记、回到父块、原处无补格；⌘Z 复原`
+})
+
+/**
+ * **T360：宿主面里删一个带内容的页——确认框必须压在浮层之上。**
+ *
+ * 搜索浮层里的块菜单现在不拆宿主（T250），于是「右键页 → 删除块 → 确认框」这条
+ * 路第一次能在浮层开着时走到。确认框若按普通菜单那套 z 排（低于 `.popover`），
+ * 会被宿主整面盖住：用户看到的是「点了删除，什么都没发生」，而删除就等在后面。
+ * 判据是**命中最上面那一层**（elementFromPoint 落在 `.confirm` 里），不是只数节点。
+ */
+await check('T360 搜索浮层里删页：确认框压在浮层之上、Esc 先收确认框、浮层还在', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await openFirstPage(page)
+  await page.waitForTimeout(150)
+
+  const probeId = await plantProbe(page, '删除确认探针ZZZ')
+  assert(probeId, '前置：探针块要建出来')
+  const built = await page.evaluate(async (pid) => {
+    await window.__qua.invoke('core.tree/insert-child', { parentId: pid, text: '子块ZZZ' })
+    const asPage = window.__qua.invoke('core.block/as-page', { blockId: pid })
+    const b = window.__qua.__editor.store.find(pid)
+    return { asPage: asPage?.ok ?? null, children: b?.children.length ?? -1 }
+  }, probeId)
+  assert(built.asPage === true && built.children >= 1, `前置：探针要变成带子块的页：${JSON.stringify(built)}`)
+
+  await page.evaluate(() => window.__qua.invoke('core.search/open', {}, 'api'))
+  await page.fill('.popover.search-overlay .search-face-input', '删除确认探针ZZZ')
+  await page.waitForFunction(
+    (pid) => Boolean(document.querySelector(`.popover.search-overlay .search-face-preview .blk[data-block-id="${pid}"]`)),
+    probeId,
+    { timeout: 3000 },
+  )
+  await page.click(`.popover.search-overlay .search-face-preview .blk[data-block-id="${probeId}"] .tx`, { button: 'right' })
+  await page.waitForSelector('.layer [data-id^="core.block/delete"]', { timeout: 3000 })
+  await page.click('.layer [data-id^="core.block/delete"]')
+  await page.waitForSelector('.confirm-backdrop', { timeout: 3000 })
+  await page.waitForTimeout(150)
+
+  const shown = await page.evaluate(() => {
+    const box = document.querySelector('.confirm')
+    const r = box?.getBoundingClientRect()
+    const hit = r ? document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) : null
+    return {
+      overlay: Boolean(document.querySelector('.popover.search-overlay')),
+      confirmOnTop: Boolean(hit?.closest?.('.confirm')),
+      hit: hit?.className ?? null,
+    }
+  })
+  assert(shown.overlay, `确认框打开时宿主浮层还在（不是被拆掉顺手开的）：${JSON.stringify(shown)}`)
+  assert(shown.confirmOnTop, `确认框必须压在搜索浮层之上（否则等于没有这道闸）：${JSON.stringify(shown)}`)
+
+  // Esc 按层退：先收确认框，宿主浮层留着
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !document.querySelector('.confirm-backdrop'), null, { timeout: 3000 })
+  assert(
+    await page.evaluate(() => Boolean(document.querySelector('.popover.search-overlay'))),
+    'Esc 第一下只收确认框，搜索浮层还在',
+  )
+
+  await ctx.close()
+  return '确认框压住宿主、Esc 先收问句'
 })
 
 const known = results.filter((r) => !r.ok && r.known)

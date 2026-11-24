@@ -55,6 +55,15 @@
   overflow: hidden;
   animation: overlay-in var(--ui-dur-2) var(--ui-ease-out);
 }
+/*
+  **宿主面上的菜单**（搜索浮层里右键块、`#` 补全…）：宿主面自己是一层 `.popover`，
+  从它里面开出的菜单必须住在它**上面**——照普通菜单的 z 会被宿主盖住，
+  用户看到的是「菜单开了但看不见，点了没反应」。菜单与宿主的互斥判据见
+  `Layers.openMenu`（宿主面不拆，普通信息浮层仍替换）。
+*/
+.layer.layer-over-host {
+  z-index: var(--ui-z-menu-over-host);
+}
 .layer-head {
   padding: var(--ui-gap-3) var(--ui-gap-4);
   border-bottom: 1px solid var(--ui-border);
