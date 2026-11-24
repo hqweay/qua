@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      CSP：本地应用只需要自己的脚本、样式，以及 data: 与 blob: 两种图片。
+      · style-src 的 'unsafe-inline' 用于首屏 color-scheme 兜底与 Vite 注入的样式；
+      · script-src 的 'wasm-unsafe-eval' 是分词 WASM 的唯一用途（不开放 JS eval）；
+      · worker-src 的 blob: 给 Vite 的 module worker 兜底（dev 下 worker 由 blob 引导）；
+      · img-src 的 blob: 是**行内资产的唯一来源**：字节从资产库读出来是 Blob，
+        经 `URL.createObjectURL` 变成 blob URL 才能给 <img>。少了它，真实图片会被
+        浏览器静默拦下（console 里只有一条 error，页面上是一片空白）。
+      · img-src 的 http: / https: 只给 **asset 属性值的外态链接**：那格值本来就能存
+        http(s) 地址（与「插入／打开外链」同一份白名单），不放行就变成「存得进去、
+        画不出来」。代价：外链图片会向第三方发起请求，离线或链接腐烂时显示缺失态。
+      · connect-src 的 ws 仅给 dev server 的 HMR 用（端口固定 5180）。
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob: file:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: qua-asset: http: https:; font-src 'self'; connect-src 'self' ws://127.0.0.1:5180; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <!--
+      首屏兜底：在 styles.css / main.ts 到位**之前**就按系统外观定色，冷启动不闪。
+      最小内联 `color-scheme` —— 零颜色字面量、零脚本；真正的三档主题由 styles.css 的
+      `color-scheme` ＋ `light-dark()` 接过去（跟随系统 / 亮 / 暗）。
+    -->
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+    </style>
+    <link rel="icon" href="data:," />
+    <!-- 文案为空壳：一切用户可见文案由 src/msg.ts 在启动时灌入 -->
+    <title></title>
+    <script type="module" crossorigin src="./assets/index-Dc-ZFY_L.js"></script>
+    <link rel="modulepreload" crossorigin href="./assets/icon-catalog-BRPqingI.js">
+    <link rel="stylesheet" crossorigin href="./assets/index-DQl6usfx.css">
+  </head>
+  <body>
+    <!-- 启动级持久告警（数据只读 / 保存失败）；默认隐藏，文案由 msg.ts 灌入 -->
+    <div id="boot-notice" class="boot-notice" role="status" hidden></div>
+    <div id="app">
+      <!--
+        贯通顶栏 ＋ 三槽（2026-11-10 修订）
+          · 顶栏是**窗口级**的一层：后退/前进、搜索、回今日、命令面板、这一屏的漏斗、
+            页签，以及两侧槽自己的开关与卡片动作，全在这同一条里。
+            以前它们分住在左槽头 42px、中心 tab 条 31px、右槽头 42px 三条上，
+            高度与下边框各管各的，正文起点还错开 11px ⇒ 收成一条，槽不再各自抬头。
+          · 顶栏**绝对定位在 #app 顶部**：三槽的 DOM 与网格不变，各自 padding-top 让位。
+            这样槽的开关仍是「列宽归零 + visibility」，不用为一条顶栏改列算法。
+          · 漏斗筛的是「当前打开的这一屏」，面板仍就地展开在中心槽顶栏之下。
+          · 页签是**保存的视图**（含自己的历史），所以保留一排轻量文字，不折叠成菜单。
+          · 文案为空壳：按钮的 title/aria-label 由 msg.ts 在装配时灌入。
+      -->
+      <header id="topbar" class="topbar">
+        <!--
+          槽控件组的排布判据（2026-11-14）：**控件贴着它控制的对象**。
+            · 槽的整体开关控制窗口边缘那根列 ⇒ 贴窗口边缘（左右两端各在最外侧）；
+            · 组内按作用范围从外向内：槽的存在（开关）→ 槽内容（加卡 → 折卡）；
+            · 两端组互为镜像，一套心智扫两端；
+            · 加卡/折卡是内容动作，只在槽开着（内容在场）时露面，收起只剩开关。
+        -->
+        <div class="dock-head topbar-dock" id="dock-left-head" data-dock-side="left">
+          <span class="dock-title" id="dock-left-title"></span>
+          <button class="dock-btn dock-collapse" id="dock-left-collapse" type="button"></button>
+          <button class="dock-btn dock-add" id="dock-left-add" type="button"></button>
+          <button class="dock-btn dock-foldall" id="dock-left-foldall" type="button"></button>
+        </div>
+        <div class="topbar-nav" role="group">
+          <button id="topbar-back" class="topbar-btn" type="button"></button>
+          <button id="topbar-forward" class="topbar-btn" type="button"></button>
+          <button id="topbar-search" class="topbar-btn" type="button"></button>
+        </div>
+        <div class="topbar-center">
+          <div id="center-tabs" class="center-tabs" role="tablist"></div>
+          <!-- 全部页签集合入口：多于一屏才出现；tab 再多顶栏也只呈现当前这一屏 -->
+          <button id="center-tab-list" class="center-tab-list" type="button" hidden></button>
+          <!-- 新建 tab 的 + 在滚动区之外：tab 多了也不会被横向滚走 -->
+          <button id="center-tab-add" class="center-tab-add" type="button"></button>
+        </div>
+        <div class="topbar-tools" role="group">
+          <button id="center-filter" class="center-filter" type="button" hidden></button>
+          <button id="topbar-today" class="topbar-btn" type="button"></button>
+          <button id="topbar-palette" class="topbar-btn" type="button"></button>
+        </div>
+        <div class="dock-head topbar-dock" id="dock-right-head" data-dock-side="right">
+          <span class="dock-title" id="dock-right-title"></span>
+          <button class="dock-btn dock-foldall" id="dock-right-foldall" type="button"></button>
+          <button class="dock-btn dock-add" id="dock-right-add" type="button"></button>
+          <button class="dock-btn dock-collapse" id="dock-right-collapse" type="button"></button>
+        </div>
+      </header>
+
+      <section class="dock" id="dock-left" data-dock="left">
+        <div class="dock-stack" id="dock-left-stack"></div>
+        <!-- 内侧边缘的宽度手柄：位置（哪条边）由 JS 按 side 标，样式只读 token -->
+        <div class="dock-resize"></div>
+      </section>
+
+      <!--
+        中心槽（2026-11-10 修订）：**自己的抬头没有了，tab 与漏斗搬进贯通顶栏**。
+          · 调试开关（甲乙丙／明暗）仍在调试菜单，格式命令仍由划选气泡承载 ——
+            这两类东西不因为有了顶栏就常驻回来；
+          · 顶栏是窗口级的一层，不属于任何一个槽；中心槽这里只剩**内容**与
+            漏斗就地展开的面板（面板跟着内容走，不是浮层）。
+          · **文档头仍只剩面包屑**：页 / 日记 / 被 zoom 的块一律是正文第一行
+            （`rootsFor()` 装进编辑器），不存在不可编辑的「标题」位置。
+      -->
+      <main class="dock" id="dock-center" data-dock="center">
+        <!-- 漏斗的面板：就地展开（与查询块抬头的 chips 面板同一个组件），不是浮层 -->
+        <div id="center-filter-panel" class="center-filter-panel" hidden></div>
+        <div id="scroll">
+          <div id="doc">
+            <!-- 面包屑：顶层时 hidden（不占高度）；点一格＝聚焦到该祖先（＝退回） -->
+            <div id="crumbs-trail" hidden></div>
+            <div id="editor" spellcheck="false"></div>
+            <!--
+              块底的挂载区（引用／同类／提及 ＋ 用户配的查询）**不在这里**：
+              它是**每一段**末尾的 chrome —— 编辑器在段尾留一个空槽（`.sec-mount`），
+              装配层按段根把实例挂进去。静态模板放一份就只能属于某一段。
+              「点开查询块看结果」同理：那一段的槽里会先有一份查询视图。
+            -->
+            <div id="empty-hint" hidden></div>
+          </div>
+        </div>
+        <!--
+          中心表面宿主：派生/工具面的 tab 身体挂在这里（与 #scroll 二选一可见）。
+          块 tab 不用它——那份内容住编辑器；哪一个 tab 在前由 tab 状态层说，这里只收容。
+        -->
+        <div id="center-surface" class="center-surface" hidden></div>
+      </main>
+
+      <section class="dock" id="dock-right" data-dock="right">
+        <div class="dock-stack" id="dock-right-stack">
+          <!--
+            检视卡：内容**跟着中心槽的当前对象**走（不是光标所在行）。
+            它是右槽的常驻节点（`renderDockStack` 的 persistent），因为里面是表单：
+            重画整槽会把正在输入的控件换掉、丢焦点与光标。
+            形状与钉住区同一套卡（`.dock-card`），但主体来源不同：
+            钉住区的主体是卡片自带的块 id，这张卡的主体是 `activeId`。
+          -->
+          <div class="dock-card" id="inspect-card" data-inspect-card hidden>
+            <div class="dock-card-head">
+              <span class="dock-card-title ui-ellipsis ui-ellipsis-grow" id="inspect-card-title"></span>
+            </div>
+            <div class="dock-card-body">
+              <div class="properties-body" id="properties-body"></div>
+              <!--
+                添加入口在**体**里、不在卡头：卡头只放卡级控件（收起／单卡／关闭），
+                每张卡同构；作用于内容的动作贴着内容长（与日历「点月份回本月」同一条口径）。
+              -->
+              <button class="props-add" id="properties-add" type="button"></button>
+            </div>
+          </div>
+        </div>
+        <div class="dock-resize"></div>
+      </section>
+    </div>
+
+    <!-- 浮层 -->
+    <div id="overlay" hidden></div>
+    <div id="popover" hidden></div>
+
+    <!-- 右下角状态角标 -->
+    <div id="badge"></div>
+    <div id="badge-panel" hidden></div>
+
+    <!-- 演示状态菜单的锚点（原来在左栏页脚，入口条作废后移到这里） -->
+    <button id="state-menu-btn" class="ghost" hidden type="button"></button>
+
+  </body>
+</html>
