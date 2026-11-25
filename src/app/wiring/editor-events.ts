@@ -144,6 +144,10 @@ function viewEvents(
           if (next && !isDeleted(next)) ed.placeCaret(next.id, 0)
           else ed.insert.insertBlockAfter(block.id, '')
         },
+        // ⌘↵：与正文同一条命令（岛内接管，避免 CM6 默认插行）
+        onToggleTask: () => {
+          getApp().toggleClosure(block.id)
+        },
       }),
     (block) => `${block.id}\u0000${prop<string>(block, LANG_PROP) ?? ''}`,
   )

@@ -39,8 +39,7 @@ test('岛内焦点：文本键归岛，全局键与应用撤销照常', () => {
   assert.equal(appKeyWhileCodeFocused({ when: '', command: 'core.history/back' }), true)
   assert.equal(appKeyWhileCodeFocused({ when: 'editorTextFocus', command: 'core.history/undo' }), true)
   assert.equal(appKeyWhileCodeFocused({ when: 'editorTextFocus', command: 'core.history/redo' }), true)
-  assert.equal(appKeyWhileCodeFocused({ when: 'editorTextFocus', command: 'core.editor/toggle-closure' }), true, '代码块也能是任务，⌘↵ 不被岛吞掉')
-  assert.equal(appKeyWhileCodeFocused({ when: 'editorTextFocus', command: 'core.editor/clear-closure' }), true)
+  assert.equal(appKeyWhileCodeFocused({ when: 'editorTextFocus', command: 'core.editor/toggle-closure' }), false, '任务切换由岛内 keymap 接管，不再走全局派发')
 })
 
 test('DOM 标记与高度上限都走常量，不在组件里写第二份', () => {

@@ -118,6 +118,8 @@ export interface CodeIslandMount {
   onContextMenu?: (anchor: DOMRect) => void
   /** 离开代码块去下一块（末行末尾 ↓/→）：没有下一块时新建一行 */
   onExitBelow?: () => void
+  /** ⌘↵：代码块也照常切换任务；岛内接管，避免 CM6 默认 insertBlankLine */
+  onToggleTask?: () => void
 }
 
 export interface CodeIslandHandle {
@@ -125,7 +127,7 @@ export interface CodeIslandHandle {
   dispose(): void
 }
 
-export function mountCodeIsland({ getEd, blockId, into, onContextMenu, onExitBelow }: CodeIslandMount): CodeIslandHandle {
+export function mountCodeIsland({ getEd, blockId, into, onContextMenu, onExitBelow, onToggleTask }: CodeIslandMount): CodeIslandHandle {
   const ed = getEd()
   const initial = ed.store.find(blockId)
   const lang = canonicalLang(initial ? prop<string>(initial, '_lang') : undefined)
@@ -170,7 +172,10 @@ export function mountCodeIsland({ getEd, blockId, into, onContextMenu, onExitBel
         syntaxHighlighting(syntaxColors),
         search({ top: true }),
         keymap.of([
-          // 退出代码块只走 ↓/→（末行末尾）或块菜单；⌘↵ 留给应用层的任务切换
+          // ⌘↵：切任务（代码块也能是任务）。岛内接管并 stopPropagation，
+          // 否则 CM6 默认的 insertBlankLine 会同时插一行、应用层还会再切一次。
+          { key: 'Mod-Enter', run: () => { onToggleTask?.(); return true }, stopPropagation: true },
+          // 退出代码块只走 ↓/→（末行末尾）或块菜单
           { key: 'ArrowDown', run: (v) => exitAtEnd(v) },
           { key: 'ArrowRight', run: (v) => exitAtEnd(v) },
           ...closeBracketsKeymap,

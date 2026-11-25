@@ -51,13 +51,8 @@ export function isUndoKey(e: KeyboardEvent, isMac: boolean): boolean {
  * （CM6 的历史被关掉，两套历史并存会让一次 ⌘Z 只撤一半）。
  */
 export function appKeyWhileCodeFocused(b: Pick<Binding, 'when' | 'command'>): boolean {
-  // 撤销/重做归应用栈；任务切换是块级属性，代码块也能是任务 ⇒ 不在岛里被吞掉
-  if (
-    b.command === 'core.history/undo' ||
-    b.command === 'core.history/redo' ||
-    b.command === 'core.editor/toggle-closure' ||
-    b.command === 'core.editor/clear-closure'
-  ) return true
+  // 撤销/重做归应用栈；任务切换由岛内 keymap 自己调（见 code-island），不在全局再走一遍
+  if (b.command === 'core.history/undo' || b.command === 'core.history/redo') return true
   const when = b.when ?? ''
   return !when.includes('editorTextFocus') && !when.includes('blockSelection')
 }
