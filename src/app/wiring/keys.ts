@@ -51,6 +51,7 @@ export function setupKeys(deps: KeysDeps) {
      */
     const focusBlock = focusId ? ed.store.index.blocks.get(focusId) : undefined
     const ctx: CtxKeys = {
+      ...ed.ctxKeys(),
       // 代码岛里的文本键归岛：编辑器作用域的绑定读到这个键才让路（全局键不受影响）
       codeEditorFocus: Boolean(
         document.activeElement instanceof Element &&

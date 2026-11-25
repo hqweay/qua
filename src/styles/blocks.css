@@ -3668,7 +3668,11 @@ button.blk-auto-chip {
   border-top: 0;
 }
 
-/* 代码块：外层是编辑岛，内层 CM6 自己滚；高度上限走 token，组件不写长度字面量 */
+/* 代码块：外层是编辑岛宿主（吃满行宽），内层 CM6 自己滚；高度上限走 token */
+.blk-code-host {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 .blk-code-body {
   width: 100%;
   max-height: var(--ui-code-max-h);

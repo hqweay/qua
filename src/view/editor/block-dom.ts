@@ -482,7 +482,7 @@ export const ALLOWED_ROW_CHILDREN: ReadonlySet<string> = new Set([
   'blk-tags',
   'blk-embed-body',
   'blk-view-body',
-  'blk-code-body',
+  'blk-code-host',
 ])
 
 /**
@@ -1111,9 +1111,8 @@ export function makeBlockEl(
     tx.dataset.codeSlot = '1'
     tx.setAttribute('aria-hidden', 'true')
     const body = document.createElement('div')
-    body.className = 'blk-code-body'
+    body.className = 'blk-code-host'
     body.contentEditable = 'false'
-    body.setAttribute('data-code-island', '1')
     body.dataset.codeBodyFor = b.id
     embedBodyEl = body
     embedMount = () => opts.codeBody?.(b, body)
