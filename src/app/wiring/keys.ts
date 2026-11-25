@@ -8,7 +8,7 @@
  */
 import { BINDINGS, keyLabel } from '../../core/infra/bindings.ts'
 import { installKeydown, type DispatchEnv, type KeyTrace } from '../../core/infra/dispatch.ts'
-import { ensureIndexLists, hasList, isJournal, prop, type Block, type CtxKeys } from '../../core/index.ts'
+import { CODE_ISLAND_ATTR, ensureIndexLists, hasList, isJournal, prop, type Block, type CtxKeys } from '../../core/index.ts'
 import type { BlockEditor } from '../../view/editor/editor.ts'
 import type { Registry } from '../../core/commands/index.ts'
 import type { Workspace } from '../../core/infra/workspace.ts'
@@ -51,7 +51,11 @@ export function setupKeys(deps: KeysDeps) {
      */
     const focusBlock = focusId ? ed.store.index.blocks.get(focusId) : undefined
     const ctx: CtxKeys = {
-      ...ed.ctxKeys(),
+      // 代码岛里的文本键归岛：编辑器作用域的绑定读到这个键才让路（全局键不受影响）
+      codeEditorFocus: Boolean(
+        document.activeElement instanceof Element &&
+        document.activeElement.closest(`[${CODE_ISLAND_ATTR}]`),
+      ),
       blockSelection: ed.bsel.hasBlockSelection(),
       blockSelectionCount: ed.bsel.blockSelectionCount(),
       paletteOpen: deps.layers.open,

@@ -195,6 +195,7 @@ export const BINDINGS: Binding[] = [
   /* 换骨架：正文/引文/代码块是「这一块是什么」，不是外观开关 */
   { command: 'core.block/set-type', kind: 'menu', when: 'blockMenuTarget && blockCanConvertType', group: 'blockKind/1', order: 10, args: { type: 'outline' }, layer: 'core', label: t('ui.query.type.outline'), actsOn: 'block' },
   { command: 'core.block/set-type', kind: 'menu', when: 'blockMenuTarget && blockCanConvertType', group: 'blockKind/1', order: 20, args: { type: 'core/quote' }, layer: 'core', label: t('menu.label.quote'), actsOn: 'block' },
+  { command: 'core.block/set-type', kind: 'menu', when: 'blockMenuTarget && blockCanConvertType', group: 'blockKind/1', order: 30, args: { type: 'core/code' }, layer: 'core', label: t('menu.label.codeBlock'), actsOn: 'block' },
 
   /* ---- 结构：把这一块摆成什么样（顺序/深度/状态） ---- */
   { command: 'core.editor/toggle-closure', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 10, layer: 'core' },
@@ -259,6 +260,7 @@ export const BINDINGS: Binding[] = [
   // 「编辑默认」入口——不再有独立菜单行，声明与覆写在同一个面里对得上
   { command: 'core.view/options', kind: 'menu', when: 'blockMenuTarget && blockCanHaveView', group: 'block/5-view', order: 25, layer: 'core', label: t('ui.view.options'), keywords: ['filter', 'sort', 'group', 'display', t('menu.kw.views')] },
   { command: 'core.embed/paste-menu', kind: 'menu', when: 'blockMenuTarget', group: 'block/5-view', order: 30, layer: 'core', label: t('cmd.embed.paste-menu') },
+  { submenu: 'codeLang/', kind: 'menu', when: 'blockMenuTarget && blockIsCode', group: 'block/5-view', order: 12, layer: 'core', label: t('menu.label.language'), actsOn: 'block' },
   // zoom：进子树的入口挂在块菜单。**叶子块也给**（修订：
   // 块标左键＝聚焦是一贯行为：若叶子不给，点击结果会时 zoom 时不 zoom）
   { command: 'core.block/focus-block', kind: 'menu', when: 'blockMenuTarget', group: 'block/5-view', order: 40, layer: 'core', keywords: ['zoom', t('menu.kw.zoom')] },
@@ -277,6 +279,18 @@ export const BINDINGS: Binding[] = [
   { command: 'core.dock/open-block', kind: 'menu', when: 'blockMenuTarget', group: 'block/5-view', order: 55, layer: 'core' },
   // 「加到快捷」与「在右槽打开」是两条独立露面：前者只留一颗 44px 入口，后者摊一张窗口卡
   { command: 'core.dock/add-shortcut', kind: 'menu', when: 'blockMenuTarget', group: 'block/5-view', order: 56, layer: 'core' },
+  /* 代码块的语言：一族预设值，选中即写 `_lang`，正文与骨架不动 */
+  { command: 'core.block/set-lang', kind: 'menu', when: 'blockMenuTarget && blockIsCode', group: 'codeLang/1', order: 10, args: { lang: 'plain' }, layer: 'core', label: t('ui.code.lang.plain'), actsOn: 'block' },
+  { command: 'core.block/set-lang', kind: 'menu', when: 'blockMenuTarget && blockIsCode', group: 'codeLang/1', order: 20, args: { lang: 'javascript' }, layer: 'core', label: 'JavaScript', actsOn: 'block' },
+  { command: 'core.block/set-lang', kind: 'menu', when: 'blockMenuTarget && blockIsCode', group: 'codeLang/1', order: 30, args: { lang: 'typescript' }, layer: 'core', label: 'TypeScript', actsOn: 'block' },
+  { command: 'core.block/set-lang', kind: 'menu', when: 'blockMenuTarget && blockIsCode', group: 'codeLang/1', order: 40, args: { lang: 'python' }, layer: 'core', label: 'Python', actsOn: 'block' },
+  { command: 'core.block/set-lang', kind: 'menu', when: 'blockMenuTarget && blockIsCode', group: 'codeLang/1', order: 50, args: { lang: 'json' }, layer: 'core', label: 'JSON', actsOn: 'block' },
+  { command: 'core.block/set-lang', kind: 'menu', when: 'blockMenuTarget && blockIsCode', group: 'codeLang/1', order: 60, args: { lang: 'html' }, layer: 'core', label: 'HTML', actsOn: 'block' },
+  { command: 'core.block/set-lang', kind: 'menu', when: 'blockMenuTarget && blockIsCode', group: 'codeLang/1', order: 70, args: { lang: 'css' }, layer: 'core', label: 'CSS', actsOn: 'block' },
+  { command: 'core.block/set-lang', kind: 'menu', when: 'blockMenuTarget && blockIsCode', group: 'codeLang/1', order: 80, args: { lang: 'sql' }, layer: 'core', label: 'SQL', actsOn: 'block' },
+  { command: 'core.block/set-lang', kind: 'menu', when: 'blockMenuTarget && blockIsCode', group: 'codeLang/1', order: 90, args: { lang: 'bash' }, layer: 'core', label: 'Bash', actsOn: 'block' },
+  { command: 'core.block/set-lang', kind: 'menu', when: 'blockMenuTarget && blockIsCode', group: 'codeLang/1', order: 100, args: { lang: 'yaml' }, layer: 'core', label: 'YAML', actsOn: 'block' },
+  { command: 'core.block/set-lang', kind: 'menu', when: 'blockMenuTarget && blockIsCode', group: 'codeLang/1', order: 110, args: { lang: 'markdown' }, layer: 'core', label: 'Markdown', actsOn: 'block' },
 
   /* ---- 删除：危险动作**同位** ---- */
   /**
@@ -331,6 +345,8 @@ export const BINDINGS: Binding[] = [
   { command: 'core.editor/clear-closure', kind: 'slash', when: 'editorTextFocus && blockClosure == "closure"', group: 'slash/1-structure', order: 15, layer: 'core', icon: 'lucide:square-dashed' },
   // 引文块：可写正文，插完光标就落在这一行（不像只读组件还要补一个空位）
   { command: 'core.editor/insert-block', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-structure', order: 17, layer: 'core', label: t('menu.label.quote'), args: { type: 'quote' }, keywords: ['quote', 'blockquote'], icon: 'lucide:quote' },
+  // 代码块：空行原地换骨架，语言再走块菜单的「语言…」
+  { command: 'core.editor/insert-block', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-structure', order: 18, layer: 'core', label: t('menu.label.codeBlock'), args: { type: 'code' }, keywords: ['code', 'snippet'], icon: 'lucide:code' },
   // 分割线：没有正文的块，插完光标要落到它下面那一行（见 insertDividerAfter）
   { command: 'core.editor/insert-block', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-structure', order: 20, layer: 'core', label: t('menu.label.divider'), args: { type: 'divider' }, keywords: ['divider', 'hr', 'line', t('menu.kw.divider')], icon: 'lucide:minus' },
   { command: 'core.query/insert', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-structure', order: 30, layer: 'core', label: t('cmd.query.insert'), keywords: ['query', 'filter', 'where'], icon: 'lucide:list-filter' },

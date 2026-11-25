@@ -8,6 +8,7 @@
  * 这是装配层的单槽语义，不是本片的状态。
  */
 import { createRowBodyCache } from '../../app/wiring/row-bodies.ts'
+import { mountCodeIsland } from '../../view/editor/code-island.ts'
 import { mountEmbedBody } from '../../ui/block-ui/embed-body.ts'
 import type { BlockEditor, ViewEvents } from '../../view/editor/editor.ts'
 import { assetViewOf } from '../../view/asset-views.ts'
@@ -113,6 +114,10 @@ function viewEvents(
     const vh = getPanels().mountBlockView(block, into, active, 'inline')
     return { root: vh.root, dispose: () => { vh.dispose(); vh.root.remove() } }
   })
+  /** 代码岛的实例缓存：同一块跨行重画不重建，焦点与搜索面板跟着走 */
+  const codeBodies = createRowBodyCache((block, into) =>
+    mountCodeIsland({ getEd: active, blockId: block.id, into }),
+  )
   /**
    * **自动化身体的运行选择器**（运行按钮的落点）：打开的就是**「如果」的命中集**——
    * 有条件 ⇒ 第一行「全部运行 · N」（补收存量），下面列每一块命中（单跑其中一块）；
@@ -483,6 +488,8 @@ function viewEvents(
      * `onFocus` 把「活动编辑器」切到里层：键位走命令层，认的是当前这一台。
      */
     embedBody: (block, into) => embedBodyCache(block, into),
+    /** 代码块的 CM6 岛（实例缓存同上；静态投影面不接这条回调） */
+    codeBody: (block, into) => codeBodies(block, into),
     /**
      * **正文里的查询体**：与段尾宿主同一台 `ViewHost`，只是贴在查询块那一行下面。
      *

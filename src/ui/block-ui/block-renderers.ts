@@ -18,8 +18,8 @@
  * ⚠️ 这不是「视图类型系统」（29 那套要独立布局状态才升格）。它只是**最小的渲染分派**，
  * 目的是让「槽里是块、块由渲染器画」这个形状现在就在，而不是等视图系统落地才做。
  */
-import { blockTypeOf, DEFAULT_BLOCK_TYPE, DIVIDER_TYPE, blockLabel, isJournal, journalDate, journalDateLabel, openActionOf, prop, type Block, type FindBlock, type OpenAction } from '../../core/index.ts'
-import { renderIcon } from '../../view/icons.ts'
+import { blockTypeOf, CODE_TYPE, DEFAULT_BLOCK_TYPE, DIVIDER_TYPE, QUOTE_TYPE, plainText, blockLabel, isJournal, journalDate, journalDateLabel, openActionOf, prop, type Block, type FindBlock, type OpenAction } from '../../core/index.ts'
+import { renderIcon, type IconName } from '../../view/icons.ts'
 
 /** 渲染一个块时能拿到的东西（后续会加：上下文键、命令执行、订阅） */
 export interface BlockRenderCtx {
@@ -133,6 +133,35 @@ const dividerRenderer: BlockRenderer = {
   },
 }
 
+/**
+ * 引文/代码块的静态投影：卡片、表格、搜索结果等面只画首行，不起第二台编辑器。
+ * 截断交给 `ui-ellipsis`（CSS），全文留作 tip —— 不在这里手写省略号。
+ */
+const staticTypedRenderer = (type: string, icon: IconName): BlockRenderer => ({
+  match: (b) => blockTypeOf(b) === type,
+  render: (b, ctx) => {
+    const row = document.createElement('button')
+    row.type = 'button'
+    row.className = 'page-item'
+    if (ctx.isActive(b.id)) row.dataset.active = '1'
+    const ico = document.createElement('span')
+    ico.className = 'p-ico'
+    renderIcon(ico, prop<string>(b, '_icon'), icon)
+    const title = document.createElement('span')
+    title.className = 'p-title ui-ellipsis ui-ellipsis-grow'
+    const full = plainText(b.content)
+    const first = full.split(/\r?\n/, 1)[0] ?? ''
+    title.textContent = first
+    title.dataset.tip = full
+    row.append(ico, title)
+    bindRowClick(row, b, ctx)
+    return row
+  },
+})
+
+const quoteRenderer = staticTypedRenderer(QUOTE_TYPE, 'quote')
+const codeRenderer = staticTypedRenderer(CODE_TYPE, 'code')
+
 /** 兜底：任何块都能画一行纯文本（保证「不认识的块」不会消失） */
 const fallbackRenderer: BlockRenderer = {
   match: () => true,
@@ -166,6 +195,8 @@ const CHROME_RENDERERS: BlockRenderer[] = [journalRenderer]
 const TYPE_RENDERERS: Record<string, BlockRenderer> = {
   [DEFAULT_BLOCK_TYPE]: outlineRenderer,
   [DIVIDER_TYPE]: dividerRenderer,
+  [QUOTE_TYPE]: quoteRenderer,
+  [CODE_TYPE]: codeRenderer,
 }
 
 /**

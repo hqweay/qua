@@ -14,6 +14,7 @@
  *   3. gutter（块标/箭头/导轨）**不混进 `.tx`**：读回模型时会把它当成字。
  */
 import {
+  CODE_TYPE,
   CLOSURE_USE,
   DEFAULT_BLOCK_TYPE,
   DIVIDER_TYPE,
@@ -481,7 +482,7 @@ export const ALLOWED_ROW_CHILDREN: ReadonlySet<string> = new Set([
   'blk-tags',
   'blk-embed-body',
   'blk-view-body',
-  'blk-props-line',
+  'blk-code-body',
 ])
 
 /**
@@ -560,6 +561,11 @@ export function makeBlockEl(
      *    结果行／里层编辑器在构造上没有这个回调，深度由此截断。
      */
     viewBody?: (b: Block, into: HTMLElement) => void
+    /**
+     * **代码块的编辑岛**：只给可编辑面；静态投影（卡片/表格/搜索结果）不接这个回调，
+     * 就不会为每个单元格起一台编辑器。
+     */
+    codeBody?: (b: Block, into: HTMLElement) => void
     /**
      * **正文里自动化块的身体**（三段式：当／如果／就）。与 `viewBody` 同一条分工
      * （`view` 不 import `ui`、装配层给画法、行内体是另一个编辑宿主）；
@@ -1100,6 +1106,17 @@ export function makeBlockEl(
     }
     embedBodyEl = body
     embedMount = () => opts.embedBody?.(b, body)
+  } else if (blockTypeOf(b) === CODE_TYPE) {
+    // 正文不是可编辑文本而是 CM6 文档：`.tx` 留空，代码只存在于岛里
+    tx.dataset.codeSlot = '1'
+    tx.setAttribute('aria-hidden', 'true')
+    const body = document.createElement('div')
+    body.className = 'blk-code-body'
+    body.contentEditable = 'false'
+    body.setAttribute('data-code-island', '1')
+    body.dataset.codeBodyFor = b.id
+    embedBodyEl = body
+    embedMount = () => opts.codeBody?.(b, body)
   } else if (blockTypeOf(b) === DIVIDER_TYPE) {
     const rule = document.createElement('span')
     rule.className = 'divider-rule'

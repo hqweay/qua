@@ -64,7 +64,8 @@ test('引文、分割线与围栏：引文有类型，围栏整段原文并给�
   assert.equal(r.blocks[2]!.kind, 'fence')
   assert.equal(r.blocks[2]!.lang, 'ts')
   assert.equal(r.blocks[2]!.raw, '```ts\nconst x = 1\n```')
-  assert.deepEqual(r.unsupported, ['fence'])
+  assert.deepEqual(r.unsupported, [], '围栏已有代码编辑面，不再当不支持语法')
+  assert.equal(r.blocks[2]!.code, 'const x = 1')
 })
 
 test('不支持的块整行原文，行内语法不转换', () => {

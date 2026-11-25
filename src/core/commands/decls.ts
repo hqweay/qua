@@ -232,6 +232,7 @@ export const COMMANDS: CommandDecl[] = [
    */
   { name: 'core.block/configure', title: t('cmd.block.configure'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['config', 'alias', 'name', 'list', 'icon', 'color', 'face'], actsOn: 'block' },
   { name: 'core.block/set-type', title: t('cmd.block.set-type'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, type: { type: 'string' }, lang: { type: 'string' } }, keywords: ['type', 'convert'], hidden: true, actsOn: 'block' },
+  { name: 'core.block/set-lang', title: t('cmd.block.set-lang'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, lang: { type: 'string' } }, keywords: ['code', 'language', 'syntax'], hidden: true, actsOn: 'block' },
   /**
    * 把一处纯文本提及换成一枚指向目标块的引用（`start`/`end` 是 plain 偏移区间）。
    * 入口只有提及栏片段行上的高亮按钮（与 `set-anchor` 同一条口径：不进命令面板）。

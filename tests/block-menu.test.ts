@@ -68,7 +68,7 @@ test('「转为…」是子菜单行，正文/引文共用同一条命令且各�
     return a && typeof a === 'object' && 'type' in a && typeof a.type === 'string' ? a.type : ''
   }
   const rows = BINDINGS.filter((b) => b.kind === 'menu' && b.group === 'blockKind/1')
-  assert.deepEqual(rows.map(typeArg), ['outline', 'core/quote'])
+  assert.deepEqual(rows.map(typeArg), ['outline', 'core/quote', 'core/code'])
   const anchor = BINDINGS.find((b) => b.kind === 'menu' && b.submenu === 'blockKind/')
   assert.ok(anchor?.actsOn, '子菜单锚点要自己声明作用域')
   assert.ok(rows.every((b) => b.actsOn === 'block'), '换骨架按 id 执行，记录面也要出现')

@@ -10,9 +10,8 @@
  * 把这两个做成参数，本文件就能在没有装配层的情况下被单独理解。
  */
 
-import { eventKeyId, resolveKey } from './bindings.ts'
+import { eventKeyId, resolveKey, type Binding } from './bindings.ts'
 import type { CtxKeys } from '../index.ts'
-
 /** 派发所需的最小环境（由装配层注入） */
 export interface DispatchEnv {
   /** 求值 `when` 用的上下文键 */
@@ -45,12 +44,25 @@ export function isUndoKey(e: KeyboardEvent, isMac: boolean): boolean {
 }
 
 /**
+ * 代码岛里有焦点时，键位归谁。
+ *
+ * 岛里的 Enter／Tab／⌘A 等文本键归岛（CM6 自己处理），编辑器作用域的绑定必须让路；
+ * 应用级全局键（空 `when` 或导航上下文）照常生效；撤销/重做仍归应用栈
+ * （CM6 的历史被关掉，两套历史并存会让一次 ⌘Z 只撤一半）。
+ */
+export function appKeyWhileCodeFocused(b: Pick<Binding, 'when' | 'command'>): boolean {
+  if (b.command === 'core.history/undo' || b.command === 'core.history/redo') return true
+  const when = b.when ?? ''
+  return !when.includes('editorTextFocus') && !when.includes('blockSelection')
+}
+/**
  * 一次按键 → 一条命令。
  * @returns 是否已处理（true ⇒ 调用方应 `preventDefault`）
  */
 export function dispatchKey(e: KeyboardEvent, env: DispatchEnv): boolean {
   const ctx = env.ctx()
   const res = resolveKey(e, ctx, env.isMac())
+  if (ctx.codeEditorFocus === true && res.hit && !appKeyWhileCodeFocused(res.hit)) return false
   if (env.trace) {
     env.trace({
       key: res.id,

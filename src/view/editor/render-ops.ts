@@ -410,7 +410,7 @@ export class RenderOps {
   private renderedWithEvents = false
   private eventsPresent(): boolean {
     const ev = this.ed.events
-    return Boolean(ev && (ev.viewBody || ev.automationBody || ev.embedBody || ev.propsLine || ev.assetView))
+    return Boolean(ev && (ev.viewBody || ev.automationBody || ev.embedBody || ev.codeBody || ev.propsLine || ev.assetView))
   }
 
   /**
@@ -1087,6 +1087,8 @@ export class RenderOps {
         contextBack: Boolean(this.ed.onContextBack) && r.depth === 0 && (this.ed.doc.expandedRoots?.has(r.block.id) ?? false),
         // 露面块的身体：这一层只认「有没有展开」；画什么由装配层给（见 `ViewEvents.embedBody`）
         embedBody: (b, into) => this.ed.embeds.attach(b, into),
+        // 代码块的 CM6 岛：与露面身体共用同一张登记/回收表
+        codeBody: (b, into) => this.ed.embeds.attachCodeBody(b, into),
         ...(this.ed.emptyPlaceholder !== undefined ? { placeholder: this.ed.emptyPlaceholder } : {}),
         /**
          * **正文里的查询体**：只有装配层接了画法、且这一份装载允许展开时才给。

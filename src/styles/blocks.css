@@ -3667,3 +3667,13 @@ button.blk-auto-chip {
   padding-top: 0;
   border-top: 0;
 }
+
+/* 代码块：外层是编辑岛，内层 CM6 自己滚；高度上限走 token，组件不写长度字面量 */
+.blk-code-body {
+  width: 100%;
+  max-height: var(--ui-code-max-h);
+  overflow: hidden;
+  background: var(--ui-code-bg);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-md);
+}

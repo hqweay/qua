@@ -500,6 +500,11 @@ export interface ViewEvents {
    */
   embedBody?: (block: Block, into: HTMLElement) => (() => void) | void
   /**
+   * **代码块的编辑岛**（CM6）：与 `embedBody` 同一条生命周期纪律（换 DOM 前释放）。
+   * 静态投影面不接这个回调，就不会为每个单元格起一台编辑器。
+   */
+  codeBody?: (block: Block, into: HTMLElement) => (() => void) | void
+  /**
    * **正文里查询块的身体**：由装配层用同一台 `ViewHost` 画（surface＝`inline`）。
    *
    * 与 `embedBody` 同一条分工（`view` 不 import `ui`）与同一条生命周期纪律

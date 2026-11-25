@@ -43,6 +43,13 @@ export class EmbedBodies {
     if (dispose) this.disposers.set(b.id, dispose)
   }
 
+  /** makeBlockEl 的 `codeBody` 钩子：代码岛的 CM6 实例也走同一张回收表 */
+  attachCodeBody(b: Block, into: HTMLElement): void {
+    if (b.id === this.pinned) return
+    const dispose = this.ed.events.codeBody?.(b, into)
+    if (dispose) this.disposers.set(b.id, dispose)
+  }
+
   /** makeBlockEl 的 `viewBody` 钩子（正文里的查询体；装配层没接就不进这个分支） */
   attachViewBody(b: Block, into: HTMLElement): void {
     if (b.id === this.pinned) return

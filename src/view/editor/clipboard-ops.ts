@@ -12,8 +12,11 @@ import {
   canDirectEditText,
   DEFAULT_BLOCK_TYPE,
   DIVIDER_TYPE,
+  CODE_TYPE,
+  LANG_PROP,
   QUOTE_TYPE,
   isAutomationBlock,
+  normalizeStoredLang,
   isBlankPlaceholder,
   isQueryBlock,
   normalizeRuns,
@@ -191,9 +194,14 @@ export class ClipboardOps {
           return normalizeRuns(out)
         }
         const make = (node: ParsedBlock): Block => {
-          const b = mkBlock(node.kind === 'fence' ? textRuns(node.raw ?? '') : runsOf(node.inline))
+          const b = mkBlock(node.kind === 'fence' ? textRuns(node.code ?? '') : runsOf(node.inline))
           if (node.kind === 'quote') setBlockType(b, QUOTE_TYPE)
-          if (node.kind === 'divider') setBlockType(b, DIVIDER_TYPE)
+          else if (node.kind === 'divider') setBlockType(b, DIVIDER_TYPE)
+          else if (node.kind === 'fence') {
+            setBlockType(b, CODE_TYPE)
+            const lang = normalizeStoredLang(node.lang)
+            if (lang) b.props = { [LANG_PROP]: lang }
+          }
           return b
         }
         // 解析结果是普通描述树，按显式栈插入；块树遍历仍只走 `walkForest` 一个入口
@@ -217,8 +225,12 @@ export class ClipboardOps {
           tx.patch(targetId, (b) => {
             if (first.kind === 'quote') setBlockType(b, QUOTE_TYPE)
             else if (first.kind === 'divider') setBlockType(b, DIVIDER_TYPE)
-            else setBlockType(b, DEFAULT_BLOCK_TYPE)
-            writeBlockContent(b, first.kind === 'fence' ? textRuns(first.raw ?? '') : runsOf(first.inline))
+            else if (first.kind === 'fence') {
+              setBlockType(b, CODE_TYPE)
+              const lang = normalizeStoredLang(first.lang)
+              if (lang) b.props = { ...(b.props ?? {}), [LANG_PROP]: lang }
+            } else setBlockType(b, DEFAULT_BLOCK_TYPE)
+            writeBlockContent(b, first.kind === 'fence' ? textRuns(first.code ?? '') : runsOf(first.inline))
           })
           insertTree(first.children, targetId, 0)
           insertTree(blocks.slice(1), floc.parent?.id ?? null, floc.index + 1)

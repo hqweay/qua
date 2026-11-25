@@ -15,6 +15,8 @@ export interface ParsedBlock {
   inline: ParsedInline[]
   /** `quote` 与 `divider` 落到类型；`fence` 在编辑器面才决定怎么落 */
   kind?: 'quote' | 'divider' | 'fence'
+  /** 围栏内的代码（不含围栏行）——有编辑面时直接落成代码块 */
+  code?: string
   lang?: string
   /** 围栏整段原文（含围栏行），未支持时的降级载荷 */
   raw?: string
@@ -144,12 +146,12 @@ export function parseMarkdown(source: string): MarkdownParse {
       const end = j < lines.length ? j : lines.length - 1
       attach({
         inline: [],
+        code: lines.slice(i + 1, j < lines.length ? j : lines.length).join('\n'),
         kind: 'fence',
         ...(fence[2] ? { lang: fence[2] } : {}),
         raw: lines.slice(i, end + 1).join('\n'),
         children: [],
       })
-      note('fence')
       i = end
       continue
     }

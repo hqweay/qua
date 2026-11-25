@@ -108,6 +108,14 @@
   --ui-danger-border: color-mix(in srgb, var(--ui-danger) 45%, transparent);
   --ui-ok: var(--c-ok);
   --ui-code-bg: var(--c-code);
+  --ui-code-max-h: 60vh;
+  --ui-code-keyword: var(--c-violet);
+  --ui-code-string: var(--c-green);
+  --ui-code-comment: var(--c-gray);
+  --ui-code-number: var(--c-orange);
+  --ui-code-function: var(--c-blue);
+  --ui-code-type: var(--c-accent);
+  --ui-yellow-soft: var(--c-yellow-soft);
   /* 行内颜色：主题只填这一层；正文与色板只引用它，不碰 --c-* */
   --ui-ink-red: var(--c-red);
   --ui-ink-orange: var(--c-orange);

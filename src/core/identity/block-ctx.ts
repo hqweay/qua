@@ -9,8 +9,8 @@
  * 由调用方补（编辑器补它那一份；记录面补空选区）。
  */
 import type { Block } from '../model/model.ts'
-import { hasList, hasLiveChildren, isPropDefBlock, isQueryBlock } from '../model/model.ts'
-import { canConvertBlockType, typeDeclOf } from '../model/types.ts'
+import { blockTypeOf, hasList, hasLiveChildren, isPropDefBlock, isQueryBlock } from '../model/model.ts'
+import { canConvertBlockType, CODE_TYPE, typeDeclOf } from '../model/types.ts'
 import type { CtxKeys } from '../model/undo.ts'
 import { isJournal, journalDate, todayISO } from './journal.ts'
 import { isEmbedBlock } from '../views/embed.ts'
@@ -72,5 +72,7 @@ export function blockMenuCtxOf(
     blockClosure: closureOf(b, table) ? 'closure' : 'paragraph',
     /** 换骨架的准入：名字/日期不住在正文里的块不给转换入口（否则菜单是死行） */
     blockCanConvertType: canConvertBlockType(b),
+    /** 代码块才有语言一格：菜单不给别的类型挂一个点不动的语言入口 */
+    blockIsCode: blockTypeOf(b) === CODE_TYPE,
   }
 }

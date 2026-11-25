@@ -4,7 +4,7 @@
  * 「这块是什么」用角色（`as-page` / `as-tag`），「这一块归在谁下面」用归属边
  * （`core.belongs-to/*`）——两件事，两个区段。
  */
-import { canConvertBlockType } from '../../core/index.ts'
+import { canConvertBlockType, CODE_TYPE } from '../../core/index.ts'
 import type { Handler } from '../../core/infra/ports.ts'
 import { curBlock, S } from './shared.ts'
 export const TAGS_HANDLERS: Record<string, Handler> = {
@@ -61,6 +61,14 @@ export const TAGS_HANDLERS: Record<string, Handler> = {
     if (!b || !canConvertBlockType(b)) return false
     const lang = S(a.lang, '')
     return app.setBlockType(id, type, lang === '' ? undefined : lang)
+  },
+
+  /** 代码块的语言：只改 `_lang`，正文与骨架不动（未知语言由读侧按纯文本降级） */
+  'core.block/set-lang': (a, app) => {
+    const id = S(a.blockId) || curBlock(app)
+    const lang = S(a.lang, '')
+    if (!id || !lang) return false
+    return app.setBlockType(id, CODE_TYPE, lang === 'plain' ? undefined : lang)
   },
   /**
    * **块级标签的两个入口**（属性面板用）。
