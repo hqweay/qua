@@ -566,6 +566,15 @@ export class ViewHost {
    */
   private candidatesLoaded = new Set<string>()
   /**
+   * **这一屏自己新建的块**（看板列尾「新建」，落点住森林顶层）。
+   *
+   * 它们是**确定的候选**：出生就在内存里，但候选页是按装载时的树取的分页快照，
+   * 游标停在它们出生之前 ⇒ `candidatesLoaded` 里不会有它们。并进求值域里，
+   * 免得「未枚举」冒充「不命中」——那正是「按钮给了却没出现」的来源。
+   * 下一次刷新从头重取候选页，这一格里的 id 照旧无害（求值仍按条件现判）。
+   */
+  private createdIds = new Set<string>()
+  /**
    * 大纲里的**结构编辑**改过树：冻结结果与上下文展开栈都可能过期。
    *
    * 为什么不在每次按键上重算：查询结果是**冻结**的（不自动重算，否则打一个字
@@ -1111,7 +1120,12 @@ export class ViewHost {
   private domain(): ReadonlySet<string> | undefined {
     if (!this.deps.loadCandidateWindow) return undefined
     if (this.streamDone && this.candidatesLoaded.size === 0) return undefined
-    return this.candidatesLoaded
+    /**
+     * **本屏自己新建的块也是候选**（看板列尾「新建」）：候选页是装载那一刻的快照，
+     * 新块出生在游标之后、旧页里没有它；只按已取页过滤，会把「命中但还没枚举到」
+     * 读成「不命中」（刷新按钮那条注释记的是同一个坑）。
+     */
+    return this.createdIds.size === 0 ? this.candidatesLoaded : new Set([...this.candidatesLoaded, ...this.createdIds])
   }
 
   /**
@@ -2066,23 +2080,32 @@ export class ViewHost {
               ...(ctx.today ? { today: ctx.today } : {}),
             })
           },
-          // 列尾「新建」：children 源直接建；查询源建完按当前生效条件重算一次——
-          // 新卡没进结果就直说（卡在库里，不在这一列），不让「点了没出现」变成悬案
+          /**
+           * 列尾「新建」：children 源直接建；查询源建完把**这一笔新造的块**并进求值域
+           * 再算一次——候选页是装载那一刻的快照，新块不在里面；拿旧域过滤会把
+           * 「命中但还没枚举到」读成「不命中」（先弹一句假话、卡片也不画）。
+           * 真的没进结果（出生块满足不了的面、`limit` 截断等）才直说。
+           */
           insertValueCard: (propId, raw) => {
             const args = { owner: this.writeOwner, propId, ...(raw !== undefined && raw !== null ? { value: raw } : {}) }
             if (this.source.kind !== 'query') {
               this.deps.invoke('core.view/new-card', args)
               return
             }
-            const before = new Set(this.frozen?.hits.map((h) => h.blockId) ?? [])
-            this.deps.invoke('core.view/new-card', args)
             const spec = this.effective
-            if (spec) {
-              const fresh = freezeResult(spec, this.deps.kb, this.evalContext(spec), this.viewKey, this.domain())
-              this.frozen = fresh
-              if (!fresh.hits.some((h) => !before.has(h.blockId))) {
-                this.deps.toast?.(t('ui.cards.createdOutsideQuery'), 'info')
-              }
+            /** 查询源的新卡住森林顶层；命令面只回 true／false，靠顶层差分认出这一笔新造的块 */
+            const rootsBefore = new Set(spec ? this.deps.kb.roots().map((b) => b.id) : [])
+            this.deps.invoke('core.view/new-card', args)
+            if (!spec) return
+            const created = this.deps.kb.roots().filter((b) => !rootsBefore.has(b.id)).map((b) => b.id)
+            // 命令被拒（坏值等）自己已经说过一句：没有新块就到此为止，别补一句假的「没命中」
+            if (created.length === 0) return
+            for (const id of created) this.createdIds.add(id)
+            const fresh = freezeResult(spec, this.deps.kb, this.evalContext(spec), this.viewKey, this.domain())
+            this.frozen = fresh
+            this.sync(true)
+            if (!created.some((id) => fresh.hits.some((h) => h.blockId === id))) {
+              this.deps.toast?.(t('ui.cards.createdOutsideQuery'), 'info')
             }
           },
           // 结构分组只接 children 源：组＝直接子块、记录＝它的孩子（query 命中是平的，没有一级）
