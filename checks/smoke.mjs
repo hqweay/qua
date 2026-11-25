@@ -4627,10 +4627,19 @@ await check('T35 跨块拖拽选块 / Shift+拖拽选文本 / 多块菜单删除
   assert(afterEnter.count === 0, `Enter 应清块选区：${JSON.stringify(afterEnter)}`)
   assert(afterEnter.sel?.aOff === 0, `Enter 后光标应在首块 0 位：${JSON.stringify(afterEnter.sel)}`)
 
-  // ⑥b Esc：光标折叠 ⇒ 选中当前块（键盘入口）；再 Esc 清空
+  // ⑥b Esc：光标折叠 ⇒ 选中当前块（键盘入口）；⇧↓/⇧↑ 逐块扩大/收缩；再 Esc 清空
   await page.keyboard.press('Escape')
   const escSel = await state()
   assert(escSel.count === 1 && escSel.painted === 1, `Esc 应选中当前块：${JSON.stringify(escSel)}`)
+  await page.keyboard.press('Shift+ArrowDown')
+  const escDown1 = await state()
+  assert(escDown1.count === 2 && escDown1.painted === 2, `Esc 后 ⇧↓ 应扩到 2 块：${JSON.stringify(escDown1)}`)
+  await page.keyboard.press('Shift+ArrowDown')
+  const escDown2 = await state()
+  assert(escDown2.count === 3, `再 ⇧↓ 应扩到 3 块：${JSON.stringify(escDown2)}`)
+  await page.keyboard.press('Shift+ArrowUp')
+  const escUp = await state()
+  assert(escUp.count === 2, `⇧↑ 应收回到 2 块：${JSON.stringify(escUp)}`)
   await page.keyboard.press('Escape')
   const escCleared = await state()
   assert(escCleared.count === 0, `再按 Esc 应清空块选区：${JSON.stringify(escCleared)}`)

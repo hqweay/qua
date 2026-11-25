@@ -119,15 +119,28 @@ export class BlockSelection {
 
   /**
    * `Shift+↑/↓` 的边界规则：
-   * - 已有块选区 ⇒ 扩展一块；
+   * - 已有块选区 ⇒ 在**移动端**扩展一块（锚块那一端不动）；
    * - 否则只有 caret 在**块文本首/尾**时才起块选区；文本内部返回 false（让原生文本选区接手）。
    */
   extendBlockSelection(dir: -1 | 1): boolean {
     const ids = this.visibleIds()
     if (this.blockSel) {
-      const anchor = this.blockSel.anchor
-      const endId = dir > 0 ? this.blockSel.ids[this.blockSel.ids.length - 1] : this.blockSel.ids[0]
-      const ei = endId ? ids.indexOf(endId) : -1
+      const { ids: selIds, anchor } = this.blockSel
+      /**
+       * 移动端＝**锚块的另一端**：与文本选区同构——锚（起点）不动，⇧↑/⇧↓ 都在另一端生长与收缩。
+       * 若按方向选端（过去那版），向下扩两格后再 ⇧↑ 会从锚块那端往上挪，退不回来
+       * （锚块已在首位时更是一个键按下去毫无反应）；向上扩同理。
+       * 锚块落在中间不是本类会产生形状，仍按方向兜底。
+       */
+      const movingEnd =
+        selIds[0] === anchor
+          ? selIds[selIds.length - 1]
+          : selIds[selIds.length - 1] === anchor
+            ? selIds[0]
+            : dir > 0
+              ? selIds[selIds.length - 1]
+              : selIds[0]
+      const ei = movingEnd ? ids.indexOf(movingEnd) : -1
       if (ei < 0) return false
       const ni = ei + dir
       if (ni < 0 || ni >= ids.length) return false
