@@ -49,6 +49,8 @@ export interface CaptionRowOptions {
   actions?: HTMLElement
   /** 动作组里点了哪一颗（`above`／`below`／`delete`）：命令归调用方，这里只读 DOM 意图 */
   onAction?: (act: 'above' | 'below' | 'delete') => void
+  /** 右键这一行（题注）：与右键块标/正文同一条块菜单。`trigger` 用于「同一处再右键＝收起」 */
+  onContextMenu?: (rect: DOMRect, trigger: HTMLElement) => void
 }
 
 export function makeCaptionRow(block: Block, opts: CaptionRowOptions): HTMLElement {
@@ -168,6 +170,18 @@ export function makeCaptionRow(block: Block, opts: CaptionRowOptions): HTMLEleme
     commit()
   }
 
+  /**
+   * **右键题注 ＝ 右键这一块的菜单**（与查询块的标题同一件事）。
+   *
+   * 外层编辑器的 `contextmenu` 委托按「岛内事件不归我」整支跳过（题注住在编辑岛里），
+   * 所以这里必须自己收下再交给同一条桥；CM6 正文那边也是这么做的（`onContextMenu`）。
+   */
+  row.addEventListener('contextmenu', (e) => {
+    if (!opts.onContextMenu) return
+    e.preventDefault()
+    e.stopPropagation()
+    opts.onContextMenu(new DOMRect(e.clientX, e.clientY, 0, 0), row)
+  })
   text.addEventListener('input', onInput)
   text.addEventListener('compositionstart', onCompositionStart)
   text.addEventListener('compositionend', onCompositionEnd)

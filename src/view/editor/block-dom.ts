@@ -608,6 +608,11 @@ export function makeBlockEl(
      */
     bodyAction?: (act: BlockAction, blockId: string) => void
     /**
+     * **右键题注**：与右键块标/正文开同一张块菜单。题注在编辑岛里，外层委托跳过
+     * 岛内事件 ⇒ 由题注自己收下、交回同一座桥（`ViewEvents.blockMenu`）。
+     */
+    bodyMenu?: (blockId: string, rect: DOMRect, appearanceHost: string | undefined, trigger: HTMLElement) => void
+    /**
      * **正文里自动化块的身体**（三段式：当／如果／就）。与 `viewBody` 同一条分工
      * （`view` 不 import `ui`、装配层给画法、行内体是另一个编辑宿主）；
      * 「哪一行画」同走 `rowHasInlineViewBody`（自动化块是身体的一种源）。
@@ -1166,6 +1171,10 @@ export function makeBlockEl(
         onCommit: (text) => opts.captionWrite!(b.id, text),
         actions: opts.bodyAction ? makeBodyActions(b.id) : undefined,
         onAction: (act) => opts.bodyAction?.(act, b.id),
+        // 与块标同一份绑定：露面行右键开在**源**上并附「移除这次露面」，普通行开自己
+        onContextMenu: opts.bodyMenu
+          ? (rect, trigger) => opts.bodyMenu!(markerTargetId, rect, markerTargetId === b.id ? undefined : b.id, trigger)
+          : undefined,
       }))
     }
     embedBodyEl = body
@@ -1188,6 +1197,10 @@ export function makeBlockEl(
         onCommit: (text) => opts.captionWrite!(b.id, text),
         actions: opts.bodyAction ? makeBodyActions(b.id) : undefined,
         onAction: (act) => opts.bodyAction?.(act, b.id),
+        // 与块标同一份绑定：露面行右键开在**源**上并附「移除这次露面」，普通行开自己
+        onContextMenu: opts.bodyMenu
+          ? (rect, trigger) => opts.bodyMenu!(markerTargetId, rect, markerTargetId === b.id ? undefined : b.id, trigger)
+          : undefined,
       }))
     }
     /**
