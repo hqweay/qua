@@ -7,6 +7,8 @@
  * （`structTail` 管光标与重画）；每条「撤销一次全回」的纪律跟着方法走。
  */
 import {
+  CODE_TYPE,
+  blockTypeOf,
   cloneSubtree,
   enterKind,
   flatten,
@@ -14,6 +16,7 @@ import {
   hasIdentity,
   hasLiveChildren,
   indentMove,
+  isEmbedBlock,
   removableBySplice,
   isJournal,
   locate,
@@ -30,11 +33,29 @@ import {
   typeDeclOf,
   unfoldBlock,
   writeBlockContent,
+  type Block,
   type MovePlan,
 } from '../../core/index.ts'
 import { plainLen, spliceRuns, splitRuns } from '../../core/model/runs.ts'
 import type { Tx } from '../../core/kb/types.ts'
 import type { BlockEditor } from './editor.ts'
+import { isReadonlyBlock } from './block-dom.ts'
+
+/**
+ * 这一块能不能接住删除后的光标：日期只读投影没有可编辑正文，代码／露面的正文在
+ * 编辑岛里（`.tx` 只是让位的空槽）。落点挑它们 ⇔ 竖线画不出来、打的字没有去处
+ * （实测：删掉一天的末尾代码块后，落点是下一天的日期行，一个字都打不进）。
+ */
+function canHoldCaret(b: Block): boolean {
+  return !isReadonlyBlock(b) && blockTypeOf(b) !== CODE_TYPE && !isEmbedBlock(b)
+}
+
+/** 删除后的落点：从 `from` 往后找第一个能接光标的块，没有就往前找 */
+function caretTargetFrom(list: readonly Block[], from: number): Block | undefined {
+  for (let i = from; i < list.length; i++) if (canHoldCaret(list[i]!)) return list[i]
+  for (let i = from - 1; i >= 0; i--) if (canHoldCaret(list[i]!)) return list[i]
+  return undefined
+}
 
 export class StructOps {
   constructor(private readonly ed: BlockEditor) {}
@@ -578,8 +599,12 @@ export class StructOps {
     }
     const after = flatten(this.ed.doc)
     // 关 fill 的实例删空了段（页签删最后一页）：没有落点可给，视图层会回落激活页
-    if (after.length > 0) this.ed.structTail({ id: after[Math.min(idx, after.length - 1)]!.id, off: 0 })
-    else this.ed.abortUndoEntry()
+    if (after.length > 0) {
+      const at = Math.min(idx, after.length - 1)
+      const target = caretTargetFrom(after, at)
+      if (target) this.ed.structTail({ id: target.id, off: 0 })
+      else this.ed.abortUndoEntry()
+    } else this.ed.abortUndoEntry()
     return true
   }
 

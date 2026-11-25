@@ -2170,6 +2170,14 @@ export class BlockEditor {
     const r = this.sel
     const all = flatten(this.doc)
     if (!all.some((b) => b.id === r.aBlock)) return
+    /**
+     * 没有**可写**正文槽的行不是插入点目标：把选区投影进去，`syncSel` → `reclaimCaret`
+     * 会把它当「跑出正文槽」顶回来，而模型选区还在 ⇒ 再投影一次，两边互相搬。
+     * 实测（2026-11-26）：↓ 从代码岛落到下一天的日期行，一秒上万次 `placeCaret`，
+     * 界面卡住且一个块都不建。光标可以不存在，但不能自激。
+     */
+    const tx = this.txEl(r.aBlock)
+    if (!tx || tx.closest('[data-readonly]')) return
     this.placeCaret(r.aBlock, r.aOff)
   }
 
@@ -2271,12 +2279,32 @@ export class BlockEditor {
   structTail(caret?: { id: string; off: number } | null, ids?: readonly string[]): void {
     this.finishUndoEntry('structural')
     this.renderAll()
-    if (caret) this.placeCaret(caret.id, caret.off)
+    if (caret) {
+      this.takeFocusForCaret(caret.id)
+      this.placeCaret(caret.id, caret.off)
+    }
     this.emitChange('struct', ids)
     // 可见性兜底：这一步结构动作之后，光标落在了本视图看不见的块上 ⇒ 回源。
     // ⚠️ 看**该落的**那块，不是 `this.sel`：落点不可见时 `placeCaret` 落不下光标，
     //    `sel` 还停在旧块上（旧块当然可见，判它就永远验不出「落空」）。
     this.ensureCaretVisible(caret?.id)
+  }
+
+  /**
+   * **结构动作的焦点跟着光标走。**
+   *
+   * 结构动作常常从里层编辑岛发起（代码块里按 ⌘⇧↵／⌘⇧D／块末 ↓），而重排会把岛的 DOM
+   * 搬走或摘掉 ⇒ 焦点落在 body，或还留在岛里。只搬 DOM Range 不够：竖线画在新块上，
+   * 按键仍归岛或无人接收（实测：⌘⇧↵ 建了上一块，打的字进了代码；删块之后一个字打不进）。
+   * 焦点在**别的编辑器**里则不动——那台的命令该它自己收尾。
+   */
+  private takeFocusForCaret(targetId: string): void {
+    const active = document.activeElement as HTMLElement | null
+    if (active && active !== document.body && !this.container.contains(active)) return
+    const island = active?.closest?.(`[${EDIT_ISLAND_ATTR}]`)
+    // 落点就在这座岛自己的那一行里 ⇒ 焦点归岛（岛内编辑期间外层不抢）
+    if (island && this.blockEl(targetId)?.contains(island)) return
+    this.container.focus({ preventScroll: true })
   }
 
   undoStep(): void {

@@ -321,10 +321,13 @@ export function mountCodeIsland({ getEd, blockId, into, onCopyBlock, onCutBlock,
   /**
    * ⌘↵ 走应用层切任务，`structTail` 会重画这一行，焦点会掉出去。
    * 只在这种「命令引发的焦点丢失」后补回岛内，用户主动点别处不抢。
+   *
+   * ⚠️ 只认**恰好** ⌘↵：⌘⇧↵（在上一块插入）与 ⌥↵ 都是结构命令，光标该跟着
+   *    **新块**走；一并补回岛内就会出现「新块建好了、竖线也画上了，打的字却进代码」。
    */
   let restoreAfterCommand = false
   const noteCommandKey = (e: KeyboardEvent) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') restoreAfterCommand = true
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !e.shiftKey && !e.altKey) restoreAfterCommand = true
   }
   const onFocusOut = () => {
     if (!restoreAfterCommand) return

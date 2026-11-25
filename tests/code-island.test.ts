@@ -33,14 +33,23 @@ test('外部写回只在文本真的不同时发生，自己的写不回灌', ()
   assert.equal(codeNeedsWriteBack('const a = 1', ''), true)
 })
 
-test('岛内焦点：文本键归岛，全局键与应用撤销照常', () => {
-  assert.equal(appKeyWhileCodeFocused({ when: 'editorTextFocus', command: 'core.editor/split-block' }), false)
-  assert.equal(appKeyWhileCodeFocused({ when: 'blockSelection', command: 'core.editor/delete-selected-blocks' }), false)
-  assert.equal(appKeyWhileCodeFocused({ when: '', command: 'core.command-palette/show' }), true)
+test('岛内焦点：文本键归岛，结构命令照常走 app', () => {
+  // 文本键：CM6 有原生含义，app 必须让路
+  assert.equal(appKeyWhileCodeFocused({ key: 'enter', when: 'editorTextFocus', command: 'core.editor/split-block' }), false)
+  assert.equal(appKeyWhileCodeFocused({ key: 'tab', when: 'editorTextFocus', command: 'core.editor/indent-block' }), false)
+  assert.equal(appKeyWhileCodeFocused({ key: 'backspace', when: 'editorTextFocus', command: 'core.editor/backspace' }), false)
+  assert.equal(appKeyWhileCodeFocused({ key: 'mod+a', when: 'editorTextFocus', command: 'core.editor/select-all' }), false)
+  assert.equal(appKeyWhileCodeFocused({ key: 'shift+down', when: 'editorTextFocus || blockSelection', command: 'core.selection/extend-down' }), false)
+  assert.equal(appKeyWhileCodeFocused({ key: 'mod+enter', when: 'editorTextFocus', command: 'core.editor/toggle-closure' }), false, '任务切换由岛内 keymap 接管，不再走全局派发')
+  // 结构命令：代码编辑器里没有这个键，吞掉等于「按了没反应」
+  assert.equal(appKeyWhileCodeFocused({ key: 'mod+shift+d', when: 'editorTextFocus && blockCanDelete', command: 'core.block/delete' }), true, '删块在代码块里也要生效')
+  assert.equal(appKeyWhileCodeFocused({ key: 'mod+shift+enter', when: 'editorTextFocus', command: 'core.editor/insert-block-before' }), true)
+  assert.equal(appKeyWhileCodeFocused({ key: 'mod+shift+up', when: 'editorTextFocus', command: 'core.editor/move-block-up' }), true)
+  // 全局键与应用撤销照常
+  assert.equal(appKeyWhileCodeFocused({ key: 'mod+shift+p', when: '', command: 'core.command-palette/show' }), true)
   assert.equal(appKeyWhileCodeFocused({ when: '', command: 'core.history/back' }), true)
-  assert.equal(appKeyWhileCodeFocused({ when: 'editorTextFocus', command: 'core.history/undo' }), true)
-  assert.equal(appKeyWhileCodeFocused({ when: 'editorTextFocus', command: 'core.history/redo' }), true)
-  assert.equal(appKeyWhileCodeFocused({ when: 'editorTextFocus', command: 'core.editor/toggle-closure' }), false, '任务切换由岛内 keymap 接管，不再走全局派发')
+  assert.equal(appKeyWhileCodeFocused({ key: 'mod+z', when: 'editorTextFocus', command: 'core.history/undo' }), true)
+  assert.equal(appKeyWhileCodeFocused({ key: 'mod+shift+z', when: 'editorTextFocus', command: 'core.history/redo' }), true)
 })
 
 test('DOM 标记与高度上限都走常量，不在组件里写第二份', () => {

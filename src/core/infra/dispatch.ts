@@ -50,11 +50,50 @@ export function isUndoKey(e: KeyboardEvent, isMac: boolean): boolean {
  * 应用级全局键（空 `when` 或导航上下文）照常生效；撤销/重做仍归应用栈
  * （CM6 的历史被关掉，两套历史并存会让一次 ⌘Z 只撤一半）。
  */
-export function appKeyWhileCodeFocused(b: Pick<Binding, 'when' | 'command'>): boolean {
+export function appKeyWhileCodeFocused(b: Pick<Binding, 'when' | 'command' | 'key'>): boolean {
   // 撤销/重做归应用栈；任务切换由岛内 keymap 自己调（见 code-island），不在全局再走一遍
   if (b.command === 'core.history/undo' || b.command === 'core.history/redo') return true
   const when = b.when ?? ''
-  return !when.includes('editorTextFocus') && !when.includes('blockSelection')
+  if (!when.includes('editorTextFocus') && !when.includes('blockSelection')) return true
+  /**
+   * 岛里的**文本键**归岛，其余编辑器作用域的绑定照常走 app。
+   *
+   * ⚠️ 旧判据是「`when` 含 editorTextFocus ⇒ 一律让路」，代价是**每一条结构键
+   *    （删块／上建块／移动）在代码块里静默失效**——用户在岛里按 ⌘⇧D，命令根本没被派发，
+   *    与「CM6 吃掉了键」看起来一模一样。让路的唯一理由应该是「这一键在代码编辑器里
+   *    有原生含义」，所以判据收成一张**按 chord 的让步表**：表外的结构命令一律放行。
+   */
+  return ISLAND_TEXT_KEYS[b.key ?? ''] !== true
+}
+
+/**
+ * 代码岛自己的文本/编辑键（CM6 的原生含义不能被 app 抢）：
+ * 换行与缩进、删除、全选、转义（搜索面板）、注释开关，以及岛内已接管的复制/剪切/任务切换
+ * 与正文格式键（代码里没有 marks，放行只会写出用户看不见的东西）。
+ */
+const ISLAND_TEXT_KEYS: Record<string, true> = {
+  enter: true,
+  'shift+enter': true,
+  tab: true,
+  'shift+tab': true,
+  backspace: true,
+  delete: true,
+  escape: true,
+  'mod+a': true,
+  'mod+/': true,
+  'mod+c': true,
+  'mod+x': true,
+  'mod+shift+c': true,
+  'mod+enter': true,
+  'shift+up': true,
+  'shift+down': true,
+  'shift+left': true,
+  'shift+right': true,
+  'mod+b': true,
+  'mod+i': true,
+  'mod+e': true,
+  'mod+`': true,
+  'mod+shift+m': true,
 }
 /**
  * 一次按键 → 一条命令。
