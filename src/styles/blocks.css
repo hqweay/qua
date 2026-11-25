@@ -2958,16 +2958,62 @@
   --blk-lh: inherit;
 }
 /*
- * **露面行的块标是空心的**：两处——投影行的绑源块标（宿主行自己的 chrome）、
- * 镜像行岛首行的那颗块标（源行的块标顶上来的那一颗）。空心说的是同一句话：
- * 「这一行的身体不是一份独立内容」。
+ * **投影行的块标是空心的**：空心说的是「这一行的身体不是一份独立内容」。
  */
-.blk[data-embed='1'] > .left .marker::before,
-.blk[data-embed='1'] .blk-embed-body .blk[data-depth='0'] > .left .marker::before {
+.blk[data-embed='1'] > .left .marker::before {
   background: transparent;
   border: 1px solid var(--ui-text-tertiary);
   width: calc(var(--ui-bullet-size) + 2px);
   height: calc(var(--ui-bullet-size) + 2px);
+}
+/*
+ * **镜像行的块标是一枚 M 徽章**（虚线圆 ＋ 字母）：同一颗空心点说不清两件事——
+ * 「投影＝结果视图」与「镜像＝同一个块又出现了一次」。镜像要的是后者：
+ * 这一行不是一块新内容，而是那一块的镜面，所以给它一枚自成形状的徽章，
+ * 不和普通块标（5px 实心点）、投影块标（7px 空心点）挤在同一档里。
+ *
+ * 尺寸从 `--ui-bullet-size` 抬到 16px：普通点太细，读不出「这是另一种身份」；
+ * 虚线圆在静止态就把「镜面／非实体」说出口，不靠颜色深浅。
+ * 字母是**形状**不是文案（ASCII，不进 `msg.ts`，也不随语言切）——它和圆一起构成徽章本身。
+ *
+ * ⚠️ 悬停整颗让位给抓手：基线的 `.blk .marker:hover::before { opacity: 0 }` 照旧生效，
+ *    徽章不会和抓手同屏叠影。
+ */
+.blk[data-embed='1'] .blk-embed-body .blk[data-depth='0'] > .left .marker::before {
+  content: 'M';
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  background: transparent;
+  border: 1px dashed var(--ui-text-tertiary);
+  border-radius: var(--ui-radius-pill);
+  color: var(--ui-text-tertiary);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  /* 普通点在静息态是半透明的待命件（--ui-quiet）；徽章是身份，读满强度 */
+  opacity: 1;
+}
+/*
+ * **镜身里的竖线是虚线，并且抬一档色**：外边的大纲导轨是实线（结构本身就在那里），
+ * 镜面里的这一条是「同一个子树在这面镜子里继续」——虚线把它和真实子树分开；
+ * 颜色从 `--ui-rail`（border-subtle）抬到 `--ui-border`，否则 1px 浅灰在镜面里
+ * 和空白同值（阅读时等于没有线）。
+ *
+ * 悬停／活动保留同一套反馈（加宽 ＋ 染成 tertiary）：原规则的纯色底会被这里的选择器
+ * 盖掉，所以同一段虚线用更深的颜色重写一遍，反馈不丢。
+ */
+.blk[data-embed='1'] .blk-embed-body[data-embed-body='mirror'] .rail::before,
+.blk[data-embed='1'] .blk-embed-body[data-embed-body='mirror'] .rail-self::after {
+  background: repeating-linear-gradient(to bottom, var(--ui-border) 0 3px, transparent 3px 6px);
+}
+.blk[data-embed='1'] .blk-embed-body[data-embed-body='mirror'] .rail:hover::before,
+.blk[data-embed='1'] .blk-embed-body[data-embed-body='mirror'] .rail.hot::before,
+.blk[data-embed='1'] .blk-embed-body[data-embed-body='mirror'] .rail-self:hover::after,
+.blk[data-embed='1'] .blk-embed-body[data-embed-body='mirror'] .rail-self.hot::after {
+  background: repeating-linear-gradient(to bottom, var(--ui-text-tertiary) 0 3px, transparent 3px 6px);
 }
 /*
  * **祖先导轨要留在岛上面**：镜像行的身体左移之后盖住了宿主行左缘的 gutter 区，
