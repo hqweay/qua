@@ -216,6 +216,7 @@ export const BINDINGS: Binding[] = [
   { command: 'core.editor/insert-child', kind: 'menu', when: 'blockMenuTarget && blockCanTakeChildren', group: 'block/2-structure', order: 45, layer: 'core' },
   { command: 'core.editor/insert-parent-sibling', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 47, layer: 'core' },
   { command: 'core.editor/insert-block', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 48, args: { type: 'paragraph' }, layer: 'core', label: t('menu.label.insertBelow') },
+  { command: 'core.editor/insert-block-before', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 49, layer: 'core', label: t('menu.label.insertAbove') },
   { submenu: 'blockKind/', kind: 'menu', when: 'blockMenuTarget && blockCanConvertType', group: 'block/2-structure', order: 13, layer: 'core', label: t('menu.label.turnInto'), actsOn: 'block' },
   { command: 'core.editor/indent-block', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 50, layer: 'core' },
   { command: 'core.editor/outdent-block', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 60, layer: 'core' },

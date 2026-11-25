@@ -282,6 +282,7 @@ export const EN3 = {
   'menu.label.codeBlock': 'Code block',
   'menu.label.turnInto': 'Change type...',
   'menu.label.insertBelow': 'Insert block below',
+  'menu.label.insertAbove': 'Insert block above',
   'menu.label.language': 'Language...',
   'ui.code.lang.plain': 'Plain text',
   'menu.label.pageRef': 'Inline reference',

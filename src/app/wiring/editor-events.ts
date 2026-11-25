@@ -23,8 +23,8 @@ import {
   isDeleted,
   isPropDef,
   LANG_PROP,
-  locate,
   openAxisOf,
+  plainLen,
   prop,
   readEmbed,
   removableBySplice,
@@ -136,13 +136,23 @@ function viewEvents(
             title: t('menu.title.block'),
           })
         },
-        // 末行末尾 ↓/→：优先落到已有的下一块，没有才新建一行
+        // 末行末尾 ↓/→：落到可见的下一行；没有才新建
         onExitBelow: () => {
           const ed = active()
-          const loc = locate({ roots: ed.store.blocks }, block.id)
-          const next = loc ? (loc.parent ? loc.parent.children[loc.index + 1] : ed.store.blocks[loc.index + 1]) : undefined
+          const rows = ed.rows()
+          const i = rows.findIndex((r) => r.block.id === block.id)
+          const next = i >= 0 ? rows[i + 1]?.block : undefined
           if (next && !isDeleted(next)) ed.placeCaret(next.id, 0)
           else ed.insert.insertBlockAfter(block.id, '')
+        },
+        // 首行开头 ↑/←：落到可见的上一行（光标在末尾）；没有才在上方新建
+        onExitAbove: () => {
+          const ed = active()
+          const rows = ed.rows()
+          const i = rows.findIndex((r) => r.block.id === block.id)
+          const prev = i > 0 ? rows[i - 1]?.block : undefined
+          if (prev && !isDeleted(prev)) ed.placeCaret(prev.id, plainLen(prev.content))
+          else ed.insert.insertBlockBefore(block.id)
         },
         // ⌘↵：与正文同一条命令（岛内接管，避免 CM6 默认插行）
         onToggleTask: () => {

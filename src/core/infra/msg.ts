@@ -1263,6 +1263,7 @@ export const MSG = {
   'menu.label.codeBlock': '代码块',
   'menu.label.turnInto': '转为…',
   'menu.label.insertBelow': '在下方新建块',
+  'menu.label.insertAbove': '在上方新建块',
   'menu.label.language': '语言…',
   'ui.code.lang.plain': '纯文本',
   'menu.label.pageRef': '行内引用',
