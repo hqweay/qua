@@ -33,7 +33,7 @@
  */
 import { walkForest } from '../model/walk.ts'
 import type { Block } from '../model/model.ts'
-import { canDirectEditText, canWriteText } from '../model/types.ts'
+import { canWriteText } from '../model/types.ts'
 import { systemPropViolation } from '../props/system-props.ts'
 import type { Op, ForestLookup } from './types.ts'
 
@@ -120,7 +120,7 @@ export function validate(forest: readonly Block[], ops: readonly Op[], lookup?: 
            * 能到达这里的查询块正文 op 只能是「直接改名」⇒ 按直接编辑放行。
            * 其余受保护块（日记／字段定义／只读类型）照旧拒绝。
            */
-          if (pre && !canWriteText(pre) && !canDirectEditText(pre)) {
+          if (pre && !canWriteText(pre)) {
             out.push({ index: i, blockId: op.id, reason: 'content is protected (journal/prop-def/query/readonly text)' })
           }
         }

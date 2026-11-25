@@ -377,11 +377,11 @@ export function setupPersistence(deps: PersistenceDeps) {
   function txRun<R>(
     fn: (tx: Tx) => R,
     source?: unknown,
-    opts: { directEdit?: boolean; capture?: (undo: UndoCapture) => void } = {},
+    opts: { capture?: (undo: UndoCapture) => void } = {},
   ): { ops: Op[]; changes: Change[]; result: R; undo: UndoCapture } {
     const n = pendingOps.length
     try {
-      const r = kb.tx(fn, { source, directEdit: opts.directEdit })
+      const r = kb.tx(fn, { source })
       pendingOps.push(...r.ops)
       lastOps = r.ops
       /**
@@ -400,7 +400,7 @@ export function setupPersistence(deps: PersistenceDeps) {
   function run<R>(
     fn: (tx: Tx) => R,
     source?: unknown,
-    opts: { directEdit?: boolean; capture?: (undo: UndoCapture) => void } = {},
+    opts: { capture?: (undo: UndoCapture) => void } = {},
   ): R {
     return txRun(fn, source, opts).result
   }

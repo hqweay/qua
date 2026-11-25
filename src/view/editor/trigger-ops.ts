@@ -9,13 +9,13 @@ import {
   createObjRecordInTx,
   detectTrigger,
   ensurePageInTx,
+  canWriteText,
   hasList,
   locate,
   mkBlock,
   tagIdsOf,
   uuidv7Hex,
   writeBlockContent,
-  canDirectEditText,
   type Block,
   type TriggerChar,
   type TriggerHit,
@@ -43,7 +43,7 @@ export class TriggerOps {
     const loc = locate(this.ed.doc, bid)
     // 只读行（日记日期等）上不该弹：那里连字都敲不进去。判据是「这一行能不能直接编辑」，
     // 不是「正文是不是内容」——查询块的正文是名字，但名字行同样敲得进字、弹得出补全。
-    if (!loc || !canDirectEditText(loc.block)) return null
+    if (!loc || !canWriteText(loc.block)) return null
     const off = this.ed.sel?.aBlock === bid ? (this.ed.sel?.aOff ?? 0) : 0
     const text = plainText(loc.block.content).slice(0, projectOff(loc.block.content, off))
     const hit = detectTrigger(text, { composing: this.ed.probe.isComposing })
@@ -72,7 +72,7 @@ export class TriggerOps {
     const hit = this.triggerAt(id)
     if (!hit) return false
     // 抹触发词是用户刚在这一行敲下那几个字的逆动作，与打字同档
-    this.ed.editBlock(id, hit.from, hit.to, '', 'delete', { directEdit: true })
+    this.ed.editBlock(id, hit.from, hit.to, '', 'delete')
     this.ed.placeCaret(id, hit.from)
     return true
   }
@@ -209,7 +209,7 @@ export class TriggerOps {
     // 落点改的是「正在打字的这一行」的正文（抹触发词＋插 run），与打字同档
     let ok = false
     try {
-      ok = this.ed.write((tx) => apply(tx, loc.block), undefined, { directEdit: true })
+      ok = this.ed.write((tx) => apply(tx, loc.block))
     } catch (e) {
       // 失败也要收口（本方法在 `write` 之前已经 `beginUndoEntry`）：
       // begin/finish 不配对会让此后所有编辑都记不进撤销栈

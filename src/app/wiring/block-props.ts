@@ -14,6 +14,8 @@ import {
   blockTypeOf,
   canConvertBlockType,
   CODE_TYPE,
+  CODE_TEXT_PROP,
+  codeTextOf,
   claimAlias,
   declaredFieldIds,
   DISPLAY_PROP,
@@ -25,12 +27,14 @@ import {
   primaryAliasOf,
   prop,
   setBlockType,
+  writeBlockContent,
   tagMemberIds,
   COLOR_PROP,
   addAlias,
   addList,
   removeList,
   plainText,
+  textRuns,
   type Block,
 } from '../../core/index.ts'
 import { takenWhere } from '../../app/commands-impl.ts'
@@ -53,7 +57,7 @@ export interface BlockPropsDeps {
   txRun: <R>(
     fn: (tx: KbTx) => R,
     source?: unknown,
-    opts?: { directEdit?: boolean; capture?: (undo: UndoCapture) => void },
+    opts?: { capture?: (undo: UndoCapture) => void },
   ) => { ops: Op[]; changes: Change[]; result: R; undo: UndoCapture }
   scheduleSave: () => void
   scheduleBadge: () => void
@@ -271,8 +275,28 @@ function applyBlockType(blockId: string, typeId: string, lang?: string): boolean
   if (!b || !canConvertBlockType(b)) return false
   const nextLang = typeId === CODE_TYPE && lang ? lang.trim() : undefined
   if (blockTypeOf(b) === typeId && prop<string>(b, LANG_PROP) === nextLang) return false
+  const wasCode = blockTypeOf(b) === CODE_TYPE
+  const willCode = typeId === CODE_TYPE
   writeProps(blockId, () => {
-    setBlockType(b, typeId)
+    /**
+     * **行文本与代码文档换家**（判定见 `CODE_TEXT_PROP`）：转成代码 ⇒ 这一行的字
+     * 变成代码文档、标题留空；转回普通骨架 ⇒ 代码文档回到行上。
+     * 不搬的话，两个方向各丢一次用户的字（正文留在被隐藏的槽里 / 文档留在没人读的属性里）。
+     */
+    if (!wasCode && willCode) {
+      const line = plainText(b.content)
+      setBlockType(b, typeId)
+      if (line !== '') {
+        writeBlockContent(b, [])
+        b.props = { ...(b.props ?? {}), [CODE_TEXT_PROP]: line }
+      }
+    } else if (wasCode && !willCode) {
+      const code = codeTextOf(b)
+      setBlockType(b, typeId)
+      if (code !== '') writeBlockContent(b, textRuns(code))
+    } else {
+      setBlockType(b, typeId)
+    }
     if (nextLang) b.props = { ...(b.props ?? {}), [LANG_PROP]: nextLang }
   })
   return true

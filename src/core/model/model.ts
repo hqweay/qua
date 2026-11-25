@@ -4,7 +4,7 @@
  */
 
 import { uuidv7Hex } from './ids.ts'
-import { isHexColor, normalizeRuns, textRuns, type Anno, type Run } from './runs.ts'
+import { isHexColor, normalizeRuns, plainText, textRuns, type Anno, type Run } from './runs.ts'
 import { mapAnnos } from './annos.ts'
 
 /**
@@ -71,15 +71,26 @@ export function isIconValue(v: unknown): boolean {
   return typeof v === 'string' && v.trim() !== ''
 }
 
-/** `_caption` 的形状判据：非空字符串（空串＝没有标题，落盘/写入都不留空壳） */
-export function isCaptionValue(v: unknown): boolean {
-  return typeof v === 'string' && v.trim() !== ''
+/** `_code` 的形状判据：字符串（空串＝没有代码；落盘不留空壳） */
+export function isCodeTextValue(v: unknown): boolean {
+  return typeof v === 'string'
 }
 
-/** 容器标题的读口径：去掉首尾空白，空串＝没有标题（调用点不再各自 trim） */
-export function captionOf(b: Block): string {
-  const v = prop<string>(b, CAPTION_PROP)
-  return typeof v === 'string' ? v.trim() : ''
+/** 代码正文的读口径：缺键＝空文档（调用点不再各自判 undefined） */
+export function codeTextOf(b: Block): string {
+  const v = prop<string>(b, CODE_TEXT_PROP)
+  return typeof v === 'string' ? v : ''
+}
+
+/**
+ * **这一块里由用户写下的全部文本**：行文本（标题/描述）＋ 作者写的身体文本（代码文档）。
+ *
+ * 给「按文本找块」的三位读者用：索引、扫描降级、`{text}` 条件。它们问的是
+ * 「这块里有没有这句话」，不是「这一行写着什么」——后者是 `displayTextOf`/`blockLabel`。
+ * ⚠️ 派生的身体文本（查询结果）不在其中：那不是用户写的字。
+ */
+export function authoredTextOf(b: Block): string {
+  return [plainText(b.content), codeTextOf(b)].filter((x) => x !== '').join('\n')
 }
 
 /**
@@ -126,15 +137,17 @@ export const DELETED_AT_PROP = '_deletedAt' as const
 export const LANG_PROP = '_lang'
 
 /**
- * **容器标题**（`_caption`）：给「身体不是那行字」的块（代码、露面、将来的图片/自定义）
- * 一个**显示名**。
+ * **代码正文**（`_code`）：`core/code` 块的文档。
  *
- * ⚠️ 它不是地址：不参与 `_aliases` 的唯一性，不能被 `((…))` 按名引用。
- *    读侧只经 `blockLabel` 露面（引用 chip、面包屑、搜索行）；正文/复制不改。
- * ⚠️ 只挂在这些块上（`canHaveBodyCaption`）：正文已经是名字的块（查询/自动化/定义）
- *    再挂一份，就成了同一个块两个名字。
+ * 为什么不是 `content`：`content` 是**这一块在大纲里那一行**说的话（标题/描述），
+ * 而代码是它的**身体**——与查询的条件（`_query`）、露面的目标同族。
+ * 两者挤在一格会得到一条自相矛盾的判据：`plainText(content)` 到底投影哪一个？
+ * 复制块文本、搜索、`{text}` 条件、空白行判据都得各猜一次。
+ * 分家之后：**行＝标题，身体＝代码**，代码块与查询块由同一条规则解释。
+ *
+ * ⚠️ 它不是地址也不是名字：标题（`content`）才是这一行读出来的东西。
  */
-export const CAPTION_PROP = '_caption'
+export const CODE_TEXT_PROP = '_code' as const
 
 /**
  * **视图配置**（`ViewConfig[]`，见 `core/view.ts`）：
@@ -258,7 +271,7 @@ export function hasLiveChildren(b: Block): boolean {
 export type SystemPropId =
   | '_type'
   | typeof LANG_PROP
-  | typeof CAPTION_PROP
+  | typeof CODE_TEXT_PROP
   | typeof ICON_PROP
   | typeof COLOR_PROP
   | '_date'

@@ -4,7 +4,7 @@
  * 钉住四件容易被「看起来差不多」糊过去的：
  *   ① 只改命中 kind 的槽，其余槽一个字节不动；
  *   ② 同一块多种 kind 命中 ⇒ 合成一笔补丁（一次撤销的一部分）；
- *   ③ tag 去重保序、正文走 canDirectEditText 闸、跨类改指拦下；
+ *   ③ tag 去重保序、正文走 canWriteText 闸、跨类改指拦下；
  *   ④ from===to 是 no-op。
  */
 import { test } from 'node:test'
@@ -107,7 +107,7 @@ test('跨类改指：#标签 改到非标签类 ⇒ blocked，正文不写', () 
   assert.equal(JSON.stringify(src.content), before)
 })
 
-test('只读正文：canDirectEditText 不通过 ⇒ blocked', () => {
+test('只读正文：canWriteText 不通过 ⇒ blocked', () => {
   const journal = b('j', { props: { _date: '2026-01-01' }, content: [...textRuns('x'), ref('r1', 'old')] })
   const plan = planRetarget('old', 'new', {
     edges: edgesOf(['j', 'old', 'inline']),

@@ -13,7 +13,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  canDirectEditText,
   canWriteText,
   cloneSubtree,
   hasIdentity,
@@ -84,13 +83,12 @@ test('isAutomationDef：触发器与步骤的形状判据（写侧唯一一份�
   )
 })
 
-test('自动化块是身份块：hasIdentity 认它、外观标记带 automation、正文受保护但可直接改名', () => {
+test('自动化块是身份块：hasIdentity 认它、外观标记带 automation、名字就是这一行', () => {
   const b = mkAutomationBlock({ name: '收尾归档', def: MANUAL_DEF })
   assert.equal(isAutomationBlock(b), true)
   assert.equal(hasIdentity(b), true)
   assert.ok(identityTags(b).includes('automation'), '外观按身份标记（样式表按 data-role 挑行）')
-  assert.equal(canWriteText(b), false, '正文是名字——内容写路径不许改写它')
-  assert.equal(canDirectEditText(b), true, '但这一行打字是它唯一的改名路径')
+  assert.equal(canWriteText(b), true, '名字就是这一行，与别的行同一条写路径')
 })
 
 test('复制自动化块：定义不带走（副本不能是第二条同规则）', () => {

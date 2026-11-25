@@ -158,14 +158,6 @@ export interface MenuOpts {
    * 下一问，按「换题」处理（不重播入场，见 `pickActive`）。
    */
   trigger?: HTMLElement
-  /**
-   * 触发器的**稳定身份**（同一处再触发＝收起的另一种认法）。
-   *
-   * 为什么元素本身不够：菜单一开，焦点离开编辑岛 ⇒ 那一行会重排，题注这类
-   * chrome 换成了新节点 ⇒ 元素判据落空，第二下右键变成「关掉再开」（看起来没关）。
-   * 节点会换、身份不会：按「这个触发器是谁」给一个字符串。
-   */
-  triggerKey?: string
 }
 
 export class Layers {
@@ -219,8 +211,6 @@ export class Layers {
   private popClose: (() => void) | null = null
   /** 菜单/浮层的触发元素（`MenuOpts.trigger` 的去处；关闭时清掉） */
   private menuTrigger: HTMLElement | null = null
-  /** 触发器的稳定身份（`MenuOpts.triggerKey`）：节点会被重排换掉，这个不会 */
-  private menuTriggerKey: string | null = null
   private popTriggerEl: HTMLElement | null = null
   private popTriggerKey: string | undefined = undefined
   /** 抽屉打开之前焦点在哪（同上） */
@@ -266,13 +256,6 @@ export class Layers {
     )
     document.addEventListener('mousedown', (e) => {
       if (!this.open) return
-      /**
-       * **右键不在这里关菜单**：关闭/收起归右键的触发器自己（`openMenu` 的 toggle）。
-       * 这里抢先关掉的话，紧接着的 `contextmenu` 只会重新开一次——用户按的明明是
-       * 「同一处再右键」，却看到菜单原地重开。右键到别的行时会开新菜单（`openMenu`
-       * 本来就会替换旧面），所以这里不关不会留下悬着的菜单。
-       */
-      if (e.button !== 0) return
       const t = e.target as Node
       if (this.el?.contains(t)) return
       /**
@@ -350,10 +333,7 @@ export class Layers {
      * 入口只报「我是谁」，开还是收是浮层自己的状态。
      * 触发元素被整行重渲染换掉（新节点）时判据落空 ⇒ 退回先关再开，与旧行为一致。
      */
-    const sameTrigger =
-      (o.trigger !== undefined && this.menuTrigger === o.trigger) ||
-      (o.triggerKey !== undefined && this.menuTriggerKey === o.triggerKey)
-    if (this.open && sameTrigger) {
+    if (this.open && o.trigger && this.menuTrigger === o.trigger) {
       this.closeMenu()
       return
     }
@@ -375,7 +355,6 @@ export class Layers {
     /** 下钻（见 `pickActive`）：这次开的是同一张面换题，不重播入场 */
     const replacing = this.picking
     this.menuTrigger = o.trigger ?? null
-    this.menuTriggerKey = o.triggerKey ?? null
     /**
      * **焦点归还**：菜单会抢焦点（搜索框要能打字），关掉之后必须还回去。
      * 不还的后果见 `ui/focus-return.ts`：关掉后打字一个字符都进不去，且不报错。
@@ -598,7 +577,6 @@ export class Layers {
     this.allRows = []
     this.open = false
     this.menuTrigger = null
-    this.menuTriggerKey = null
     const cb = this.opts?.onClose
     this.opts = null
     // 先归还焦点再回调：回调里可能立刻打开另一个覆盖层（那会重新记一次焦点）

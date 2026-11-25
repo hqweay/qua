@@ -106,7 +106,6 @@ export class UndoStack {
     if (mergeable && last) {
       last.before = mergeStates(last.before, capture.before, 'first')
       last.after = mergeStates(last.after, capture.after, 'last')
-      last.directEdit = last.directEdit || capture.directEdit
       last.at = at
       return false
     }
@@ -121,7 +120,7 @@ export class UndoStack {
    */
   recordDevice(step: DeviceUndoStep, at = Date.now()): boolean {
     this.future = []
-    this.past.push({ before: [], after: [], directEdit: false, sel: null, kind: 'other', at, device: step })
+    this.past.push({ before: [], after: [], sel: null, kind: 'other', at, device: step })
     if (this.past.length > 500) this.past.shift()
     return true
   }

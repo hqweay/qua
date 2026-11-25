@@ -204,7 +204,7 @@ export function canonicalAutomation(def: AutomationDef): AutomationDef {
  * 造一个**自动化块**（内容对象：有名字、能进回收站、定义住 props）。
  *
  * 正文＝名字——它没有别名入口，在这一行打字是唯一的改名路径
- * （判据见 `canDirectEditText`）；内容写路径不许改写它（`canWriteText` 拦）。
+ * （判据见 `canWriteText`：名字就是那一行，与其他行同一条写路径）。
  */
 export function mkAutomationBlock(opts: { name: string; def: AutomationDef; icon?: string }): Block {
   const props: Block['props'] = { _automation: canonicalAutomation(opts.def) }

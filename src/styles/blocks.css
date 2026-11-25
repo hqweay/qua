@@ -3720,75 +3720,39 @@ button.blk-auto-chip {
 }
 
 /* 代码块：外层是编辑岛宿主（吃满行宽），内层 CM6 自己滚；高度上限走 token */
-.blk[data-code='1'] > .tx {
-  display: none;
-}
 /*
- * **容器标题（`_caption`）**：收起态是这一块唯一的一行；展开态只有真有标题时
- * 才占一行（空标题不凭空多一行 header）。收起时 CM6 真卸掉，标题顶替它。
+ * **代码行＝标题 ＋ 身体**：标题吃第一行，代码编辑器折到第二行并对齐正文起点
+ * （与 `.blk-view-body` 同一套几何：gutter 已由 `.blk` 的 padding 让出，这里只补 marker 槽）。
  */
-.blk-caption {
-  display: none;
-  flex: 0 0 100%;
-  align-items: center;
-  gap: var(--ui-gap-2);
+.blk[data-code='1'] {
+  flex-wrap: wrap;
+  row-gap: var(--ui-gap-1);
+}
+.blk[data-code='1'] > .blk-code-host {
+  flex: 0 0 auto;
+  width: calc(100% - var(--ui-marker-slot) - var(--ui-gap-4));
+  margin-inline-start: calc(var(--ui-marker-slot) + var(--ui-gap-4));
   min-width: 0;
-  font-size: var(--ui-fs-md);
-  line-height: var(--ui-lh-relaxed);
-}
-.blk-caption[data-has='1'],
-.blk[data-collapsed='1'] .blk-caption,
-.blk-caption:focus-within {
-  display: flex;
 }
 /*
- * 代码块没有别的名字可显示 ⇒ 题注行就是它的头，**展开态也常驻**（空时是「添加标题」
- * 占位）。露面的头是目标自己，题注是可选的覆写 ⇒ 仍只在有标题/收起时出现。
- */
-.blk[data-code='1'] > .blk-code-host > .blk-caption {
-  display: flex;
-}
-.blk-caption-text {
-  outline: none;
-  color: var(--ui-text);
-}
-.blk-caption-text[data-empty='1'] {
-  color: var(--ui-text-tertiary);
-}
-.blk-caption-text[data-empty='1']::before {
-  content: attr(data-ph);
-  color: var(--ui-text-tertiary);
-  pointer-events: none;
-}
-.blk[data-collapsed='1'] .blk-caption-text[data-empty='1']::before {
-  content: attr(data-ph-collapsed);
-}
-/*
- * 光标落进题注时**藏掉占位**：占位是 `::before` 生成内容，浏览器把光标放在它之后
- * ⇒ 看起来像在「添加标题」四个字后面等输入。与空块 `.tx[data-ph]` 同一条教训
- * （`data-caret` 那一格）：占位不是内容，编辑时它必须让位。
- */
-.blk-caption-text:focus[data-empty='1']::before {
-  content: none;
-}
-/*
- * **身体块行头的动作组**（上建块／下建块／删除）：跟着题注行走，右对齐。
+ * **身体块行头的动作组**（上建块／下建块／删除）：行级 chrome，跟标题同一行、靠右。
  *
- * 为什么不用绝对定位：题注是这一行的第一条 flex 行，动作组在这里只会把名字的省略号
- * 往左收一点（宽度常驻、只换透明度）——不压标签槽，也不在 hover 时改行宽（那样整行
- * 的字会抖一下）。与块标/折叠同一档鼠标 chrome：不进 tab 序。
+ * 为什么是行项而不是绝对定位：它和标题共享第一行，宽度常驻、只换透明度——hover
+ * 不改行宽（改了整行的字会抖一下），也不压标签槽（标签槽排在它后面）。
+ * 与块标/折叠同一档鼠标 chrome：不进 tab 序，点击由组自己收下再交给结构命令。
  */
 .blk-acts {
+  flex: 0 0 auto;
+  align-self: flex-start;
   display: flex;
   align-items: center;
   gap: var(--ui-gap-1);
-  margin-left: auto;
-  flex: 0 0 auto;
+  min-height: var(--blk-lh);
+  margin-inline-start: var(--ui-gap-2);
   opacity: 0;
   transition: opacity var(--ui-dur-1) ease;
 }
-.blk:hover > .blk-code-host .blk-acts,
-.blk:hover > .blk-embed-body .blk-acts,
+.blk:hover > .blk-acts,
 .blk-acts:focus-within {
   opacity: var(--ui-soft);
 }
@@ -3815,12 +3779,17 @@ button.blk-auto-chip {
     transition: none;
   }
 }
-/* 收起态的代码块用一种「合上的盒子」读法：标题就是盒面，正文不占位 */
-.blk[data-collapsed='1'] > .blk-code-host .blk-caption {
+/* 收起态的代码块用一种「合上的盒子」读法：标题就是盒面（`.tx`），正文不占位 */
+.blk[data-collapsed='1'][data-code='1'] > .tx {
   padding: var(--ui-gap-2) var(--ui-gap-4);
   background: var(--ui-code-bg);
   border: 1px solid var(--ui-border-subtle);
   border-radius: var(--ui-radius-md);
+  font-family: var(--ui-font-mono);
+}
+/* 代码块的标题行读作代码文档的一行（等宽），与身体同一条视觉语言 */
+.blk[data-code='1'] > .tx {
+  font-family: var(--ui-font-mono);
 }
 .blk-code-host[data-folded='1'] > .blk-code-body {
   display: none;

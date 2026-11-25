@@ -11,11 +11,11 @@
  *   · core 不碰 DOM、不碰事务实现；调用方拿 plan 在自己的 tx 里落笔。
  *
  * ⚠️ 写按 kind 分派到各自的槽，不合成一条通用写路径：正文必须过
- *    `canDirectEditText` 且走 `writeBlockContent`，属性有形状校验，`_tags` 用 `setTags`。
+ *    `canWriteText` 且走 `writeBlockContent`，属性有形状校验，`_tags` 用 `setTags`。
  */
 import { prop, writeBlockContent, type Block } from '../model/model.ts'
 import { tagIdsOf } from '../identity/tags.ts'
-import { canDirectEditText } from '../model/types.ts'
+import { canWriteText } from '../model/types.ts'
 import type { Run } from '../model/runs.ts'
 import { isRefKind, type RelationEdge, type RefKind } from './relations.ts'
 
@@ -97,7 +97,7 @@ export function planRetarget(fromId: string, toId: string, input: RetargetPlanIn
     total += e.count ?? 1
 
     if (kind === 'inline' || kind === 'tagMention') {
-      if (!canDirectEditText(src)) {
+      if (!canWriteText(src)) {
         blocked.push({ blockId: src.id, kind, reason: 'readonly-text' })
         continue
       }

@@ -25,6 +25,7 @@ import {
   runAtCell,
   blockSpanPlan,
   hasTag,
+  hasBody,
   hasLiveChildren,
   liveChildren,
   mkBlock,
@@ -56,10 +57,8 @@ import {
   clearValue,
   closureOf,
   CODE_TYPE,
-  CAPTION_PROP,
   TASK_STATUS_PROP_ID,
   canWriteText,
-  canDirectEditText,
   isOwnEdit,
   type Block,
   type ClosurePlan,
@@ -180,7 +179,6 @@ export type Run = <R>(
   fn: (tx: Tx) => R,
   source?: unknown,
   opts?: {
-    directEdit?: boolean
     /**
      * **事务出口的撤销捕获**（装配层在 `kb.tx` 返回后调）。
      *
@@ -456,7 +454,7 @@ export interface ViewEvents {
    * `appearanceHost` ＝ 右键落在露面行上（见 `ViewEvents.onBlockMenu`）：菜单开在源上，
    * 装配层据此附「移除这次露面」。
    */
-  blockMenu?: (blockId: string, rect: DOMRect, appearanceHost?: string, trigger?: HTMLElement, triggerKey?: string) => void
+  blockMenu?: (blockId: string, rect: DOMRect, appearanceHost?: string, trigger?: HTMLElement) => void
   /**
    * **点身体块行头那颗动作**：上建块／下建块／删除。
    *
@@ -2335,49 +2333,15 @@ export class BlockEditor {
   }
 
   /**
-   * **写容器标题**（`_caption`）：给「身体不是那行字」的块一个显示名。
-   *
-   * 单行：换行折成空格（标题不是一个多行文本框）；空串 ⇒ 摘掉属性，不留空壳。
-   * 每笔一次 undo 条目，连续输入由撤销栈的合并窗口收成一步（与代码岛同一条纪律）。
-   */
-  setCaption(id: string, text: string): boolean {
-    const b = this.store.find(id)
-    if (!b) return false
-    const raw = text.replace(/[\r\n]+/g, ' ')
-    // 首尾空白不进模型：空白串就是「没有标题」，与缺席同义（不为退格写空 op）
-    const next = raw.trim()
-    if ((b.props?.[CAPTION_PROP] ?? '') === next) return false
-    this.beginUndoEntry()
-    const ok = this.write((tx) => {
-      if (next === '') tx.clearProp(id, CAPTION_PROP)
-      else tx.setProp(id, CAPTION_PROP, next)
-      return true
-    })
-    if (ok) this.finishUndoEntry('insert', Date.now())
-    else this.abortUndoEntry()
-    return ok
-  }
-
-  /**
    * 块内替换（程序化编辑入口）：按 plain 偏移切内容，一次 content 写入。
    * 格式与原子随切片自然分家（相邻同段合并、区间盖住的原子整枚消失——都是序列语义）。
-   *
-   * `directEdit` 给「用户正对着这一行」的调用者（抹触发词）——与打字同档；
-   * 缺省不标记，程序化整段替换仍被正文闸挡住。
    */
-  editBlock(
-    id: string,
-    from: number,
-    to: number,
-    insert: string,
-    kind: 'insert' | 'delete' = 'insert',
-    opts?: { directEdit?: boolean },
-  ): void {
+  editBlock(id: string, from: number, to: number, insert: string, kind: 'insert' | 'delete' = 'insert'): void {
     const loc = locate(this.doc, id)
     if (!loc) return
     this.beginUndoEntry()
     const next = spliceRuns(loc.block.content, from, to, insert)
-    this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)), undefined, opts)
+    this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)))
     this.finishUndoEntry(kind, Date.now())
     this.renderBlock(id)
     this.emitChange('text')
@@ -2643,15 +2607,9 @@ export class BlockEditor {
      *    它记的是「改动之前」的选区与这一动作的捕获袋。
      */
     this.beginUndoEntry()
-    this.write(
-      (tx) => {
-        tx.patch(id, (b) => writeBlockContent(b, next))
-      },
-      undefined,
-      // 这是一行里的直接打字（含行内粘贴／删除）：查询块的标题只住在正文里，
-      // 没有别的改名入口 ⇒ 只有这条路径能写它；合并／拆分等结构路径仍被挡。
-      { directEdit: true },
-    )
+    this.write((tx) => {
+      tx.patch(id, (b) => writeBlockContent(b, next))
+    })
     const caret = this.sel ? this.sel.aOff : null
     this.finishUndoEntry(kind, at)
     if (reRender) {
@@ -3000,7 +2958,7 @@ export class BlockEditor {
         const b = this.store.find(bid)
         if (b) tx.patch(bid, (bb) => writeBlockContent(bb, apply(bid, bb.content)))
       }
-    }, undefined, { directEdit: true })
+    })
     this.finishUndoEntry('mark')
     if (rerender === 'single' && ranges.length === 1) this.renderBlock(ranges[0]!.blockId)
     else this.renderAll()
@@ -3107,13 +3065,13 @@ export class BlockEditor {
      * 写进去事务会抛 protected，而调用方已经 `beginUndoEntry` —— 一走了之会把
      * `entryDepth` 永久留在 1，此后所有编辑都记不进撤销栈（⌘Z 看着像坏了）。
      */
-    if (!b || !canDirectEditText(b)) {
+    if (!b || !canWriteText(b)) {
       this.finishUndoEntry(undo)
       return
     }
     // 这里是**行内 run 编辑**的统一落点（插引用/图片/外链、改锚文本、摘原子……）——
     // 全部是用户正对着这一行发起的直接编辑，与打字同档；结构写路径不走这里。
-    this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)), undefined, { directEdit: true })
+    this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)))
     this.finishUndoEntry(undo)
     this.renderBlock(id)
     if (caret !== undefined) this.placeCaret(id, caret)
@@ -3257,7 +3215,7 @@ export class BlockEditor {
       if (label === '') return false
       // 重建要改**宿主块**的 run（`to` 指过去）：只读行（journal 日期等）不写；
       // 可直接编辑的行（普通块／查询标题）都修——引用能进标题，修复就要跟得上
-      if (!canDirectEditText(hit.block)) return false
+      if (!canWriteText(hit.block)) return false
       const lookup = tagLookupOf(this.store.blocks, this.store)
       let target: Block | null = null
       try {
@@ -3279,7 +3237,7 @@ export class BlockEditor {
       )
       mode = 'repointed'
       return true
-    }, undefined, { directEdit: true })
+    })
     if (!ok) {
       this.abortUndoEntry()
       return 'none'
@@ -3308,7 +3266,7 @@ export class BlockEditor {
     const s = this.sel
     if (!s || s.aBlock !== s.hBlock || s.aOff !== s.hOff) return false
     const loc = locate(this.doc, s.aBlock)
-    if (!loc || !canDirectEditText(loc.block)) return false
+    if (!loc || !canWriteText(loc.block)) return false
     const content = loc.block.content
     const before = runAtCell(content, s.aOff - 1)
     const after = runAtCell(content, s.aOff)
@@ -3335,7 +3293,7 @@ export class BlockEditor {
     const s = this.sel
     if (!s || s.aBlock !== s.hBlock || s.aOff !== s.hOff) return false
     const loc = locate(this.doc, s.aBlock)
-    if (!loc || !canDirectEditText(loc.block)) return false
+    if (!loc || !canWriteText(loc.block)) return false
     const hit = runAtCell(loc.block.content, dir === 'back' ? s.aOff - 1 : s.aOff)
     if (!hit || hit.t === 'text') return false
     this.beginUndoEntry()
@@ -3351,7 +3309,7 @@ export class BlockEditor {
     this.beginUndoEntry()
     const next = removeRunById(hit.block.content, runId)
     // 摘原子与插原子同档（都是这一行上的行内 run 编辑）
-    this.write((tx) => tx.patch(hit.block.id, (b) => writeBlockContent(b, next)), undefined, { directEdit: true })
+    this.write((tx) => tx.patch(hit.block.id, (b) => writeBlockContent(b, next)))
     this.finishUndoEntry('delete')
     this.renderAll()
     this.emitChange('text')
@@ -3403,7 +3361,7 @@ export class BlockEditor {
     this.write((tx) => {
       writeHosts(tx)
       noteId = ensureNoteInTx(this.store.blocks, pairs, tx).id
-    }, undefined, { directEdit: true })
+    })
     this.finishUndoEntry('other', Date.now())
     return noteId ? { noteId, pairs } : null
   }
@@ -3487,7 +3445,15 @@ export class BlockEditor {
      */
     const tail = liveChildren(root)
     const lastChild = tail[tail.length - 1]
-    const emptyTail = lastChild && isEmptyContent(lastChild.content) && !hasLiveChildren(lastChild) ? lastChild : null
+    /**
+     * 「可复用的末尾空块」＝真是空行（无正文、无子块、**无身体**）。
+     * 有身体的块（代码/查询/露面）不是空行：复用它等于把点击当成「聚焦这一块」，
+     * 而用户点的是「我还想往下写」。
+     */
+    const emptyTail =
+      lastChild && isEmptyContent(lastChild.content) && !hasLiveChildren(lastChild) && !hasBody(lastChild)
+        ? lastChild
+        : null
     const child = emptyTail ?? mkBlock('')
     if (!emptyTail) {
       this.write((tx) => tx.insert(child, root.id, root.children.length))
@@ -3605,7 +3571,7 @@ export class BlockEditor {
         if (!locate(this.doc, id)) return
         this.beginUndoEntry()
         // 写回的是组合开始前模型里已有的那份正文（那次进入本身是直接编辑），同一档
-        this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, content)), undefined, { directEdit: true })
+        this.write((tx) => tx.patch(id, (b) => writeBlockContent(b, content)))
         this.finishUndoEntry('delete')
         this.emitChange('text', [id])
       },
@@ -3645,7 +3611,7 @@ export class BlockEditor {
         this.commitLeavingLine()
         this.events.onAtomClick?.(atom, el, mods)
       },
-      onBlockMenu: (id, rect, appearanceHost, trigger, triggerKey) => this.events.blockMenu?.(id, rect, appearanceHost, trigger, triggerKey),
+      onBlockMenu: (id, rect, appearanceHost, trigger) => this.events.blockMenu?.(id, rect, appearanceHost, trigger),
       onAtomMenu: (hit, el, rect) => this.events.atomMenu?.(hit, el, rect),
       // 左键点块标 ＝ 聚焦/zoom。这也是**离开这一行**：先把当前行的编辑交出去
       // （判据是「上一个块 ≠ 这个块」；点自己那一行的块标不算离开）

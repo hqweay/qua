@@ -720,7 +720,7 @@ export class BlockStore {
     const entry = this.undoStack.undo(sel)
     if (!entry) return null
     const lookup = this.undoLookup()
-    const ops = scopedOps(lookup, entry.before, { directEdit: entry.directEdit })
+    const ops = scopedOps(lookup, entry.before)
     applyOps(this.blocks, ops, lookup)
     this.apply(ops, source)
     // 设备步：块侧零 op，回滚的是装配层在记录时交给栈的那份配置
@@ -736,7 +736,7 @@ export class BlockStore {
     const redoSel = entry.redoSel ?? entry.sel
     delete entry.redoSel
     const lookup = this.undoLookup()
-    const ops = scopedOps(lookup, entry.after, { directEdit: entry.directEdit })
+    const ops = scopedOps(lookup, entry.after)
     applyOps(this.blocks, ops, lookup)
     this.apply(ops, source)
     entry.device?.redo()

@@ -22,7 +22,7 @@
  *   · 名字类来源（tag／prop 选项／link 引用）索引的是**现算名** ⇒ 名字变了要牵连重索引
  *     （见 `ftsTargets` 的扩散名单）。
  */
-import { ALIASES_PROP, CAPTION_PROP, aliasesOf, captionOf, isDeleted, isPropDefBlock, type Block } from '../model/model.ts'
+import { ALIASES_PROP, CODE_TEXT_PROP, aliasesOf, authoredTextOf, isDeleted, isPropDefBlock, type Block } from '../model/model.ts'
 import { propKindOf } from '../props/props.ts'
 import { allChoicesOf, CHOICES_PROP } from '../props/choices.ts'
 import { displayTextOf } from '../identity/alias.ts'
@@ -256,8 +256,8 @@ export function ftsTargets(ws: StoredWorkspace, ops: readonly Op[]): FtsTargets 
       addIn(index, 'tag', op.block)
       continue
     }
-    if (op.name === CAPTION_PROP) {
-      // 标题并进正文行（同一来源）：改标题只重铺这一行
+    if (op.name === CODE_TEXT_PROP) {
+      // 代码文档并进正文行（同一来源）：改代码只重铺这一行
       addIn(index, 'content', op.block)
       continue
     }
@@ -378,8 +378,9 @@ export function sourceTextsOf(
     const b = get(id)
     if (!b || isDeleted(b)) continue
 
-    // 容器标题也是「这一块可搜的字」：代码块按标题搜得到，结果行也先看到标题。
-    const content = [captionOf(b), plainText(b.content)].filter((x) => x.trim() !== '').join('\n')
+    // 行文本（标题/描述）与**作者写的身体文本**（代码文档）都是「这一块可搜的字」：
+    // 代码块按标题或代码都能搜到。顺序＝行在前——结果行先读到的应该是标题。
+    const content = authoredTextOf(b)
     if (content.trim() !== '') out.push({ key: ftsRowKey(id, 'content'), text: content })
 
     const aliases = aliasesOf(b)

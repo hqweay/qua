@@ -40,7 +40,7 @@ const j = (date: string, children: Block[] = []): Block => ({
   props: { _date: date },
 })
 
-test('canWriteText：字段定义／日记／查询的正文只读；页、标签、普通块的正文是描述', () => {
+test('canWriteText：字段定义／日记的正文不是内容；页、标签、查询与普通块的行文本都可写', () => {
   const tag = mkBlock('设计')
   addList(tag, 'tag')
   const schema = mkBlock('截止日')
@@ -53,7 +53,7 @@ test('canWriteText：字段定义／日记／查询的正文只读；页、标�
   assert.equal(canWriteText(tag), true, '标签的正文是描述，名字在 `_aliases`')
   assert.equal(canWriteText(schema), false)
   assert.equal(canWriteText(j('2026-10-22')), false)
-  assert.equal(canWriteText(query), false, '查询的条件是它的身份，正文只是名字')
+  assert.equal(canWriteText(query), true, '名字就是这一行，与别的行同一条写路径')
   assert.equal(canWriteText(page), true)
   assert.equal(canWriteText(mkBlock('一行内容')), true)
 })

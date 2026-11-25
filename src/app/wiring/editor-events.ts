@@ -658,7 +658,7 @@ function viewEvents(
       if (act === 'above') ed.insert.insertBlockBefore(id, { reuseBlank: false })
       else ed.insert.insertBlockAfter(id, '', undefined, { reuseBlank: false })
     },
-    blockMenu: (blockId, rect, appearanceHost, trigger, triggerKey) => {
+    blockMenu: (blockId, rect, appearanceHost, trigger) => {
       const ed = active()
       // 命中**已选中的块**（且多块）⇒ 多块菜单；否则清块选区，走原单块菜单
       if (ed.bsel.inBlockSelection(blockId) && ed.bsel.blockSelectionCount() > 1) {
@@ -683,7 +683,6 @@ function viewEvents(
         target: { blockId, surface: 'editor' },
         // 同一处再右键一次＝收起（toggle）；触发元素随行重渲染换掉时退回先关再开
         ...(trigger ? { trigger } : {}),
-        ...(triggerKey !== undefined ? { triggerKey } : {}),
         title: t('menu.title.block'),
         // 右键落在露面行上（投影行的绑源块标／镜像岛里的源行）：菜单开在源上，
         // 附**这一次露面自己的两件事**——露面块 id 只有打开这一刻才知道，走现算追加项。

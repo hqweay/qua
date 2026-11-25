@@ -433,7 +433,7 @@ export class MemoryKb implements KbClient {
        * 每个 `Tx` 方法只改内存，不再各自 `ops.push` —— 完备性由构造保证：
        * 新加一个方法的人没有地方可以「忘记发 op」。
        */
-      const ops = diffTouched(touched.values(), { directEdit: opts.directEdit })
+      const ops = diffTouched(touched.values())
       const changes = changesOf(ops)
       /**
        * **撤销捕获在出口取，且立刻深拷**（`captureOf` 里做）。
@@ -442,7 +442,7 @@ export class MemoryKb implements KbClient {
        * 条目要是只记引用，⌘Z 拿到的是「后来那份」——与 `pendingOps` 那条 250ms 的坑同源。
        * 成本只与 touched 有关，和库体量无关；这也正是收窄撤销作用域的前提。
        */
-      const undo = captureOf(touched.values(), opts.directEdit === true)
+      const undo = captureOf(touched.values())
       /**
        * **宣布只在这里发生**：`store.apply` 是状态转移的唯一入口 ——
        * 它同时做「按 op 修补索引」与「通知订阅者」两件事。

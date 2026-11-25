@@ -76,15 +76,10 @@ export interface TouchedState {
   placement?: Placement
 }
 
-/** 一次事务交出的撤销捕获：两侧状态 ＋ 「这次是不是一行里的直接编辑」 */
+/** 一次事务交出的撤销捕获：改前／改后两侧状态 */
 export interface UndoCapture {
   before: TouchedState[]
   after: TouchedState[]
-  /**
-   * 这次写入带 `directEdit`（查询块正文只在这条路上可写）。
-   * 撤销/重做要带同一个选项，否则同一次写入在反向时会撞上内容闸。
-   */
-  directEdit: boolean
 }
 
 /** 把一片森林摊成 lookup（**含被软删的块**）。没有索引时的实现，也是测试与非 store 路径的入口。 */
@@ -128,17 +123,11 @@ export function mergeStates(
   return [...out.values()]
 }
 
-/**
- * 把一次动作里的多笔事务捕获合并成一条撤销条目。
- *
- * `directEdit` 用 **OR**：每一笔捕获都来自一次合法写入，反向把同一条内容写回去
- * 不会比当初更宽松（日记/字段定义仍会被 `canDirectEditText` 挡住）。
- */
+/** 把一次动作里的多笔事务捕获合并成一条撤销条目（同一次动作的两侧状态取首/尾）。 */
 export function mergeCapture(prev: UndoCapture, next: UndoCapture): UndoCapture {
   return {
     before: mergeStates(prev.before, next.before, 'first'),
     after: mergeStates(prev.after, next.after, 'last'),
-    directEdit: prev.directEdit || next.directEdit,
   }
 }
 
@@ -148,7 +137,7 @@ export function mergeCapture(prev: UndoCapture, next: UndoCapture): UndoCapture 
  * 为什么在出口深拷：`touched` 里的 `block` 是**活引用**，事务返回后它还会被下一次编辑改；
  * 条目若只记引用，撤销拿到的就是「后来那份」。这一条与 `pendingOps` 的 250ms 是同一个病。
  */
-export function captureOf(touched: Iterable<TouchedBlock>, directEdit = false): UndoCapture {
+export function captureOf(touched: Iterable<TouchedBlock>): UndoCapture {
   const before: TouchedState[] = []
   const after: TouchedState[] = []
   for (const t of touched) {
@@ -167,7 +156,7 @@ export function captureOf(touched: Iterable<TouchedBlock>, directEdit = false): 
       ...(t.afterPlacement ? { placement: { ...t.afterPlacement } } : {}),
     })
   }
-  return { before, after, directEdit }
+  return { before, after }
 }
 
 function stateOfBefore(t: TouchedBlock): TouchedState {
@@ -200,13 +189,8 @@ function blockOfState(s: TouchedState): Block {
  *
  * @param current 现在的森林（只按 id / 父链问，不摊平）
  * @param states  目标侧（`entry.before` 或 `entry.after`）
- * @param opts    `directEdit` 必须与捕获时一致（见 `UndoCapture.directEdit`）
  */
-export function scopedOps(
-  current: ForestLookup,
-  states: readonly TouchedState[],
-  opts: { directEdit?: boolean } = {},
-): Op[] {
+export function scopedOps(current: ForestLookup, states: readonly TouchedState[]): Op[] {
   const byId = new Map(states.map((s) => [s.id, s]))
   const ops: Op[] = []
 
@@ -259,7 +243,7 @@ export function scopedOps(
         continue
       }
       /* 已存在：只发变了的格；位置只在这次事务真的动过它时发 */
-      ops.push(...existingBlockOps(cellsOf(cur), blockOfState(s), s.placement, opts))
+      ops.push(...existingBlockOps(cellsOf(cur), blockOfState(s), s.placement))
     }
   }
 

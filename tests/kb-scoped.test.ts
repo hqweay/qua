@@ -5,7 +5,7 @@
  * 而不是「撤销后这块的正文对上了」——后者会让「位置错了」「属性少了一格」静默通过。
  *
  * 覆盖：新块／软删／清除（三态存在）、移动、正文、属性、annos、子树、多块、
- * 缺父／缺块、未动块的对象身份、`directEdit`（查询块正文）。
+ * 缺父／缺块、未动块的对象身份、查询块标题（名字）的写入与撤销。
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -36,8 +36,8 @@ function clone<T>(v: T): T {
 }
 
 /** 一次「撤销/重做」的完整落地：generator ＋ applyOps（与 `store.undo` 同一条路，跳过索引修补） */
-function walk(forest: Block[], states: readonly TouchedState[], opts: { directEdit?: boolean } = {}): Op[] {
-  const ops = scopedOps(lookupOf(forest), states, opts)
+function walk(forest: Block[], states: readonly TouchedState[]): Op[] {
+  const ops = scopedOps(lookupOf(forest), states)
   applyOps(forest, ops)
   return ops
 }
@@ -46,9 +46,9 @@ function walk(forest: Block[], states: readonly TouchedState[], opts: { directEd
  * **生产路径**：读面用索引的「全部块」表（O(1)），op 应用后按同一批 op 修补索引。
  * 与 `store.undo` 是同一对动作（先改森林、再 `store.apply`）。
  */
-function walkIndexed(store: BlockStore, states: readonly TouchedState[], opts: { directEdit?: boolean } = {}): Op[] {
+function walkIndexed(store: BlockStore, states: readonly TouchedState[]): Op[] {
   const lookup = store.undoLookup()
-  const ops = scopedOps(lookup, states, opts)
+  const ops = scopedOps(lookup, states)
   applyOps(store.blocks, ops, lookup)
   store.apply(ops)
   return ops
@@ -282,33 +282,39 @@ test('清除父块但子树里有一块没被记录 ⇒ 抛错（不静默丢块
   assert.throws(() => scopedOps(lookupOf(store.blocks), states), /untracked block "a1"/)
 })
 
-test('directEdit：查询块正文的直接编辑能用同一个选项撤销；不带选项则被内容闸拦下', () => {
+test('查询块的名字就是那一行：写入直接落，撤销逐字节回', () => {
   const q = mk('q', '旧名字', { props: { _query: { where: { kind: 'any' } } } })
   const { store, kb } = setup([q, mk('b', '乙')])
   const beforeFp = forestFingerprint(store.blocks)
 
-  const r = kb.tx(
-    (tx) =>
-      tx.patch('q', (b) => {
-        writeBlockContent(b, textRuns('新名字'))
-        b.modified = 600
-      }),
-    { directEdit: true },
+  const r = kb.tx((tx) =>
+    tx.patch('q', (b) => {
+      writeBlockContent(b, textRuns('新名字'))
+      b.modified = 600
+    }),
   )
-  assert.equal(r.undo.directEdit, true, '条目要记住这次是「一行里的直接编辑」')
   const afterFp = forestFingerprint(store.blocks)
+  assert.equal(plainTextOf(store.blocks, 'q'), '新名字')
 
-  assert.throws(
-    () => scopedOps(lookupOf(store.blocks), r.undo.before),
-    /content is protected/,
-    '不带 directEdit 的反向写入必须仍被拦（说明这个 flag 不是可选的装饰）',
-  )
-  walk(store.blocks, r.undo.before, { directEdit: r.undo.directEdit })
+  // 反向重放：不改任何选项，与正向同一条判据
+  walk(store.blocks, r.undo.before)
   assert.equal(forestFingerprint(store.blocks), beforeFp)
-  walk(store.blocks, r.undo.after, { directEdit: r.undo.directEdit })
+  walk(store.blocks, r.undo.after)
   assert.equal(forestFingerprint(store.blocks), afterFp)
 })
 
+function plainTextOf(forest: readonly Block[], id: string): string {
+  const find = (list: readonly Block[]): Block | undefined => {
+    for (const b of list) {
+      if (b.id === id) return b
+      const hit = find(b.children)
+      if (hit) return hit
+    }
+    return undefined
+  }
+  const b = find(forest)
+  return (b?.content ?? []).map((x) => (x.t === 'text' ? x.v : '[')).join('')
+}
 test('applyOps：带 lookup 与不带 lookup 对同一批 op 得到逐字节相同的结果', () => {
   const { store, kb } = setup()
   const r = kb.tx((tx) => {

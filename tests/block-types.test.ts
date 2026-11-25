@@ -5,11 +5,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  CAPTION_PROP,
+  CODE_TEXT_PROP,
   CODE_TYPE,
   LANG_PROP,
   blockLabel,
-  captionOf,
+  codeTextOf,
   QUOTE_TYPE,
   TYPE_DECLS,
   canConvertBlockType,
@@ -69,15 +69,14 @@ test('换骨架准入：身份与只读正文不给转换', () => {
 })
 
 
-test('容器标题：显示名优先于正文投影，空串不算标题；换回普通骨架时清掉', () => {
-  const code = mkBlock('const x = 1', { props: { _type: CODE_TYPE, [CAPTION_PROP]: ' 两数之和 ' } })
-  assert.equal(captionOf(code), '两数之和')
+test('代码正文住 `_code`（身体），行文本是标题；换回普通骨架时清掉文档', () => {
+  const code = mkBlock('两数之和', { props: { _type: CODE_TYPE, [CODE_TEXT_PROP]: 'const x = 1' } })
+  assert.equal(codeTextOf(code), 'const x = 1')
+  // 名字读的是这一行（标题），不是代码文档
   assert.equal(blockLabel(code), '两数之和')
-  assert.equal(systemPropViolation(CAPTION_PROP, '两数之和'), null)
-  assert.equal(systemPropViolation(CAPTION_PROP, '   '), 'invalid value for system prop "_caption"')
-  // 不是地址：没有 caption 时仍按正文首行显示
-  assert.equal(blockLabel(mkBlock('const y = 2', { props: { _type: CODE_TYPE } })), 'const y = 2')
+  assert.equal(systemPropViolation(CODE_TEXT_PROP, 'const x = 1'), null, '字符串都合法（空串也是）')
+  assert.equal(systemPropViolation(CODE_TEXT_PROP, 42), 'invalid value for system prop "_code"')
   const plain = { ...code, props: { ...code.props } }
   assert.equal(setBlockType(plain, 'outline'), true)
-  assert.equal(prop(plain, CAPTION_PROP), undefined)
+  assert.equal(prop(plain, CODE_TEXT_PROP), undefined, '换回普通骨架清掉代码文档')
 })

@@ -22,6 +22,7 @@ import {
   aliasesOf,
   blockTypeOf,
   displayNameOf,
+  codeTextOf,
   embedBodyOf,
   hasChildrenViewBody,
   hasDeclaredFields,
@@ -55,7 +56,6 @@ import { t } from '../../core/infra/msg.ts'
 import { blockLabel, danglingView, resolveRefs } from '../../core/relations/ref.ts'
 import { createIcon, renderIcon } from '../icons.ts'
 import { buildMarker } from './marker.ts'
-import { makeCaptionRow } from './caption-row.ts'
 import { EDIT_ISLAND_ATTR } from './edit-island.ts'
 import { makeTaggedChip } from './field-affordance.ts'
 
@@ -476,6 +476,7 @@ export const ALLOWED_ROW_CHILDREN: ReadonlySet<string> = new Set([
   'blk-embed-body',
   'blk-view-body',
   'blk-code-host',
+  'blk-acts',
 ])
 
 /** 身体块行头的三个动作（与块菜单同名项同一条命令） */
@@ -494,7 +495,7 @@ export type BlockAction = 'above' | 'below' | 'delete'
  *   · 不进 tab 序（与块标／折叠同一档鼠标 chrome）；点击由编辑器事件表委托，
  *     这里只写 `data-block-act`，不认识命令。
  */
-function makeBodyActions(id: string): HTMLElement {
+function makeBodyActions(onAct: (act: BlockAction) => void): HTMLElement {
   const group = document.createElement('span')
   group.className = 'blk-acts'
   group.contentEditable = 'false'
@@ -502,7 +503,6 @@ function makeBodyActions(id: string): HTMLElement {
     const el = document.createElement('span')
     el.className = act === 'delete' ? 'blk-act blk-act-delete' : 'blk-act'
     el.dataset.blockAct = act
-    el.dataset.blockActFor = id
     el.dataset.tip = tip
     el.setAttribute('role', 'button')
     el.setAttribute('aria-label', tip)
@@ -512,6 +512,18 @@ function makeBodyActions(id: string): HTMLElement {
   add('above', 'arrow-up', t('menu.label.insertAbove'))
   add('below', 'arrow-down', t('menu.label.insertBelow'))
   add('delete', 'trash-2', t('cmd.block.delete'))
+  /**
+   * 点击在**组自己**身上收：三颗是行级 chrome（不是编辑岛），但外层编辑器的点击委托
+   * 会把它当「点到了块里」继续往下分派——这里收口后交给同一条结构命令。
+   */
+  group.addEventListener('click', (e) => {
+    const el = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-block-act]') : null
+    const act = el?.dataset.blockAct
+    if (act !== 'above' && act !== 'below' && act !== 'delete') return
+    e.preventDefault()
+    e.stopPropagation()
+    onAct(act)
+  })
   return group
 }
 
@@ -597,21 +609,10 @@ export function makeBlockEl(
      */
     codeBody?: (b: Block, into: HTMLElement) => void
     /**
-     * **容器标题**（`_caption`）的写入口：题注行是单行编辑面，读模型、写回由调用方给。
-     * 不接 ⇒ 不画题注行（静态投影与没有标题需求的表面不多一个死控件）。
-     */
-    captionWrite?: (blockId: string, text: string) => void
-    /**
-     * **身体块行头三颗动作的落点**（上建块／下建块／删除）：题注行在编辑岛里，
-     * 点击必须由岛自己收下再交回同一条命令（外层委托会跳过岛内事件）。
+     * **身体块行头三颗动作的落点**（上建块／下建块／删除）：与块菜单同名项同一条命令。
      * 不接 ⇒ 不画动作组（静态投影不多三颗点了没反应的按钮）。
      */
     bodyAction?: (act: BlockAction, blockId: string) => void
-    /**
-     * **右键题注**：与右键块标/正文开同一张块菜单。题注在编辑岛里，外层委托跳过
-     * 岛内事件 ⇒ 由题注自己收下、交回同一座桥（`ViewEvents.blockMenu`）。
-     */
-    bodyMenu?: (blockId: string, rect: DOMRect, appearanceHost: string | undefined, trigger: HTMLElement, triggerKey: string) => void
     /**
      * **正文里自动化块的身体**（三段式：当／如果／就）。与 `viewBody` 同一条分工
      * （`view` 不 import `ui`、装配层给画法、行内体是另一个编辑宿主）；
@@ -1129,8 +1130,6 @@ export function makeBlockEl(
      */
     el.dataset.embed = '1'
     el.dataset.embedState = embedRes!.status
-    tx.dataset.embedSlot = '1'
-    tx.setAttribute('aria-hidden', 'true')
     const body = document.createElement('div')
     body.className = 'blk-embed-body'
     body.contentEditable = 'false'
@@ -1163,48 +1162,30 @@ export function makeBlockEl(
        */
       if (folded) body.dataset.folded = '1'
     }
-    if (opts.captionWrite) {
-      const target = embedRes?.status === 'ok' ? blockLabel(embedRes.target, opts.find) : ''
-      body.appendChild(makeCaptionRow(b, {
-        placeholder: t('ui.block.captionAdd'),
-        collapsedPlaceholder: target.trim() || t('ui.block.captionAdd'),
-        onCommit: (text) => opts.captionWrite!(b.id, text),
-        actions: opts.bodyAction ? makeBodyActions(b.id) : undefined,
-        onAction: (act) => opts.bodyAction?.(act, b.id),
-        // 与块标同一份绑定：露面行右键开在**源**上并附「移除这次露面」，普通行开自己
-        onContextMenu: opts.bodyMenu
-          ? (rect, trigger) =>
-              opts.bodyMenu!(markerTargetId, rect, markerTargetId === b.id ? undefined : b.id, trigger, `caption:${b.id}`)
-          : undefined,
-      }))
-    }
+    /**
+     * **露面行没有自己的标题行**：这一行就是「那一块的又一次露面」。
+     * 它的名字由**身体自己的首行**承担（投影里就是 Query 行、镜像里就是源那一行）——
+     * 再往上叠一条宿主标题，同一个名字会读两遍。`.tx` 因此恒空（位留着，光标与 ⌘A
+     * 的既有判据都按 `.tx` 认块）。
+     */
+    tx.dataset.embedSlot = '1'
+    tx.setAttribute('aria-hidden', 'true')
     embedBodyEl = body
     embedMount = () => opts.embedBody?.(b, body)
   } else if (blockTypeOf(b) === CODE_TYPE) {
-    // 正文不是可编辑文本而是 CM6 文档：`.tx` 留空并让位，代码只存在于岛里
+    /**
+     * **行＝标题，身体＝代码文档**（`_code`）：与查询块「行＝名字，身体＝结果」同一条规则。
+     * 标题就是普通正文槽，编辑、选区、`⌘X/⌘C`、富文本全走同一条管线。
+     */
     el.dataset.code = '1'
-    tx.dataset.codeSlot = '1'
-    tx.setAttribute('aria-hidden', 'true')
+    const firstLine = codeTextOf(b).split('\n')[0]?.trim() ?? ''
+    if (isEmptyContent(b.content)) tx.dataset.ph = firstLine || t('ui.block.captionAdd')
+    fill(tx)
     const body = document.createElement('div')
     body.className = 'blk-code-host'
     body.contentEditable = 'false'
     body.setAttribute(EDIT_ISLAND_ATTR, '1')
     body.dataset.codeBodyFor = b.id
-    if (opts.captionWrite) {
-      const firstLine = plainText(b.content).split('\n')[0]?.trim() ?? ''
-      body.appendChild(makeCaptionRow(b, {
-        placeholder: t('ui.block.captionAdd'),
-        collapsedPlaceholder: firstLine || t('ui.block.captionAdd'),
-        onCommit: (text) => opts.captionWrite!(b.id, text),
-        actions: opts.bodyAction ? makeBodyActions(b.id) : undefined,
-        onAction: (act) => opts.bodyAction?.(act, b.id),
-        // 与块标同一份绑定：露面行右键开在**源**上并附「移除这次露面」，普通行开自己
-        onContextMenu: opts.bodyMenu
-          ? (rect, trigger) =>
-              opts.bodyMenu!(markerTargetId, rect, markerTargetId === b.id ? undefined : b.id, trigger, `caption:${b.id}`)
-          : undefined,
-      }))
-    }
     /**
      * 收起态**不挂 CM6**：折叠是阅读态，长代码不该为一行标题付一台编辑器。
      * 展开由 `toggleCollapse` 重画这一行（`renderBlock`），这才会重新走 `codeBody`。
@@ -1290,8 +1271,13 @@ export function makeBlockEl(
      * 露面行的 DOM 序＝视觉序：投影行**先 chrome 后身体**（块标回左边）；
      * 镜像行没有宿主 chrome——岛首行就是这一行，块标列由 CSS 对齐。
      */
-    if (left) el.append(left, embedBodyEl, tx)
-    else el.append(embedBodyEl, tx)
+    // 视觉序＝DOM 序：行（chrome ＋ 标题）在前，身体折到下一行
+    if (left) el.append(left, tx)
+    else el.append(tx)
+    if (opts.bodyAction && markerTargetId === b.id) {
+      el.appendChild(makeBodyActions((act) => opts.bodyAction!(act, b.id)))
+    }
+    el.appendChild(embedBodyEl)
     // 身体接进文档之后再画：岛编辑器／ViewHost 的构造会量 DOM
     embedMount?.()
   } else {

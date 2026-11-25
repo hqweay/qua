@@ -17,7 +17,9 @@ import {
   hasLiveChildren,
   isDeleted,
   liveChildren,
+  isAutomationBlock,
   isQueryBlock,
+  blockTypeOf,
   mkBlock,
   writeBlockContent,
   type Block,
@@ -32,6 +34,8 @@ import { shiftAnnos, splitAnnos } from './annos.ts'
 import { walkForest } from './walk.ts'
 import { cloneMountEntries, MOUNTS_PROP } from '../views/mount.ts'
 import { isEmbedBlock } from '../views/embed.ts'
+import { hasChildrenViewBody } from '../views/view.ts'
+import { CODE_TYPE } from './types.ts'
 import { splitPropsForEnter } from '../props/props.ts'
 
 /**
@@ -596,14 +600,35 @@ export type InsertSite =
   | { kind: 'before'; parentId: string; index: number }
 
 /**
- * **空块占位**：没有正文、没有活子块、正文可写。
+ * **这一块有没有「身体」**（正文之外的那一格）：查询条件、代码文档、自动化定义、
+ * 露面目标、激活的看法。它们都由别的槽画在行下面，与这一行的字无关。
+ *
+ * 判据要收在这里（而不是「行里有没有字」）：有身体的块即使行是空的，也不是
+ * 「这一行可以放别的东西」——占它的行会把身体一起丢掉。
+ */
+export function hasBody(b: Block): boolean {
+  return (
+    isQueryBlock(b) ||
+    isAutomationBlock(b) ||
+    isEmbedBlock(b) ||
+    blockTypeOf(b) === CODE_TYPE ||
+    hasChildrenViewBody(b)
+  )
+}
+
+/**
+ * **空块占位**：没有正文、没有活子块、正文可写，**也没有身体**。
  *
  * 这一行只表示「这里可以放一块」，不是一块有内容的兄弟 ⇒ 往它这里插／搬时，
  * 来的块要**占它那一行**，而不是被塞到它前面或后面、把空行留在中间。
  * `insertSiteOf` 的 `replace` 与剪贴板移动的空块让位是同一份判据，别各写一遍。
+ *
+ * ⚠️ 身体那一格也参与判据：一个没有标题的代码块/查询块不是空行——占它的行会把
+ *    代码文档或条件一起丢掉（实测过：空代码块被当成空行，「在下方新建」静默变成
+ *    「把光标放回这一块」）。
  */
 export function isBlankPlaceholder(b: Block): boolean {
-  return isEmptyContent(b.content) && !hasLiveChildren(b) && canWriteText(b)
+  return isEmptyContent(b.content) && !hasLiveChildren(b) && canWriteText(b) && !hasBody(b)
 }
 
 /**
@@ -618,7 +643,7 @@ export function isBlankPlaceholder(b: Block): boolean {
  * 能写 ⇒ 它就是普通一行，光标停在这里按粘贴，意图是填这一行，不是往组里加一项。
  */
 export function blankRowKind(b: Block): 'placeholder' | 'container' | null {
-  if (!isEmptyContent(b.content) || !canWriteText(b)) return null
+  if (!isEmptyContent(b.content) || !canWriteText(b) || hasBody(b)) return null
   if (isBlankPlaceholder(b)) return 'placeholder'
   if (!hasLiveChildren(b) || typeDeclOf(b).children === 'none') return null
   return 'container'
@@ -676,6 +701,12 @@ export function mergeIntoPrevPlan(doc: Doc, id: string): MergePlan | null {
   const prev = prevBlock(doc, id)
   if (!prev) return null
   if (!canWriteText(prev)) return null
+  /**
+   * **有名字或有身体的块不往上一块里并**：合并会把它软删掉——名字（身份）与身体
+   * （查询条件／代码文档／露面目标）都跟着陪葬，而用户只按了一次退格。
+   * 名字型正文（查询/自动化）现在与普通正文同一条写路径，所以这道闸必须显式存在。
+   */
+  if (hasIdentity(loc.block) || hasBody(loc.block)) return null
   return {
     kept: prev.id,
     removed: id,
@@ -1263,7 +1294,10 @@ export function focusRootOf(roots: readonly Block[]): string | undefined {
  * 这条判据只回答「能不能折」，不回答「画在哪」（正文内联／段根／右槽窗口分别由渲染层决定）。
  */
 export function hasFoldable(b: Block | undefined): boolean {
-  return Boolean(b && (hasLiveChildren(b) || isQueryBlock(b) || isEmbedBlock(b)))
+  // 折叠的意义是「把这一行下面的东西藏起来」：子块与身体都算。
+  // 身体判据走 `hasBody`（查询/自动化/代码/露面/激活看法）——与渲染层
+  // `bodyFoldable` 同一份清单，否则会出现「视图说有身体、模型说不许折」。
+  return Boolean(b && (hasLiveChildren(b) || hasBody(b)))
 }
 
 /**

@@ -10,6 +10,7 @@ import {
   CODE_TYPE,
   canWriteText,
   blockTypeOf,
+  hasBody,
   cloneSubtree,
   enterKind,
   flatten,
@@ -70,13 +71,14 @@ export class StructOps {
     const loc = locate(this.ed.doc, id)
     if (!loc) return
     /**
-     * **正文不是内容的行不拆正文**：查询块／自动化块的名字（正文就是名字）、
-     * 字段定义的名字、只读投影 —— 结构写路径被 `canWriteText` 挡着，拆它只会拿到
-     * 一句「content is protected」的报错（实测：查询块标题里按 Enter）。
-     * 与代码块标题同一条口径：Enter ＝ **在下方新建一块**，原行一个字节不动。
+     * **标题不是正文的行不拆标题**：字段定义的名字 / 日记投影（正文不是内容），
+     * 以及**有身体的块**（查询/自动化/代码/露面）——后者的那一行是它们的标题，
+     * 正文（条件、代码文档、目标）在别的槽里。拆标题要么被内容闸拦下（前者），
+     * 要么得到一个共享/搬走了身体的怪块（后者：`_code` 这类身体属性会随前半走）。
+     * 两种块同一条口径：Enter ＝ **在下方新建一块**，原行一个字节不动。
      * 落点走 `insertBlockAfter` 那一份（不在这里再算一遍兄弟位）。
      */
-    if (!canWriteText(loc.block)) {
+    if (!canWriteText(loc.block) || hasBody(loc.block)) {
       this.ed.insert.insertBlockAfter(id, '', undefined, { reuseBlank: false })
       return
     }

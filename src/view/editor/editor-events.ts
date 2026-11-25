@@ -373,7 +373,7 @@ export interface EditorBridge {
    * 或镜像岛里的源那一行）：菜单开在**源**上，装配层会附「移除这次露面」——
    * 露面行自己的 chrome 已交给源（块标绑源），摘露面的出口就跟着走同一条路。
    */
-  onBlockMenu: (blockId: string, rect: DOMRect, appearanceHost?: string, trigger?: HTMLElement, triggerKey?: string) => void
+  onBlockMenu: (blockId: string, rect: DOMRect, appearanceHost?: string, trigger?: HTMLElement) => void
   /**
    * **原子边缘 6px 带的点击吸附**：点击落在行内原子左右缝隙带时，把光标放到原子的
    * 模型边界上（左缘 ⇒ 原子前，右缘 ⇒ 原子后），返回是否吸附成功。

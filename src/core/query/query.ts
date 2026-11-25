@@ -11,8 +11,8 @@
  *    （候选迭代）共用同一份 matcher／`applySort`／回退判据；索引路径见 `index-port.ts`
  *    的 `queryByIndex`；`QuerySpec` 仍是那个 canonical JSON。
  */
-import { hasList, isAutomationBlock, isJournalBlock, isPropDefBlock, isQueryBlock, type Block, type IdentityKind } from '../model/model.ts'
-import { MARK_KINDS, normMarks, plainText, type Content, type Marks } from '../model/runs.ts'
+import { authoredTextOf, hasList, isAutomationBlock, isJournalBlock, isPropDefBlock, isQueryBlock, type Block, type IdentityKind } from '../model/model.ts'
+import { MARK_KINDS, normMarks, type Content, type Marks } from '../model/runs.ts'
 import { walkForest } from '../model/walk.ts'
 import { findPath } from '../model/tree.ts'
 import { tagIdsOf, tagMemberIds } from '../identity/tags.ts'
@@ -977,8 +977,8 @@ export function createMatcher(forest: readonly Block[] | undefined, env: QueryEn
      * 问 asset 是另一轴，等真实问法出现再立，不预造）。
      */
     if ('text' in node) {
-      if (typeof node.text === 'string') return plainText(block.content).includes(node.text)
-      return plainText(block.content).trim() !== ''
+      if (typeof node.text === 'string') return authoredTextOf(block).includes(node.text)
+      return authoredTextOf(block).trim() !== ''
     }
     /**
      * 有子级：可见树按需建（与 `{up}`/`{down}` 共用同一份——纯 tag/text 查询

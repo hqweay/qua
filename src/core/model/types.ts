@@ -101,46 +101,26 @@ export function typeDeclOf(b: Block): TypeDecl {
 }
 
 /**
- * **这一块的正文是不是「内容」** —— 内容写路径（合并、拆块、区间替换）只许写内容。
+ * **这一行的正文能不能写**（打字、拆块、合并、程序化整段替换共用这一条）。
  *
- * 有一类块的正文是**名字或投影**，不是内容：字段定义的名字、日记的日期投影；
+ * `content` 是**这一块在大纲里那一行**说的话：页/标签是描述，查询/自动化是名字，
+ * 代码/露面是标题（代码文档在 `_code` 里）。
+ *
+ * 有两类块的正文不是用户写的字：字段定义的名字（改名走命令）与日记的日期投影；
  * 还有一类块**根本没有正文**（类型声明说 `text: 'readonly'`，例如分割线）。
  * 把别的块的正文并进它们，用户只按了一次退格，换来的是一次**静默改名**
  * （更糟的是往只读的日期行里塞字，而日期行的正文恒空是一条不变量）。
  * 所以要有一道判据挡在所有内容写路径前面 —— **一条**判据，不是每个调用点各判一次。
  *
- * ⚠️ **页与标签的正文现在可写**：名字住在 `_aliases`，正文是描述。
- *    旧模型把标签名放在正文里，所以这里拦过 `tag`；现在拦它就等于
- *    「标签不能写描述」，而地址早已不受正文影响。
- * ⚠️ 住在类型模块而不是 `model.ts`：这条判据现在要看类型声明，而 `model.ts` 是
+ * ⚠️ **页与标签的正文可写**：名字住在 `_aliases`，正文是描述。
+ * ⚠️ **查询/自动化块不再例外**：名字就是它们那一行，与别的行同一条写路径
+ *    （它们不会被合并掉——`mergeIntoPrevPlan` 拒绝有身份或有身体的块）。
+ * ⚠️ 住在类型模块而不是 `model.ts`：这条判据要看类型声明，而 `model.ts` 是
  *    零依赖叶子（依赖只能从这边指向它）。放在声明旁边也更顺：它本来就是声明里的一格。
  * ⚠️ **改名不走这条判据**：改名写的是 `_aliases`，它走 `core/alias.ts`。
- * ⚠️ **查询块的正文就是它的名字，而它没有别名入口**：直接在这一行打字是它唯一的改名路径，
- *    走 `canDirectEditText`；这条判据只管结构写路径（合并／拆分／程序化整段替换）。
  */
 export function canWriteText(b: Block): boolean {
-  return (
-    !isJournalBlock(b) &&
-    !isPropDefBlock(b) &&
-    !isQueryBlock(b) &&
-    !isAutomationBlock(b) &&
-    typeDeclOf(b).text !== 'readonly'
-  )
-}
-
-/**
- * **这一行的正文能不能被「直接编辑」**（在行内打字、粘贴、加格式——用户正对着这一行做的那类编辑）。
- *
- * 与 `canWriteText` 回答的是两件事：那条管**内容写路径**（合并／拆分／程序化整段替换），
- * 它们不该碰「正文是名字」的块。但「正文是名字」不等于「这一行不可编辑」：
- * 查询块／自动化块的名字只住在正文里（它们没有地址），在这一行打字是它们唯一的改名路径，
- * 行内 run 编辑（插图、加粗、行内引用）与打字同档 —— 都是用户正对着这一行的直接编辑。
- *
- * 其余受保护块不在此列：日记的正文是日期投影（恒空），字段定义的正文是标签（改名走命令），
- * 只读类型根本没有正文 —— 它们连直接编辑也不放行。
- */
-export function canDirectEditText(b: Block): boolean {
-  return isQueryBlock(b) || isAutomationBlock(b) || canWriteText(b)
+  return !isJournalBlock(b) && !isPropDefBlock(b) && typeDeclOf(b).text !== 'readonly'
 }
 
 /**
@@ -159,8 +139,8 @@ export function setBlockType(b: Block, typeId: string): boolean {
   if (typeId === DEFAULT_BLOCK_TYPE) delete props._type
   else props._type = typeId
   if (typeId !== CODE_TYPE) delete props._lang
-  // 容器标题只对「身体不是那行字」的骨架有意义；换回普通骨架后它就成了看不见的旧解释
-  if (typeId !== CODE_TYPE) delete props._caption
+  // 代码文档只对代码骨架有意义；换回普通骨架后它就成了看不见的旧解释
+  if (typeId !== CODE_TYPE) delete props._code
   // 属性袋也不留空壳：`{}` 与「没有属性」在快照比较里是两种东西
   if (Object.keys(props).length === 0) delete b.props
   else b.props = props
@@ -172,5 +152,6 @@ export function setBlockType(b: Block, typeId: string): boolean {
  * 却改不动那一格内容；只读类型根本没有可写正文。入口与命令处理器共用这一份判据。
  */
 export function canConvertBlockType(b: Block): boolean {
-  return canWriteText(b) && !hasList(b, 'page') && !hasList(b, 'tag')
+  // 查询/自动化是**有身体的对象**：换骨架会留下一份读不出来的旧配置（条件/定义没有落点）
+  return canWriteText(b) && !isQueryBlock(b) && !isAutomationBlock(b) && !hasList(b, 'page') && !hasList(b, 'tag')
 }

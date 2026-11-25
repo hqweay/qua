@@ -691,7 +691,6 @@ function showMenu(req: MenuRequest): void {
       rows,
       anchor: req.anchor,
       ...(req.trigger ? { trigger: req.trigger } : {}),
-      ...(req.triggerKey !== undefined ? { triggerKey: req.triggerKey } : {}),
       title: req.title,
       searchable: false,
       focusSearch: false,
@@ -707,7 +706,6 @@ function showMenu(req: MenuRequest): void {
             prefix: row.submenu,
             anchor: req.anchor,
             ...(req.trigger ? { trigger: req.trigger } : {}),
-            ...(req.triggerKey !== undefined ? { triggerKey: req.triggerKey } : {}),
             title: row.label,
             ...(req.target ? { target: req.target } : {}),
           })

@@ -9,10 +9,13 @@
 import {
   bareExternalUrl,
   blankRowKind,
-  canDirectEditText,
+  blockTypeOf,
+  canWriteText,
+  codeTextOf,
   DEFAULT_BLOCK_TYPE,
   DIVIDER_TYPE,
   CODE_TYPE,
+  CODE_TEXT_PROP,
   LANG_PROP,
   QUOTE_TYPE,
   isAutomationBlock,
@@ -67,7 +70,7 @@ export class ClipboardOps {
      * 那个异常会把 `entryDepth` 永久留在 1：此后所有编辑都记不进撤销栈（⌘Z 看着像坏了）。
      */
     const target = locate(this.ed.doc, blockId)?.block ?? this.ed.store.find(blockId)
-    if (!target || !canDirectEditText(target)) return null
+    if (!target || !canWriteText(target)) return null
     const s = this.ed.sel
     const cut =
       s && s.aBlock === blockId && s.hBlock === blockId && s.aOff !== s.hOff
@@ -80,7 +83,7 @@ export class ClipboardOps {
     const loc = locate(this.ed.doc, id)
     if (!loc) return
     // 只读行不落内容：调用方可能绕过 `pasteTarget` 直接调这里（命令／测试），判据同一份
-    if (!canDirectEditText(loc.block)) return
+    if (!canWriteText(loc.block)) return
     // 区间选中＝先删后贴，插入点就是范围起点；两步在**同一笔**内容写里落
     const at = cut ? Math.min(cut.from, cut.to) : offset
     const cutTo = cut ? Math.max(cut.from, cut.to) : offset
@@ -97,7 +100,7 @@ export class ClipboardOps {
       this.ed.beginUndoEntry()
       try {
         // 与单行粘贴同档（把内容落进这一行）；原子各占 1 格 ⇒ 光标落在原子后面
-        this.ed.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)), undefined, { directEdit: true })
+        this.ed.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)))
       } finally {
         /**
          * `begin` 与 `finish` **必须配对**：写抛异常（落点在这一笔里变成只读等）时也要收口。
@@ -120,7 +123,7 @@ export class ClipboardOps {
       if (lines.length === 1) {
         const next = spliceRuns(loc.block.content, at, cutTo, firstLine)
         // 单行粘贴与打字同档（把字落进这一行）；多行分支含拆块，归结构路径（下面不标记）
-        this.ed.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)), undefined, { directEdit: true })
+        this.ed.write((tx) => tx.patch(id, (b) => writeBlockContent(b, next)))
       } else {
         // 光标处切两半：首行接在左半后面，余下各成新块，**原右半接到最后一块尾部**
         const base = cut ? spliceRuns(loc.block.content, at, cutTo, []) : loc.block.content
@@ -166,7 +169,7 @@ export class ClipboardOps {
     const targetId = selIds[selIds.length - 1] ?? this.ed.sel?.aBlock ?? this.ed.rows()[0]?.block.id
     if (!targetId) return { applied: false, unsupported, refused: true }
     const target = locate(this.ed.doc, targetId)?.block ?? this.ed.store.find(targetId)
-    if (!target || isQueryBlock(target) || isAutomationBlock(target) || !canDirectEditText(target)) {
+    if (!target || isQueryBlock(target) || isAutomationBlock(target) || !canWriteText(target)) {
       return { applied: false, unsupported, refused: true }
     }
     const floc = locate({ roots: this.ed.store.blocks } satisfies Doc, targetId)
@@ -194,13 +197,15 @@ export class ClipboardOps {
           return normalizeRuns(out)
         }
         const make = (node: ParsedBlock): Block => {
-          const b = mkBlock(node.kind === 'fence' ? textRuns(node.code ?? '') : runsOf(node.inline))
+          // 代码文档住 `_code`（身体）；行文本是标题，围栏里的字不进 content
+          const b = mkBlock(node.kind === 'fence' ? '' : runsOf(node.inline))
           if (node.kind === 'quote') setBlockType(b, QUOTE_TYPE)
           else if (node.kind === 'divider') setBlockType(b, DIVIDER_TYPE)
           else if (node.kind === 'fence') {
             setBlockType(b, CODE_TYPE)
             const lang = normalizeStoredLang(node.lang)
-            if (lang) b.props = { [LANG_PROP]: lang }
+            b.props = { ...(b.props ?? {}), [CODE_TEXT_PROP]: node.code ?? '' }
+            if (lang) b.props = { ...(b.props ?? {}), [LANG_PROP]: lang }
           }
           return b
         }
@@ -230,7 +235,8 @@ export class ClipboardOps {
               const lang = normalizeStoredLang(first.lang)
               if (lang) b.props = { ...(b.props ?? {}), [LANG_PROP]: lang }
             } else setBlockType(b, DEFAULT_BLOCK_TYPE)
-            writeBlockContent(b, first.kind === 'fence' ? textRuns(first.code ?? '') : runsOf(first.inline))
+            writeBlockContent(b, first.kind === 'fence' ? [] : runsOf(first.inline))
+            if (first.kind === 'fence') b.props = { ...(b.props ?? {}), [CODE_TEXT_PROP]: first.code ?? '' }
           })
           insertTree(first.children, targetId, 0)
           insertTree(blocks.slice(1), floc.parent?.id ?? null, floc.index + 1)
@@ -277,7 +283,9 @@ export class ClipboardOps {
   /** 单块的正文味（复制块链接用：软外拿到的是块文本，不是 `((id))` 记号） */
   plainTextOf(id: string): string {
     const b = locate(this.ed.doc, id)?.block ?? this.ed.store.find(id)
-    return b ? plainText(b.content) : ''
+    if (!b) return ''
+    // 「块正文」对代码块＝代码文档（身体），不是标题：复制出来的应该是代码
+    return blockTypeOf(b) === CODE_TYPE ? codeTextOf(b) : plainText(b.content)
   }
 
   /** 造一枚指向 `rid` 的行内引用原子；目标不在（已删/别库）⇒ dangling，照实显示 */
@@ -347,15 +355,15 @@ export class ClipboardOps {
     const loc = locate(this.ed.doc, target.blockId)
     if (!loc) return 'gone'
     // 只读行不落内容（与 `pasteTarget`／`pasteAt` 同一判据）
-    if (!canDirectEditText(loc.block)) return 'refused'
+    if (!canWriteText(loc.block)) return 'refused'
     const runs = refs.ids.map((rid) => this.refRunTo(rid, refs.anchor))
     const at = target.cut ? Math.min(target.cut.from, target.cut.to) : target.offset
     const cutTo = target.cut ? Math.max(target.cut.from, target.cut.to) : target.offset
     const next = spliceRuns(loc.block.content, at, cutTo, runs)
     this.ed.beginUndoEntry()
     try {
-      // 与单行粘贴同档：把内容落进这一行（directEdit，过内容闸的同一道豁口）
-      this.ed.write((tx) => tx.patch(target.blockId, (b) => writeBlockContent(b, next)), undefined, { directEdit: true })
+      // 与单行粘贴同档：把内容落进这一行
+      this.ed.write((tx) => tx.patch(target.blockId, (b) => writeBlockContent(b, next)))
     } finally {
       // 粘贴独占一步（不并进前后打字）：否则「打了字紧接着贴引用」按一次 ⌘Z 会连刚打的字一起吃掉
       this.ed.finishUndoEntry('insert', Date.now(), { standalone: true })

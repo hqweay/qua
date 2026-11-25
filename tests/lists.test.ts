@@ -11,7 +11,6 @@ import assert from 'node:assert/strict'
 import type { Block } from '../src/core/index.ts'
 import {
   addList,
-  canDirectEditText,
   canWriteText,
   hasIdentity,
   hasList,
@@ -104,7 +103,7 @@ test('身份判据看数据而不看列表值：有列表但没日期不算日�
   assert.equal(isQueryBlock(badQuery), false)
 })
 
-test('canWriteText：只拦日记／定义／查询／只读类型；页与标签的正文是描述，可写', () => {
+test('canWriteText：只拦日记／定义／只读类型；页、标签、查询的名字都是这一行，可写', () => {
   const day: Block = { id: 'j', text: '', children: [], props: { _date: '2026-10-22' } }
   const def: Block = { id: 'd', text: '截止日', children: [], props: { _kind: 'date' } }
   const query: Block = { id: 'q', text: '待办', children: [], props: { _query: { where: { text: '待办' } } } }
@@ -114,21 +113,10 @@ test('canWriteText：只拦日记／定义／查询／只读类型；页与标�
   addList(page, 'page')
   const divider: Block = { id: 'v', text: '', children: [], props: { _type: 'core/divider' } }
 
-  for (const x of [day, def, query, divider]) assert.equal(canWriteText(x), false)
-  for (const x of [tag, page, b()]) assert.equal(canWriteText(x), true)
+  for (const x of [day, def, divider]) assert.equal(canWriteText(x), false)
+  for (const x of [tag, page, query, b()]) assert.equal(canWriteText(x), true)
 })
 
-test('canDirectEditText：直接编辑＝普通块＋查询标题；日记／定义／只读类型连直接编辑也不放行', () => {
-  const day: Block = { id: 'j', text: '', children: [], props: { _date: '2026-10-22' } }
-  const def: Block = { id: 'd', text: '截止日', children: [], props: { _kind: 'date' } }
-  const query: Block = { id: 'q', text: '待办', children: [], props: { _query: { where: { text: '待办' } } } }
-  const divider: Block = { id: 'v', text: '', children: [], props: { _type: 'core/divider' } }
-
-  // 查询块的名字只住在正文里：打字、行内粘贴、加格式都正对着这一行，与普通块同档
-  for (const x of [b(), query]) assert.equal(canDirectEditText(x), true)
-  // 其余受保护块的正文是投影或没有正文：不因「放宽直接编辑」而松动
-  for (const x of [day, def, divider]) assert.equal(canDirectEditText(x), false)
-})
 
 test('identityTags：给外观与诊断面的名字集合是现算的，不落盘；别名不进这里', () => {
   const day: Block = { id: 'j', text: '', children: [], props: { _date: '2026-10-22' } }

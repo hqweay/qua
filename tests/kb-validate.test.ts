@@ -150,30 +150,30 @@ test('正文闸：普通块照常可写（闸只拦身份与只读）', () => {
 
 /* -------------------------------------------- 查询块：正文即标题，直接打字可写 */
 
-test('正文闸：查询块的正文（标题）只许直接编辑写，结构写路径仍被拦', () => {
+test('正文闸：查询块的名字就是那一行，写入与普通行同一条路', () => {
   const { kb, store } = fixture()
   const q = mkQueryBlock({ name: '', spec: { where: { all: [] } } })
   kb.tx((tx) => tx.insert(q, null, 0))
 
-  // 不带「直接编辑」标记的同一笔（结构写路径）必须抛错并整批回滚
-  failsWithoutChange(
-    kb,
-    store,
-    () => kb.tx((tx) => tx.patch(q.id, (b) => writeBlockContent(b, textRuns('查询标题')))),
-    /content is protected/,
-  )
-
-  // 直接编辑（打字／行内粘贴／行内删除）放行，且只产出一条正文 op
-  const r = kb.tx((tx) => tx.patch(q.id, (b) => writeBlockContent(b, textRuns('查询标题'))), {
-    directEdit: true,
-  })
+  // 不再是例外：结构写路径也能写它（它是这一行的字，不是条件）
+  const r = kb.tx((tx) => tx.patch(q.id, (b) => writeBlockContent(b, textRuns('查询标题'))))
   assert.equal(plainText(store.find(q.id)!.content), '查询标题')
   assert.ok(
     r.ops.some((op) => op.e === 'block' && op.id === q.id && op.op === 'upsert' && op.value.content !== undefined),
-    '直接编辑必须产生一条正文 op',
+    '写入必须产生一条正文 op',
+  )
+
+  // 日记的日期投影仍是只读：正文不是它的内容
+  const { kb: kb2, store: store2 } = fixture()
+  const day = mkBlock('', { props: { _date: '2026-10-22' } })
+  kb2.tx((tx) => tx.insert(day, null, 0))
+  failsWithoutChange(
+    kb2,
+    store2,
+    () => kb2.tx((tx) => tx.patch(day.id, (b) => writeBlockContent(b, textRuns('改日期')))),
+    /content is protected/,
   )
 })
-
 test('回放：查询块正文 op 应用后仍在（收端按直接改名接受）', () => {
   const { kb } = fixture()
   const q = mkQueryBlock({ name: '', spec: { where: { all: [] } } })

@@ -29,12 +29,11 @@ import { tags } from '@lezer/highlight'
 import {
   CODE_ISLAND_ATTR,
   CODE_MAX_HEIGHT_TOKEN,
+  CODE_TEXT_PROP,
   canonicalLang,
   codeNeedsWriteBack,
-  plainText,
+  codeTextOf,
   prop,
-  textRuns,
-  writeBlockContent,
   type CodeLang,
 } from '../../core/index.ts'
 import type { BlockEditor } from './editor.ts'
@@ -183,7 +182,7 @@ export function mountCodeIsland({ getEd, blockId, into, onCopyBlock, onCutBlock,
   const view = new EditorView({
     parent: root,
     state: EditorState.create({
-      doc: initial ? plainText(initial.content) : '',
+      doc: initial ? codeTextOf(initial) : '',
       extensions: [
         lineNumbers(),
         highlightActiveLineGutter(),
@@ -230,7 +229,14 @@ export function mountCodeIsland({ getEd, blockId, into, onCopyBlock, onCutBlock,
            */
           ed.beginUndoEntry()
           const ok = ed.write((tx) => {
-            tx.patch(blockId, (b) => writeBlockContent(b, textRuns(text)))
+            // 代码文档住 `_code`（身体），行文本（标题）不动：两者是两块不同的字
+            tx.patch(blockId, (b) => {
+              const props = { ...(b.props ?? {}) }
+              if (text === '') delete props[CODE_TEXT_PROP]
+              else props[CODE_TEXT_PROP] = text
+              if (Object.keys(props).length === 0) delete b.props
+              else b.props = props
+            })
             return true
           })
           if (ok) ed.finishUndoEntry('insert', Date.now())
@@ -250,7 +256,7 @@ export function mountCodeIsland({ getEd, blockId, into, onCopyBlock, onCutBlock,
     if (ids && !ids.includes(blockId)) return
     const b = ed.store.find(blockId)
     if (!b) return
-    const model = plainText(b.content)
+    const model = codeTextOf(b)
     if (!codeNeedsWriteBack(model, view.state.doc.toString())) return
     applyingExternal = true
     try {

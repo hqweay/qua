@@ -24,7 +24,7 @@ import { t } from '../infra/msg.ts'
 import { aliasLeaf, primaryAliasOf } from '../identity/alias.ts'
 import { colorOfByFind, faceOfByFind } from '../identity/faces.ts'
 import { isJournal, journalDate, journalDateLabel } from '../identity/journal.ts'
-import { captionOf, hasList, type Block } from '../model/model.ts'
+import { hasList, type Block } from '../model/model.ts'
 import { tagIdsOf } from '../identity/tags.ts'
 import type { Content } from '../model/runs.ts'
 
@@ -167,8 +167,7 @@ export function blockSummary(b: Block, find?: FindBlock, budget = 2): string {
  * （裸 id 尤其不许露——用户没有可以从 4 位 hex 里认出哪块是哪块的能力）。
  */
 export function blockLabel(b: Block, find?: FindBlock, budget = 2): string {
-  // 容器标题（`_caption`）是显示名，不是地址：有它就优先，空/缺才退回正文投影。
-  return captionOf(b) || blockSummary(b, find, budget) || t('ui.page.untitled')
+  return blockSummary(b, find, budget) || t('ui.page.untitled')
 }
 
 /**
