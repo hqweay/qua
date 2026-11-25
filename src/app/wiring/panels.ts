@@ -1677,11 +1677,16 @@ export function setupPanels(deps: PanelsDeps) {
     if (!host) return
     const mountHost = mountHostOf(host)
     const before = new Set(owners.entriesOf(mountHost).map((e) => e.id))
+    /**
+     * **出生条件为空**（永不命中），与查询块同一条口径：条件该由用户给。
+     * 不按宿主预置「这一块之下」——它会暗中把结果圈在宿主里，用户加条件时
+     * 以为在查全库；要那个范围就在条件树里选「在…之下 → 所在块」。
+     */
     void deps
       .getRegistry()
       .invoke(
         'core.mount/add-local',
-        { host: mountHost, label: t('ui.mount.localName'), spec: { where: { up: { is: '$self' } } } },
+        { host: mountHost, label: t('ui.mount.localName'), spec: { where: { any: [] } } },
         surface?.via ?? 'mount',
       )
     const added = owners.entriesOf(mountHost).find((e) => !before.has(e.id))

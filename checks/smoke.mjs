@@ -19803,9 +19803,18 @@ await check('T189 挂载区的 + 直接建 local 查询：不弹菜单、不建�
   assert(after.kinds.includes('local'), `+ 应直接加出一栏 local：${JSON.stringify(after.kinds)}`)
   assert(!after.kinds.includes('linked'), `面板不再有 linked 栏：${JSON.stringify(after.kinds)}`)
   assert(after.blocks === before, `新建一栏不建块：${before} → ${after.blocks}`)
+  /**
+   * **出生不带条件**：新栏不该按宿主预置「这一块之下」——那会暗中把结果圈在宿主里，
+   * 用户加条件时以为在查全库。空条件 ⇒ 0 行 ＋ 一句「还没有条件」。
+   */
+  const born = await page.evaluate(() => {
+    const el = document.querySelector('#editor .mount .queryview-editor[data-empty]')
+    return el?.dataset.emptyText ?? ''
+  })
+  assert(born.includes('还没有条件'), `新栏出生不带条件（应说「还没有条件」）：${JSON.stringify(born)}`)
 
   await ctx.close()
-  return `+ 直接建 local；块数 ${before} 不变；无菜单、无 linked`
+  return `+ 直接建 local；块数 ${before} 不变；无菜单、无 linked；出生条件为空`
 })
 
 
