@@ -130,3 +130,26 @@ test('⑤ 本笔新建的子树入册：needsDoc 为假（建完就打开不再�
   assert.equal(store.isLoaded(doomed.id), false)
   assert.equal(kb.needsDoc(doomed.id), true, '没建成的块照旧是「要补读」')
 })
+
+test('⑥ 按 id 补装载是 store 级共享能力：没有 loader 直接回放，换库不清 loader', () => {
+  const { a } = tree()
+  const store = new BlockStore([a])
+  let replayed = 0
+  store.ensureLoaded([a.id], () => replayed++)
+  assert.equal(replayed, 1, '整库模式没有 loader ⇒ 所有块已在内存，直接回放')
+
+  let asked: readonly string[] = []
+  store.setDocLoader((ids, then) => {
+    asked = ids
+    then() // 装载完成才回放：调用方据此重放这次触发词落点
+  })
+  store.ensureLoaded([a.id], () => replayed++)
+  assert.equal(replayed, 2)
+  assert.deepEqual(asked, [a.id])
+
+  // 换库清的是「这份库的事实」，不是宿主给的装载能力（与 aliasResolver 同级）
+  store.reset([])
+  store.ensureLoaded(['unloaded'], () => replayed++)
+  assert.equal(replayed, 3)
+  assert.deepEqual(asked, ['unloaded'])
+})

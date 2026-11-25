@@ -107,8 +107,8 @@ export class TriggerOps {
       // 归属还没问过库 ⇒ 问一次再重放（闸的语义见 `core/kb/alias-gate.ts`）
       if (deferAliasGate(this.ed.store, named, () => this.acceptTrigger(opts))) return true
       const state = this.ed.store.aliasState(named)
-      if (state.kind === 'owned' && !state.loaded && this.ed.ensureLoaded) {
-        this.ed.ensureLoaded([state.id], () => {
+      if (state.kind === 'owned' && !state.loaded) {
+        this.ed.store.ensureLoaded([state.id], () => {
           this.acceptTrigger(opts)
         })
         return true

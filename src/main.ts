@@ -429,6 +429,12 @@ if (libraryClient) {
   })
 }
 /**
+ * 按 id 补装载也走共享 store：所有编辑器（正文／窗口／挂载区／查询视图）共用，
+ * 不再是正文编辑器的私有选项。`ensureDocsLoaded` 是函数声明，这里拿引用即可。
+ */
+blocks.setDocLoader(ensureDocsLoaded)
+
+/**
  * 种子库的**设备侧**演示配置：日记面板的演示栏 ＋ 左槽的演示收纳盘（`seedDock`）。
  * 它们住在设备状态里（日记面板是系统视图；槽布局「跟库走」但不属于任何一块）。
  *
@@ -2286,8 +2292,6 @@ async function backupBeforeReplace(failMsg: MsgId): Promise<string | null | fals
 // 会被当成「未知原子」渲染成 dangling（持久化后重开最明显）。
 ed = new BlockEditor({
   container: editorEl,
-  // 工作集装载：触发链落点按名字复用未装载的目标（先装再落，不建重复身份）
-  ensureLoaded: ensureDocsLoaded,
   // 「点空白建块」的监听面 = #doc：只监听 editorEl 的话，点它下方气口不触发
   blankArea: chrome.blankAreaEl,
   // 共享 store：块是活引用；marks/atoms/undo 也是共享的

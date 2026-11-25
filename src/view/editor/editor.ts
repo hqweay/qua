@@ -351,14 +351,6 @@ export interface ViewOpts {
    * 只改「段怎么摆」，不改「段是什么」——DOM 形状对所有 layout 一致（见 `renderRows` 的 `.sec`）。
    */
   layout?: SecLayout
-  /**
-   * **按 id 装一批块进工作集**（工作集装载；装配层注入）。
-   *
-   * 触发链落点要「找到或创建」一个名字目标：名字被一个未装载的块占着时，
-   * 先装载它再落（复用同一块），而不是把「未加载」当「不存在」去新建
-   * （新建就是第二个同名身份）。省略 ＝ 整库模式（所有块都在内存里）。
-   */
-  ensureLoaded?: (ids: readonly string[], then: () => void) => void
 }
 
 export interface ViewEvents {
@@ -802,8 +794,6 @@ export class BlockEditor {
    * 此后所有编辑都记不进撤销栈（⌘Z 看着还能用，只是停在旧条目上）。
    */
   private entryGroupDepth = 0
-  /** 工作集装载咽喉（装配层注入；省略 ＝ 整库模式）。触发链落点按名字复用未装载目标用 */
-  readonly ensureLoaded: ViewOpts['ensureLoaded']
   private relationsPending = false
   private relationsTimer: number | null = null
   /** store 订阅与事件绑定的卸载函数（`dispose` 用；视图被移除后不该继续收通知） */
@@ -818,7 +808,6 @@ export class BlockEditor {
     this.allowRootRemove = o.allowRootRemove !== false
     this.rootRemoveFill = o.rootRemoveFill !== false
     this.structuralScope = o.structuralScope ?? 'document'
-    this.ensureLoaded = o.ensureLoaded
     // 写入口不再无条件作废字段表：正文写入不碰标签声明/定义，缓存键是修订号＋索引身份
     this.write = (fn, source, opts) => {
       // 发起写的编辑器就是自己（见 `Run` 的 source 口径）：不注入的话，装配层的

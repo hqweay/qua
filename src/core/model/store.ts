@@ -491,6 +491,29 @@ export class BlockStore {
     this.catalogJournals = catalog === null ? null : [...catalog.journals]
   }
 
+  /* ------------------------------------------------------------ 按 id 补装载（工作集全局能力） */
+
+  /**
+   * **「这块还没装载，先装再重放」的宿主能力**，与 `prepareAlias` 同级：
+   * 名字被未装载块占有时，`#`／`@` 落点与引用修复要复用那一块，不能按名字新建。
+   * 正文、窗口、挂载区、查询视图共用这一台 store ⇒ 所有编辑器都读同一格；
+   * 早先它只是正文编辑器的私有选项，非正文表面遇到未装载别名会直接拒建。
+   * 没有 loader（整库模式）时直接回调——所有块本来就在内存里。
+   */
+  private docLoader: ((ids: readonly string[], then: () => void) => void) | null = null
+
+  setDocLoader(fn: ((ids: readonly string[], then: () => void) => void) | null): void {
+    this.docLoader = fn
+  }
+
+  ensureLoaded(ids: readonly string[], then: () => void): void {
+    if (ids.length === 0 || !this.docLoader) {
+      then()
+      return
+    }
+    this.docLoader(ids, then)
+  }
+
   /* ------------------------------------------------------------ 地址归属（全局，按名点查） */
 
   /**
