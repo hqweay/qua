@@ -30,6 +30,7 @@
  */
 import {
   embedBodyOf,
+  hasLiveChildren,
   isDeleted,
   resolveEmbed,
   type Block,
@@ -155,9 +156,26 @@ function mountProjection(host: Block, target: Block, into: HTMLElement, deps: Em
 function mountMirror(host: Block, target: Block, into: HTMLElement, deps: EmbedBodyDeps): () => void {
   const hostEl = document.createElement('div')
   hostEl.className = 'embed-mirror'
+  /**
+   * **外层折了这一面镜子 ⇒ 岛里的源行折着进来**：折的落点是「源那一行的下一层」，
+   * 源行自己留着（有块标、有名字，折起来还认得出是哪一块）。
+   *
+   * 为什么要在装载这里接：镜像岛是**另一个编辑世界**，折叠表是每台编辑器一份
+   * （`ed.doc.folded`）；外层写在宿主行上的折叠态传不进去，两层之间只有这一次装载。
+   *
+   * ⚠️ `into` 是**实例缓存的搬家托盘**（`.blk-embed-holder`），折叠标志写在它外面那层
+   *    身体（`.blk-embed-body`）上 —— 读错层级就永远是 `undefined`（实测踩过）。
+   * ⚠️ 只在源**真有子块**时带：叶子源没有下一层可藏，带进去会画出一颗
+   *    「这里收着东西」的空环，点开什么都没有（`writeFold` 拒绝记的就是这件事）。
+   */
+  const bodyEl = into.closest<HTMLElement>('.blk-embed-body')
+  const collapseRoot = bodyEl?.dataset.folded === '1' && hasLiveChildren(target)
   const load = (ed: BlockEditor | null): void => {
     if (!ed) return
-    ed.loadPage({ roots: [target], folded: ed.doc.folded })
+    ed.loadPage({
+      roots: [target],
+      folded: collapseRoot ? { ...ed.doc.folded, [target.id]: true } : ed.doc.folded,
+    })
   }
   const island = new EditableBlock({
     host: hostEl,

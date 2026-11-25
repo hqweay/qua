@@ -21,6 +21,7 @@ import {
   embedBodyOf,
   iconOf,
   isDeleted,
+  isFolded,
   isPropDef,
   LANG_PROP,
   locate,
@@ -458,14 +459,23 @@ function viewEvents(
       const pointer = readEmbed(block)
       const target = pointer ? find(pointer.block) : undefined
       const status = resolveEmbed(block, find).status
+      const kind = embedBodyOf(block, find)
+      /**
+       * **镜像的折叠态在岛里，不在这一行的 CSS 里**：折／展必须重挂身体
+       * （岛是另一个编辑世界，它的折叠表由装载那一刻带进去），所以要进键。
+       * 投影相反——它的折叠只是 CSS 藏结果面板，重挂会丢冻结结果与滚动位置，
+       * **不许**进键。两个方向都写错一次才看得见，理由留在这里。
+       */
+      const mirrorFold = kind === 'mirror' && active() && isFolded(active().doc, block.id) ? 'f' : 'u'
       return [
         block.id,
         status,
         target && isDeleted(target) ? 'deleted' : '',
-        embedBodyOf(block, find),
+        kind,
         pointer?.view ?? '',
         // 子树读全了没有：裸块挂出来的身体是「只有根行」的，装完必须换一把钥匙重建
         target ? (blocks.childrenKnown(target.id) ? 'k' : 'u') : 'm',
+        mirrorFold,
       ].join(':')
     },
   )

@@ -1103,6 +1103,17 @@ export function makeBlockEl(
       if (folded) body.dataset.folded = '1'
     } else {
       body.dataset.embedBody = 'mirror'
+      /**
+       * **镜像也认得折叠态**：宿主行没有自己的 gutter，但「折这一面镜子」＝
+       * **源那一行留着、它的子块收起**（与投影「只藏下一层」同一条口径）。
+       *
+       * 折叠态由**成组折叠**写进外层的折叠表（`hasFoldable` 把露面块算作可折成员），
+       * 落地的两处是这里（把态带到身体上）＋ `mountMirror` 的装载（把它带进岛里的源行）。
+       *
+       * ⚠️ 曾经只给投影写 `data-folded`：折叠表里明明有这一行，屏幕上什么都不动
+       *    （用户报「镜像块是个父子块，点前面的线不折叠」）。
+       */
+      if (folded) body.dataset.folded = '1'
     }
     if (opts.captionWrite) {
       const target = embedRes?.status === 'ok' ? blockLabel(embedRes.target, opts.find) : ''
