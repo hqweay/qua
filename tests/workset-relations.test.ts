@@ -7,8 +7,9 @@
  * |---|---|---|
  * | ① | 内容/属性/anno 编辑 ⇒ 该源块的 prune＋upsert 与「按块重算 `relationEdgesOfBlock`」一致 | 漏一种 op（如 `prop` 不重铺），引用计数等式红 |
  * | ② | 结构变化（移动/删除/恢复/清除）⇒ **整棵子树**的源块进 prune（含已不可见的块——它们的旧行必须清掉） | 只 prune 根，子的旧关系行残留，反链会「死人说话」 |
- * | ③ | 祖先链**不完整**的块不重铺（from_root 会算错）——prune 照做 | 把普通预取的目标也算完整链，`from_root` 等式红 |
+ * | ③ | 可见但祖先链**不完整**的源块**原样不动**（prune 了补不回来＝永久丢边） | 对它 prune 却不 upsert，全库计数会永久少一条边 |
  * | ④ | `from_root` 沿父链走到顶层；同一源块的边按 `(from,to,kind)` 去重（与全量重建同一条口径） | 去重漏了双 ref 属性指同一目标，upsert 键冲突静默覆盖 |
+ * | ⑤ | 新建／搬进来的块落点已知（父为空或在完整集里）⇒ **当场补进完整集**，出向边立刻落行 | 新块永远不在完整集里 ⇒ 它的边 prune 完不补（角标少数、反链栏多数） |
  *
  * 语义基准是层 0 的 `derivedRowsOf`（全量重建）；增量必须与它对同一批源块逐行一致。
  */
@@ -130,9 +131,9 @@ test('② 删除/恢复 ⇒ 整棵子树进 prune（含已不可见的块）', (
   void store
 })
 
-test('③ 祖先链不完整的块不重铺；prune 照做', () => {
-  const { ws } = fixture()
-  // 普通预取（complete=false）：引用目标自己的行，父链还在库里
+test('③ 可见但祖先链不完整的源块：整批不动（不 prune、不 upsert）', () => {
+  const { store, ws } = fixture()
+  // 普通预取（complete=false）：块进了 store，父链还在库里（父没装载）
   ws.loadBlocks(rows([row('target', 'somePage')]))
   const ops = [
     {
@@ -143,14 +144,44 @@ test('③ 祖先链不完整的块不重铺；prune 照做', () => {
       at: 2,
     },
   ]
-  const writes = relationWritesOf(new BlockStore([]).index ? relationStoreStub() : new BlockStore([]), new Set(), ops)
-  assert.deepEqual(writes.filter((w) => w.op === 'upsert'), [], '链不完整 ⇒ 不重铺（from_root 会算错）')
+  const writes = relationWritesOf(store, ws.completeIds(), ops)
+  assert.deepEqual(writes, [], '链不完整 ⇒ 一行都不写：旧行留着（from_root 虽然旧，边不能丢），也不清')
 })
 
-/** ③ 的帮手：一个没有装载任何块的 store（index 为空 ⇒ prune/upsert 集都过不了 complete 闸） */
-function relationStoreStub(): BlockStore {
-  return new BlockStore([])
-}
+test('③b 已不可见（软删）的源块：链不完整也照清', () => {
+  const { store, ws } = fixture()
+  ws.loadBlocks(rows([row('gone', 'somePage', null, { deleted: 3 })]))
+  const ops = [{ e: 'block' as const, id: 'gone', op: 'exist' as const, state: 'deleted' as const, at: 4 }]
+  const writes = relationWritesOf(store, ws.completeIds(), ops)
+  const deleted = writes
+    .filter((w) => w.table === 'BlockRelation' && w.op === 'delete')
+    .map((w) => String((w.key as Record<string, unknown>).from_id))
+  assert.deepEqual(deleted, ['gone'], '不可见的块留下的行必须清掉，否则反链里「死人说话」')
+})
+
+test('⑤ 新建块落在完整链下 ⇒ 当场补进完整集，出向边立刻落行', () => {
+  const { store, ws } = fixture()
+  ws.loadDoc(rows([row('day'), row('parent', 'day')]), ['day'])
+  // 新块经 Tx 插入后已在 index 里（这里用装载模拟那一步，不给 complete）
+  ws.loadBlocks(
+    rows([row('child', 'parent', null, { content: JSON.stringify([{ t: 'ref', to: 'T1', id: 'r1' }]) })]),
+  )
+  const ops = [
+    {
+      e: 'block' as const,
+      id: 'child',
+      op: 'upsert' as const,
+      value: { parent: 'parent', prev: null, created: 1, modified: 1 },
+      at: 2,
+    },
+  ]
+  const writes = ws.relationWritesFor(ops)
+  const relRow = writes.find((w) => w.table === 'BlockRelation' && w.op === 'upsert')
+  assert.ok(relRow, '新块的边必须落行——不然清完就再也补不回来')
+  assert.equal((relRow!.key as Record<string, unknown>).from_id, 'child')
+  assert.equal((relRow!.values as Record<string, unknown>).from_root, 'day', 'from_root 沿父链到顶层')
+  void store
+})
 
 test('④ from_root 沿父链到顶层；同源块的边按 (from,to,kind) 去重', () => {
   const { store, ws } = fixture()

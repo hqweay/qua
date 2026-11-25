@@ -510,6 +510,25 @@ export const MIGRATIONS: Migration[] = [
       db.exec(`create index if not exists idx_BlockAlias_norm on ${DB_TABLES.alias}(norm)`)
     },
   },
+  {
+    to: 17,
+    up: (db) => {
+      /**
+       * **派生两表整表作废**：关系行的增量维护曾对「祖先链不完整」的可见源块
+       * prune 而不 upsert —— 部分装载下新建／编辑的块，出向边清掉就再也补不回来
+       * （反链栏在内存里看得到，引用角标读表却少数）；反向地，源块被清除后
+       * 行若没跟上，角标又会多算已不可见的引用。
+       *
+       * 两类残留都不是「下次编辑会自愈」的形状：丢失的边没有触发者，多出的行没有删者。
+       * 派生数据由内容全量重算 ⇒ 与 v14 同一条做法：清空两表、打回 `pending`，
+       * 让流式重建按内容重铺一轮。**清表而不是只改状态**：流式重建只 upsert，
+       * 多出来的旧行它不会删。
+       */
+      db.exec(`delete from ${DB_TABLES.blockIndex}`)
+      db.exec(`delete from ${DB_TABLES.blockRelation}`)
+      writeMeta(db, META_KEYS.derivedState, 'pending')
+    },
+  },
 ]
 
 export type OpenResult =

@@ -178,9 +178,22 @@ export const LIBRARY_READS = {
     select p.block as id, 'prop' as kind from ${P} p
       where p.name not like '\\_%' escape '\\' and p.value = ?2`,
 
-  /** **入向关系按目标批查**（引用角标的全库计数；派生表 ready 后才可读） */
-  relationsFor: `select to_id, from_id, kind, from_root, count from BlockRelation
-    where to_id in (select value from json_each(?1))`,
+  /**
+   * **入向关系按目标批查**（引用角标的全库计数；派生表 ready 后才可读）。
+   *
+   * 只收**此刻在树上可见的来源块**：
+   *   · 来源自己没被软删；
+   *   · 它的来源根仍是一个活着的顶层块 —— 父块被清除后留下的孤儿子树，
+   *     `from_root` 指向一个已经不存在的 id，这些边在内存读面（`relationsTo`）
+   *     根本不存在，角标却会照表计数，两个数字就对不上。
+   *
+   * 判据只读**内容表**（`deleted`／`parent`），不回查 `BlockIndex`：派生索引自己
+   * 也可能缺行（新根还没铺上），拿它当可见性会反过来把真边滤掉。
+   */
+  relationsFor: `select r.to_id, r.from_id, r.kind, r.from_root, r.count from BlockRelation r
+    where r.to_id in (select value from json_each(?1))
+      and exists (select 1 from ${B} src where src.id = r.from_id and src.deleted is null)
+      and exists (select 1 from ${B} root where root.id = r.from_root and root.parent is null and root.deleted is null)`,
 
   /**
    * **派生位置行按块批查**（`BlockIndex` 的按 id 取数口）。

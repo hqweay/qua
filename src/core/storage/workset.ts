@@ -169,7 +169,31 @@ export class Workset {
 
   /** 这次 op 批的派生关系行写（只重铺祖先链完整的源块，见 `relationWritesOf`） */
   relationWritesFor(ops: readonly Op[]): RowWrite[] {
-    return relationWritesOf(this.store, this.complete, ops)
+    return relationWritesOf(this.store, this.completeAfter(ops), ops)
+  }
+
+  /**
+   * **这批 op 让哪些块新获得了完整祖先链**。
+   *
+   * 装载时收集的 `complete` 是「装载那一刻的行集」：新建／刚搬进来的块不在里面，
+   * 于是它的边会被 prune 掉却永远不重铺（一条边就此从全库计数里消失）。
+   * 落点已知（父为空＝顶层，或父已在完整集里）就能就地补进去——链上每一块都追得到顶层，
+   * 这正是 `from_root` 的前提。落点未知（父不在完整集）的块不加，维持「不动」。
+   */
+  private completeAfter(ops: readonly Op[]): ReadonlySet<string> {
+    const index = this.store.index
+    const mark = (id: string, parent: string | null): void => {
+      if (parent !== null && !this.complete.has(parent)) return
+      const { all } = subtreeIdsOf(index.all.get(id), id)
+      for (const x of all) this.complete.add(x)
+    }
+    for (const op of ops) {
+      if (op.e !== 'block') continue
+      if (op.op === 'upsert' && op.value.parent !== undefined) mark(op.id, op.value.parent)
+      // 从回收站恢复：树上原位已知（父链含被删块），父在完整集里就能算 from_root
+      else if (op.op === 'exist' && op.state === 'present') mark(op.id, index.parentOfAll.get(op.id) ?? null)
+    }
+    return this.complete
   }
 
   /* ------------------------------------------------------------ 内部 */
@@ -440,10 +464,17 @@ export function relationWritesOf(store: BlockStore, complete: ReadonlySet<string
       upsert.add(op.block)
     }
   }
-  // 祖先链不完整的块不重铺（from_root 会算错）；但 prune 照做——旧行清掉是对的
+  /**
+   * 两类块分开算，判据是**能不能在库里重建这一行**：
+   *   · 不可见（删除／清除／索引里没有）⇒ 行必须清，链全不全无所谓：
+   *     旧行留着就是「已消失的块还在反链里说话」；
+   *   · 可见 ⇒ 只有祖先链完整才 prune＋upsert（`from_root` 要沿父链算）；
+   *     链不完整就**原样不动**——prune 了却补不回来，等于永久丢一条边。
+   */
+  const orphaned = [...prune].filter((id) => !index.blocks.has(id))
   const sources = [...upsert].filter((id) => complete.has(id) && index.blocks.has(id))
-  if (prune.size === 0 && sources.length === 0) return []
-  const out = derivedPruneWrites([], prune)
+  if (orphaned.length === 0 && sources.length === 0) return []
+  const out = derivedPruneWrites([], [...orphaned, ...sources])
   const seen = new Set<string>()
   const relations: BlockRelationRow[] = []
   for (const id of sources) {

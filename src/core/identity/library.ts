@@ -64,12 +64,15 @@ export const LIBRARY_FORMAT = 1
  * 不动内容；它的行由索引重建铺底，所以同样把 `fts_state` 打回 `pending`。
  * v16 给地址加**归一化键** `norm`（见 `address-key.ts`）：一次回填、一条索引，
  * 让「这个名字归谁」从「启动读全表」变成一次点查。
+ * v17 派生两表整表作废：关系行的增量维护曾在「祖先链不完整的可见源块」上 prune
+ * 却不 upsert（边永久丢失），源块清除后行也可能残留（角标多算）。内容不动，
+ * 清空 `BlockIndex`／`BlockRelation` 落回 `pending`，由流式重建按内容重铺。
  *
  * **不写数据迁移**：原型不做旧数据迁移，旧库作废重 seed（`judgeDbVersion` 判到
  * `migrate` 时跑 `MIGRATIONS` 里那一步**只丢旧形状、不搬数据**的 DDL）。
  * `user_version` 只增不减。
  */
-export const DB_SCHEMA_VERSION = 16
+export const DB_SCHEMA_VERSION = 17
 
 /**
  * **派生路径的编码版本**（落 `meta.derived_path_version`）。

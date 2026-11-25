@@ -15,7 +15,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openLibraryDb, applyRowWrites, type RowWrite } from '../electron/library/sqlite.ts'
-import { readAliasTargets, readBlockRows, readCatalogRows, readDocRows, readIdentityRows } from '../electron/library/reads.ts'
+import { readAliasTargets, readBlockRows, readCatalogRows, readDocRows, readIdentityRows, readRelationsFor } from '../electron/library/reads.ts'
 import { rowsToWorkspace } from '../src/core/storage/db-rows.ts'
 import { normalizeAlias } from '../src/core/identity/address-key.ts'
 import { isAutomationBlock } from '../src/core/model/model.ts'
@@ -211,5 +211,23 @@ test('identity：全局身份块＝页/标签露面、字段定义、自动化�
     const ws = rowsToWorkspace(rows)
     const auto = ws.blocks.find((b) => b.id === 'auto')
     assert.ok(auto !== undefined && isAutomationBlock(auto), '自动化块随身份读装载，且定义可用')
+  })
+})
+
+test('relationsFor：只数**在树上可见的来源块**的边（残留行不许让角标多算）', () => {
+  withDb((db) => {
+    applyRowWrites(db, [
+      { table: 'BlockRelation', op: 'upsert', key: { from_id: 'a', to_id: 'p', kind: 'inline' }, values: { from_root: 'p', count: 1 } },
+      // 源块被软删（x 在 seed 里带 deleted）⇒ 边不该再算
+      { table: 'BlockRelation', op: 'upsert', key: { from_id: 'x', to_id: 'p', kind: 'inline' }, values: { from_root: 'x', count: 1 } },
+      // 父块被清除后留下的孤儿子块：from_root 指向一个库里不存在的 id
+      { table: 'BlockRelation', op: 'upsert', key: { from_id: 'a1', to_id: 'p', kind: 'inline' }, values: { from_root: 'purgedRoot', count: 1 } },
+    ])
+    const rows = readRelationsFor(db, ['p'])
+    assert.deepEqual(
+      rows.map((r) => r.from_id),
+      ['a'],
+      '只留「来源活着 ＋ 它的根是个活顶层块」的边——其余在内存读面（relationsTo）里根本不存在，角标按表数就会和反链栏对不上',
+    )
   })
 })
