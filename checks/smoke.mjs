@@ -24764,6 +24764,51 @@ await check('T241 搜索面右预览：就地编辑落盘、Enter 建子块并�
   return '就地编辑落盘、Enter 子块可见、↑↓ 换选中不重建、删块回落、⌘↵ 打开、离开回正文、查询块带结果体'
 })
 
+await check('T365 搜索预览面包屑：普通点原地展开祖先、收起退回，不离开搜索面', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const parent = await plantProbe(page, '预览面包屑探针PQR')
+  assert(parent, '前置：父块要建出来')
+  const child = await page.evaluate((pid) => {
+    const ed = window.__qua.__editor
+    const id = ed.insert.insertBlockAfter(pid, '预览面包屑探针PQR 子块')
+    window.__qua.focusBlock(id, 0)
+    window.__qua.invoke('core.editor/indent-block', {})
+    return id
+  }, parent)
+  await page.waitForTimeout(300)
+  await page.evaluate(() => window.__qua.invoke('core.surface/open', { kind: 'utility', id: 'search' }, 'api'))
+  await page.fill('.search-face-input', '预览面包屑探针PQR 子块')
+  await page.waitForFunction(() => document.querySelectorAll('#center-surface [data-search-row]').length > 0, null, { timeout: 3000 })
+  await page.waitForTimeout(300)
+
+  const state = () =>
+    page.evaluate(() => ({
+      visible: !document.getElementById('center-surface').hidden,
+      active: window.__qua.snapshot().activeId,
+      roots: [...document.querySelectorAll('#center-surface .search-face-preview .blk[data-depth="0"]')].map((e) => e.dataset.blockId),
+      crumbs: [...document.querySelectorAll('#center-surface .search-face-preview .blk-context-cell')].map((e) => e.dataset.crumbFor ?? ''),
+      back: Boolean(document.querySelector('#center-surface .search-face-preview .blk-context-back')),
+    }))
+  const before = await state()
+  assert(before.visible && before.roots[0] === child, `前置：预览根是选中的子块：${JSON.stringify(before)}`)
+  assert(before.crumbs.includes(parent), `前置：子块行首要有父块面包屑：${JSON.stringify(before)}`)
+
+  await page.locator(`#center-surface .search-face-preview .blk-context-cell[data-crumb-for="${parent}"]`).first().click()
+  await page.waitForTimeout(300)
+  const expanded = await state()
+  assert(expanded.visible && expanded.active === before.active, `点面包屑不能离开搜索面／换中心：${JSON.stringify(expanded)}`)
+  assert(expanded.roots[0] === parent && expanded.back, `面包屑应把父块装成预览根并给「收起上下文」：${JSON.stringify(expanded)}`)
+
+  await page.locator('#center-surface .search-face-preview .blk-context-back').first().click()
+  await page.waitForTimeout(300)
+  const back = await state()
+  assert(back.roots[0] === child && !back.back, `收起上下文应退回原来的子块：${JSON.stringify(back)}`)
+
+  await ctx.close()
+  return `搜索预览面包屑原地展开到父块、收起退回转子块；中心与搜索面都没变`
+})
+
 await check('T242 搜索面冻结与刷新：外部改命中块 ⇒ 只点亮 stale 且左右一致；刷新按上一次的词重跑、移除并报条数；最近更新不标 stale', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))

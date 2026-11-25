@@ -17,6 +17,7 @@
  */
 import { flatten, hasFoldable, isDeleted, ownerDataOfBlock, type Block, type BlockStore } from '../../core/index.ts'
 import type { KbClient } from '../../core/kb/types.ts'
+import { expandContexts, unfoldForContext } from '../../core/views/context-expand.ts'
 import { textSpansOf } from '../../core/query/text-spans.ts'
 import type { BlockEditor, Run } from '../../view/editor/editor.ts'
 import { clearHits, paintHits } from '../../view/editor/hit-paint.ts'
@@ -78,6 +79,10 @@ export class PreviewPane {
   private component: EditableBlock | null = null
   /** 已经种过「默认折叠」的块（用户展开过的不再种第二次） */
   private readonly seededFold = new Set<string>()
+  /** 点过的祖先：与窗口/挂载区/查询视图同一套就地展开栈（换选中才清） */
+  private expanded = new Set<string>()
+  /** 当前画的是哪一块：换选中时清展开栈，别把上一块的祖先带到下一块 */
+  private loadedId = ''
   /** root 接进文档之后才建编辑器（`BlockEditor` 构造时会量 DOM） */
   private mounted = false
   private disposed = false
@@ -255,6 +260,19 @@ export class PreviewPane {
         onFocus: (editor) => {
           if (!this.readOnly) this.deps.onFocus(editor)
         },
+        /**
+         * 面包屑普通点＝**在这右列原地换根**，不离开搜索面（与窗口/挂载区/查询同一机制）。
+         * 不接时事件层退回 `focusBlock`，会把人从搜索面带走。
+         */
+        onExpandContext: (ancestorId, rowId) => {
+          if (!ancestorId) return
+          this.expanded.add(ancestorId)
+          this.reloadWithContext(rowId || undefined)
+        },
+        onContextBack: (rootId) => {
+          if (!this.expanded.delete(rootId)) return
+          this.reloadWithContext()
+        },
       })
       this.root.appendChild(this.component.root)
     }
@@ -394,17 +412,38 @@ export class PreviewPane {
     this.paint(ed, block)
   }
 
-  /** 装载一块进预览：子块默认折叠、面包屑给祖先链 */
-  private paint(ed: BlockEditor, block: Block): void {
-    const folded = { ...(ed.doc.folded ?? {}) }
+  /** 按当前展开栈重装预览（换选中不动，只有点面包屑/收起上下文才走这里） */
+  private reloadWithContext(focusHint?: string): void {
+    const ed = this.component?.ed
+    const id = this.deps.targetId()
+    const block = id === '' ? null : this.deps.kb.get(id)
+    if (!ed || !block || isDeleted(block)) return
+    this.paint(ed, block, focusHint)
+  }
+
+  /** 装载一块进预览：子块默认折叠、面包屑给祖先链；点过的祖先换成外层根 */
+  private paint(ed: BlockEditor, block: Block, focusHint?: string): void {
+    if (this.loadedId !== block.id) {
+      this.loadedId = block.id
+      this.expanded.clear()
+    }
+    const seedFolded = { ...(ed.doc.folded ?? {}) }
     // 子块默认折叠：防「一屏 50 条大树」。只在这一块**第一次被选中**时种一次——
     // 用户展开过的不再种回去（Enter 拆出来的子块因此看得见）
     if (!this.seededFold.has(block.id)) {
       this.seededFold.add(block.id)
-      if (hasFoldable(block)) folded[block.id] = true
+      if (hasFoldable(block)) seedFolded[block.id] = true
     }
     const path = this.deps.kb.pathOf(block.id)
-    const contexts = path.length > 1 ? new Map([[block.id, path.slice(0, -1)]]) : undefined
+    const plan = expandContexts(
+      { roots: [block], contexts: new Map([[block.id, path.slice(0, -1)]]) },
+      this.expanded,
+      (id) => this.deps.kb.pathOf(id),
+      focusHint,
+    )
+    this.expanded = plan.expanded
+    // 展开出来的祖先本来是折着的 ⇒ 把覆盖段的折叠解掉，否则「点了没反应」
+    const folded = unfoldForContext(seedFolded, plan.covers, (id) => this.deps.kb.pathOf(id))
     /**
      * **来源说明**：词可能不在正文里（别名/标签/属性/链接命中的情况）。
      * 这一句回答「它为什么在这儿」，与左行那个「经由」同一份来路。
@@ -414,8 +453,9 @@ export class PreviewPane {
     // 预览画的是这一块自己的默认看法：显示白名单跟着它走（`loadPage` 整份换 doc）
     const displayProps = ownerDataOfBlock(block).defaultDisplayProps
     ed.loadPage({
-      roots: [block],
-      ...(contexts ? { contexts } : {}),
+      roots: plan.roots,
+      contexts: plan.contexts,
+      expandedRoots: plan.contextRoots,
       ...(rootNotes ? { rootNotes } : {}),
       ...(displayProps !== undefined ? { displayProps } : {}),
       folded,
@@ -427,8 +467,10 @@ export class PreviewPane {
      * 而用户来这儿就是为了看命中的那一句。
      * 高亮用 CSS Custom Highlight（**不往 contenteditable 里插 `<mark>`**：
      * 那会改模型读数、破坏光标与输入法）。
+     * 点面包屑时改滚到那一行（`plan.focusId`），不再跳回原命中词。
      */
-    this.revealMatch(block)
+    if (plan.focusId) ed.reveal(plan.focusId)
+    else this.revealMatch(block)
   }
 
   /**
