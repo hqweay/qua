@@ -3758,9 +3758,18 @@ button.blk-auto-chip {
 .blk-caption-text[data-empty='1']::before {
   content: attr(data-ph);
   color: var(--ui-text-tertiary);
+  pointer-events: none;
 }
 .blk[data-collapsed='1'] .blk-caption-text[data-empty='1']::before {
   content: attr(data-ph-collapsed);
+}
+/*
+ * 光标落进题注时**藏掉占位**：占位是 `::before` 生成内容，浏览器把光标放在它之后
+ * ⇒ 看起来像在「添加标题」四个字后面等输入。与空块 `.tx[data-ph]` 同一条教训
+ * （`data-caret` 那一格）：占位不是内容，编辑时它必须让位。
+ */
+.blk-caption-text:focus[data-empty='1']::before {
+  content: none;
 }
 /* 收起态的代码块用一种「合上的盒子」读法：标题就是盒面，正文不占位 */
 .blk[data-collapsed='1'] > .blk-code-host .blk-caption {
