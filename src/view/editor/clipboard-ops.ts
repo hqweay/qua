@@ -10,6 +10,17 @@ import {
   bareExternalUrl,
   blankRowKind,
   canDirectEditText,
+  DEFAULT_BLOCK_TYPE,
+  DIVIDER_TYPE,
+  QUOTE_TYPE,
+  isAutomationBlock,
+  isBlankPlaceholder,
+  isQueryBlock,
+  normalizeRuns,
+  parseMarkdown,
+  setBlockType,
+  type ParsedBlock,
+  type ParsedInline,
   hasDescendant,
   isDeleted,
   isFolded,
@@ -137,6 +148,94 @@ export class ClipboardOps {
     this.ed.renderAll()
     this.ed.placeCaret(id, at + plainLen(firstLine))
     this.ed.emitChange('text')
+  }
+
+  /**
+   * 显式「粘贴 Markdown」：解析出的整棵节树落进块树，不与当前正文合并。
+   * 空块接管第一块，块选区态插在选区后面；只读行与查询抬头拒绝。
+   * 整次动作只开一个撤销条目——结构插入与首块改写同笔。
+   */
+  pasteMarkdown(markdown: string): { applied: boolean; unsupported: string[]; refused: boolean } {
+    const { blocks, unsupported } = parseMarkdown(markdown)
+    if (blocks.length === 0) return { applied: false, unsupported, refused: false }
+    if (this.ed.structuralScope === 'roots') return { applied: false, unsupported, refused: true }
+    const selIds = this.ed.bsel.hasBlockSelection() ? this.ed.bsel.selectedRootIds() : []
+    const targetId = selIds[selIds.length - 1] ?? this.ed.sel?.aBlock ?? this.ed.rows()[0]?.block.id
+    if (!targetId) return { applied: false, unsupported, refused: true }
+    const target = locate(this.ed.doc, targetId)?.block ?? this.ed.store.find(targetId)
+    if (!target || isQueryBlock(target) || isAutomationBlock(target) || !canDirectEditText(target)) {
+      return { applied: false, unsupported, refused: true }
+    }
+    const floc = locate({ roots: this.ed.store.blocks } satisfies Doc, targetId)
+    if (!floc) return { applied: false, unsupported, refused: true }
+    // 空块且没有子树才让位：否则接管会把已有子块和粘来的节树混成一段
+    const takeover = selIds.length === 0 && isBlankPlaceholder(target) && !target.children.some((c) => !isDeleted(c))
+
+    this.ed.beginUndoEntry()
+    try {
+      this.ed.write((tx) => {
+        const runsOf = (inline: readonly ParsedInline[]): InlineRun[] => {
+          const out: InlineRun[] = []
+          for (const it of inline) {
+            if (it.t === 'text') out.push(...textRuns(it.v, it.marks))
+            else if (it.t === 'link') out.push(linkRunOf(it.url, it.v))
+            else {
+              const found = this.ed.store.find(it.id)
+              if (found && !isDeleted(found)) {
+                out.push({ id: uuidv7Hex(), t: 'ref', to: it.id, label: blockLabel(found, (id) => this.ed.store.find(id)) })
+              } else {
+                out.push(...textRuns(`((${it.id}))`))
+              }
+            }
+          }
+          return normalizeRuns(out)
+        }
+        const make = (node: ParsedBlock): Block => {
+          const b = mkBlock(node.kind === 'fence' ? textRuns(node.raw ?? '') : runsOf(node.inline))
+          if (node.kind === 'quote') setBlockType(b, QUOTE_TYPE)
+          if (node.kind === 'divider') setBlockType(b, DIVIDER_TYPE)
+          return b
+        }
+        // 解析结果是普通描述树，按显式栈插入；块树遍历仍只走 `walkForest` 一个入口
+        const insertTree = (nodes: readonly ParsedBlock[], parentId: string | null, at: number): void => {
+          type Frame = { nodes: readonly ParsedBlock[]; parentId: string | null; at: number; i: number }
+          const stack: Frame[] = [{ nodes, parentId, at, i: 0 }]
+          while (stack.length > 0) {
+            const f = stack[stack.length - 1]!
+            if (f.i >= f.nodes.length) {
+              stack.pop()
+              continue
+            }
+            const node = f.nodes[f.i++]!
+            const b = make(node)
+            tx.insert(b, f.parentId, f.at++)
+            if (node.children.length > 0) stack.push({ nodes: node.children, parentId: b.id, at: 0, i: 0 })
+          }
+        }
+        if (takeover) {
+          const first = blocks[0]!
+          tx.patch(targetId, (b) => {
+            if (first.kind === 'quote') setBlockType(b, QUOTE_TYPE)
+            else if (first.kind === 'divider') setBlockType(b, DIVIDER_TYPE)
+            else setBlockType(b, DEFAULT_BLOCK_TYPE)
+            writeBlockContent(b, first.kind === 'fence' ? textRuns(first.raw ?? '') : runsOf(first.inline))
+          })
+          insertTree(first.children, targetId, 0)
+          insertTree(blocks.slice(1), floc.parent?.id ?? null, floc.index + 1)
+        } else {
+          insertTree(blocks, floc.parent?.id ?? null, floc.index + 1)
+        }
+        return true
+      })
+    } catch (e) {
+      // 异常路径也要收口，否则 `entryDepth` 留在 1，之后所有编辑都进不了撤销栈
+      this.ed.finishUndoEntry('structural')
+      throw e
+    }
+    this.ed.finishUndoEntry('insert', Date.now(), { standalone: true })
+    this.ed.structTail()
+    this.ed.emitChange('text')
+    return { applied: true, unsupported, refused: false }
   }
 
   /**

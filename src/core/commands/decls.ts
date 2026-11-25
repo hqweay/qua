@@ -73,6 +73,7 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.editor/copy-ref-anchor', title: t('cmd.editor.copy-ref-anchor'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.editor'), hidden: true, keywords: ['ref', 'anchor', t('menu.kw.ref')] },
   { name: 'core.editor/cut-blocks', title: t('cmd.editor.cut-blocks'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.editor'), hidden: true, keywords: ['cut', 'move'] },
   { name: 'core.editor/paste-into-selection', title: t('cmd.editor.paste-into-selection'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), hidden: true, keywords: ['paste'] },
+  { name: 'core.editor/paste-markdown', title: t('cmd.editor.paste-markdown'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['markdown', 'paste', t('menu.kw.richtext')] },
   { name: 'core.selection/clear', title: t('cmd.selection.clear'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), hidden: true },
   { name: 'core.selection/select-all-blocks', title: t('cmd.selection.select-all-blocks'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), hidden: true },
   { name: 'core.selection/select-block', title: t('cmd.selection.select-block'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), hidden: true },

@@ -60,6 +60,8 @@ export const MSG = {
   'cmd.editor.copy-ref-anchor': '复制为引用（选中文本为锚）',
   'cmd.editor.cut-blocks': '剪切块（粘贴时移动）',
   'cmd.editor.paste-into-selection': '粘贴到选中块后面',
+  'cmd.editor.paste-markdown': '粘贴 Markdown',
+  'menu.kw.richtext': '富文本',
   'cmd.selection.clear': '取消块选择',
   'cmd.selection.select-all-blocks': '全选块',
   'cmd.selection.select-block': '选择当前块',
@@ -1370,6 +1372,9 @@ export const MSG = {
   'err.cmd.missingArgs': '命令缺少必需参数：{name}｜{args}',
   'err.cmd.notGroupable': '命令不能并入批量操作（必须同步且声明为可撤销）：{name}',
   'err.clipboardFailed': '复制失败（浏览器未授权剪贴板）',
+  'err.markdownEmpty': '剪贴板里没有文本',
+  'err.markdownRefused': '这里不能粘贴 Markdown',
+  'ui.toast.markdownPartial': '部分语法暂按原文保留',
 
   /* ------------------------------------------------------------ 外链的打开判据 */
   'ui.link.rejectEmpty': '链接是空的',

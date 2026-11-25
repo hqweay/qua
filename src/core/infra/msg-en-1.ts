@@ -42,6 +42,8 @@ export const EN1 = {
   'cmd.editor.copy-ref-anchor': 'Copy as ref (selected text as anchor)',
   'cmd.editor.cut-blocks': 'Cut blocks (move on paste)',
   'cmd.editor.paste-into-selection': 'Paste after selected blocks',
+  'cmd.editor.paste-markdown': 'Paste Markdown',
+  'menu.kw.richtext': 'rich text',
   'cmd.selection.clear': 'Clear block selection',
   'cmd.selection.select-all-blocks': 'Select all blocks',
   'cmd.selection.select-block': 'Select current block',

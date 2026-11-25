@@ -181,6 +181,7 @@ export const BINDINGS: Binding[] = [
    * 放 basic 组：它是任务入口，不是新的语义分类。
    */
   { command: 'core.automation/menu', kind: 'menu', when: 'blockMenuTarget', group: 'block/1-basic', order: 30, layer: 'core', icon: 'lucide:zap', keywords: ['automation', 'action', 'run', t('menu.kw.automation')] },
+  { command: 'core.editor/paste-markdown', kind: 'menu', when: 'blockMenuTarget', group: 'block/1-basic', order: 35, layer: 'core', keywords: ['markdown', 'paste', t('menu.kw.richtext')] },
   /* 复制（子菜单）：前四条是「同一块的几种味」，复制块是落进文档的副本 */
   { command: 'core.editor/copy-block', kind: 'menu', when: 'blockMenuTarget', group: 'blockCopy/1', order: 10, layer: 'core' },
   { command: 'core.editor/copy-block-text', kind: 'menu', when: 'blockMenuTarget', group: 'blockCopy/1', order: 20, layer: 'core' },

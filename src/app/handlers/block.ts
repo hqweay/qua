@@ -336,6 +336,26 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     })
     return true
   },
+
+  /**
+   * 显式 Markdown 粘贴：默认 ⌘V 链不识别 Markdown（没有精确判据，自动转会误转代码/字面量）。
+   * 剪贴板文本由门面读，落点与一笔撤销在编辑器里判；不支持的语法只给一句实话。
+   */
+  'core.editor/paste-markdown': (_a, app) => {
+    void app
+      .readText()
+      .then((text) => {
+        if (text.trim() === '') {
+          app.toast(t('err.markdownEmpty'), 'warn')
+          return
+        }
+        const r = app.ed.clip.pasteMarkdown(text)
+        if (r.refused) app.toast(t('err.markdownRefused'), 'warn')
+        else if (r.unsupported.length > 0) app.toast(t('ui.toast.markdownPartial'), 'info')
+      })
+      .catch(() => app.toast(t('err.clipboardFailed'), 'warn'))
+    return true
+  },
   'core.editor/delete-selected-blocks': (_a, app) => {
     // 与单块 ⌘⇧D 同一条判据：站在露面岛里 ⇒ 摘露面，不删岛里的源子树
     if (app.ed.embedHostId) return app.removeEmbed(app.ed.embedHostId)
