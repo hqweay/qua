@@ -199,6 +199,8 @@ export interface MenuRequest {
   onClose?: () => void
   /** 这次打开的触发元素（点/右键的那个节点）；给了它，同一处再触发一次＝收起（toggle） */
   trigger?: HTMLElement
+  /** 触发器的稳定身份：节点可能被重排换掉，同一处再触发仍要能收起 */
+  triggerKey?: string
 }
 
 /** 引用这一跳的覆盖：跟随源块 / 强制开 / 强制关 */

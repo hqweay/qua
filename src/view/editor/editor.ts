@@ -456,7 +456,7 @@ export interface ViewEvents {
    * `appearanceHost` ＝ 右键落在露面行上（见 `ViewEvents.onBlockMenu`）：菜单开在源上，
    * 装配层据此附「移除这次露面」。
    */
-  blockMenu?: (blockId: string, rect: DOMRect, appearanceHost?: string, trigger?: HTMLElement) => void
+  blockMenu?: (blockId: string, rect: DOMRect, appearanceHost?: string, trigger?: HTMLElement, triggerKey?: string) => void
   /**
    * **点身体块行头那颗动作**：上建块／下建块／删除。
    *
@@ -3645,7 +3645,7 @@ export class BlockEditor {
         this.commitLeavingLine()
         this.events.onAtomClick?.(atom, el, mods)
       },
-      onBlockMenu: (id, rect, appearanceHost, trigger) => this.events.blockMenu?.(id, rect, appearanceHost, trigger),
+      onBlockMenu: (id, rect, appearanceHost, trigger, triggerKey) => this.events.blockMenu?.(id, rect, appearanceHost, trigger, triggerKey),
       onAtomMenu: (hit, el, rect) => this.events.atomMenu?.(hit, el, rect),
       // 左键点块标 ＝ 聚焦/zoom。这也是**离开这一行**：先把当前行的编辑交出去
       // （判据是「上一个块 ≠ 这个块」；点自己那一行的块标不算离开）

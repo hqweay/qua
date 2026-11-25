@@ -1094,7 +1094,8 @@ export class RenderOps {
         // 身体块行头的三颗动作：岛内点击 → 装配层同一个桥（不新增命令入口）
         bodyAction: (act, blockId) => this.ed.events.blockAction?.(act, blockId, this.ed),
         // 右键题注：与右键块标/正文同一条块菜单（题注在岛里，外层委托够不到）
-        bodyMenu: (blockId, rect, appearanceHost, trigger) => this.ed.events.blockMenu?.(blockId, rect, appearanceHost, trigger),
+        bodyMenu: (blockId, rect, appearanceHost, trigger, triggerKey) =>
+          this.ed.events.blockMenu?.(blockId, rect, appearanceHost, trigger, triggerKey),
         ...(this.ed.emptyPlaceholder !== undefined ? { placeholder: this.ed.emptyPlaceholder } : {}),
         /**
          * **正文里的查询体**：只有装配层接了画法、且这一份装载允许展开时才给。
