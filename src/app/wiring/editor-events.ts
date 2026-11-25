@@ -23,6 +23,8 @@ import {
   isDeleted,
   isPropDef,
   LANG_PROP,
+  locate,
+  mkBlock,
   openAxisOf,
   plainLen,
   prop,
@@ -145,14 +147,32 @@ function viewEvents(
           if (next && !isDeleted(next)) ed.placeCaret(next.id, 0)
           else ed.insert.insertBlockAfter(block.id, '')
         },
-        // 首行开头 ↑/←：落到可见的上一行（光标在末尾）；没有才在上方新建
+        // 首行开头 ↑/←：有上一兄弟就落到它末尾；没有就在同一层上方新建一块
+        // （顶层根插顶层；首个子块插首子块——都遵守「上面新建」而不是跳到父行）。
         onExitAbove: () => {
           const ed = active()
-          const rows = ed.rows()
-          const i = rows.findIndex((r) => r.block.id === block.id)
-          const prev = i > 0 ? rows[i - 1]?.block : undefined
-          if (prev && !isDeleted(prev)) ed.placeCaret(prev.id, plainLen(prev.content))
-          else ed.insert.insertBlockBefore(block.id)
+          const loc = locate({ roots: ed.store.blocks }, block.id)
+          if (!loc) {
+            ed.insert.insertBlockBefore(block.id)
+            return
+          }
+          const siblings = loc.parent ? loc.parent.children : ed.store.blocks
+          const prev = loc.index > 0 ? siblings[loc.index - 1] : undefined
+          if (prev && !isDeleted(prev)) {
+            ed.placeCaret(prev.id, plainLen(prev.content))
+            return
+          }
+          const above = mkBlock('')
+          ed.beginUndoEntry()
+          const ok = ed.write((tx) => {
+            tx.insert(above, loc.parent?.id ?? null, 0)
+            return true
+          })
+          if (!ok) {
+            ed.abortUndoEntry()
+            return
+          }
+          ed.structTail({ id: above.id, off: 0 })
         },
         // ⌘↵：与正文同一条命令（岛内接管，避免 CM6 默认插行）
         onToggleTask: () => {
