@@ -1107,7 +1107,8 @@ export function makeBlockEl(
     if (opts.captionWrite) {
       const target = embedRes?.status === 'ok' ? blockLabel(embedRes.target, opts.find) : ''
       body.appendChild(makeCaptionRow(b, {
-        placeholder: target.trim() || t('ui.block.captionAdd'),
+        placeholder: t('ui.block.captionAdd'),
+        collapsedPlaceholder: target.trim() || t('ui.block.captionAdd'),
         onCommit: (text) => opts.captionWrite!(b.id, text),
       }))
     }
@@ -1126,13 +1127,17 @@ export function makeBlockEl(
     if (opts.captionWrite) {
       const firstLine = plainText(b.content).split('\n')[0]?.trim() ?? ''
       body.appendChild(makeCaptionRow(b, {
-        placeholder: firstLine || t('ui.block.captionAdd'),
+        placeholder: t('ui.block.captionAdd'),
+        collapsedPlaceholder: firstLine || t('ui.block.captionAdd'),
         onCommit: (text) => opts.captionWrite!(b.id, text),
       }))
     }
     /**
      * 收起态**不挂 CM6**：折叠是阅读态，长代码不该为一行标题付一台编辑器。
      * 展开由 `toggleCollapse` 重画这一行（`renderBlock`），这才会重新走 `codeBody`。
+     *
+     * ⚠️ `folded` 对**有身体的块**是「收起整个容器」：身体与子块一起藏。只折子块
+     *    是另一条入口（导轨／`toggleChildrenCollapsed`）；一个折叠位不能同时表达两层。
      */
     if (folded) body.dataset.folded = '1'
     embedBodyEl = body

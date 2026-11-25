@@ -72,7 +72,7 @@ export const EN4 = {
   'ui.block.foldExpand': 'Expand (click)',
   'ui.block.foldCollapse': 'Collapse (click)',
   'ui.block.caption': 'Title',
-  'ui.block.captionAdd': 'Add a title (shown when collapsed)',
+  'ui.block.captionAdd': 'Add a title',
   'ui.block.foldLine': 'Collapse / expand child blocks (click)',
   'cmd.editor.toggle-children-collapse': 'Collapse / expand child blocks',
   'ui.block.focusHint': 'Click to focus this block · Shift+click to open in the right pane · ⌘/Ctrl+click to open in a new tab · ⌘/Ctrl+Shift+click to open in a new tab in wide mode · ⌥+click to view properties · Drag to move · Right-click to open the menu',

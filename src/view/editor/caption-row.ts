@@ -33,8 +33,10 @@ function selectContents(el: HTMLElement): void {
 }
 
 export interface CaptionRowOptions {
-  /** 空标题时的占位：代码给首行预览、露面给目标名；它不落盘 */
+  /** 空标题时的占位（展开态）；它不落盘 */
   placeholder: string
+  /** 收起态的空占位：代码给首行预览、露面给目标名——收起时它就是这一块的题 */
+  collapsedPlaceholder?: string
   /** 单行文本（可能为空串＝摘标题）；调用方负责写模型与撤销 */
   onCommit: (text: string) => void
 }
@@ -53,6 +55,7 @@ export function makeCaptionRow(block: Block, opts: CaptionRowOptions): HTMLEleme
   text.setAttribute('role', 'textbox')
   text.setAttribute('aria-label', t('ui.block.caption'))
   text.dataset.ph = opts.placeholder
+  text.dataset.phCollapsed = opts.collapsedPlaceholder ?? opts.placeholder
   text.textContent = captionOf(block)
 
   let composing = false

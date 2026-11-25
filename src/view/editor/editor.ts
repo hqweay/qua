@@ -2712,6 +2712,9 @@ export class BlockEditor {
     /**
      * 身体折起来**不重排整屏**：只改这一行的折叠标记与身体的 `data-folded`。
      * 重排会重建 ViewHost（冻结结果与滚动位置都丢），而折一下并没有改变可见行集合。
+     *
+     * ⚠️ 有子块的身体块走下面 `renderAll` 那条：`folded` 在那里表示「收起整个容器」，
+     *    身体随子块一起藏；只折子块的入口是导轨／`toggleChildrenCollapsed`。
      */
     if (bodyOnly) {
       const el = this.blockEl(id)
