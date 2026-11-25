@@ -144,10 +144,6 @@ function viewEvents(
           if (next && !isDeleted(next)) ed.placeCaret(next.id, 0)
           else ed.insert.insertBlockAfter(block.id, '')
         },
-        // ⌘↵：与块菜单「在下方新建块」同一个动作，总是新建
-        onInsertBelow: () => {
-          active().insert.insertBlockAfter(block.id, '')
-        },
       }),
     (block) => `${block.id}\u0000${prop<string>(block, LANG_PROP) ?? ''}`,
   )

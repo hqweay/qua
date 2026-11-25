@@ -118,8 +118,6 @@ export interface CodeIslandMount {
   onContextMenu?: (anchor: DOMRect) => void
   /** 离开代码块去下一块（末行末尾 ↓/→）：没有下一块时新建一行 */
   onExitBelow?: () => void
-  /** ⌘↵：总在代码块下面新建一块（与块菜单「在下方新建块」同一个动作） */
-  onInsertBelow?: () => void
 }
 
 export interface CodeIslandHandle {
@@ -127,7 +125,7 @@ export interface CodeIslandHandle {
   dispose(): void
 }
 
-export function mountCodeIsland({ getEd, blockId, into, onContextMenu, onExitBelow, onInsertBelow }: CodeIslandMount): CodeIslandHandle {
+export function mountCodeIsland({ getEd, blockId, into, onContextMenu, onExitBelow }: CodeIslandMount): CodeIslandHandle {
   const ed = getEd()
   const initial = ed.store.find(blockId)
   const lang = canonicalLang(initial ? prop<string>(initial, '_lang') : undefined)
@@ -172,9 +170,7 @@ export function mountCodeIsland({ getEd, blockId, into, onContextMenu, onExitBel
         syntaxHighlighting(syntaxColors),
         search({ top: true }),
         keymap.of([
-          // ⌘↵ 总在代码块下面新建一块（与块菜单「在下方新建块」同一个动作）；
-          // Enter 仍是代码里的换行，↓/→ 在末行末尾离开到已有下一块。
-          { key: 'Mod-Enter', run: () => { onInsertBelow?.(); return true } },
+          // 退出代码块只走 ↓/→（末行末尾）或块菜单；⌘↵ 留给应用层的任务切换
           { key: 'ArrowDown', run: (v) => exitAtEnd(v) },
           { key: 'ArrowRight', run: (v) => exitAtEnd(v) },
           ...closeBracketsKeymap,
@@ -251,6 +247,25 @@ export function mountCodeIsland({ getEd, blockId, into, onContextMenu, onExitBel
   root.addEventListener('contextmenu', openMenu)
   root.addEventListener('mouseup', ensureCaret)
   view.dom.addEventListener('focusin', markCaret)
+  /**
+   * ⌘↵ 走应用层切任务，`structTail` 会重画这一行，焦点会掉出去。
+   * 只在这种「命令引发的焦点丢失」后补回岛内，用户主动点别处不抢。
+   */
+  let restoreAfterCommand = false
+  const noteCommandKey = (e: KeyboardEvent) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') restoreAfterCommand = true
+  }
+  const onFocusOut = () => {
+    if (!restoreAfterCommand) return
+    restoreAfterCommand = false
+    queueMicrotask(() => {
+      if (disposed) return
+      view.focus()
+      markCaret()
+    })
+  }
+  root.addEventListener('keydown', noteCommandKey, true)
+  view.dom.addEventListener('focusout', onFocusOut)
 
   return {
     root,
@@ -260,7 +275,9 @@ export function mountCodeIsland({ getEd, blockId, into, onContextMenu, onExitBel
       unsubscribe()
       root.removeEventListener('contextmenu', openMenu)
       root.removeEventListener('mouseup', ensureCaret)
+      root.removeEventListener('keydown', noteCommandKey, true)
       view.dom.removeEventListener('focusin', markCaret)
+      view.dom.removeEventListener('focusout', onFocusOut)
       view.destroy()
       root.remove()
     },
