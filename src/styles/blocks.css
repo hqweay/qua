@@ -3669,6 +3669,9 @@ button.blk-auto-chip {
 }
 
 /* 代码块：外层是编辑岛宿主（吃满行宽），内层 CM6 自己滚；高度上限走 token */
+.blk[data-code='1'] > .tx {
+  display: none;
+}
 .blk-code-host {
   flex: 1 1 auto;
   min-width: 0;

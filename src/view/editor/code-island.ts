@@ -116,6 +116,10 @@ export interface CodeIslandMount {
   getEd: () => BlockEditor
   blockId: string
   into: HTMLElement
+  /** 右键菜单：岛里没有外层编辑器的菜单委托，得由装配层接回来 */
+  onContextMenu?: (anchor: DOMRect) => void
+  /** 在代码块下方新建一块（⌘↵）：代码里换行归 CM6，离开要一条显式出口 */
+  onExitBelow?: () => void
 }
 
 export interface CodeIslandHandle {
@@ -123,7 +127,7 @@ export interface CodeIslandHandle {
   dispose(): void
 }
 
-export function mountCodeIsland({ getEd, blockId, into }: CodeIslandMount): CodeIslandHandle {
+export function mountCodeIsland({ getEd, blockId, into, onContextMenu, onExitBelow }: CodeIslandMount): CodeIslandHandle {
   const ed = getEd()
   const initial = ed.store.find(blockId)
   const lang = canonicalLang(initial ? prop<string>(initial, '_lang') : undefined)
@@ -166,7 +170,14 @@ export function mountCodeIsland({ getEd, blockId, into }: CodeIslandMount): Code
         closeBrackets(),
         syntaxHighlighting(syntaxColors),
         search({ top: true }),
-        keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...foldKeymap, indentWithTab]),
+        keymap.of([
+          { key: 'Mod-Enter', run: () => { flushUndo(); onExitBelow?.(); return true } },
+          ...closeBracketsKeymap,
+          ...defaultKeymap,
+          ...searchKeymap,
+          ...foldKeymap,
+          indentWithTab,
+        ]),
         languageSlot.of([]),
         islandTheme,
         EditorView.updateListener.of((u) => {
@@ -224,6 +235,13 @@ export function mountCodeIsland({ getEd, blockId, into }: CodeIslandMount): Code
     }
   })
 
+  const openMenu = (e: MouseEvent) => {
+    if (!onContextMenu) return
+    e.preventDefault()
+    markCaret()
+    onContextMenu(new DOMRect(e.clientX, e.clientY, 0, 0))
+  }
+  root.addEventListener('contextmenu', openMenu)
   view.dom.addEventListener('focusin', markCaret)
   view.dom.addEventListener('focusout', flushUndo)
 
@@ -234,6 +252,7 @@ export function mountCodeIsland({ getEd, blockId, into }: CodeIslandMount): Code
       disposed = true
       flushUndo()
       unsubscribe()
+      root.removeEventListener('contextmenu', openMenu)
       view.dom.removeEventListener('focusin', markCaret)
       view.dom.removeEventListener('focusout', flushUndo)
       view.destroy()

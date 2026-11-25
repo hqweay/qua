@@ -1107,12 +1107,14 @@ export function makeBlockEl(
     embedBodyEl = body
     embedMount = () => opts.embedBody?.(b, body)
   } else if (blockTypeOf(b) === CODE_TYPE) {
-    // 正文不是可编辑文本而是 CM6 文档：`.tx` 留空，代码只存在于岛里
+    // 正文不是可编辑文本而是 CM6 文档：`.tx` 留空并让位，代码只存在于岛里
+    el.dataset.code = '1'
     tx.dataset.codeSlot = '1'
     tx.setAttribute('aria-hidden', 'true')
     const body = document.createElement('div')
     body.className = 'blk-code-host'
     body.contentEditable = 'false'
+    body.setAttribute(EDIT_ISLAND_ATTR, '1')
     body.dataset.codeBodyFor = b.id
     embedBodyEl = body
     embedMount = () => opts.codeBody?.(b, body)

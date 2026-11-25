@@ -166,7 +166,7 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     return r !== 'none'
   },
   'core.editor/insert-block': (a, app) => {
-    const id = curBlock(app)
+    const id = S(a.blockId) || curBlock(app)
     if (!id) return false
     const text = S(a.text, '')
     const type = S(a.type, 'paragraph')

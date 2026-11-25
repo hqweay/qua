@@ -22,7 +22,9 @@ import {
   iconOf,
   isDeleted,
   isPropDef,
+  LANG_PROP,
   openAxisOf,
+  prop,
   readEmbed,
   removableBySplice,
   resolveEmbed,
@@ -114,9 +116,31 @@ function viewEvents(
     const vh = getPanels().mountBlockView(block, into, active, 'inline')
     return { root: vh.root, dispose: () => { vh.dispose(); vh.root.remove() } }
   })
-  /** 代码岛的实例缓存：同一块跨行重画不重建，焦点与搜索面板跟着走 */
-  const codeBodies = createRowBodyCache((block, into) =>
-    mountCodeIsland({ getEd: active, blockId: block.id, into }),
+  /** 代码岛的实例缓存：同一块跨行重画不重建；语言变了才换实例（高亮要跟着换） */
+  const codeBodies = createRowBodyCache(
+    (block, into) =>
+      mountCodeIsland({
+        getEd: active,
+        blockId: block.id,
+        into,
+        // 岛里没有外层编辑器的菜单委托：右键回到同一张块菜单，目标显式进请求
+        onContextMenu: (rect) => {
+          const ed = active()
+          ed.bsel.clearBlockSelection()
+          showMenu({
+            kind: 'menu',
+            prefix: 'block/',
+            anchor: rect,
+            target: { blockId: block.id, surface: 'editor' },
+            title: t('menu.title.block'),
+          })
+        },
+        // ⌘↵：代码里换行归 CM6，离开代码块并在下方新建一行是一条显式出口
+        onExitBelow: () => {
+          active().insert.insertBlockAfter(block.id, '')
+        },
+      }),
+    (block) => `${block.id}\u0000${prop<string>(block, LANG_PROP) ?? ''}`,
   )
   /**
    * **自动化身体的运行选择器**（运行按钮的落点）：打开的就是**「如果」的命中集**——

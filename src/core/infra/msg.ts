@@ -1262,6 +1262,7 @@ export const MSG = {
   'menu.label.quote': '引文',
   'menu.label.codeBlock': '代码块',
   'menu.label.turnInto': '转为…',
+  'menu.label.insertBelow': '在下方新建块',
   'menu.label.language': '语言…',
   'ui.code.lang.plain': '纯文本',
   'menu.label.pageRef': '行内引用',
