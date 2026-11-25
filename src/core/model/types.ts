@@ -159,6 +159,8 @@ export function setBlockType(b: Block, typeId: string): boolean {
   if (typeId === DEFAULT_BLOCK_TYPE) delete props._type
   else props._type = typeId
   if (typeId !== CODE_TYPE) delete props._lang
+  // 容器标题只对「身体不是那行字」的骨架有意义；换回普通骨架后它就成了看不见的旧解释
+  if (typeId !== CODE_TYPE) delete props._caption
   // 属性袋也不留空壳：`{}` 与「没有属性」在快照比较里是两种东西
   if (Object.keys(props).length === 0) delete b.props
   else b.props = props

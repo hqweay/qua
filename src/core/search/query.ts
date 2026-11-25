@@ -10,7 +10,7 @@
  * 各写一份就会得到「同一个词，两种结果」。
  */
 import { charsOf, hasHan, latinRuns } from './tokenizer.ts'
-import { isPropDefBlock, type Block } from '../model/model.ts'
+import { captionOf, isPropDefBlock, type Block } from '../model/model.ts'
 import { plainText } from '../model/runs.ts'
 import { walkForest } from '../model/walk.ts'
 import { displayTextOf } from '../identity/alias.ts'
@@ -143,7 +143,9 @@ export function termsMatch(text: string, input: string): boolean {
  * 逐块解析；标签是用户最常直接搜的那一类，其余来源在索引就绪后由 FTS 覆盖。
  */
 function scanTextOf(b: Block, byId: ReadonlyMap<string, Block>): string {
-  let out = plainText(b.content)
+  // 与 FTS 的 content 行同一条口径：容器标题排在最前。
+  const caption = captionOf(b)
+  let out = caption === '' ? plainText(b.content) : `${caption} ${plainText(b.content)}`
   const names: string[] = []
   for (const tid of new Set(tagIdsOf(b))) {
     const t = byId.get(tid)

@@ -55,6 +55,8 @@ import { t } from '../../core/infra/msg.ts'
 import { blockLabel, danglingView, resolveRefs } from '../../core/relations/ref.ts'
 import { createIcon, renderIcon } from '../icons.ts'
 import { buildMarker } from './marker.ts'
+import { makeCaptionRow } from './caption-row.ts'
+import { EDIT_ISLAND_ATTR } from './edit-island.ts'
 import { makeTaggedChip } from './field-affordance.ts'
 
 /** 行高：与 CSS 的 `--ui-line-h` 必须一致（虚拟化算占位高度要用） */
@@ -427,18 +429,9 @@ export function makeTagsEl(
   return el
 }
 
-/**
- * **编辑岛标记**：这一棵子树是**另一个编辑宿主**（挂载区、查询视图、露面行的身体）。
- *
- * 为什么是标记而不是类名判据：本视图里有几处要回答「焦点现在是不是在别人的地盘上」
- * （`ownFocus`／`nestedEditorActive`／行级重画与全量重排的分界）。按 `.sec-mount` 这个类名判，
- * 就等于「只有挂载区算别人的地盘」——每多一种编辑岛，那三处就静默判错一次
- * （光标被抢回来、里层正在打字的节点被重排掉）。判据应该是**这件事本身**。
- *
- * 放在这里（渲染层的契约产地）：它和 `data-block-id`／`data-depth` 是同一类东西 ——
- * 别的层按它选，改名等于破坏契约。
- */
-export const EDIT_ISLAND_ATTR = 'data-edit-island'
+// 契约常量住在叶子模块（题注行也要用，留在这里会形成循环 import）；这里转出去，
+// 既有 `import { EDIT_ISLAND_ATTR } from './block-dom.ts'` 的调用点不用改。
+export { EDIT_ISLAND_ATTR } from './edit-island.ts'
 
 /**
  * **这一次事件发生在别人的岛里吗**：委托到容器上的处理器用它让路。
@@ -567,6 +560,11 @@ export function makeBlockEl(
      */
     codeBody?: (b: Block, into: HTMLElement) => void
     /**
+     * **容器标题**（`_caption`）的写入口：题注行是单行编辑面，读模型、写回由调用方给。
+     * 不接 ⇒ 不画题注行（静态投影与没有标题需求的表面不多一个死控件）。
+     */
+    captionWrite?: (blockId: string, text: string) => void
+    /**
      * **正文里自动化块的身体**（三段式：当／如果／就）。与 `viewBody` 同一条分工
      * （`view` 不 import `ui`、装配层给画法、行内体是另一个编辑宿主）；
      * 「哪一行画」同走 `rowHasInlineViewBody`（自动化块是身体的一种源）。
@@ -617,7 +615,9 @@ export function makeBlockEl(
    */
   const inlineBody = Boolean(opts.viewBody || opts.automationBody || opts.defBody) && rowHasInlineViewBody(r)
   const embedBodyFoldable = Boolean(opts.embedBody) && embedKind === 'view'
-  const foldable = r.hasChildren || inlineBody || embedBodyFoldable
+  /** 代码块的身体（CM6）只在真的接了这个表面时可折；收起态由题注行顶替 */
+  const codeBodyFoldable = Boolean(opts.codeBody) && blockTypeOf(b) === CODE_TYPE
+  const foldable = r.hasChildren || inlineBody || embedBodyFoldable || codeBodyFoldable
   /**
    * gutter 上那个**关闭态开关**：只认 `_use: 'closure'` 的字段（＋合法 `_check`）。
    *
@@ -884,7 +884,7 @@ export function makeBlockEl(
    * ⚠️ 纵向范围由 CSS 定（`top: 块标中心 ＋ gap`、`bottom: 0`），不在这里算像素：
    *    `1lh` 与 `--ui-bullet-size` 是 token，DOM 层不该知道它们的数值。
    */
-  const bodyRow = !r.hasChildren && (inlineBody || embedBodyFoldable)
+  const bodyRow = !r.hasChildren && (inlineBody || embedBodyFoldable || codeBodyFoldable)
   if ((r.hasChildren || bodyRow) && (!folded || bodyRow)) {
     const self = document.createElement('span')
     self.className = 'rail-self'
@@ -1104,6 +1104,13 @@ export function makeBlockEl(
     } else {
       body.dataset.embedBody = 'mirror'
     }
+    if (opts.captionWrite) {
+      const target = embedRes?.status === 'ok' ? blockLabel(embedRes.target, opts.find) : ''
+      body.appendChild(makeCaptionRow(b, {
+        placeholder: target.trim() || t('ui.block.captionAdd'),
+        onCommit: (text) => opts.captionWrite!(b.id, text),
+      }))
+    }
     embedBodyEl = body
     embedMount = () => opts.embedBody?.(b, body)
   } else if (blockTypeOf(b) === CODE_TYPE) {
@@ -1116,8 +1123,20 @@ export function makeBlockEl(
     body.contentEditable = 'false'
     body.setAttribute(EDIT_ISLAND_ATTR, '1')
     body.dataset.codeBodyFor = b.id
+    if (opts.captionWrite) {
+      const firstLine = plainText(b.content).split('\n')[0]?.trim() ?? ''
+      body.appendChild(makeCaptionRow(b, {
+        placeholder: firstLine || t('ui.block.captionAdd'),
+        onCommit: (text) => opts.captionWrite!(b.id, text),
+      }))
+    }
+    /**
+     * 收起态**不挂 CM6**：折叠是阅读态，长代码不该为一行标题付一台编辑器。
+     * 展开由 `toggleCollapse` 重画这一行（`renderBlock`），这才会重新走 `codeBody`。
+     */
+    if (folded) body.dataset.folded = '1'
     embedBodyEl = body
-    embedMount = () => opts.codeBody?.(b, body)
+    embedMount = folded ? null : () => opts.codeBody?.(b, body)
   } else if (blockTypeOf(b) === DIVIDER_TYPE) {
     const rule = document.createElement('span')
     rule.className = 'divider-rule'

@@ -5,8 +5,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  CAPTION_PROP,
   CODE_TYPE,
   LANG_PROP,
+  blockLabel,
+  captionOf,
   QUOTE_TYPE,
   TYPE_DECLS,
   canConvertBlockType,
@@ -63,4 +66,18 @@ test('换骨架准入：身份与只读正文不给转换', () => {
   assert.equal(canConvertBlockType(mkBlock('', { props: { _lists: ['tag'], _aliases: ['标签'] } })), false)
   assert.equal(canConvertBlockType(mkBlock('', { props: { _date: '2020-01-01' } })), false)
   assert.equal(canConvertBlockType(mkBlock('', { props: { _type: 'core/divider' } })), false)
+})
+
+
+test('容器标题：显示名优先于正文投影，空串不算标题；换回普通骨架时清掉', () => {
+  const code = mkBlock('const x = 1', { props: { _type: CODE_TYPE, [CAPTION_PROP]: ' 两数之和 ' } })
+  assert.equal(captionOf(code), '两数之和')
+  assert.equal(blockLabel(code), '两数之和')
+  assert.equal(systemPropViolation(CAPTION_PROP, '两数之和'), null)
+  assert.equal(systemPropViolation(CAPTION_PROP, '   '), 'invalid value for system prop "_caption"')
+  // 不是地址：没有 caption 时仍按正文首行显示
+  assert.equal(blockLabel(mkBlock('const y = 2', { props: { _type: CODE_TYPE } })), 'const y = 2')
+  const plain = { ...code, props: { ...code.props } }
+  assert.equal(setBlockType(plain, 'outline'), true)
+  assert.equal(prop(plain, CAPTION_PROP), undefined)
 })

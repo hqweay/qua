@@ -1089,6 +1089,8 @@ export class RenderOps {
         embedBody: (b, into) => this.ed.embeds.attach(b, into),
         // 代码块的 CM6 岛：与露面身体共用同一张登记/回收表
         codeBody: (b, into) => this.ed.embeds.attachCodeBody(b, into),
+        // 容器标题（代码／露面）：题注行只把文本交回来，写入与撤销归编辑器
+        captionWrite: (blockId, text) => this.ed.setCaption(blockId, text),
         ...(this.ed.emptyPlaceholder !== undefined ? { placeholder: this.ed.emptyPlaceholder } : {}),
         /**
          * **正文里的查询体**：只有装配层接了画法、且这一份装载允许展开时才给。

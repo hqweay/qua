@@ -3672,6 +3672,45 @@ button.blk-auto-chip {
 .blk[data-code='1'] > .tx {
   display: none;
 }
+/*
+ * **容器标题（`_caption`）**：收起态是这一块唯一的一行；展开态只有真有标题时
+ * 才占一行（空标题不凭空多一行 header）。收起时 CM6 真卸掉，标题顶替它。
+ */
+.blk-caption {
+  display: none;
+  flex: 0 0 100%;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  min-width: 0;
+  font-size: var(--ui-fs-md);
+  line-height: var(--ui-lh-relaxed);
+}
+.blk-caption[data-has='1'],
+.blk[data-collapsed='1'] .blk-caption,
+.blk-caption:focus-within {
+  display: flex;
+}
+.blk-caption-text {
+  outline: none;
+  color: var(--ui-text);
+}
+.blk-caption-text[data-empty='1'] {
+  color: var(--ui-text-tertiary);
+}
+.blk-caption-text[data-empty='1']::before {
+  content: attr(data-ph);
+  color: var(--ui-text-tertiary);
+}
+/* 收起态的代码块用一种「合上的盒子」读法：标题就是盒面，正文不占位 */
+.blk[data-collapsed='1'] > .blk-code-host .blk-caption {
+  padding: var(--ui-gap-2) var(--ui-gap-4);
+  background: var(--ui-code-bg);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-md);
+}
+.blk-code-host[data-folded='1'] > .blk-code-body {
+  display: none;
+}
 .blk-code-host {
   flex: 1 1 auto;
   min-width: 0;

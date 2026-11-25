@@ -18,6 +18,7 @@ import {
   UndoStack,
   activeView,
   blockMenuCtxOf,
+  blockTypeOf,
   ensurePageInTx,
   flatten,
   locate,
@@ -54,6 +55,8 @@ import {
   setValue,
   clearValue,
   closureOf,
+  CODE_TYPE,
+  CAPTION_PROP,
   TASK_STATUS_PROP_ID,
   canWriteText,
   canDirectEditText,
@@ -2297,6 +2300,28 @@ export class BlockEditor {
   }
 
   /**
+   * **写容器标题**（`_caption`）：给「身体不是那行字」的块一个显示名。
+   *
+   * 单行：换行折成空格（标题不是一个多行文本框）；空串 ⇒ 摘掉属性，不留空壳。
+   * 每笔一次 undo 条目，连续输入由撤销栈的合并窗口收成一步（与代码岛同一条纪律）。
+   */
+  setCaption(id: string, text: string): boolean {
+    const b = this.store.find(id)
+    if (!b) return false
+    const raw = text.replace(/[\r\n]+/g, ' ')
+    if ((b.props?.[CAPTION_PROP] ?? '') === raw) return false
+    this.beginUndoEntry()
+    const ok = this.write((tx) => {
+      if (raw.trim() === '') tx.clearProp(id, CAPTION_PROP)
+      else tx.setProp(id, CAPTION_PROP, raw)
+      return true
+    })
+    if (ok) this.finishUndoEntry('insert', Date.now())
+    else this.abortUndoEntry()
+    return ok
+  }
+
+  /**
    * 块内替换（程序化编辑入口）：按 plain 偏移切内容，一次 content 写入。
    * 格式与原子随切片自然分家（相邻同段合并、区间盖住的原子整枚消失——都是序列语义）。
    *
@@ -2687,7 +2712,21 @@ export class BlockEditor {
      * 重排会重建 ViewHost（冻结结果与滚动位置都丢），而折一下并没有改变可见行集合。
      */
     if (bodyOnly) {
-      this.paintFold(id)
+      const el = this.blockEl(id)
+      /**
+       * 代码块的身体是 CM6：收起要**真卸掉**（折叠态不挂第二编辑器），展开再重画
+       * 这一行把它挂回来。查询体／投影体不同：它们只藏不卸，冻结结果与滚动还在。
+       */
+      if (el?.dataset.code === '1') {
+        if (isFolded(this.doc, id)) {
+          this.paintFold(id)
+          this.embeds.disposeRow(id)
+        } else {
+          this.renderBlock(id)
+        }
+      } else {
+        this.paintFold(id)
+      }
       this.emitChange('view')
       return
     }
@@ -2704,7 +2743,7 @@ export class BlockEditor {
     else delete el.dataset.collapsed
     const fold = el.querySelector<HTMLElement>(':scope > .left > .fold')
     if (fold) fold.dataset.tip = folded ? t('ui.block.foldExpand') : t('ui.block.foldCollapse')
-    const body = el.querySelector<HTMLElement>(':scope > .blk-view-body, :scope > .blk-embed-body')
+    const body = el.querySelector<HTMLElement>(':scope > .blk-view-body, :scope > .blk-embed-body, :scope > .blk-code-host')
     if (body) {
       if (folded) body.dataset.folded = '1'
       else delete body.dataset.folded
@@ -2751,7 +2790,8 @@ export class BlockEditor {
   private bodyFoldable(b: Block): boolean {
     return (
       (Boolean(this.events.viewBody || this.events.automationBody || this.events.defBody) && inlineBodyKind(b) !== null) ||
-      (Boolean(this.events.embedBody) && rowHasEmbedViewBody(b, (id) => this.store.find(id)))
+      (Boolean(this.events.embedBody) && rowHasEmbedViewBody(b, (id) => this.store.find(id))) ||
+      (Boolean(this.events.codeBody) && blockTypeOf(b) === CODE_TYPE)
     )
   }
 

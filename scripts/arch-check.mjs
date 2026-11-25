@@ -1661,7 +1661,7 @@ function commandDecls() {
   const MODEL = join(ROOT, 'src/core/model/model.ts')
   const REGISTRY = join(ROOT, 'src/core/props/system-props.ts')
   const EXPECTED = new Set([
-    '_type', '_lang', '_icon', '_color', '_date', '_aliases', '_lists', '_display', '_query', '_views', '_activeView', '_defaultFilter', '_defaultDisplayProps', '_defaultShowPaths', '_defaultGroup',
+    '_type', '_lang', '_caption', '_icon', '_color', '_date', '_aliases', '_lists', '_display', '_query', '_views', '_activeView', '_defaultFilter', '_defaultDisplayProps', '_defaultShowPaths', '_defaultGroup',
     '_embed', '_kind', '_format', '_fieldDefs', '_choices', '_choiceScope', '_use', '_check', '_cardinality', '_ownProps', '_uiPosition', '_default',
     '_belongsTo', '_tags', '_mounts', '_deletedAt', '_childProps', '_childPropsFollow', '_childPropsForRefs', '_annotates', '_refTags', '_refView', '_refDomain', '_automation',
   ])

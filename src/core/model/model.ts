@@ -71,6 +71,17 @@ export function isIconValue(v: unknown): boolean {
   return typeof v === 'string' && v.trim() !== ''
 }
 
+/** `_caption` 的形状判据：非空字符串（空串＝没有标题，落盘/写入都不留空壳） */
+export function isCaptionValue(v: unknown): boolean {
+  return typeof v === 'string' && v.trim() !== ''
+}
+
+/** 容器标题的读口径：去掉首尾空白，空串＝没有标题（调用点不再各自 trim） */
+export function captionOf(b: Block): string {
+  const v = prop<string>(b, CAPTION_PROP)
+  return typeof v === 'string' ? v.trim() : ''
+}
+
 /**
  * 身份色（色板 key，**封闭集**）。「无颜色」是合法态不是错误态：缺席＝中性。
  *
@@ -113,6 +124,17 @@ export const DELETED_AT_PROP = '_deletedAt' as const
  * 它是渲染提示不是内容：换语言不改写正文，撤销一步全回。
  */
 export const LANG_PROP = '_lang'
+
+/**
+ * **容器标题**（`_caption`）：给「身体不是那行字」的块（代码、露面、将来的图片/自定义）
+ * 一个**显示名**。
+ *
+ * ⚠️ 它不是地址：不参与 `_aliases` 的唯一性，不能被 `((…))` 按名引用。
+ *    读侧只经 `blockLabel` 露面（引用 chip、面包屑、搜索行）；正文/复制不改。
+ * ⚠️ 只挂在这些块上（`canHaveBodyCaption`）：正文已经是名字的块（查询/自动化/定义）
+ *    再挂一份，就成了同一个块两个名字。
+ */
+export const CAPTION_PROP = '_caption'
 
 /**
  * **视图配置**（`ViewConfig[]`，见 `core/view.ts`）：
@@ -236,6 +258,7 @@ export function hasLiveChildren(b: Block): boolean {
 export type SystemPropId =
   | '_type'
   | typeof LANG_PROP
+  | typeof CAPTION_PROP
   | typeof ICON_PROP
   | typeof COLOR_PROP
   | '_date'

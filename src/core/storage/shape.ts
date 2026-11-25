@@ -9,7 +9,7 @@
  * 适配器只负责**字节的进与出**（见 `local-storage.ts` 的信封）；
  * 「这些字节是不是一份能打开的库」归这里。
  */
-import { ACTIVE_VIEW_PROP, ALIASES_PROP, COLOR_PROP, DISPLAY_PROP, ICON_PROP, LISTS_PROP, VIEWS_PROP, isColorValue, isDisplayValue, isIconValue, isListsValue, type Block, type Doc, type FoldState } from '../model/model.ts'
+import { ACTIVE_VIEW_PROP, ALIASES_PROP, CAPTION_PROP, COLOR_PROP, DISPLAY_PROP, ICON_PROP, LISTS_PROP, VIEWS_PROP, isCaptionValue, isColorValue, isDisplayValue, isIconValue, isListsValue, type Block, type Doc, type FoldState } from '../model/model.ts'
 import { isAliasesValue, LEGACY_ALIAS_PROP } from '../identity/alias.ts'
 import { isMountsValue, MOUNTS_PROP } from '../views/mount.ts'
 import { canonicalViewRef, EMBED_PROP } from '../views/embed.ts'
@@ -288,6 +288,8 @@ function isBlock(x: unknown): x is Block {
   if (date !== undefined && !isJournalDate(date)) return false
   const icon = b.props[ICON_PROP]
   if (icon !== undefined && !isIconValue(icon)) return false
+  const caption = b.props[CAPTION_PROP]
+  if (caption !== undefined && !isCaptionValue(caption)) return false
   const color = b.props[COLOR_PROP]
   if (color !== undefined && !isColorValue(color)) return false
   const kind = b.props['_kind']
