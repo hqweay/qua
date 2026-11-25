@@ -17,7 +17,7 @@ import { BlockStore } from './core/model/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
 import { dockKey, openAxisOf, validSurfaceRef } from './core/index.ts'
 import type { Op } from './core/kb/types.ts'
-import { BlockEditor } from './view/editor/editor.ts'
+import { BlockEditor, clearRefBadgeCache, setRefBadgeSource } from './view/editor/editor.ts'
 import { inputSession } from './view/editor/input-session.ts'
 import { editorRun } from './view/editor/editor-run.ts'
 import { fillBlockText } from './view/editor/block-dom.ts'
@@ -331,6 +331,30 @@ if (worksetBoot) kb.setCatalog(worksetBoot.catalog)
 let derivedReady =
   worksetBoot?.catalog.meta.derivedState === 'ready' &&
   worksetBoot.catalog.meta.derivedPathVersion === DERIVED_PATH_VERSION
+
+/**
+ * 引用角标的全库批查**只装一次**：正文、窗口、挂载区、查询视图的编辑器共用它。
+ * 早先它是正文编辑器的私有选项 ⇒ 同一块正文报派生表全数、窗口报工作集子集。
+ * 这里的闭包读活引用（换库/重建后照旧拿到当前 client 与 ready 状态）。
+ */
+setRefBadgeSource(async (ids) => {
+  if (!libraryClient || !derivedReady) return null
+  const r = await libraryClient.relations(ids)
+  if (r.status !== 'ok') throw new Error(r.status === 'error' ? r.error : r.status)
+  if (!r.value.ready) return null
+  const map = new Map<string, RelationEdge[]>()
+  for (const row of r.value.rows) {
+    const list = map.get(row.to_id) ?? []
+    list.push({
+      from: row.from_id,
+      to: row.to_id,
+      kind: row.kind as RelationKind,
+      ...(row.count !== null && row.count !== undefined ? { count: row.count } : {}),
+    })
+    map.set(row.to_id, list)
+  }
+  return map
+})
 
 /**
  * **派生表的后台重建**（启动后错峰）：表还是 `pending`（迁移来的库没跑过全量），
@@ -1414,6 +1438,8 @@ function swapWorkspace(next: Workspace, save: boolean): void {
   device.folded = {}
   scheduleDeviceSave()
   blocks.reset(next.blocks)
+  // 角标的全库答案按库算：旧库的缓存不能跟着块 id 过河
+  clearRefBadgeCache()
   const p = activeBlock()
   ed = mainEd
   applyChrome()
@@ -2262,25 +2288,6 @@ ed = new BlockEditor({
   container: editorEl,
   // 工作集装载：触发链落点按名字复用未装载的目标（先装再落，不建重复身份）
   ensureLoaded: ensureDocsLoaded,
-  // 引用角标的全库计数：派生表 ready 才查（未 ready 回 null ⇒ 退回工作集口径）
-  relationsFor: async (ids) => {
-    if (!libraryClient || !derivedReady) return null
-    const r = await libraryClient.relations(ids)
-    if (r.status !== 'ok') throw new Error(r.status === 'error' ? r.error : r.status)
-    if (!r.value.ready) return null
-    const map = new Map<string, RelationEdge[]>()
-    for (const row of r.value.rows) {
-      const list = map.get(row.to_id) ?? []
-      list.push({
-        from: row.from_id,
-        to: row.to_id,
-        kind: row.kind as RelationKind,
-        ...(row.count !== null && row.count !== undefined ? { count: row.count } : {}),
-      })
-      map.set(row.to_id, list)
-    }
-    return map
-  },
   // 「点空白建块」的监听面 = #doc：只监听 editorEl 的话，点它下方气口不触发
   blankArea: chrome.blankAreaEl,
   // 共享 store：块是活引用；marks/atoms/undo 也是共享的

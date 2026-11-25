@@ -192,6 +192,53 @@ export type Run = <R>(
 /** 滚动联动换窗的提前量（行）：贴着窗口边这几行以内就换，免得看到占位区 */
 const WINDOW_SLACK = 4
 
+/**
+ * 引用角标的**全库口径只有这一份来源与缓存**（2026-11-25 实测：正文 16／窗口 12）。
+ *
+ * 正文、窗口、挂载区、查询视图共用同一台 store，但只有装配层拿得到派生表。
+ * 早先 fetch 是正文编辑器的私有选项，其余编辑器退回工作集子集 ⇒ 同一块在两个表面
+ * 报不同数。把 source 与 cache 放在模块层：每台编辑器照自己可见的 ids 触发批查，
+ * 命中的答案所有表面共用；换库时由装配层清一次。返回 `null` 表示派生表还没就绪，
+ * 此时仍退回工作集口径（半表不可信）。
+ */
+type RefBadgeSource = (ids: readonly string[]) => Promise<Map<string, readonly RelationEdge[]> | null>
+let refBadgeSource: RefBadgeSource | null = null
+const refBadgeCache = new Map<string, readonly RelationEdge[]>()
+let refBadgeFetch: Promise<void> | null = null
+
+/** 装配层只设一次；闭包读活引用，换库不需要重设 */
+export function setRefBadgeSource(fn: RefBadgeSource): void {
+  refBadgeSource = fn
+}
+
+/** 换库/作废派生表时清缓存：旧数字不能跟着块 id 过河 */
+export function clearRefBadgeCache(): void {
+  refBadgeCache.clear()
+}
+
+/** 并发的几台编辑器共用一次在飞的批查；没查到（未 ready）不写空缓存 */
+async function loadRefBadges(ids: readonly string[]): Promise<void> {
+  const source = refBadgeSource
+  if (!source) return
+  const missing = [...new Set(ids)].filter((id) => !refBadgeCache.has(id))
+  if (missing.length === 0) return
+  if (refBadgeFetch) {
+    await refBadgeFetch
+    return
+  }
+  const job = (async () => {
+    const map = await source(missing)
+    if (!map) return
+    for (const [id, edges] of map) refBadgeCache.set(id, edges)
+  })()
+  refBadgeFetch = job
+  try {
+    await job
+  } finally {
+    if (refBadgeFetch === job) refBadgeFetch = null
+  }
+}
+
 export interface ViewOpts {
   container: HTMLElement
   // ⚠️ 加回调（装配层 → 事件层的通知）只有一条通道：本接口加字段 → 构造器赋值 →
@@ -312,13 +359,6 @@ export interface ViewOpts {
    * （新建就是第二个同名身份）。省略 ＝ 整库模式（所有块都在内存里）。
    */
   ensureLoaded?: (ids: readonly string[], then: () => void) => void
-  /**
-   * **入向关系的全库批查**（引用角标的全库计数；装配层注入）。
-   *
-   * 返回 `null` ＝ 派生表还没重建（`derived_state !== 'ready'`）：半表不可信，
-   * 角标退回工作集口径。整库模式省略 ＝ 工作集就是全库。
-   */
-  relationsFor?: (ids: readonly string[]) => Promise<Map<string, readonly RelationEdge[]> | null>
 }
 
 export interface ViewEvents {
@@ -764,14 +804,6 @@ export class BlockEditor {
   private entryGroupDepth = 0
   /** 工作集装载咽喉（装配层注入；省略 ＝ 整库模式）。触发链落点按名字复用未装载目标用 */
   readonly ensureLoaded: ViewOpts['ensureLoaded']
-  /** 入向关系全库批查（装配层注入；省略 ＝ 整库模式） */
-  readonly relationsFor: ViewOpts['relationsFor']
-  /**
-   * **引用角标的全库答案缓存**（targetId → 入向边）。
-   * 只在派生表 ready 时由批查填入；未命中的 id 退回工作集口径（部分装载下是子集，
-   * 这是登记过的窗口，批查完成即自愈）。
-   */
-  private relationsCache = new Map<string, readonly RelationEdge[]>()
   private relationsPending = false
   private relationsTimer: number | null = null
   /** store 订阅与事件绑定的卸载函数（`dispose` 用；视图被移除后不该继续收通知） */
@@ -787,7 +819,6 @@ export class BlockEditor {
     this.rootRemoveFill = o.rootRemoveFill !== false
     this.structuralScope = o.structuralScope ?? 'document'
     this.ensureLoaded = o.ensureLoaded
-    this.relationsFor = o.relationsFor
     // 写入口不再无条件作废字段表：正文写入不碰标签声明/定义，缓存键是修订号＋索引身份
     this.write = (fn, source, opts) => {
       // 发起写的编辑器就是自己（见 `Run` 的 source 口径）：不注入的话，装配层的
@@ -1360,23 +1391,21 @@ export class BlockEditor {
   }
 
   /**
-   * **引用角标的全库口径**：派生表批查的缓存优先，未命中退回工作集。
-   * 缓存只在派生表 ready 时填入（`relationsFor` 回 null 就不填）——
-   * 半表当真会让角标「看起来是 0」，比少几个更糟。
+   * **引用角标的全库口径**：共享缓存优先，未命中退回工作集。
+   * 缓存只在派生表 ready 时填入（source 回 null 就不填）——半表当真会让角标「看起来是 0」。
    */
   badgeSourcesOf(id: string): readonly RelationEdge[] {
-    const cached = this.relationsCache.get(id)
-    return cached ?? relationsTo(this.store.index, id)
+    return refBadgeCache.get(id) ?? relationsTo(this.store.index, id)
   }
 
-  /** 编辑让某目标的角标过期：缓存摘掉（退回工作集口径），错峰补一次批查 */
+  /** 编辑让某目标的角标过期：共享缓存摘掉（退回工作集口径），错峰补一次批查 */
   invalidateRefBadge(targets: readonly string[]): void {
-    for (const id of targets) this.relationsCache.delete(id)
+    for (const id of targets) refBadgeCache.delete(id)
     this.scheduleRefBadgePrefetch()
   }
 
   private scheduleRefBadgePrefetch(): void {
-    if (!this.relationsFor || this.relationsTimer !== null) return
+    if (!refBadgeSource || this.relationsTimer !== null) return
     this.relationsTimer = window.setTimeout(() => {
       this.relationsTimer = null
       this.prefetchRefBadges()
@@ -1384,19 +1413,16 @@ export class BlockEditor {
   }
 
   private prefetchRefBadges(): void {
-    const fetch = this.relationsFor
-    if (!fetch || this.relationsPending) return
-    const ids = [...new Set(flatten(this.doc).map((b) => b.id))].filter((id) => !this.relationsCache.has(id))
+    if (!refBadgeSource || this.relationsPending) return
+    const ids = [...new Set(flatten(this.doc).map((b) => b.id))].filter((id) => !refBadgeCache.has(id))
     if (ids.length === 0) return
     this.relationsPending = true
-    void fetch(ids)
-      .then((map) => {
-        if (map === null) return
-        for (const [to, edges] of map) this.relationsCache.set(to, edges)
+    void loadRefBadges(ids)
+      .then(() => {
         // 只重画「全库答案 ≠ 工作集答案」的行：整页重画会让折叠/选区白抖一次
         for (const id of ids) {
-          if (!this.relationsCache.has(id)) continue
-          const full = this.relationsCache.get(id)!.length
+          if (!refBadgeCache.has(id)) continue
+          const full = refBadgeCache.get(id)!.length
           const partial = relationsTo(this.store.index, id).length
           if (full !== partial && this.blockEl(id)) this.renderBlock(id)
         }
