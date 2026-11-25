@@ -243,6 +243,8 @@ export interface MountAreaDeps {
    * 初始是否展开。日记流里只有今天展开，更早的天是一行摘要（一行 DOM ＋ 不建编辑器）。
    */
   expanded?: boolean
+  /** 实例被摘掉：装配层把这台从「按宿主同刷」的注册表里退掉 */
+  onDispose?: () => void
 }
 
 /** 一栏装载什么：根块 ＋ 每个根行的面包屑（祖先链，不含自己） */
@@ -589,6 +591,7 @@ export class MountArea {
     for (const v of this.tabViews.values()) v.dispose()
     this.tabViews.clear()
     this.block.dispose()
+    this.deps.onDispose?.()
   }
 
   /**

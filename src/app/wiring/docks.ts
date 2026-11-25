@@ -54,8 +54,6 @@ import {
 } from '../../ui/dock/dock.ts'
 import { trashCard, trashScope, type DockContentDeps } from '../../ui/dock/dock-content.ts'
 import { SearchCard } from '../../ui/cards/search-card.ts'
-import { emptyCardList } from '../../ui/chrome/card-parts.ts'
-import type { DockMountCard } from '../../ui/cards/mount-card.ts'
 import { calendarCard } from '../../ui/cards/calendar-card.ts'
 import { BelongsTree, type DirectoryFace } from '../../ui/cards/belongs-tree.ts'
 import type { BelongsRow } from '../../core/relations/hierarchy.ts'
@@ -114,13 +112,6 @@ export type DocksDeps = {
     onConfirm: () => void
   }) => void
   /**
-   * 挂载区卡的**工厂**：由装配入口在依赖就绪后注入。
-   *
-   * 为什么是工厂而不是现成实例：卡身那台挂载区的编辑器要接 `viewEvents`／活动编辑器／
-   * 写事务，那些在装配入口的初始化顺序里晚于本节的构造；按需建（卡第一次出现时）才拿得到。
-   */
-  createMountCard: (side: 'left' | 'right') => DockMountCard
-  /**
    * 搜索卡（**工具面住进槽**）的工厂：与反链卡同一条理由——编辑器要接活动编辑器、
    * 写事务、事件表，那些在装配顺序里晚于本节；按需建才拿得到。
    */
@@ -145,13 +136,6 @@ export function setupDocks(deps: DocksDeps) {
   const { kb } = deps
   /** 窗口管理器在槽挂载之后创建；重画早于它就跳过窗口、只画派生卡 */
   let windows: { left: DockWindows; right: DockWindows } | null = null
-  /**
-   * 挂载区卡**每个槽一份**（同一张卡可以同时出现在两槽）。
-   *
-   * 懒建：只有 `cards` 里有它时才建；从 `cards` 里摘掉就 dispose —— 一台 contenteditable
-   * 留在后台跟着每次编辑重查，是白付的账。
-   */
-  const mountCards = new Map<'left' | 'right', DockMountCard>()
 
   /**
    * **纯 chrome 的卡**（派生卡、收纳盘）的壳按「槽 + key」缓存：header 只依赖卡的身份
@@ -196,22 +180,6 @@ export function setupDocks(deps: DocksDeps) {
     return el
   }
 
-  function ensureMountCard(side: 'left' | 'right'): DockMountCard {
-    let inst = mountCards.get(side)
-    if (!inst) {
-      inst = deps.createMountCard(side)
-      mountCards.set(side, inst)
-    }
-    return inst
-  }
-
-  /** 这一槽没有挂载区卡了 ⇒ 把它的编辑器收掉（订阅、编辑器、卡壳一起） */
-  function dropMountCard(side: 'left' | 'right'): void {
-    const inst = mountCards.get(side)
-    if (!inst) return
-    inst.dispose()
-    mountCards.delete(side)
-  }
 
   /**
    * 搜索卡**每个槽一份**（同一张面可以同时出现在两槽）：懒建、摘卡 dispose，
@@ -606,8 +574,7 @@ export function setupDocks(deps: DocksDeps) {
     const contentIds = cards.flatMap((e) => (e.kind === 'block' ? [e.block] : []))
     const winCards = windows ? windows[side].sync(contentIds) : new Map<string, HTMLElement>()
     const entries: DockCardEntry[] = []
-    /** 这一槽里有没有挂载区卡／搜索卡（没有就把它们那台编辑器收掉） */
-    let hasMountCard = false
+    /** 这一槽里有没有搜索卡（没有就把它那台编辑器收掉） */
     let hasSearch = false
     for (const card of cards) {
       // 种类由 `kind` 说，不由字符串形状猜：改 id 生成方案也不会让某种卡整片消失
@@ -622,15 +589,6 @@ export function setupDocks(deps: DocksDeps) {
         continue
       }
       if (card.kind === 'derived') {
-        /**
-         * 挂载区卡是**持久卡壳**（里面有一台 contenteditable）：每次重画只 `sync`，
-         * 不重建元素。其余派生卡是纯派生 DOM，照旧每次现造。
-         */
-        if (card.card === 'mount') {
-          hasMountCard = true
-          entries.push({ id: key, el: ensureMountCard(side).sync(), size: 'large' })
-          continue
-        }
         entries.push({ ...derivedCard(side, card.card), size: 'large' })
         continue
       }
@@ -652,7 +610,6 @@ export function setupDocks(deps: DocksDeps) {
       const el = winCards.get(card.block)
       if (el) entries.push({ id: key, el, size: 'large' })
     }
-    if (!hasMountCard) dropMountCard(side)
     if (!hasSearch) dropSearch(side)
     renderDockStack(slot.stack, entries, t('ui.dock.empty'), deps.prefs().dock.solo[side])
     syncTileCols(slot.stack)
@@ -1005,17 +962,6 @@ export function setupDocks(deps: DocksDeps) {
       }
       case 'belongs':
         return finish(belongsTree.card())
-      case 'mount':
-        /**
-         * 正常路径在 `renderSlot` 里被**持久实例**接管（`ensureMountCard`）；
-         * 走到这里只可能是装配早期（实例还没建出来的那一瞬）——
-         * 给一张空壳，下一次重画就有内容，不在这里再造第二台挂载区。
-         */
-        return finish({
-          id: 'mount',
-          title: t('ui.dock.mount'),
-          body: emptyCardList(t('ui.mount.empty.refs')),
-        })
       case 'trash':
         return finish(trashCard(dockDeps))
       case 'calendar':

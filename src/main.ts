@@ -36,7 +36,6 @@ import {
 } from './core/commands/index.ts'
 import { Layers } from './ui/overlay/layers.ts'
 import { DockWindows } from './ui/dock/dock-windows.ts'
-import { DockMountCard } from './ui/cards/mount-card.ts'
 import { SearchCard } from './ui/cards/search-card.ts'
 import { mountDockSlot } from './ui/dock/dock.ts'
 import { createIcon } from './view/icons.ts'
@@ -872,26 +871,6 @@ const { renderDocks, openWindow, closeCard, addTile, addDerived, addUtility, add
   showTileMenu: (side, command, anchor, trigger) => menus.showTileMenu(side, command, anchor, trigger),
   toast: (msg, kind) => app.toast(msg, kind),
   confirm: (o) => layers.confirm(o),
-  /**
-   * 挂载区卡：**与正文块底那台挂载区同一台组件**（宿主＝当前对象，随导航换一次装载）。
-   *
-   * 懒建：卡第一次出现时才建实例。工厂本身在装配早期传入，但真正调用发生在
-   * 首次重画——那时 `panels`／`cardStateFor`／`closeCard` 都已就位（`panels` 的
-   * 工厂造的是中心段尾那台的兄弟实例：同一份判据，另一份表面 spec）。
-   */
-  createMountCard: (side) =>
-    new DockMountCard({
-      target: () => ws.activeId,
-      createArea: (target) => panels.createDockMountArea(target),
-      state: () => cardStateFor(side, 'mount'),
-      onClose: () => closeCard(side, 'mount'),
-      // 活动编辑器正指着卡里那台时退回正文：摘卡之后键位不能指着一台已卸事件的编辑器
-      onDispose: (editor) => {
-        if (ed !== editor) return
-        ed = mainEd
-        scheduleBadge()
-      },
-    }),
   /**
    * 搜索卡（**工具面住进槽**）：与 ⌘K 浮层、中心 tab 是同一份 `SearchFace`。
    * 依赖经 `searchFaceDeps()` 现取（引擎/打开/晋升/复制都在装配层）；卡壳状态与关闭
@@ -2483,7 +2462,7 @@ ed.events.undoOps = (ops) => {
 let diag: ReturnType<typeof setupDiagnostics>
 const {
   renderMounts,
-  createDockMountArea,
+  createWindowMountArea,
   renderProperties,
   scheduleProperties,
   pickRefValue,
@@ -2545,7 +2524,7 @@ const {
 })
 panels = {
   renderMounts,
-  createDockMountArea,
+  createWindowMountArea,
   renderProperties,
   scheduleProperties,
   pickRefValue,
@@ -2813,6 +2792,7 @@ menus = setupCardMenus({
   run,
   wireEditor: wireViewEditor,
   mountViewRoot: panels.mountBlockView,
+  mountWindowArea: (block) => panels.createWindowMountArea(block),
   syncSections,
   scheduleSave,
   scheduleBadge,

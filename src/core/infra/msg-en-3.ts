@@ -152,7 +152,6 @@ export const EN3 = {
   'ui.view.renameCancel': 'Cancel',
   'ui.view.remove': 'Delete this view',
   'ui.dock.resize': 'Drag to resize; double-click to restore default',
-  'ui.dock.mount': 'Dock',
   'ui.dock.trash': 'Trash',
   'ui.dock.trashEmpty': 'Trash is empty',
   'ui.dock.trashBlank': '(empty block)',

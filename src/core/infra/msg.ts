@@ -1120,7 +1120,6 @@ export const MSG = {
   'ui.view.renameCancel': '取消',
   'ui.view.remove': '删除这一视图',
   'ui.dock.resize': '拖动调整宽度；双击恢复默认',
-  'ui.dock.mount': '挂载区',
   'ui.dock.trash': '回收站',
   'ui.dock.trashEmpty': '回收站是空的',
   'ui.dock.trashBlank': '（空块）',

@@ -318,18 +318,17 @@
   padding: 0 var(--ui-gap-2) var(--ui-gap-3);
 }
 /*
- * 右槽挂载区卡：卡身就是块底那台挂载区（同一台组件），样式沿用 `.mount`。
- * 卡内收掉两条**属于中心段尾**的外距：段尾的 margin-top 是它跟正文之间的呼吸空隙，
- * 卡壳自己的边框已经给了上下文；margin-inline 的 gutter 内缩是「跟着正文竖线对齐」，
- * 卡身有自己的边距，再缩一层就是两套对齐语法。
+ * 侧槽窗口 body 尾部的挂载区：块底那台组件原样搬来，样式沿用 `.mount`。
+ * 段尾的 margin-top 是它跟正文之间的呼吸空隙，卡壳自己的边框已经给了上下文；
+ * margin-inline 的 gutter 内缩是「跟着正文竖线对齐」，窗口有自己的边距，再缩一层就是两套对齐语法。
  * 编辑器宿主补两行兜底（与中心段尾同一档）：最小高度撑住空态，
  * `outline: none` 别让聚焦描边画在卡里。
  */
-.dock-card-body .mount {
+.dock-window-body .mount {
   margin-top: 0;
   margin-inline: 0;
 }
-.dock-card-body .mount-editor {
+.dock-window-body .mount-editor {
   min-height: var(--ui-line-h);
   outline: none;
 }
@@ -388,7 +387,7 @@
 .dock-window-editor {
   min-width: 0;
 }
-/* 窗口身体：根行编辑器 ＋（可选）根块的视图体；与中心的「根行 ＋ 段尾视图」同构 */
+/* 窗口身体：根行编辑器 ＋（可选）根块的视图体 ＋ 段尾挂载区；与中心同构 */
 .dock-window-body {
   min-width: 0;
 }

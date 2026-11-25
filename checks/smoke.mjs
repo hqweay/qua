@@ -13068,7 +13068,7 @@ await check('T119 单卡：只留这一张；目标不可见时自动失效；�
     solo: window.__qua.snapshot().dock.solo.right,
     hidden: document.getElementById('inspect-card')?.hidden === true,
     stack: document.querySelector('#dock-right .dock-stack')?.dataset.solo ?? '',
-    backrefs: getComputedStyle(document.querySelector('#dock-right .dock-card[data-card-id="mount"]')).display,
+    backrefs: getComputedStyle(document.querySelector('#dock-right .dock-card[data-card-id="trash"]')).display,
   }))
   assert(fallback.solo === 'inspect', `单卡状态应保留：${JSON.stringify(fallback)}`)
   assert(fallback.hidden, `检视卡此时应不可见：${JSON.stringify(fallback)}`)
@@ -13161,12 +13161,24 @@ await check('T120 卡片拖拽：槽内排序、跨槽移动、一个块只留�
   return `槽内 b 到 a 前；跨槽 b→左（日历前）；Shift+点移回右且只有一张；再拖回左仍可读；检视卡右→左→右`
 })
 
-await check('T121 右槽挂载区卡的引用栏与正文同一种东西：一列可编辑源块，带面包屑', async () => {
+await check('T121 块窗口 body 的挂载区引用栏与正文同一种东西：一列可编辑源块，带面包屑', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
-  await page.waitForTimeout(350) // 卡首次装载（查询走索引，但仍走一次拍板）
-  const card = '#dock-right .dock-card[data-card-id="mount"]'
+  const hostId = await page.evaluate(() => window.__qua.snapshot().activeId)
+  await shiftClickMarker(page, hostId)
+  await page.waitForTimeout(350) // 窗口与它 body 尾的挂载区首次装载（查询走索引，但仍走一次拍板）
+  const card = `${windowSel('right', hostId)} .mount`
+  /** 同一解剖：中心段尾与窗口 body 各一台，DOM 不互搬 */
+  const surfaces = await page.evaluate((sel) => ({
+    center: document.querySelectorAll('#editor .mount').length,
+    window: document.querySelectorAll(sel).length,
+    same: document.querySelector('#editor .mount') === document.querySelector(sel),
+  }), card)
+  assert(surfaces.center === 1 && surfaces.window === 1 && !surfaces.same,
+    `窗口与中心应各有一台挂载区：${JSON.stringify(surfaces)}`)
+  await page.locator(`${card} .mount-tabs .mount-tab[data-tab="refs"]`).click()
+  await page.waitForTimeout(200)
   /**
    * 第一页被「写作示范」里的**两块**分别引用 ⇒ 卡里两行真实块（不是按来源根聚合的摘要行）。
    * 行首面包屑说明「这一句住哪」，与正文「引用」栏同一条机制。
@@ -13187,8 +13199,7 @@ await check('T121 右槽挂载区卡的引用栏与正文同一种东西：一�
   assert(rows.every((r) => r.crumb === '写作示范'), `每行要带来源路径（页名）：${JSON.stringify(rows)}`)
 
   /**
-   * **卡里直接编辑**（不是点开某个页面）：点这一行的文本、在行尾敲一个字。
-   * 判据读**模型**（源块在另一页，正文里此刻没有它），再读同一行的 DOM。
+   * **窗口 body 里直接编辑**（不是点开某个页面）：点这一行的文本、在行尾敲一个字。
    */
   const src = rows[0]
   const rowTx = `${card} .blk[data-block-id="${src.id}"] > .tx`
@@ -13254,8 +13265,7 @@ await check('T121 右槽挂载区卡的引用栏与正文同一种东西：一�
   await page.waitForTimeout(120)
 
   /**
-   * 面包屑就地展开：点来源页，卡里装成那一页的子树（中心/历史不动）。
-   * 与正文「引用」栏/右槽窗口共用 `expandContexts`，不是卡片自己发明的第二套。
+   * 面包屑就地展开：点来源页，窗口 body 里装成那一页的子树（中心/历史不动）。
    */
   await page.locator(`${card} .blk-context-cell`).first().click()
   await page.waitForTimeout(200)
@@ -13283,7 +13293,7 @@ await check('T121 右槽挂载区卡的引用栏与正文同一种东西：一�
   assert(after.active === before.active, `反链行 Shift+点不换中心：${before.active} → ${after.active}`)
 
   await ctx.close()
-  return `卡里两行源块（面包屑「写作示范」）；直接编辑/⌘Z；路径显隐开关；面包屑就地展开；Shift 开源块`
+  return `窗口 body 里两行源块（面包屑「写作示范」）；直接编辑/⌘Z；路径显隐开关；面包屑就地展开；Shift 开源块；窗口/中心各一台`
 })
 
 await check('T123 标签页成员块标的 Shift ⇒ 右槽窗口；中心不动', async () => {
@@ -14068,21 +14078,25 @@ await check('T132 挂载区：虚拟化滚过之后每段仍只有一个槽（�
   return `${st.secs.length} 段可见：每段 ≤1 个槽，空 data-sec 段 0 个`
 })
 
-await check('T133 挂载区两个表面：中心段尾一台，右槽卡一台（同一台组件，宿主＝当前对象）', async () => {
+await check('T133 挂载区两个表面：中心段尾一台，块窗口 body 一台（同一台组件，宿主＝窗口块）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   const isOpen = await page.evaluate(() => window.__qua.snapshot().dock.right.open)
   if (!isOpen) await page.evaluate(() => window.__qua.invoke('core.dock/toggle-right', {}))
+  await openFirstPage(page)
+  const hostId = await page.evaluate(() => window.__qua.snapshot().activeId)
+  await shiftClickMarker(page, hostId)
   await page.waitForTimeout(400)
-  const st = await page.evaluate(() => ({
-    rightMounts: document.querySelectorAll('#dock-right .mount').length,
-    rightTabs: document.querySelectorAll('#dock-right .mount-tab').length,
-    rightCard: Boolean(document.querySelector('#dock-right .dock-card[data-card-id="mount"]')),
+  const st = await page.evaluate((sel) => ({
+    winMounts: document.querySelectorAll(sel).length,
+    winTabs: document.querySelectorAll(`${sel} .mount-tab`).length,
+    oldCard: Boolean(document.querySelector('#dock-right .dock-card[data-card-id="mount"]')),
     centerMounts: document.querySelectorAll('#editor .mount').length,
-  }))
+  }), `${windowSel('right', hostId)} .mount`)
   assert(st.centerMounts > 0, `中心槽应有挂载区：${JSON.stringify(st)}`)
-  assert(st.rightCard && st.rightMounts === 1 && st.rightTabs > 0, `右槽应有一台挂载区卡（带 tab 条）：${JSON.stringify(st)}`)
+  assert(!st.oldCard, `旧跟随卡应退役：${JSON.stringify(st)}`)
+  assert(st.winMounts === 1 && st.winTabs > 0, `窗口 body 应有一台挂载区（带 tab 条）：${JSON.stringify(st)}`)
   await ctx.close()
-  return `中心 ${st.centerMounts} 个挂载区；右槽卡 1 台、tab ${st.rightTabs} 个`
+  return `中心 ${st.centerMounts} 个挂载区；窗口 body 1 台、tab ${st.winTabs} 个；旧 mount 卡消失`
 })
 
 await check('T134 日记的自定义栏跟随今天：加一栏 ⇒ 推到明天 ⇒ 新今天有、昨天没有 ⇒ 摘掉不丢块', async () => {
@@ -20870,6 +20884,11 @@ await check('T199 关联型引用默认折叠、传递型默认摊开：引用�
   // ② 回到 P：引用栏（派生，默认大纲）出现；关联型**默认折着**，传递型**默认摊开**
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), made.P)
   await page.waitForTimeout(450)
+  await shiftClickMarker(page, made.P)
+  await page.waitForTimeout(300)
+  const mountSel = `${windowSel('right', made.P)} .mount`
+  await page.locator(`${mountSel} .mount-tabs .mount-tab[data-tab="refs"]`).click()
+  await page.waitForTimeout(250)
   await mountTab(page, 'refs')
   await page.waitForTimeout(300)
 
@@ -20915,7 +20934,7 @@ await check('T199 关联型引用默认折叠、传递型默认摊开：引用�
         collapsed: el.dataset.collapsed === '1',
       })),
     }
-  }, '#dock-right .dock-card[data-card-id="mount"]')
+  }, mountSel)
   assert(cardRows.present, `前置：右槽挂载区卡应在：${JSON.stringify(cardRows.present)}`)
   const cardAssoc = cardRows.rows.find((r) => r.id === made.assoc)
   const cardPass = cardRows.rows.find((r) => r.id === made.pass)
@@ -20946,7 +20965,7 @@ await check('T199 关联型引用默认折叠、传递型默认摊开：引用�
 
   // ⑥ 卡的一键同口径：卡是**独立的编辑器实例**，此刻卡上关联型还折着（默认播种）
   //    ⇒ 第一下是「展开」；再点一下才是「折叠」。两个方向都钉。
-  const cardBulk = '#dock-right .dock-card[data-card-id="mount"] [data-refs-bulk="1"]'
+  const cardBulk = `${mountSel} [data-refs-bulk="1"]`
   assert(await page.locator(cardBulk).count() > 0, '前置：挂载区卡抬头应有一键折/展按钮')
   const cardState = () =>
     page.evaluate((sel) => {
@@ -20958,7 +20977,7 @@ await check('T199 关联型引用默认折叠、传递型默认摊开：引用�
         })),
         text: card?.innerText ?? '',
       }
-    }, '#dock-right .dock-card[data-card-id="mount"]')
+    }, mountSel)
   await page.locator(cardBulk).click()
   await page.waitForTimeout(300)
   const cardExpanded = await cardState()
@@ -24391,7 +24410,7 @@ await check('T237 候选引用：片段行高亮名字出现处、一键转成�
   return `提及 ${before.rows} 行（片段高亮＋按钮）→ 一键转换提及消失/引用出现（1 op）→ ⌘Z 换回来`
 })
 
-await check('T239 快速筛选（右槽挂载区卡·引用栏）：候选带计数、点击加入/Shift 排除、加摘可逆；筛选写在这一栏条目上', async () => {
+await check('T239 快速筛选（块窗口 body 的挂载区·引用栏）：候选带计数、点击加入/Shift 排除、加摘可逆；筛选写在这一栏条目上', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   // 两个不同页各有一条块引用**没有既有反链的最后一页** ⇒ 卡里两行、来源两页（每页各命中 1 行）
@@ -24416,8 +24435,11 @@ await check('T239 快速筛选（右槽挂载区卡·引用栏）：候选带计
   })
   assert(setup.q !== setup.r, `前置：两个来源页名不同（chip 按名字点）：${JSON.stringify(setup)}`)
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.P)
+  await shiftClickMarker(page, setup.P)
   await page.waitForTimeout(450)
-  const card = '#dock-right .dock-card[data-card-id="mount"]'
+  const card = `${windowSel('right', setup.P)} .mount`
+  await page.locator(`${card} .mount-tabs .mount-tab[data-tab="refs"]`).click()
+  await page.waitForTimeout(200)
   const rowCount = () => page.evaluate((sel) => document.querySelectorAll(`${sel} .blk[data-depth="0"]`).length, card)
   assert((await rowCount()) === 2, `前置：卡里两行源块`)
 
@@ -24491,7 +24513,7 @@ await check('T239 快速筛选（右槽挂载区卡·引用栏）：候选带计
   )
 
   await ctx.close()
-  return `候选两页各带计数 1；包含→1 行、Shift 排除→落排除列、逐颗摘除两行全回；筛空说「没有符合筛选的引用」；筛选写在这一栏条目上`
+  return `窗口 body：候选两页各带计数 1；包含→1 行、Shift 排除→落排除列、逐颗摘除两行全回；筛空说「没有符合筛选的引用」；筛选写在这一栏条目上`
 })
 
 await check('T240 快速筛选（引用栏）：大纲筛行；切到表格是同一份 chips；摘空＝无筛选；筛选写在这栏条目上', async () => {

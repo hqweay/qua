@@ -202,7 +202,6 @@ export const DEFAULT_DOCK: DockPrefs = {
     width: null,
     cards: [
       { kind: 'derived', card: 'inspect' },
-      { kind: 'derived', card: 'mount' },
       { kind: 'derived', card: 'trash' },
     ],
   },

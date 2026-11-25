@@ -46,6 +46,7 @@ import { bindDropTarget } from '../../view/dnd.ts'
 import { applyDockCardState, buildDockCard, type DockCardState } from './dock.ts'
 import { EditableBlock } from '../block-ui/editable-block.ts'
 import type { ViewHost } from '../query/query-view.ts'
+import type { MountArea } from '../chrome/mount-area.ts'
 
 export interface DockWindowsDeps {
   store: BlockStore
@@ -79,11 +80,16 @@ export interface DockWindowsDeps {
    * 返回 `ViewHost`：它有 `root`／`sync`／`dispose`，生命周期与这张卡一起。
    */
   mountViewRoot?: (block: Block, into: HTMLElement, source: () => BlockEditor | undefined) => ViewHost | null
+  /**
+   * **窗口 body 尾部的挂载区**：宿主固定＝窗口这一块（装配层造同一台组件）。
+   * 不传就没有块底栏——窗口与中心段尾必须是同一解剖，这里是唯一的接缝。
+   */
+  mountArea: (block: Block) => MountArea
 }
 
 export class DockWindows {
   private readonly deps: DockWindowsDeps
-  private readonly windows = new Map<string, { block: EditableBlock; card: HTMLElement; view: ViewHost | null }>()
+  private readonly windows = new Map<string, { block: EditableBlock; card: HTMLElement; view: ViewHost | null; area: MountArea }>()
   /** 每张卡的上下文展开栈（运行时；块 id → 点过的祖先 id，可能嵌套） */
   private readonly expandedByCard = new Map<string, Set<string>>()
 
@@ -169,8 +175,8 @@ export class DockWindows {
     win.ensureEditor()
 
     /**
-     * 身体 = 根行编辑器 ＋（可选）它的视图体。两者同一张卡、同一份 store；
-     * 视图体的写 source 是这台窗口编辑器（撤销/重画落在这一张卡里）。
+     * 身体 = 根行编辑器 ＋（可选）它的视图体 ＋ 段尾挂载区。三者同一张卡、同一份 store；
+     * 写 source 都是这台窗口编辑器（撤销/重画落在这一张卡里）。
      *
      * **身体画在自己行下的源不走这里**（查询源、children 源激活视图：`rowHasInlineViewBody`，
      * 与正文同一条路）；窗口根宿主只接其余 children/items 源的视图根 ——
@@ -182,7 +188,11 @@ export class DockWindows {
     const view = isViewRoot(block) && !hasQueryBody(block) && !hasChildrenViewBody(block)
       ? (this.deps.mountViewRoot?.(block, body, () => win.ed ?? undefined) ?? null)
       : null
-
+    /**
+     * 段尾挂载区排在身体最后：宿主永远是窗口这一块，不跟上下文展开的临时祖先走。
+     */
+    const area = this.deps.mountArea(block)
+    body.appendChild(area.root)
     const card = buildDockCard(
       {
         id,
@@ -197,7 +207,7 @@ export class DockWindows {
     )
     card.dataset.window = '1'
 
-    const w = { block: win, card, view }
+    const w = { block: win, card, view, area }
     this.windows.set(id, w)
     // 首装载带上祖先 trail：没有展开时它只是地址，展开后才出现「收起上下文」
     this.applyPlan(id)
@@ -207,11 +217,11 @@ export class DockWindows {
   private dispose(id: string): void {
     const w = this.windows.get(id)
     if (!w) return
-    const ed = w.block.ed
-    if (ed) this.deps.onDispose(ed)
+    for (const ed2 of [w.block.ed, w.area.blockEditor]) if (ed2) this.deps.onDispose(ed2)
     w.view?.dispose()
     w.view?.root.remove()
-    w.block.dispose()
+    w.area.dispose()
+    w.area.root.remove()
     w.card.remove()
     this.windows.delete(id)
     this.expandedByCard.delete(id)

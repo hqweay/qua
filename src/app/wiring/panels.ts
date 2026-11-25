@@ -1055,10 +1055,21 @@ export function setupPanels(deps: PanelsDeps) {
   type MountInstance = { area: MountArea; view: ViewHost | null; viewHostId: string }
   const mountInstances = new Map<string, MountInstance>()
   /**
-   * **右槽挂载区卡的那一台**（单例：宿主是当前对象，卡跟着它换）。
-   * 中心段尾的设备状态类改动（看法/分组/增删栏）也要让它跟上——两个表面读的是同一格。
+   * **所有表面的 MountArea 按宿主登记**：中心段尾、侧槽窗口 body、引用 peek。
+   * 看法/分组是「一个宿主一格」的设备状态，三个表面读同一格；继续点名实例会漏，
+   * 所以改状态后一律问这张表，只刷宿主相同的那几台。
    */
-  let dockMountArea: MountArea | null = null
+  interface MountSurfaceEntry {
+    area: MountArea
+    host: () => Block | undefined
+  }
+  const mountSurfaces = new Set<MountSurfaceEntry>()
+  const renderMountHost = (host: Block): void => {
+    for (const entry of mountSurfaces) if (entry.host()?.id === host.id) entry.area.render()
+  }
+  const refreshAllMountEntries = (): void => {
+    for (const entry of mountSurfaces) entry.area.refreshEntries()
+  }
 
   /** 这一段该不该默认展开：日记只展开今天（「今天 = 你要写的那一天」） */
   const expandedFor = (host: Block): boolean => (isJournal(host) ? journalDate(host) === todayISO() : true)
@@ -1307,17 +1318,15 @@ export function setupPanels(deps: PanelsDeps) {
     if (kind === 'outline') delete deps.prefs().mountViews[key]
     else deps.prefs().mountViews[key] = kind
     deps.scheduleDeviceSave()
-    // 设备状态是一格、两个表面都读它：发起面整幅重画，另一面如果正看着同一格也要跟上
-    mountInstances.get(host.id)?.area.render()
-    dockMountArea?.render()
+    // 设备状态是一格、每个宿主每台都读它：按宿主问注册表（窗口/peek 也会跟上）
+    renderMountHost(host)
   }
 
   /**
    * 一台挂载区落在哪个「表面」上，差异只收在这几条里。
    *
-   * 挂载区落两个表面：**中心段尾**每段一份（宿主固定、日记只有今天展开），
-   * **右槽一张卡**（宿主＝当前对象，随导航换一次装载）。写路径、判据、命令全部
-   * 是同一份 —— 差异若散在别处各写一遍，就是同一件事两个答案。
+   * 挂载区落在中心段尾、侧槽窗口 body、引用 peek 三个表面。写路径、判据、命令
+   * 全部同一份 —— 差异若散在别处各写一遍，就是同一件事两个答案。
    */
   interface MountSurface {
     /** 这一面的宿主（段根，或右槽的当前对象） */
@@ -1396,7 +1405,8 @@ export function setupPanels(deps: PanelsDeps) {
 
 
   function createMountArea(spec: MountSurface): MountArea {
-    return new MountArea({
+    let entry: MountSurfaceEntry | undefined
+    const area = new MountArea({
       store: blocks,
       write: editorRun(run, spec.edSource),
       kb,
@@ -1442,9 +1452,8 @@ export function setupPanels(deps: PanelsDeps) {
         if (key === '') delete deps.prefs().mountGroups[mk]
         else deps.prefs().mountGroups[mk] = key
         deps.scheduleDeviceSave()
-        // 设备状态是一格、两个表面都读它（与看法切换同一条）
-        mountInstances.get(hostBlock.id)?.area.render()
-        dockMountArea?.render()
+        // 设备状态是一格、按宿主同刷（与看法切换同一条）
+        renderMountHost(hostBlock)
       },
       setDerivedLens: (hostRef, source, patch) => {
         const args: Record<string, unknown> = { host: hostRef, source }
@@ -1564,12 +1573,18 @@ export function setupPanels(deps: PanelsDeps) {
         return null
       },
       expanded: spec.expanded,
+      // 退册：窗口关闭/段收走/peek 换实例后，注册表不能留下死引用
+      onDispose: () => {
+        if (entry) mountSurfaces.delete(entry)
+      },
     })
+    entry = { area, host: spec.host }
+    mountSurfaces.add(entry)
+    return area
   }
 
   /**
    * 中心段尾的那一台：宿主固定为段根，其余差异按中心表面的口径给。
-   * 右槽卡的那一台见 `createDockMountArea` —— 同一台 `createMountArea`，另一份 spec。
    */
   function createMount(host: Block): MountInstance {
     const hostId = host.id
@@ -1589,32 +1604,32 @@ export function setupPanels(deps: PanelsDeps) {
   }
 
   /**
-   * **右槽挂载区卡的那一台**：宿主＝当前对象，随导航换一次装载（`MountArea.render`
-   * 里的换段判据管状态清空）。装配早于实例创建的引用全部走惰性 getter ——
-   * 构造期回调拿到的是空值（与中心实例的「构造期空筛选」同一条事实）。
+   * **侧槽窗口 body 尾部的那一台**：宿主钉在窗口这一块，不跟上下文展开的临时祖先走。
+   * 其余差异按「非中心表面」的 dock 档给（与中心共用同一份判定）；局部惰性：
+   * 构造期还没有 area，回调在触发时才从闭包取。
    */
-  function createDockMountArea(target: () => string): MountArea {
-    let area: MountArea | null = null
+  function createWindowMountArea(block: Block): MountArea {
+    const hostId = block.id
+    let area: MountArea | undefined
     area = createMountArea({
-      host: () => blocks.find(target()),
+      host: () => blocks.find(hostId),
       edSource: () => area?.blockEditor ?? undefined,
       via: 'dock',
       viewSurface: 'dock',
       inlineViewBodies: true,
-      expanded: true,
+      expanded: expandedFor(block),
       refocus: refocusAfterMountOp,
       activate: (tabId) => area?.activateTab(tabId),
-      renderSurface: () => dockMountArea?.render(),
+      renderSurface: () => area?.render(),
     })
-    dockMountArea = area
     return area
   }
 
   /**
-   * **行尾徽标 hover 浮层＝第三个表面**：与块底栏、右槽卡共用同一台 `createMountArea`。
+   * **行尾徽标 hover 浮层＝另一个非中心表面**：与块底栏、侧槽窗口共用同一台 `createMountArea`。
    *
    * 宿主是**被 hover 的那个块**（不是段根）—— 这正是浮层能就地显示任意块反链的原因：
-   * 块底那台按段根建，右槽卡按当前对象建，这里按徽标所属块建。差异只在这一个 getter。
+   * 块底那台按段根建，窗口按窗口块建，这里按徽标所属块建。差异只在这一个 getter。
    * `viewSurface` 复用 `dock` 档：都是「非中心表面」，几何／条件树状态各自记，
    * 不为此新增一档 `ViewSurface`（那会让每个按表面分派的地方都多一个分支）。
    *
@@ -1850,8 +1865,8 @@ export function setupPanels(deps: PanelsDeps) {
       inst.area.root.remove()
       mountInstances.delete(id)
     }
-    // 右槽那台也跟着对齐：增删栏/改名/换序写在 `_mounts`/设备状态上，不经过它的 store 订阅
-    dockMountArea?.refreshEntries()
+    // 加/摘/改名/换序写在 `_mounts`／设备状态上，不经过各台的 store 订阅：按注册表对齐
+    refreshAllMountEntries()
   }
 
   /**
@@ -1874,7 +1889,7 @@ export function setupPanels(deps: PanelsDeps) {
 
   return {
     renderMounts,
-    createDockMountArea,
+    createWindowMountArea,
     createRefPeekArea,
     activateRefsFor,
     recordRecentColor,

@@ -16,6 +16,7 @@ import type { Run, BlockEditor, ViewEvents } from '../../view/editor/editor.ts'
 import { editorRun } from '../../view/editor/editor-run.ts'
 import type { DockWindows } from '../../ui/dock/dock-windows.ts'
 import type { ViewHost } from '../../ui/query/query-view.ts'
+import type { MountArea } from '../../ui/chrome/mount-area.ts'
 import type { DockCardState, DockSlotEls } from '../../ui/dock/dock.ts'
 import { bindDockResize } from '../../ui/dock/dock-resize.ts'
 import type { Row, Layers } from '../../ui/overlay/layers.ts'
@@ -63,6 +64,8 @@ export interface DockMenusDeps {
     source: () => BlockEditor | undefined,
     surface: 'inline' | 'dock',
   ) => ViewHost | null
+  /** 窗口 body 尾部挂载区（装配层的同一台组件，宿主固定＝窗口块） */
+  mountWindowArea: (block: import('../../core/index.ts').Block) => MountArea
   syncSections: () => void
   scheduleSave: () => void
   scheduleBadge: () => void
@@ -432,6 +435,7 @@ export function setupCardMenus(deps: DockMenusDeps) {
      * 与中心同一条规则，只是容器换了 —— 不是第二种窗口语义。
      */
     mountViewRoot: (block, into, source) => deps.mountViewRoot(block, into, source, 'dock'),
+    mountArea: (block) => deps.mountWindowArea(block),
     onFocus: (editor) => {
       deps.setEd(editor)
       deps.scheduleBadge()

@@ -47,7 +47,7 @@ test('dock: 新形状逐项校验；坏项丢掉，不连累整槽', () => {
     { kind: 'derived', card: 'inspect' },
     { kind: 'cmd', command: 'core.page/new' },
     { kind: 'derived', card: 'nope' }, // 目录外的派生卡：没有渲染器
-    { kind: 'block', block: '' },
+    { kind: 'derived', card: 'mount' }, // 退役的跟随卡：同未知 id 丢弃，不为它留兼容分支
     { kind: 'cmd', command: '' },
     { kind: 'wat' },
     { block: 'b2' }, // 缺 kind
@@ -99,13 +99,13 @@ test('dock: 重启清理——非 pin 的块窗口卡清掉，pin 的保留', ()
   const cards = [
     { kind: 'block', block: 'ephemeral' },
     { kind: 'block', block: 'pinned' },
-    { kind: 'derived', card: 'mount' },
+    { kind: 'derived', card: 'calendar' },
     { kind: 'cmd', command: 'core.page/new' },
   ] as const
   const out = pruneEphemeralWindows(cards, { pinned: true })
   assert.deepEqual(out, [
     { kind: 'block', block: 'pinned' },
-    { kind: 'derived', card: 'mount' },
+    { kind: 'derived', card: 'calendar' },
     { kind: 'cmd', command: 'core.page/new' },
   ])
 })

@@ -10,7 +10,7 @@
  * ⚠️ 读一律走**读门面**（`KbClient` 的窄方法：按 id、按名字、按清单取数）——
  *   命令层写不出「遍历全库」：整库在内存是门面实现的事，不是调用方的假设。
  */
-import type { Block, SecLayout, ShellCol, ViewOwnerRef } from '../../core/index.ts'
+import type { Block, DerivedCardId, SecLayout, ShellCol, ViewOwnerRef } from '../../core/index.ts'
 import type { KbClient, Op, Tx } from '../../core/kb/types.ts'
 import type { OwnerStore } from '../wiring/owners.ts'
 import type { CheckEdgeResult, Dangling } from '../../core/relations/hierarchy.ts'
@@ -199,7 +199,7 @@ export interface PageDeps {
    * 承诺了**具体内容**的命令用——卡被关掉之后只开槽，会得到一个「打开了一个空列」
    * 的假成功。
    */
-  ensureDockCard: (side: 'left' | 'right', id: 'inspect' | 'belongs' | 'mount' | 'trash' | 'calendar') => void
+  ensureDockCard: (side: 'left' | 'right', id: DerivedCardId) => void
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
   /**
    * **后果性操作的确认框**（会话层 `Layers.confirm` 的接口子集）。
