@@ -12,6 +12,7 @@ import {
   normalizeStoredLang,
 } from '../src/core/infra/code-lang.ts'
 import { appKeyWhileCodeFocused } from '../src/core/infra/dispatch.ts'
+import { isBlockClipboardGesture } from '../src/view/editor/code-island.ts'
 
 test('语言别名收成规范名，不认识的语言按纯文本画但仍原文照存', () => {
   assert.equal(canonicalLang('js'), 'javascript')
@@ -45,4 +46,12 @@ test('岛内焦点：文本键归岛，全局键与应用撤销照常', () => {
 test('DOM 标记与高度上限都走常量，不在组件里写第二份', () => {
   assert.equal(CODE_ISLAND_ATTR, 'data-code-island')
   assert.equal(CODE_MAX_HEIGHT_TOKEN, '--ui-code-max-h')
+})
+
+test('块剪贴板手势只在「单光标塌缩」时成立：划选与多光标留给 CM6', () => {
+  assert.equal(isBlockClipboardGesture(1, true, true), true)
+  assert.equal(isBlockClipboardGesture(1, false, false), false, '有划选归身体')
+  assert.equal(isBlockClipboardGesture(1, false, true), false, 'CM6 状态非空就不接管')
+  assert.equal(isBlockClipboardGesture(1, true, false), false, 'DOM 选区没塌缩不接管')
+  assert.equal(isBlockClipboardGesture(2, true, true), false, '多光标留给行语义')
 })

@@ -109,11 +109,28 @@ const islandTheme = EditorView.theme({
   '.cm-searchMatch': { backgroundColor: 'var(--ui-yellow-soft)' },
 })
 
+/**
+ * **块剪贴板手势**：单光标、塌缩。
+ *
+ * 有划选 ⇒ 归身体（CM6／原生文本语义）；无划选 ⇒ 归容器（整块）。
+ * 多光标留给 CM6 的行语义——那种状态下 `⌘C`／`⌘X` 剪的是行，不是块。
+ * 三个输入都是「事件那一刻」的事实，抽成纯谓词只为单测能钉住边界。
+ */
+export function isBlockClipboardGesture(rangeCount: number, empty: boolean, domCollapsed: boolean): boolean {
+  return rangeCount === 1 && empty && domCollapsed
+}
+
 export interface CodeIslandMount {
   /** 顶层编辑器由装配层现取：焦点切表面之后，写入仍落在当前那台 */
   getEd: () => BlockEditor
   blockId: string
   into: HTMLElement
+  /** 空选区 ⌘C：复制整块（正文味 ＋ 引用味），与块上的 ⌘C 同一动作 */
+  onCopyBlock?: () => void
+  /** 空选区 ⌘X：抓取整块移动（不当场删，粘贴那一刻才搬） */
+  onCutBlock?: () => void
+  /** 空选区 ⌘⇧C：复制整块纯文本（不带引用意图） */
+  onCopyBlockText?: () => void
   /** 右键菜单：岛里没有外层编辑器的菜单委托，得由装配层接回来 */
   onContextMenu?: (anchor: DOMRect) => void
   /** 离开代码块去下一块（末行末尾 ↓/→）：没有下一块时新建一行 */
@@ -129,7 +146,7 @@ export interface CodeIslandHandle {
   dispose(): void
 }
 
-export function mountCodeIsland({ getEd, blockId, into, onContextMenu, onExitBelow, onExitAbove, onToggleTask }: CodeIslandMount): CodeIslandHandle {
+export function mountCodeIsland({ getEd, blockId, into, onCopyBlock, onCutBlock, onCopyBlockText, onContextMenu, onExitBelow, onExitAbove, onToggleTask }: CodeIslandMount): CodeIslandHandle {
   const ed = getEd()
   const initial = ed.store.find(blockId)
   const lang = canonicalLang(initial ? prop<string>(initial, '_lang') : undefined)
@@ -168,6 +185,24 @@ export function mountCodeIsland({ getEd, blockId, into, onContextMenu, onExitBel
     return true
   }
 
+  /**
+   * 块剪贴板手势要同时满足：CM6 里单光标塌缩，且 DOM 选区也是塌缩的。
+   * DOM 那一半是防「CM6 状态已空、原生选区还停在别处」的半拍差。
+   */
+  const isBlockGesture = (v: EditorView): boolean => {
+    const sel = v.state.selection
+    const dom = document.getSelection()
+    return isBlockClipboardGesture(sel.ranges.length, sel.main.empty, dom?.isCollapsed ?? true)
+  }
+  /** 空选区 ⌘C／⌘X 回块语义：capture 拦截，别让 CM6 的行级复制/删除先跑 */
+  const claimBlockClipboard = (e: ClipboardEvent, run: (() => void) | undefined): void => {
+    if (!run || !isBlockGesture(view)) return
+    e.preventDefault()
+    e.stopPropagation()
+    markCaret()
+    run()
+  }
+
   const view = new EditorView({
     parent: root,
     state: EditorState.create({
@@ -183,6 +218,16 @@ export function mountCodeIsland({ getEd, blockId, into, onContextMenu, onExitBel
         syntaxHighlighting(syntaxColors),
         search({ top: true }),
         keymap.of([
+          // ⌘⇧C：空选区复制整块纯文本。有划选不接管（那一档用 ⌘C 的文本复制）。
+          {
+            key: 'Mod-Shift-c',
+            run: (v) => {
+              if (!onCopyBlockText || !isBlockGesture(v)) return false
+              markCaret()
+              onCopyBlockText()
+              return true
+            },
+          },
           // ⌘↵：切任务（代码块也能是任务）。岛内接管并 stopPropagation，
           // 否则 CM6 默认的 insertBlankLine 会同时插一行、应用层还会再切一次。
           { key: 'Mod-Enter', run: () => { onToggleTask?.(); return true }, stopPropagation: true },
@@ -262,6 +307,14 @@ export function mountCodeIsland({ getEd, blockId, into, onContextMenu, onExitBel
     view.focus()
     view.dispatch({ selection: { anchor: pos } })
   }
+  /**
+   * **capture 是关键**：bubble 阶段太晚——CM6 的 `cut` 已经把当前行删掉了。
+   * 空选区在这里被我们接走，有划选／多光标不拦，CM6 的原生文本语义照走。
+   */
+  const onCopyEvent = (e: ClipboardEvent) => claimBlockClipboard(e, onCopyBlock)
+  const onCutEvent = (e: ClipboardEvent) => claimBlockClipboard(e, onCutBlock)
+  root.addEventListener('copy', onCopyEvent, true)
+  root.addEventListener('cut', onCutEvent, true)
   root.addEventListener('contextmenu', openMenu)
   root.addEventListener('mouseup', ensureCaret)
   view.dom.addEventListener('focusin', markCaret)
@@ -291,6 +344,8 @@ export function mountCodeIsland({ getEd, blockId, into, onContextMenu, onExitBel
       if (disposed) return
       disposed = true
       unsubscribe()
+      root.removeEventListener('copy', onCopyEvent, true)
+      root.removeEventListener('cut', onCutEvent, true)
       root.removeEventListener('contextmenu', openMenu)
       root.removeEventListener('mouseup', ensureCaret)
       root.removeEventListener('keydown', noteCommandKey, true)

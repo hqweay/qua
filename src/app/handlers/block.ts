@@ -320,8 +320,13 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
    * 粘贴那一刻（一笔事务，id 不变、可反复贴）；划选态键位不命中 ⇒ 原生文本剪切照旧。
    * 成功不弹提示：被抓的行抖一下（`confirmGrab`）就是反馈；失败照常有警告。
    */
-  'core.editor/cut-blocks': (_a, app) => {
-    const snap = app.ed.clip.copySnapshot()
+  'core.editor/cut-blocks': (a, app) => {
+    /**
+     * 显式目标来自岛／菜单一类的调用面：那里的编辑器不一定是「活动编辑器」，
+     * 不能靠 `app.ed.clip.copySnapshot()` 的隐式选区。键位路径仍走选区快照。
+     */
+    const id = S(a.blockId)
+    const snap = id ? { ids: [id], text: app.ed.clip.plainTextOf(id) } : app.ed.clip.copySnapshot()
     if (!snap) return false
     const html = buildCopyHtml(snap.text, { ids: snap.ids, move: true })
     app.copyFlavors({ text: snap.text, html, clip: { ids: snap.ids, move: true } }, null)

@@ -126,6 +126,19 @@ function viewEvents(
         getEd: active,
         blockId: block.id,
         into,
+        /**
+         * **空选区归容器（块语义）**：岛内 capture 已经拦下 copy/cut，这里只把动作
+         * 交回同一条命令——显式带 blockId，岛所在的编辑器不一定就是当前活动编辑器。
+         */
+        onCopyBlock: () => {
+          void getRegistry().invoke('core.editor/copy-block', { blockId: block.id }, via)
+        },
+        onCutBlock: () => {
+          void getRegistry().invoke('core.editor/cut-blocks', { blockId: block.id }, via)
+        },
+        onCopyBlockText: () => {
+          void getRegistry().invoke('core.editor/copy-block-text', { blockId: block.id }, via)
+        },
         // 岛里没有外层编辑器的菜单委托：右键回到同一张块菜单，目标显式进请求
         onContextMenu: (rect) => {
           const ed = active()
