@@ -100,28 +100,48 @@ export function makeCaptionRow(block: Block, opts: CaptionRowOptions): HTMLEleme
     commit()
   }
   /**
-   * 标题是单行文本：Enter/Esc 收尾，其余键全部留在这里。
+   * **标题行只截自己要的键，其余放行给应用键位表。**
    *
-   * `stopPropagation` 是为了不让外层编辑器的文本键位（Enter 拆块、Backspace 并块、
-   * ⌘A 全选块…）作用到这一行；文档 capture 上的撤销仍先于此运行，所以 ⌘Z 还是
-   * 应用撤销栈（与代码岛同一条「只有一套撤销」）。
+   * 曾经这里无条件 `stopPropagation()`，等于把「题注也是这一块的标题」这个事实关掉：
+   * ⌘⇧↵（上建块）、Tab（缩进）、⌘⇧D 全都到不了命令层，而**查询块的标题**
+   * （就是 `.tx` 本身）一直能用这些键——同一个「标题」在两种块上两种手感。
+   * 现在两边对齐：结构键接同一条命令，其余（含撤销）照旧走应用键位表。
+   *
+   * ⚠️ Enter 不拆标题：题注不是这一块的正文（代码块的正文是代码），把标题切成
+   *    「后半段搬进下一块的正文」是用户没要求的转换。它只表示「标题写完，往下走」⇒
+   *    在下方建一个空块（与查询块标题「Enter 出兄弟块」同一效果，命令不同是因为
+   *    切的对象不同）。
    */
   const onKeyDown = (e: KeyboardEvent): void => {
-    e.stopPropagation()
     // 嵌套 contenteditable 里原生 ⌘A 会落到外层编辑区（实测选区为空）；这里显式只选标题
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') {
       e.preventDefault()
+      e.stopPropagation()
       selectContents(text)
       return
     }
-    if (e.key === 'Enter') {
+    // ⌘⇧↵ ＝ 在上方新建块（与正文里同一条动作）；必须在冒泡前拦，否则会再走一次拆块
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'Enter') {
+      if (!opts.onAction) return // 没有结构动作的宿主：放行，不制造死键
       e.preventDefault()
-      text.blur()
+      e.stopPropagation()
+      commit()
+      opts.onAction('above')
+      return
+    }
+    // Enter ＝ 在下方新建块（标题写完往下走；不切标题文本）
+    if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+      e.preventDefault()
+      e.stopPropagation()
+      commit()
+      if (opts.onAction) opts.onAction('below')
+      else text.blur()
       return
     }
     if (e.key === 'Escape') {
       // 已逐键落库，Esc 只是离开（不拿建行时的旧值回滚——那会把刚写的标题吃掉）
       e.preventDefault()
+      e.stopPropagation()
       text.blur()
     }
   }
