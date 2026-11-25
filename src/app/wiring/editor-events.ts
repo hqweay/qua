@@ -23,6 +23,7 @@ import {
   isDeleted,
   isPropDef,
   LANG_PROP,
+  locate,
   openAxisOf,
   prop,
   readEmbed,
@@ -135,9 +136,13 @@ function viewEvents(
             title: t('menu.title.block'),
           })
         },
-        // ⌘↵：代码里换行归 CM6，离开代码块并在下方新建一行是一条显式出口
+        // 末行末尾 ↓/→：优先落到已有的下一块，没有才新建一行
         onExitBelow: () => {
-          active().insert.insertBlockAfter(block.id, '')
+          const ed = active()
+          const loc = locate({ roots: ed.store.blocks }, block.id)
+          const next = loc ? (loc.parent ? loc.parent.children[loc.index + 1] : ed.store.blocks[loc.index + 1]) : undefined
+          if (next && !isDeleted(next)) ed.placeCaret(next.id, 0)
+          else ed.insert.insertBlockAfter(block.id, '')
         },
       }),
     (block) => `${block.id}\u0000${prop<string>(block, LANG_PROP) ?? ''}`,

@@ -116,7 +116,7 @@ export interface CodeIslandMount {
   into: HTMLElement
   /** 右键菜单：岛里没有外层编辑器的菜单委托，得由装配层接回来 */
   onContextMenu?: (anchor: DOMRect) => void
-  /** 在代码块下方新建一块（⌘↵）：代码里换行归 CM6，离开要一条显式出口 */
+  /** 离开代码块去下一块（末行末尾 ↓/→）：没有下一块时新建一行 */
   onExitBelow?: () => void
 }
 
@@ -145,6 +145,15 @@ export function mountCodeIsland({ getEd, blockId, into, onContextMenu, onExitBel
     // 只写模型光标：DOM 光标留在 CM6，调用 placeCaret 会把焦点抢回外层
     ed.sel = { aBlock: blockId, hBlock: blockId, aOff: off, hOff: off }
   }
+  /** 末行末尾是代码块唯一的「向下」出口：↓/→ 在那里离开岛，其余位置照常走 CM6 */
+  const exitAtEnd = (v: EditorView): boolean => {
+    const sel = v.state.selection.main
+    if (!sel.empty) return false
+    const line = v.state.doc.lineAt(sel.head)
+    if (line.number !== v.state.doc.lines || sel.head !== line.to) return false
+    onExitBelow?.()
+    return true
+  }
 
   const view = new EditorView({
     parent: root,
@@ -161,7 +170,11 @@ export function mountCodeIsland({ getEd, blockId, into, onContextMenu, onExitBel
         syntaxHighlighting(syntaxColors),
         search({ top: true }),
         keymap.of([
+          // ⌘↵ 在代码块里＝离开并继续下一块（CM6 默认会插空行，必须显式接管）；
+          // Enter 仍是代码里的换行，↓/→ 在末行末尾也能离开。
           { key: 'Mod-Enter', run: () => { onExitBelow?.(); return true } },
+          { key: 'ArrowDown', run: (v) => exitAtEnd(v) },
+          { key: 'ArrowRight', run: (v) => exitAtEnd(v) },
           ...closeBracketsKeymap,
           ...defaultKeymap,
           ...searchKeymap,
