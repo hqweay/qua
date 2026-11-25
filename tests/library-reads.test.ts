@@ -231,3 +231,16 @@ test('relationsFor：只数**在树上可见的来源块**的边（残留行不�
     )
   })
 })
+
+test('doc：软删根的子树一起读回（清除要能按结构级联发账）', () => {
+  withDb((db) => {
+    // x 在 seed 里是软删的顶层根；给它挂个子块，模拟「回收站里还有内容的页」
+    applyRowWrites(db, [block('x1', 'x')])
+    const doc = readDocRows(db, ['x'])
+    assert.deepEqual(
+      doc.rows.blocks.map((b) => String(b.id)).sort(),
+      ['x', 'x1'],
+      '装载不看可见性：子块要跟着回来。清除的子块账按内存子树发，装不全就会留下「父块没了、自己没删」的孤儿',
+    )
+  })
+})

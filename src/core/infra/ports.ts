@@ -258,10 +258,13 @@ export interface App {
   /**
    * 永久清除回收站条目（整棵子树级联，不可恢复、不进撤销栈）。
    *
-   * @returns 实际清除的块数（含级联的后代）；0 ＝ 没有可清的。
-   *          op 的落盘与重画都在这条门面里收口，handler 只管说「做了多少」。
+   * **完成是异步的**：级联账（每块一条 `exist{purged}`）只能按内存子树发，
+   * 而部分装载下子块通常还没装 —— 先用装载补齐子树再清（装载要过 IPC）。
+   * ⚠️ 不补齐就清，未装载的子块拿不到自己的账，会以「父块没了、自己没删」的孤儿
+   * 留在库里：它不在任何顶层根下面，界面再也够不着（内容丢失，不是显示问题）。
+   * 报数与落盘都在这条门面里收口，handler 只管说「开始清了」。
    */
-  purgeTrash(ids: readonly string[]): number
+  purgeTrash(ids: readonly string[]): void
   renamePage(id: string, title: string): void
   /** 把焦点交给页名（**UI 归装配层**：命令只说「要改名」，不碰 `document` — 59 ） */
   focusTitle(): void

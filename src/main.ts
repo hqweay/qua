@@ -1633,13 +1633,20 @@ const app: App = {
   /**
    * **回收站清空**：purge 不进撤销栈（不可逆是口径），所以它与撤销/重做同形——
    * 建 op → 原地应用 → `store.apply` 宣布 → op 交落盘队列。撤销捕获那条路一步都不碰。
+   *
+   * ⚠️ **先补子树再清**：级联账按内存子树发（每块一条 `exist{purged}`），部分装载下
+   *    子块多半还没装 —— 不等装载就清，未装载的子块没有自己的账，父行一删它们就变成
+   *    「父块没了、自己没删」的孤儿：不在任何顶层根下面，界面再也够不着（内容丢失）。
+   *    这也是这条门面**异步完成**的原因（装载过 IPC）；报数在完成之后。
    */
   purgeTrash: (ids) => {
-    const ops = kb.purgeTrash(ids)
-    if (ops.length === 0) return 0
-    addOps(ops)
-    scheduleSave()
-    return ops.length
+    ensureDocsLoaded(ids, () => {
+      const ops = kb.purgeTrash(ids)
+      if (ops.length === 0) return
+      addOps(ops)
+      scheduleSave()
+      app.toast(t('ui.toast.trashPurged', { count: String(ops.length) }))
+    })
   },
 
   /**

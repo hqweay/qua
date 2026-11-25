@@ -125,14 +125,13 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
    *
    * 判据：purge **不进撤销栈**（不可逆是口径）——所以它不走编辑器写入口，
    * 走 `App.purgeTrash`（撤销/重做同一条 op 路：建 op → 应用 → 宣布 → 落盘）。
+   * 清除要先补齐子树装载才能级联发账，完成与报数都在门面里（这里只说「开始清了」）。
    */
   'core.trash/purge': (args, app) => {
     const raw = (args as { ids?: string }).ids ?? ''
     const ids = raw.split(',').filter((s) => s !== '')
     if (ids.length === 0) return false
-    const n = app.purgeTrash(ids)
-    if (n === 0) return false
-    app.toast(t('ui.toast.trashPurged', { count: String(n) }))
+    app.purgeTrash(ids)
     return true
   },
   // 提及栏片段行的按钮与块菜单那一条都走这道门面；区间复核与「没转成」的实话在门面那一步
