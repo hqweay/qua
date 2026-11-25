@@ -2309,11 +2309,13 @@ export class BlockEditor {
     const b = this.store.find(id)
     if (!b) return false
     const raw = text.replace(/[\r\n]+/g, ' ')
-    if ((b.props?.[CAPTION_PROP] ?? '') === raw) return false
+    // 首尾空白不进模型：空白串就是「没有标题」，与缺席同义（不为退格写空 op）
+    const next = raw.trim()
+    if ((b.props?.[CAPTION_PROP] ?? '') === next) return false
     this.beginUndoEntry()
     const ok = this.write((tx) => {
-      if (raw.trim() === '') tx.clearProp(id, CAPTION_PROP)
-      else tx.setProp(id, CAPTION_PROP, raw)
+      if (next === '') tx.clearProp(id, CAPTION_PROP)
+      else tx.setProp(id, CAPTION_PROP, next)
       return true
     })
     if (ok) this.finishUndoEntry('insert', Date.now())
