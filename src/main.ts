@@ -17,7 +17,7 @@ import { BlockStore } from './core/model/store.ts'
 import { MemoryKb } from './core/kb/memory.ts'
 import { dockKey, openAxisOf, validSurfaceRef } from './core/index.ts'
 import type { Op } from './core/kb/types.ts'
-import { BlockEditor, clearRefBadgeCache, setRefBadgeSource } from './view/editor/editor.ts'
+import { BlockEditor, clearRefBadgeCache, refreshRefBadges, setRefBadgeSource } from './view/editor/editor.ts'
 import { inputSession } from './view/editor/input-session.ts'
 import { editorRun } from './view/editor/editor-run.ts'
 import { fillBlockText } from './view/editor/block-dom.ts'
@@ -377,7 +377,11 @@ if (worksetBoot && LIBRARY_BRIDGE) {
       void (async () => {
         if (needDerived) {
           const r = await rebuildDerivedTables({ client: libraryClient!, store })
-          if (r.ok) derivedReady = true
+          if (r.ok) {
+            derivedReady = true
+            // 派生表刚可用：清旧口径并让所有活编辑器当场重查，别等下一次渲染
+            refreshRefBadges()
+          }
           console.info(`[derived] rebuild ${r.ok ? 'done' : 'incomplete'}: ${r.done}/${r.total} roots, failed=${r.failed}`)
         }
         if (needFts) {

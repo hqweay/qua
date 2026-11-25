@@ -205,6 +205,10 @@ type RefBadgeSource = (ids: readonly string[]) => Promise<Map<string, readonly R
 let refBadgeSource: RefBadgeSource | null = null
 const refBadgeCache = new Map<string, readonly RelationEdge[]>()
 let refBadgeFetch: Promise<void> | null = null
+/** 派生表 ready 翻转/换库时加一：在飞的那次批查不能把旧答案写回新世界 */
+let refBadgeEpoch = 0
+/** 活编辑器登记表：全库口径变了要当场同刷，不能等用户下一次操作撞上重画 */
+const liveEditors = new Set<BlockEditor>()
 
 /** 装配层只设一次；闭包读活引用，换库不需要重设 */
 export function setRefBadgeSource(fn: RefBadgeSource): void {
@@ -213,22 +217,37 @@ export function setRefBadgeSource(fn: RefBadgeSource): void {
 
 /** 换库/作废派生表时清缓存：旧数字不能跟着块 id 过河 */
 export function clearRefBadgeCache(): void {
+  refBadgeEpoch++
   refBadgeCache.clear()
+}
+
+/**
+ * 派生表从 pending 翻到 ready 时由装配层调一次：清缓存并让每台活编辑器重查。
+ * 不广播的话，窗口/挂载区那几台会停在「工作集子集」直到下一次渲染。
+ */
+export function refreshRefBadges(): void {
+  clearRefBadgeCache()
+  for (const ed of liveEditors) ed.refreshRefBadges()
 }
 
 /** 并发的几台编辑器共用一次在飞的批查；没查到（未 ready）不写空缓存 */
 async function loadRefBadges(ids: readonly string[]): Promise<void> {
   const source = refBadgeSource
   if (!source) return
+  const epoch = refBadgeEpoch
   const missing = [...new Set(ids)].filter((id) => !refBadgeCache.has(id))
   if (missing.length === 0) return
   if (refBadgeFetch) {
-    await refBadgeFetch
+    const inFlight = refBadgeFetch
+    await inFlight
+    if (refBadgeFetch === inFlight) refBadgeFetch = null
+    // 在飞的那次可能带回旧世界的答案（或返回 null）；epoch 变了就再查一次
+    if (refBadgeEpoch !== epoch) await loadRefBadges(ids)
     return
   }
   const job = (async () => {
     const map = await source(missing)
-    if (!map) return
+    if (refBadgeEpoch !== epoch || !map) return
     for (const [id, edges] of map) refBadgeCache.set(id, edges)
   })()
   refBadgeFetch = job
@@ -802,6 +821,7 @@ export class BlockEditor {
   private readonly annoHover: AnnoHover
 
   constructor(o: ViewOpts) {
+    liveEditors.add(this)
     this.container = o.container
     this.blankArea = o.blankArea ?? o.container
     this.allowBlankCreate = o.allowBlankCreate !== false
@@ -903,6 +923,7 @@ export class BlockEditor {
 
   /** 从文档里摘掉这个视图：退订 store、卸掉事件（否则游离容器还会继续被重画） */
   dispose(): void {
+    liveEditors.delete(this)
     this.rowEls = null
     this.embeds.disposeAll()
     this.offStore()
@@ -1385,6 +1406,12 @@ export class BlockEditor {
    */
   badgeSourcesOf(id: string): readonly RelationEdge[] {
     return refBadgeCache.get(id) ?? relationsTo(this.store.index, id)
+  }
+
+  /** 全库口径变化后的强制重查：即便有一次批查在飞，也不能让 pending 挡住 */
+  refreshRefBadges(): void {
+    this.relationsPending = false
+    this.prefetchRefBadges()
   }
 
   /** 编辑让某目标的角标过期：共享缓存摘掉（退回工作集口径），错峰补一次批查 */
