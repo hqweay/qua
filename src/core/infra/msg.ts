@@ -62,6 +62,7 @@ export const MSG = {
   'cmd.editor.paste-into-selection': '粘贴到选中块后面',
   'cmd.selection.clear': '取消块选择',
   'cmd.selection.select-all-blocks': '全选块',
+  'cmd.selection.select-block': '选择当前块',
   'cmd.selection.focus-first': '取消块选择并定位到首个选中块',
   'cmd.selection.extend-up': '向上扩展块选择',
   'cmd.selection.extend-down': '向下扩展块选择',

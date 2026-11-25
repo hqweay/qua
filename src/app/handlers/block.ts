@@ -359,6 +359,7 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     return had
   },
   'core.selection/select-all-blocks': (_a, app) => app.ed.bsel.selectAllBlocks(),
+  'core.selection/select-block': (_a, app) => app.ed.bsel.selectCurrentBlock(),
   'core.selection/focus-first': (_a, app) => app.ed.bsel.focusFirstSelected(),
   'core.selection/extend-up': (a, app) => app.ed.bsel.extendBlockSelection(Number(a.dir) === 1 ? 1 : -1),
   'core.selection/extend-down': (a, app) => app.ed.bsel.extendBlockSelection(Number(a.dir) === -1 ? -1 : 1),

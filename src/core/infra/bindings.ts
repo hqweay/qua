@@ -111,7 +111,8 @@ export const BINDINGS: Binding[] = [
   { command: 'core.layer/close', kind: 'keymap', key: 'escape', when: '', layer: 'core' },
   /* ================= 块选区 =================
      ⚠️ 这些必须放在文本绑定**之后**：按键解析是**反向遍历、后出现者优先**。
-     块选区激活时（`blockSelection`）它们盖过 Enter/Backspace/Delete/Escape 的文本语义。 */
+     块选区激活时（`blockSelection`）它们盖过 Enter/Backspace/Delete/Escape 的文本语义；
+     段尾那条是**文本态的入口**（Esc 选中当前块，`!blockSelection`）。 */
   { command: 'core.selection/clear', kind: 'keymap', key: 'escape', when: 'blockSelection && !paletteOpen', layer: 'core' },
   { command: 'core.selection/focus-first', kind: 'keymap', key: 'enter', when: 'blockSelection', layer: 'core' },
   { command: 'core.editor/delete-selected-blocks', kind: 'keymap', key: 'backspace', when: 'blockSelection', layer: 'core' },
@@ -124,6 +125,10 @@ export const BINDINGS: Binding[] = [
   { command: 'core.selection/select-all-blocks', kind: 'keymap', key: 'mod+shift+a', when: 'editorTextFocus || blockSelection', layer: 'core' },
   { command: 'core.selection/extend-up', kind: 'keymap', key: 'shift+up', when: 'editorTextFocus || blockSelection', layer: 'core', args: { dir: -1 } },
   { command: 'core.selection/extend-down', kind: 'keymap', key: 'shift+down', when: 'editorTextFocus || blockSelection', layer: 'core', args: { dir: 1 } },
+  // Esc：光标折叠（没划选文字）⇒ 选中当前块（块选区的键盘入口；跨块拖拽、块尾 ⇧↑/⇧↓ 之外的第三条路）。
+  // 划选文字时不接：那是「取消文本选区」的直觉，不能反手变成选中整块。
+  // 块选区态由上面那条「清空」接；放在退档（`axisActive`）之前 ⇒ 宽屏里 Esc 第一义仍是退一档。
+  { command: 'core.selection/select-block', kind: 'keymap', key: 'escape', when: 'editorTextFocus && selectionEmpty && !blockSelection', layer: 'core' },
   { command: 'core.menu/slash', kind: 'keymap', key: 'mod+/', when: 'editorTextFocus', layer: 'core' },
   // 复制端定身份（粘贴端零打断）：块上 ⌘C＝多味复制（软内 ⌘V 贴成引用、软外贴出正文），
   // 划选 ⌘C 不在此列（键位不命中 ⇒ 原生复制文本）。⌘⇧C 两个身份档：划选＝块引＋静态锚文本，无划选＝只贴正文（复制份）。

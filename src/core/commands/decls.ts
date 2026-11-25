@@ -75,6 +75,7 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.editor/paste-into-selection', title: t('cmd.editor.paste-into-selection'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), hidden: true, keywords: ['paste'] },
   { name: 'core.selection/clear', title: t('cmd.selection.clear'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), hidden: true },
   { name: 'core.selection/select-all-blocks', title: t('cmd.selection.select-all-blocks'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), hidden: true },
+  { name: 'core.selection/select-block', title: t('cmd.selection.select-block'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), hidden: true },
   { name: 'core.selection/focus-first', title: t('cmd.selection.focus-first'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), hidden: true },
   { name: 'core.selection/extend-up', title: t('cmd.selection.extend-up'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), hidden: true },
   { name: 'core.selection/extend-down', title: t('cmd.selection.extend-down'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), hidden: true },

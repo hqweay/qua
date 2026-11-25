@@ -4627,6 +4627,14 @@ await check('T35 跨块拖拽选块 / Shift+拖拽选文本 / 多块菜单删除
   assert(afterEnter.count === 0, `Enter 应清块选区：${JSON.stringify(afterEnter)}`)
   assert(afterEnter.sel?.aOff === 0, `Enter 后光标应在首块 0 位：${JSON.stringify(afterEnter.sel)}`)
 
+  // ⑥b Esc：光标折叠 ⇒ 选中当前块（键盘入口）；再 Esc 清空
+  await page.keyboard.press('Escape')
+  const escSel = await state()
+  assert(escSel.count === 1 && escSel.painted === 1, `Esc 应选中当前块：${JSON.stringify(escSel)}`)
+  await page.keyboard.press('Escape')
+  const escCleared = await state()
+  assert(escCleared.count === 0, `再按 Esc 应清空块选区：${JSON.stringify(escCleared)}`)
+
   // ⑦ Shift+↓ 的边界规则：块尾起块选区并可扩展；文本内部仍是原生文本选区
   await page.evaluate((id) => window.__qua.focusBlock(id, 9999), ids.a)
   await page.keyboard.press('Shift+ArrowDown')
@@ -4656,7 +4664,7 @@ await check('T35 跨块拖拽选块 / Shift+拖拽选文本 / 多块菜单删除
   assert(blockAll.count > 0, `第二次 ⌘A 应升级为块选区：${JSON.stringify(blockAll)}`)
 
   await ctx.close()
-  return `单块内拖=文本；A→C=3 块；右键多块菜单删除 + 一次撤销；Shift+拖=跨块文本；Mod+Shift+A 全选块；Enter 清选区；Shift+↓ 边界规则；⌘A 两次升级`
+  return `单块内拖=文本；A→C=3 块；右键多块菜单删除 + 一次撤销；Shift+拖=跨块文本；Mod+Shift+A 全选块；Enter 清选区；Esc 选中当前块；Shift+↓ 边界规则；⌘A 两次升级`
 })
 
 /**

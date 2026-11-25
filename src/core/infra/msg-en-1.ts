@@ -44,6 +44,7 @@ export const EN1 = {
   'cmd.editor.paste-into-selection': 'Paste after selected blocks',
   'cmd.selection.clear': 'Clear block selection',
   'cmd.selection.select-all-blocks': 'Select all blocks',
+  'cmd.selection.select-block': 'Select current block',
   'cmd.selection.focus-first': 'Clear block selection and jump to first selected block',
   'cmd.selection.extend-up': 'Extend block selection up',
   'cmd.selection.extend-down': 'Extend block selection down',

@@ -78,6 +78,27 @@ export class BlockSelection {
     return true
   }
 
+  /**
+   * `Esc`：把光标所在块整块选中（块选区的**键盘入口**；已有块选区时由清空那条先接）。
+   *
+   * 与「全选块」同一份可选择性判据：section 根（页名／日记日期）与只读块不选。
+   * 不在可见行里的块也不选——块选区是「这一屏的可见行」的区间，选中看不见的行画不出来。
+   */
+  selectCurrentBlock(): boolean {
+    if (this.blockSel) return false
+    const id = this.ed.sel?.aBlock
+    if (!id || !this.visibleIds().includes(id)) return false
+    const loc = locate(this.ed.doc, id)
+    if (!loc || loc.parent === null || isReadonlyBlock(loc.block)) return false
+    this.blockSel = { ids: [id], anchor: id }
+    this.ed.sel = null
+    document.getSelection()?.removeAllRanges()
+    this.ed.markCaret()
+    this.paintBlockSel()
+    this.ed.events.selChange?.()
+    return true
+  }
+
   clearBlockSelection(): void {
     if (!this.blockSel) return
     this.blockSel = null
