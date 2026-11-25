@@ -2976,8 +2976,9 @@
  * 虚线圆在静止态就把「镜面／非实体」说出口，不靠颜色深浅。
  * 字母是**形状**不是文案（ASCII，不进 `msg.ts`，也不随语言切）——它和圆一起构成徽章本身。
  *
- * ⚠️ 悬停整颗让位给抓手：基线的 `.blk .marker:hover::before { opacity: 0 }` 照旧生效，
- *    徽章不会和抓手同屏叠影。
+ * ⚠️ 悬停整颗让位给抓手——但**必须在这里重声明**（见下一条）：上面这条有 7 个选择器单元，
+ *    它的 `opacity: 1` 会压掉基线的 `.blk .marker:hover::before { opacity: 0 }`（3 个单元）。
+ *    不补那条，徽章在悬停时不让位，抓手直接叠在 M 上。
  */
 .blk[data-embed='1'] .blk-embed-body .blk[data-depth='0'] > .left .marker::before {
   content: 'M';
@@ -2995,6 +2996,10 @@
   line-height: 1;
   /* 普通点在静息态是半透明的待命件（--ui-quiet）；徽章是身份，读满强度 */
   opacity: 1;
+}
+/* 悬停＝让位：与基线同一条口径，只是特异性要压过上面那条（否则徽章与抓手叠影） */
+.blk[data-embed='1'] .blk-embed-body .blk[data-depth='0'] > .left .marker:hover::before {
+  opacity: 0;
 }
 /*
  * **镜身里的竖线是虚线，并且抬一档色**：外边的大纲导轨是实线（结构本身就在那里），
@@ -3736,6 +3741,13 @@ button.blk-auto-chip {
 .blk-caption:focus-within {
   display: flex;
 }
+/*
+ * 代码块没有别的名字可显示 ⇒ 题注行就是它的头，**展开态也常驻**（空时是「添加标题」
+ * 占位）。露面的头是目标自己，题注是可选的覆写 ⇒ 仍只在有标题/收起时出现。
+ */
+.blk[data-code='1'] > .blk-code-host > .blk-caption {
+  display: flex;
+}
 .blk-caption-text {
   outline: none;
   color: var(--ui-text);
@@ -3746,6 +3758,9 @@ button.blk-auto-chip {
 .blk-caption-text[data-empty='1']::before {
   content: attr(data-ph);
   color: var(--ui-text-tertiary);
+}
+.blk[data-collapsed='1'] .blk-caption-text[data-empty='1']::before {
+  content: attr(data-ph-collapsed);
 }
 /* 收起态的代码块用一种「合上的盒子」读法：标题就是盒面，正文不占位 */
 .blk[data-collapsed='1'] > .blk-code-host .blk-caption {
