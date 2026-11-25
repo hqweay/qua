@@ -118,6 +118,8 @@ export interface CodeIslandMount {
   onContextMenu?: (anchor: DOMRect) => void
   /** 离开代码块去下一块（末行末尾 ↓/→）：没有下一块时新建一行 */
   onExitBelow?: () => void
+  /** ⌘↵：总在代码块下面新建一块（与块菜单「在下方新建块」同一个动作） */
+  onInsertBelow?: () => void
 }
 
 export interface CodeIslandHandle {
@@ -125,7 +127,7 @@ export interface CodeIslandHandle {
   dispose(): void
 }
 
-export function mountCodeIsland({ getEd, blockId, into, onContextMenu, onExitBelow }: CodeIslandMount): CodeIslandHandle {
+export function mountCodeIsland({ getEd, blockId, into, onContextMenu, onExitBelow, onInsertBelow }: CodeIslandMount): CodeIslandHandle {
   const ed = getEd()
   const initial = ed.store.find(blockId)
   const lang = canonicalLang(initial ? prop<string>(initial, '_lang') : undefined)
@@ -170,9 +172,9 @@ export function mountCodeIsland({ getEd, blockId, into, onContextMenu, onExitBel
         syntaxHighlighting(syntaxColors),
         search({ top: true }),
         keymap.of([
-          // ⌘↵ 在代码块里＝离开并继续下一块（CM6 默认会插空行，必须显式接管）；
-          // Enter 仍是代码里的换行，↓/→ 在末行末尾也能离开。
-          { key: 'Mod-Enter', run: () => { onExitBelow?.(); return true } },
+          // ⌘↵ 总在代码块下面新建一块（与块菜单「在下方新建块」同一个动作）；
+          // Enter 仍是代码里的换行，↓/→ 在末行末尾离开到已有下一块。
+          { key: 'Mod-Enter', run: () => { onInsertBelow?.(); return true } },
           { key: 'ArrowDown', run: (v) => exitAtEnd(v) },
           { key: 'ArrowRight', run: (v) => exitAtEnd(v) },
           ...closeBracketsKeymap,
