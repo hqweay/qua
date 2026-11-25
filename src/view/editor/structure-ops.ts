@@ -8,6 +8,7 @@
  */
 import {
   CODE_TYPE,
+  canWriteText,
   blockTypeOf,
   cloneSubtree,
   enterKind,
@@ -66,12 +67,20 @@ export class StructOps {
      * 拒绝时正文已回滚，拆点要收回到新正文长度之内（否则会按旧长度切开一行短文本）。
      */
     this.ed.commitEdit(id)
-    this.ed.beginUndoEntry()
     const loc = locate(this.ed.doc, id)
-    if (!loc) {
-      this.ed.abortUndoEntry()
+    if (!loc) return
+    /**
+     * **正文不是内容的行不拆正文**：查询块／自动化块的名字（正文就是名字）、
+     * 字段定义的名字、只读投影 —— 结构写路径被 `canWriteText` 挡着，拆它只会拿到
+     * 一句「content is protected」的报错（实测：查询块标题里按 Enter）。
+     * 与代码块标题同一条口径：Enter ＝ **在下方新建一块**，原行一个字节不动。
+     * 落点走 `insertBlockAfter` 那一份（不在这里再算一遍兄弟位）。
+     */
+    if (!canWriteText(loc.block)) {
+      this.ed.insert.insertBlockAfter(id, '', undefined, { reuseBlank: false })
       return
     }
+    this.ed.beginUndoEntry()
     /**
      * **同块选区 + Enter = 先删选区，再在选区起点拆**（只做无角色的普通内容块；
      * 跨块选区与页名等身份块仍走原行为）。删除与拆分在**同一笔**里落。
