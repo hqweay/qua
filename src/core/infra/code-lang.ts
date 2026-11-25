@@ -52,23 +52,6 @@ export const CODE_ISLAND_ATTR = 'data-code-island'
 /** 高度上限住在 token 段（约 60vh），组件只引 token 不写长度字面量 */
 export const CODE_MAX_HEIGHT_TOKEN = '--ui-code-max-h'
 
-export interface CodeEditStamp {
-  at: number
-  /** 这次改动在文档里的起点（plain 偏移） */
-  from: number
-  inserted: number
-  deleted: number
-}
-
-/**
- * 连续输入合并成一步撤销：时间窗内、位置相接、只有插入、且前后两笔都没删字。
- * 搜索替换、粘贴、删除都单独成步 —— 一次操作在撤销栈里就该是一次。
- */
-export function shouldMergeCodeUndo(prev: CodeEditStamp | null, next: CodeEditStamp): boolean {
-  if (!prev || next.deleted > 0 || prev.deleted > 0 || next.inserted === 0) return false
-  return next.at - prev.at <= 400 && next.from === prev.from + prev.inserted
-}
-
 /** 外部写回守卫：模型文本与岛内文本已经一致时不再 dispatch（自己的写不要回灌） */
 export function codeNeedsWriteBack(modelText: string, viewText: string): boolean {
   return modelText !== viewText

@@ -33,10 +33,8 @@ import {
   codeNeedsWriteBack,
   plainText,
   prop,
-  shouldMergeCodeUndo,
   textRuns,
   writeBlockContent,
-  type CodeEditStamp,
   type CodeLang,
 } from '../../core/index.ts'
 import type { BlockEditor } from './editor.ts'
@@ -140,20 +138,12 @@ export function mountCodeIsland({ getEd, blockId, into, onContextMenu, onExitBel
 
   let applyingExternal = false
   let disposed = false
-  let undoOpen = false
-  let lastStamp: CodeEditStamp | null = null
 
   const markCaret = () => {
     const off = view.state.selection.main.head
     ed.bsel.clearBlockSelection()
     // 只写模型光标：DOM 光标留在 CM6，调用 placeCaret 会把焦点抢回外层
     ed.sel = { aBlock: blockId, hBlock: blockId, aOff: off, hOff: off }
-  }
-  const flushUndo = () => {
-    if (!undoOpen) return
-    undoOpen = false
-    lastStamp = null
-    ed.finishUndoEntry('other', Date.now())
   }
 
   const view = new EditorView({
@@ -171,7 +161,7 @@ export function mountCodeIsland({ getEd, blockId, into, onContextMenu, onExitBel
         syntaxHighlighting(syntaxColors),
         search({ top: true }),
         keymap.of([
-          { key: 'Mod-Enter', run: () => { flushUndo(); onExitBelow?.(); return true } },
+          { key: 'Mod-Enter', run: () => { onExitBelow?.(); return true } },
           ...closeBracketsKeymap,
           ...defaultKeymap,
           ...searchKeymap,
@@ -187,29 +177,18 @@ export function mountCodeIsland({ getEd, blockId, into, onContextMenu, onExitBel
             return
           }
           const text = u.state.doc.toString()
-          let fromA = 0
-          let toA = 0
-          let fromB = 0
-          let toB = 0
-          u.changes.iterChanges((a, b, c, d) => {
-            fromA = a
-            toA = b
-            fromB = c
-            toB = d
+          /**
+           * 一次事务＝一次 begin/finish，连续输入由撤销栈的 1200ms 合并窗口收成一步
+           * （`UndoStack.record` 的 `insert` 规则）。不在岛里另开长条目：那样 ⌘Z 之前
+           * 还没收口的一笔看不见，而漏收口会把 `entryDepth` 永久留在 1。
+           */
+          ed.beginUndoEntry()
+          const ok = ed.write((tx) => {
+            tx.patch(blockId, (b) => writeBlockContent(b, textRuns(text)))
+            return true
           })
-          const stamp: CodeEditStamp = {
-            at: Date.now(),
-            from: fromA,
-            inserted: toB - fromB,
-            deleted: toA - fromA,
-          }
-          if (!shouldMergeCodeUndo(lastStamp, stamp)) flushUndo()
-          if (!undoOpen) {
-            ed.beginUndoEntry()
-            undoOpen = true
-          }
-          lastStamp = stamp
-          ed.write((tx) => tx.patch(blockId, (b) => writeBlockContent(b, textRuns(text))))
+          if (ok) ed.finishUndoEntry('insert', Date.now())
+          else ed.abortUndoEntry()
           markCaret()
         }),
       ],
@@ -241,20 +220,32 @@ export function mountCodeIsland({ getEd, blockId, into, onContextMenu, onExitBel
     markCaret()
     onContextMenu(new DOMRect(e.clientX, e.clientY, 0, 0))
   }
+  /**
+   * CM6 只在自己的文本行里落光标；点空白区/行号槽时 DOM 焦点在岛内、选区却不在
+   * `.cm-content` 里 ⇒ 打字没有落点。这里把「焦点在岛内但选区不在正文」的点击
+   * 补一次显式光标（不改写正常的文本点击与拖选）。
+   */
+  const ensureCaret = (e: MouseEvent) => {
+    if (e.button !== 0 || disposed) return
+    const sel = document.getSelection()
+    if (sel?.anchorNode && view.contentDOM.contains(sel.anchorNode)) return
+    const pos = view.posAtCoords({ x: e.clientX, y: e.clientY }) ?? view.state.doc.length
+    view.focus()
+    view.dispatch({ selection: { anchor: pos } })
+  }
   root.addEventListener('contextmenu', openMenu)
+  root.addEventListener('mouseup', ensureCaret)
   view.dom.addEventListener('focusin', markCaret)
-  view.dom.addEventListener('focusout', flushUndo)
 
   return {
     root,
     dispose() {
       if (disposed) return
       disposed = true
-      flushUndo()
       unsubscribe()
       root.removeEventListener('contextmenu', openMenu)
+      root.removeEventListener('mouseup', ensureCaret)
       view.dom.removeEventListener('focusin', markCaret)
-      view.dom.removeEventListener('focusout', flushUndo)
       view.destroy()
       root.remove()
     },

@@ -10,7 +10,6 @@ import {
   canonicalLang,
   codeNeedsWriteBack,
   normalizeStoredLang,
-  shouldMergeCodeUndo,
 } from '../src/core/infra/code-lang.ts'
 import { appKeyWhileCodeFocused } from '../src/core/infra/dispatch.ts'
 
@@ -26,16 +25,6 @@ test('语言别名收成规范名，不认识的语言按纯文本画但仍原�
   assert.equal(normalizeStoredLang(' js '), 'javascript')
   assert.equal(normalizeStoredLang('brainfuck'), 'brainfuck', '未知名字不静默吞掉')
   assert.equal(normalizeStoredLang('  '), undefined)
-})
-
-test('连续输入才合并撤销：删除、搜索替换与久隔都单独成步', () => {
-  const first = { at: 1000, from: 2, inserted: 1, deleted: 0 }
-  assert.equal(shouldMergeCodeUndo(null, first), false)
-  assert.equal(shouldMergeCodeUndo(first, { at: 1200, from: 3, inserted: 1, deleted: 0 }), true)
-  assert.equal(shouldMergeCodeUndo(first, { at: 1500, from: 3, inserted: 1, deleted: 0 }), false, '超过时间窗')
-  assert.equal(shouldMergeCodeUndo(first, { at: 1100, from: 5, inserted: 1, deleted: 0 }), false, '位置不相接')
-  assert.equal(shouldMergeCodeUndo(first, { at: 1100, from: 3, inserted: 4, deleted: 1 }), false, '有删除')
-  assert.equal(shouldMergeCodeUndo(first, { at: 1100, from: 3, inserted: 0, deleted: 0 }), false)
 })
 
 test('外部写回只在文本真的不同时发生，自己的写不回灌', () => {

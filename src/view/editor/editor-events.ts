@@ -14,7 +14,7 @@
  *   2. **键位一个都不在这里处理**——全部交给绑定表，这里只碰「输入与拖拽」。
  */
 import { bindDropTarget, isRefDrag, noteDragRef, setDragBlock, zoneHint, zoneRefHint } from '../dnd.ts'
-import { inForeignIsland as foreignIsland } from './block-dom.ts'
+import { EDIT_ISLAND_ATTR, inForeignIsland as foreignIsland } from './block-dom.ts'
 import { refsFromHtml } from './clipboard-flavor.ts'
 import type { ClipboardRefs } from './clipboard-flavor.ts'
 import type { TriggerChar } from '../../core/infra/trigger.ts'
@@ -530,7 +530,12 @@ export function bindEditorEvents(br: EditorBridge): () => void {
 
   /* ── 选区 ───────────────────────────────────────────── */
   on(document, 'selectionchange', () => {
-    if (!c.contains(document.getSelection()?.anchorNode ?? null)) return
+    const s = document.getSelection()
+    if (!c.contains(s?.anchorNode ?? null)) return
+    // 岛（代码块／镜像）里的选区归岛自己：外层 `syncSel` 会把插入点「收回」到 `.tx`，
+    // 而代码块的 `.tx` 是隐藏的 ⇒ 点进岛里打字一个字符都落不进去。
+    const anchorEl = s?.anchorNode instanceof Element ? s.anchorNode : s?.anchorNode?.parentElement
+    if (anchorEl?.closest(`[${EDIT_ISLAND_ATTR}]`)) return
     br.syncSel()
   })
 
