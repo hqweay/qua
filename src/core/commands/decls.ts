@@ -43,7 +43,7 @@ export const COMMANDS: CommandDecl[] = [
    *    调用方（handler）据此给一句解释，而不是静默。
    */
   { name: 'core.editor/clear-closure', title: t('cmd.editor.clear-closure'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['todo', 'untodo', t('menu.kw.untodo')], actsOn: 'block' },
-  { name: 'core.editor/insert-block', title: t('cmd.editor.insert-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { type: { type: 'string', enum: ['paragraph', 'closure', 'divider'] }, text: { type: 'string' } }, keywords: ['insert', 'new block'] },
+  { name: 'core.editor/insert-block', title: t('cmd.editor.insert-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { type: { type: 'string', enum: ['paragraph', 'closure', 'divider', 'quote', 'code'] }, text: { type: 'string' }, lang: { type: 'string' } }, keywords: ['insert', 'new block'] },
   // 只建空正文块、不接类型变体：上方插入目前只有键盘一条入口，斜杠菜单走的是下方语义；
   // 等出现第二个入口（斜杠/菜单项）再决定变体怎么共享
   { name: 'core.editor/insert-block-before', title: t('cmd.editor.insert-block-before'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['insert', 'above', 'before', 'new block'] },
@@ -230,7 +230,7 @@ export const COMMANDS: CommandDecl[] = [
    * 脸跟名字住同一个弹窗——读路径对所有块一致，写入口也一致。
    */
   { name: 'core.block/configure', title: t('cmd.block.configure'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' } }, keywords: ['config', 'alias', 'name', 'list', 'icon', 'color', 'face'], actsOn: 'block' },
-  { name: 'core.block/set-type', title: t('cmd.block.set-type'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, type: { type: 'string' } }, keywords: ['type', 'convert'], hidden: true },
+  { name: 'core.block/set-type', title: t('cmd.block.set-type'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.props'), args: { blockId: { type: 'string' }, type: { type: 'string' }, lang: { type: 'string' } }, keywords: ['type', 'convert'], hidden: true, actsOn: 'block' },
   /**
    * 把一处纯文本提及换成一枚指向目标块的引用（`start`/`end` 是 plain 偏移区间）。
    * 入口只有提及栏片段行上的高亮按钮（与 `set-anchor` 同一条口径：不进命令面板）。

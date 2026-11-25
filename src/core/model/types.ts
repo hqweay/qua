@@ -17,6 +17,7 @@ import { EMBED_TYPE } from '../views/embed.ts'
 import {
   DEFAULT_BLOCK_TYPE,
   blockTypeOf,
+  hasList,
   isAutomationBlock,
   isJournalBlock,
   isPropDefBlock,
@@ -47,7 +48,7 @@ export interface TypeDecl {
   text: 'editable' | 'readonly'
   /**
    * 正文是否允许字面换行（`\n`）。
-   * 现在全是 `false`；多行是给将来的代码块留的能力位。
+   * 只有代码块打开：它的正文是代码纯文本，不拆成行内 run；其余类型的正文是单行内容。
    */
   multiline?: boolean
   /**
@@ -62,6 +63,10 @@ export interface TypeDecl {
 
 /** 分割线的类型 id：出现在声明表、插入入口与渲染绑定三处，只写一份 */
 export const DIVIDER_TYPE = 'core/divider'
+
+/** 引文与代码块的类型 id：声明、插入入口与静态投影共用同一份 id */
+export const QUOTE_TYPE = 'core/quote'
+export const CODE_TYPE = 'core/code'
 
 /**
  * 类型声明表。
@@ -80,6 +85,8 @@ export const TYPE_DECLS: Record<string, TypeDecl> = {
    * 正文只读：那一行画的是「这次露面」的抬头与身体，不是用户写的字。
    */
   [EMBED_TYPE]: { id: EMBED_TYPE, children: 'none', text: 'readonly' },
+  [QUOTE_TYPE]: { id: QUOTE_TYPE, children: 'content', text: 'editable' },
+  [CODE_TYPE]: { id: CODE_TYPE, children: 'content', text: 'editable', multiline: true },
 }
 
 /**
@@ -142,8 +149,8 @@ export function canDirectEditText(b: Block): boolean {
  * ⚠️ **不认识的值不拒绝**：降级是**读侧**的事（`typeDeclOf` 会把未知类型当默认类型画）。
  *    写侧不该假装认识所有类型 —— 插件或更新版本写进来的 id 在这一层被挡住，
  *    用户看到的会是「设了却没生效」，而原因在另一层。
- * ⚠️ **换类型不处理参数**：类型声明的参数是同一骨架里的取值，换骨架时旧参数会失去意义。
- *    现在还没有任何带参数的类型，等有第一个时再定规则 —— 这是**登记**，不是待办。
+ * ⚠️ **换类型清旧参数**：参数只对自己的骨架有意义。代码块的语言留在 `_lang`，
+ *    转回别的骨架时就成了没人读的旧解释；清掉它，撤销仍一步全回。
  */
 export function setBlockType(b: Block, typeId: string): boolean {
   if (blockTypeOf(b) === typeId) return false
@@ -151,8 +158,17 @@ export function setBlockType(b: Block, typeId: string): boolean {
   // 默认类型不落 `_type`：没有这个键就是默认类型，多存一份等于同一件事有两个答案
   if (typeId === DEFAULT_BLOCK_TYPE) delete props._type
   else props._type = typeId
+  if (typeId !== CODE_TYPE) delete props._lang
   // 属性袋也不留空壳：`{}` 与「没有属性」在快照比较里是两种东西
   if (Object.keys(props).length === 0) delete b.props
   else b.props = props
   return true
+}
+
+/**
+ * 换骨架的准入：身份块的名字与日记的日期都不住在正文里，改 `_type` 会换掉渲染骨架
+ * 却改不动那一格内容；只读类型根本没有可写正文。入口与命令处理器共用这一份判据。
+ */
+export function canConvertBlockType(b: Block): boolean {
+  return canWriteText(b) && !hasList(b, 'page') && !hasList(b, 'tag')
 }

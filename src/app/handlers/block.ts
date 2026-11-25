@@ -6,6 +6,7 @@
  */
 import { t } from '../../core/infra/msg.ts'
 import { checkExternalUrl, isColorMarkValue, isHexColor, isJournalDate, journalDateLabel, rejectText } from '../../core/index.ts'
+import { CODE_TYPE, QUOTE_TYPE } from '../../core/index.ts'
 import { MISSING_ASSET_HASH, SEED_ASSET_HASH } from '../../core/fixtures/assets.ts'
 import type { App, Handler } from '../../core/infra/ports.ts'
 import { buildCopyHtml } from '../../view/editor/clipboard-flavor.ts'
@@ -171,6 +172,11 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     const type = S(a.type, 'paragraph')
     // 分割线没有正文可落光标：插入动作自己负责在它下面留一个落点
     if (type === 'divider') return app.ed.insert.insertDividerAfter(id)
+    // 可写正文的带类型块：空行原地换骨架，有正文则在下面新建，一笔撤销
+    if (type === 'quote' || type === 'code') {
+      const lang = S(a.lang, '') || undefined
+      return app.ed.insert.insertEditableTypeAfter(id, type === 'quote' ? QUOTE_TYPE : CODE_TYPE, lang) !== null
+    }
     /**
      * 只认这两种写正文的类型。**未知类型不降级成段落**：命令面的 `enum` 只是元数据，
      * `invoke` 不会按它校验——放过去就会「插了一行普通文字」，

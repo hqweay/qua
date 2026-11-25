@@ -17,6 +17,7 @@ const GROUP_TITLES: Record<string, string> = {
   'blockSel/2-delete': t('menu.group.delete'),
   'blockCopy/1': t('menu.group.copy'),
   'blockInsert/1': t('menu.group.insert'),
+  'blockKind/1': t('menu.group.blockKind'),
   'slash/1-structure': t('menu.group.structure'),
   'slash/2-inline': t('menu.group.inlineAtom'),
   'sel/1-mark': t('menu.group.mark'),

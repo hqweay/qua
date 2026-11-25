@@ -20,6 +20,8 @@ import {
   DEFAULT_BLOCK_TYPE,
   DIVIDER_TYPE,
   EMBED_TYPE,
+  CODE_TYPE,
+  QUOTE_TYPE,
   type Marks,
   type PropKind,
   type QuerySpec,
@@ -59,6 +61,8 @@ const TYPE_VALUE_TEXT: Record<string, MsgId> = {
   [DEFAULT_BLOCK_TYPE]: 'ui.query.type.outline',
   [DIVIDER_TYPE]: 'ui.query.type.divider',
   [EMBED_TYPE]: 'ui.query.type.embed',
+  [QUOTE_TYPE]: 'ui.query.type.quote',
+  [CODE_TYPE]: 'ui.query.type.code',
 }
 
 export function typeValueLabel(id: string): string {

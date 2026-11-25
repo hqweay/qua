@@ -4,9 +4,9 @@
  * 「这块是什么」用角色（`as-page` / `as-tag`），「这一块归在谁下面」用归属边
  * （`core.belongs-to/*`）——两件事，两个区段。
  */
+import { canConvertBlockType } from '../../core/index.ts'
 import type { Handler } from '../../core/infra/ports.ts'
 import { curBlock, S } from './shared.ts'
-
 export const TAGS_HANDLERS: Record<string, Handler> = {
   /* ---- 角色 ---- */
   'core.block/as-page': (a, app) => {
@@ -57,7 +57,10 @@ export const TAGS_HANDLERS: Record<string, Handler> = {
     const id = S(a.blockId) || curBlock(app)
     const type = S(a.type)
     if (!id || !type) return false
-    return app.setBlockType(id, type)
+    const b = app.ed.store.find(id)
+    if (!b || !canConvertBlockType(b)) return false
+    const lang = S(a.lang, '')
+    return app.setBlockType(id, type, lang === '' ? undefined : lang)
   },
   /**
    * **块级标签的两个入口**（属性面板用）。

@@ -115,8 +115,8 @@ test('块菜单：删除同位、复制/插入收子菜单、组标题人人有�
     .map((b) => `${b.submenu}:${b.actsOn ?? 'editor'}`)
   assert.deepEqual(
     [...anchors].sort(),
-    ['blockCopy/:block', 'blockInsert/:editor'],
-    '复制/插入两套行只从子菜单进来（子菜单是行数据，不是命令）',
+    ['blockCopy/:block', 'blockInsert/:editor', 'blockKind/:block'],
+    '子菜单行只从锚点进来（子菜单是行数据，不是命令）',
   )
   // 「我的自动化…」是 basic 组的任务 hub：动态行由命令打开（菜单 opener 需要目标，面板不裸列）
   const hub = menu.find((b) => b.command === 'core.automation/menu')

@@ -34,6 +34,7 @@ import {
   DELETED_AT_PROP,
   DISPLAY_PROP,
   ICON_PROP,
+  LANG_PROP,
   LISTS_PROP,
   VIEWS_PROP,
 } from '../model/model.ts'
@@ -91,6 +92,7 @@ import { EMBED_PROP, canonicalViewRef } from '../views/embed.ts'
 export const SYSTEM_PROP_CHECKS: Readonly<Record<string, (value: unknown) => boolean>> = {
   // 结构槽（model.ts）
   _type: () => true, // 开放：未知 id 读侧降级，写侧不假装认识
+  [LANG_PROP]: (v) => typeof v === 'string' && v.trim() !== '',
   [ICON_PROP]: isIconValue,
   [COLOR_PROP]: isColorValue, // 身份色：色板封闭集（identity/faces.ts 的链只认封闭集内的值）
   _date: isJournalDate,

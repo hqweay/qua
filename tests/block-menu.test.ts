@@ -33,7 +33,8 @@ test('块级 ctx：准入只有「今天不删」这一条，身份不再决定�
   assert.equal(normal.blockCanDelete, true, '普通块走软删')
   assert.equal(normal.blockHasPageRole, false)
   assert.equal(normal.blockHasTagRole, false)
-  assert.equal(normal.blockType, 'paragraph')
+  assert.equal(normal.blockClosure, 'paragraph')
+  assert.equal(normal.blockCanConvertType, true)
 
   const p = ctxOf(page())
   assert.equal(p.blockCanDelete, true, '页可删：菜单上那唯一一行「删除」就是它')
@@ -51,6 +52,26 @@ test('块级 ctx：准入只有「今天不删」这一条，身份不再决定�
 
   const q = ctxOf(query())
   assert.equal(q.blockCanDelete, true, '查询块是内容：没有替代删除命令，必须可删')
+})
+
+test('换骨架准入：身份块和只读正文不给入口，免得菜单里挂着点不动的行', () => {
+  assert.equal(ctxOf(page()).blockCanConvertType, false)
+  assert.equal(ctxOf(tag()).blockCanConvertType, false)
+  assert.equal(ctxOf(journal()).blockCanConvertType, false)
+  assert.equal(ctxOf(mkBlock('', { props: { _type: 'core/divider' } })).blockCanConvertType, false)
+  assert.equal(ctxOf(mkBlock('', { props: { _type: 'core/quote' } })).blockCanConvertType, true)
+})
+
+test('「转为…」是子菜单行，正文/引文共用同一条命令且各带自己的参数', () => {
+  const typeArg = (b: Binding): string => {
+    const a = b.args
+    return a && typeof a === 'object' && 'type' in a && typeof a.type === 'string' ? a.type : ''
+  }
+  const rows = BINDINGS.filter((b) => b.kind === 'menu' && b.group === 'blockKind/1')
+  assert.deepEqual(rows.map(typeArg), ['outline', 'core/quote'])
+  const anchor = BINDINGS.find((b) => b.kind === 'menu' && b.submenu === 'blockKind/')
+  assert.ok(anchor?.actsOn, '子菜单锚点要自己声明作用域')
+  assert.ok(rows.every((b) => b.actsOn === 'block'), '换骨架按 id 执行，记录面也要出现')
 })
 
 test('块级 ctx：嵌套的页也只留「删页」——身份决定，不按装载根', () => {

@@ -6,9 +6,11 @@
  * 撤销粒度的口径：用户按的是**一次**插入，同一个动作里造出的多个块共用一个撤销条目。
  */
 import {
+  CODE_TYPE,
   DIVIDER_TYPE,
   EMBED_PROP,
   EMBED_TYPE,
+  LANG_PROP,
   VIEWS_PROP,
   canonicalViews,
   upsertView,
@@ -154,6 +156,45 @@ export class InsertOps {
     const ok = this.ed.write((tx) => {
       // 新块自带关闭态值 ⇒ 定义块得同批在（与切换关闭态同一条判据）
       if (closure) ensureTaskStatusInTx(this.ed.store.blocks, tx)
+      tx.insert(b, at.parentId, at.index)
+      return true
+    })
+    if (!ok) {
+      this.ed.abortUndoEntry()
+      return null
+    }
+    this.ed.structTail({ id: b.id, off: 0 })
+    return b.id
+  }
+
+  /**
+   * 插入可写正文的带类型块（引文/代码块）。
+   *
+   * 与只读组件的 `insertTypedAfter` 不同，这里不再留一个额外空光标位：代码块自己就是正文。
+   * 空块原地换骨架，撤销一次回到空行；有正文则在下面新建，一次动作一笔事务。
+   */
+  insertEditableTypeAfter(id: string, typeId: string, lang?: string): string | null {
+    const loc = locate(this.ed.doc, id)
+    if (!loc) return null
+    const decorate = (b: Block) => {
+      setBlockType(b, typeId)
+      if (typeId === CODE_TYPE && lang) b.props = { ...(b.props ?? {}), [LANG_PROP]: lang }
+    }
+    this.ed.beginUndoEntry()
+    if (isBlankPlaceholder(loc.block)) {
+      this.ed.write((tx) => tx.patch(loc.block.id, (b) => decorate(b)))
+      this.ed.structTail(null, [loc.block.id])
+      return loc.block.id
+    }
+    const b = mkBlock('')
+    decorate(b)
+    const site = insertSiteOf(loc, { blank: false })
+    if (!site || site.kind === 'replace') {
+      this.ed.abortUndoEntry()
+      return null
+    }
+    const at = site.kind === 'first-child' ? { parentId: site.parentId, index: 0 } : site
+    const ok = this.ed.write((tx) => {
       tx.insert(b, at.parentId, at.index)
       return true
     })

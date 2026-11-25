@@ -109,6 +109,12 @@ export function isColorValue(v: unknown): boolean {
 export const DELETED_AT_PROP = '_deletedAt' as const
 
 /**
+ * 代码块的语言提示（`_lang`）。缺键＝未指定语言，读侧按纯文本处理。
+ * 它是渲染提示不是内容：换语言不改写正文，撤销一步全回。
+ */
+export const LANG_PROP = '_lang'
+
+/**
  * **视图配置**（`ViewConfig[]`，见 `core/view.ts`）：
  * 「这一块怎么看」——列、序、行高、分组、封面。
  *
@@ -229,6 +235,7 @@ export function hasLiveChildren(b: Block): boolean {
  */
 export type SystemPropId =
   | '_type'
+  | typeof LANG_PROP
   | typeof ICON_PROP
   | typeof COLOR_PROP
   | '_date'

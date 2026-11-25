@@ -424,6 +424,8 @@ export const EN2 = {
   'ui.query.type.outline': 'Outline (default)',
   'ui.query.type.divider': 'Divider',
   'ui.query.type.embed': 'Embed',
+  'ui.query.type.quote': 'Quote',
+  'ui.query.type.code': 'Code block',
   'ui.query.fieldGroup.props': 'Properties',
   'ui.query.fieldGroup.system': 'System',
   'ui.query.refkind.all': 'All references',

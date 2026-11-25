@@ -917,6 +917,8 @@ export const MSG = {
   'ui.query.type.outline': '大纲（默认）',
   'ui.query.type.divider': '分割线',
   'ui.query.type.embed': '露面',
+  'ui.query.type.quote': '引文',
+  'ui.query.type.code': '代码块',
   /* 字段下拉的两节：「属性」留给用户自己配的定义块；系统槽是块自带的问法，不借它的名字 */
   'ui.query.fieldGroup.props': '属性',
   'ui.query.fieldGroup.system': '系统',
@@ -1253,6 +1255,9 @@ export const MSG = {
   'menu.label.toggleCollapse': '折叠 / 展开',
   'menu.label.todo': '待办',
   'menu.label.divider': '分割线',
+  'menu.label.quote': '引文',
+  'menu.label.codeBlock': '代码块',
+  'menu.label.turnInto': '转为…',
   'menu.label.pageRef': '行内引用',
   'menu.label.dateRef': '日期',
   'menu.label.image': '图片',

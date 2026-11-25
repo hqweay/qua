@@ -12,12 +12,15 @@
 import {
   blockLabel,
   blockTypeOf,
+  canConvertBlockType,
+  CODE_TYPE,
   claimAlias,
   declaredFieldIds,
   DISPLAY_PROP,
   findInForest,
   hasList,
   ICON_PROP,
+  LANG_PROP,
   isColorValue,
   primaryAliasOf,
   prop,
@@ -263,10 +266,15 @@ function removeBlockRole(blockId: string, role: 'page' | 'tag'): boolean {
  * 一次属性写入就够：类型值住在块的属性袋里，撤销、落盘、重画都走同一条路。
  * 幂等检查放在写之前 —— 否则「设成它已经是的东西」也会占掉一格撤销。
  */
-function applyBlockType(blockId: string, typeId: string): boolean {
+function applyBlockType(blockId: string, typeId: string, lang?: string): boolean {
   const b = findInForest(ws.blocks, blockId)
-  if (!b || blockTypeOf(b) === typeId) return false
-  writeProps(blockId, () => setBlockType(b, typeId))
+  if (!b || !canConvertBlockType(b)) return false
+  const nextLang = typeId === CODE_TYPE && lang ? lang.trim() : undefined
+  if (blockTypeOf(b) === typeId && prop<string>(b, LANG_PROP) === nextLang) return false
+  writeProps(blockId, () => {
+    setBlockType(b, typeId)
+    if (nextLang) b.props = { ...(b.props ?? {}), [LANG_PROP]: nextLang }
+  })
   return true
 }
 

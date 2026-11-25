@@ -191,6 +191,9 @@ export const BINDINGS: Binding[] = [
   { command: 'core.editor/insert-page-ref', kind: 'menu', when: 'blockMenuTarget', group: 'blockInsert/1', order: 20, layer: 'core' },
   { command: 'core.editor/insert-image', kind: 'menu', when: 'blockMenuTarget', group: 'blockInsert/1', order: 30, layer: 'core' },
   { command: 'core.editor/insert-link', kind: 'menu', when: 'blockMenuTarget', group: 'blockInsert/1', order: 40, layer: 'core' },
+  /* 换骨架：正文/引文/代码块是「这一块是什么」，不是外观开关 */
+  { command: 'core.block/set-type', kind: 'menu', when: 'blockMenuTarget && blockCanConvertType', group: 'blockKind/1', order: 10, args: { type: 'outline' }, layer: 'core', label: t('ui.query.type.outline'), actsOn: 'block' },
+  { command: 'core.block/set-type', kind: 'menu', when: 'blockMenuTarget && blockCanConvertType', group: 'blockKind/1', order: 20, args: { type: 'core/quote' }, layer: 'core', label: t('menu.label.quote'), actsOn: 'block' },
 
   /* ---- 结构：把这一块摆成什么样（顺序/深度/状态） ---- */
   { command: 'core.editor/toggle-closure', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 10, layer: 'core' },
@@ -198,10 +201,10 @@ export const BINDINGS: Binding[] = [
    * 与上面那条**成对**出现：`toggle-closure` 在「有这一栏」时只翻值，翻不出「没有这一栏」这一态
    * （见 `editor.clearClosure`），所以「变回去」必须是独立一条。
    *
-   * 判据用 `blockType`（`core/view/editor.ts` 的 `ctxKeys`，只取 `closure`／`paragraph` 两值）：
+   * 判据用 `blockClosure`（`core/identity/block-ctx.ts` 的 `blockMenuCtxOf`，只取 `closure`／`paragraph` 两值）：
    * 不是任务的块上不显示 —— 一条「点了什么都不会发生」的菜单项比没有更糟。
    */
-  { command: 'core.editor/clear-closure', kind: 'menu', when: 'blockMenuTarget && blockType == "closure"', group: 'block/2-structure', order: 15, layer: 'core' },
+  { command: 'core.editor/clear-closure', kind: 'menu', when: 'blockMenuTarget && blockClosure == "closure"', group: 'block/2-structure', order: 15, layer: 'core' },
   { command: 'core.editor/toggle-collapse', kind: 'menu', when: 'blockMenuTarget && blockFoldable', group: 'block/2-structure', order: 20, layer: 'core', label: t('menu.label.toggleCollapse') },
   // 「在父块中打开」是上下文导航：顶层块没有父块，隐藏这一行；默认左键仍是打开它自己
   { command: 'core.block/open-parent', kind: 'menu', when: 'blockMenuTarget && !blockIsRoot', group: 'block/2-structure', order: 25, layer: 'core', icon: 'lucide:corner-up-left' },
@@ -210,6 +213,7 @@ export const BINDINGS: Binding[] = [
   // 「新建子块」与缩进相邻：两者是「让这块有子块」仅有的两条路径，菜单里也放一起
   { command: 'core.editor/insert-child', kind: 'menu', when: 'blockMenuTarget && blockCanTakeChildren', group: 'block/2-structure', order: 45, layer: 'core' },
   { command: 'core.editor/insert-parent-sibling', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 47, layer: 'core' },
+  { submenu: 'blockKind/', kind: 'menu', when: 'blockMenuTarget && blockCanConvertType', group: 'block/2-structure', order: 13, layer: 'core', label: t('menu.label.turnInto'), actsOn: 'block' },
   { command: 'core.editor/indent-block', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 50, layer: 'core' },
   { command: 'core.editor/outdent-block', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 60, layer: 'core' },
   /**
@@ -323,7 +327,9 @@ export const BINDINGS: Binding[] = [
    * 只在这一块真是任务时出现（同菜单那条判据），否则斜杠列表里永远挂着一个空动作。
    * 图标复用「虚线方框」：它是「这个方框可以被拿掉」的现成说法，不新增图标数据。
    */
-  { command: 'core.editor/clear-closure', kind: 'slash', when: 'editorTextFocus && blockType == "closure"', group: 'slash/1-structure', order: 15, layer: 'core', icon: 'lucide:square-dashed' },
+  { command: 'core.editor/clear-closure', kind: 'slash', when: 'editorTextFocus && blockClosure == "closure"', group: 'slash/1-structure', order: 15, layer: 'core', icon: 'lucide:square-dashed' },
+  // 引文块：可写正文，插完光标就落在这一行（不像只读组件还要补一个空位）
+  { command: 'core.editor/insert-block', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-structure', order: 17, layer: 'core', label: t('menu.label.quote'), args: { type: 'quote' }, keywords: ['quote', 'blockquote'], icon: 'lucide:quote' },
   // 分割线：没有正文的块，插完光标要落到它下面那一行（见 insertDividerAfter）
   { command: 'core.editor/insert-block', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-structure', order: 20, layer: 'core', label: t('menu.label.divider'), args: { type: 'divider' }, keywords: ['divider', 'hr', 'line', t('menu.kw.divider')], icon: 'lucide:minus' },
   { command: 'core.query/insert', kind: 'slash', when: 'editorTextFocus', group: 'slash/1-structure', order: 30, layer: 'core', label: t('cmd.query.insert'), keywords: ['query', 'filter', 'where'], icon: 'lucide:list-filter' },

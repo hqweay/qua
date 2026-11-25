@@ -608,12 +608,12 @@ export interface App {
   ): boolean
   /** **固定派生栏**（引用/成员/同类/提及 → local）：把现算的条件变成一栏可编辑的查询 */
   /**
-   * 写块的类型（`_type`）。
+   * 写块的类型（`_type`），代码块可同时给出语言提示（`_lang`）。
    *
    * ⚠️ 类型 id **不由这里校验**：不认识的值照写，降级是读侧的事 ——
    *    否则插件或更新版本写的类型会在这一层被抹掉。
    */
-  setBlockType(blockId: string, typeId: string): boolean
+  setBlockType(blockId: string, typeId: string, lang?: string): boolean
   /**
    * 删一个行内原子（引用 / 标签）。
    *
