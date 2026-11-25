@@ -1091,6 +1091,8 @@ export class RenderOps {
         codeBody: (b, into) => this.ed.embeds.attachCodeBody(b, into),
         // 容器标题（代码／露面）：题注行只把文本交回来，写入与撤销归编辑器
         captionWrite: (blockId, text) => this.ed.setCaption(blockId, text),
+        // 身体块行头的三颗动作：岛内点击 → 装配层同一个桥（不新增命令入口）
+        bodyAction: (act, blockId) => this.ed.events.blockAction?.(act, blockId, this.ed),
         ...(this.ed.emptyPlaceholder !== undefined ? { placeholder: this.ed.emptyPlaceholder } : {}),
         /**
          * **正文里的查询体**：只有装配层接了画法、且这一份装载允许展开时才给。

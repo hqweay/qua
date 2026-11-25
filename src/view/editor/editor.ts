@@ -135,7 +135,7 @@ import { AliasClaimError } from '../../core/kb/unsupported.ts'
 import { ensureTaskStatusInTx } from '../../core/kb/ensure-task.ts'
 // 用户可见文案一律走 t
 import { t } from '../../core/infra/msg.ts'
-import { ALLOWED_ROW_CHILDREN, EDIT_ISLAND_ATTR, inlineBodyKind, isReadonlyBlock, rowHasEmbedViewBody } from './block-dom.ts'
+import { ALLOWED_ROW_CHILDREN, EDIT_ISLAND_ATTR, inlineBodyKind, isReadonlyBlock, rowHasEmbedViewBody, type BlockAction } from './block-dom.ts'
 import { ReloadPolicy } from './reload-policy.ts'
 import { spanAt, type PlainSpan } from './hit-paint.ts'
 import { AnnoHover, type AnnoHitSpan } from './anno-hover.ts'
@@ -457,6 +457,13 @@ export interface ViewEvents {
    * 装配层据此附「移除这次露面」。
    */
   blockMenu?: (blockId: string, rect: DOMRect, appearanceHost?: string, trigger?: HTMLElement) => void
+  /**
+   * **点身体块行头那颗动作**：上建块／下建块／删除。
+   *
+   * 与块菜单里的同名动作走同一条命令（这里只报意图与目标，命令归装配层）。
+   * ⚠️ 未接 ⇒ 什么都不做（缺入口看得见地缺），不退化成聚焦或静默写入。
+   */
+  blockAction?: (act: BlockAction, blockId: string, owner: BlockEditor) => void
   /**
    * **点 gutter 上一条普通 `select` 图标**：装配层开选项菜单。
    *

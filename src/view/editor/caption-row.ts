@@ -39,6 +39,16 @@ export interface CaptionRowOptions {
   collapsedPlaceholder?: string
   /** 单行文本（可能为空串＝摘标题）；调用方负责写模型与撤销 */
   onCommit: (text: string) => void
+  /**
+   * 行头右侧的动作组（上建块／下建块／删除）。
+   *
+   * 为什么挂在这里而不是行级绝对定位：题注是这一行的第一条 flex 行，动作组跟在名字后面
+   * 右对齐——不压标签槽、不随 hover 改行宽（透明度切换，不换布局）。
+   * 按钮自己带 `data-block-act`，点击由编辑器的事件表接（与块标同一处委托）。
+   */
+  actions?: HTMLElement
+  /** 动作组里点了哪一颗（`above`／`below`／`delete`）：命令归调用方，这里只读 DOM 意图 */
+  onAction?: (act: 'above' | 'below' | 'delete') => void
 }
 
 export function makeCaptionRow(block: Block, opts: CaptionRowOptions): HTMLElement {
@@ -146,5 +156,21 @@ export function makeCaptionRow(block: Block, opts: CaptionRowOptions): HTMLEleme
   text.addEventListener('blur', commit)
 
   row.appendChild(text)
+  if (opts.actions) {
+    row.appendChild(opts.actions)
+    /**
+     * 动作组的点击**在本行里收**：题注住在块的编辑岛里，外层编辑器的委托会按
+     * 「岛内事件不归我」直接跳过（`inForeignIsland`）——挂到容器上等于点了没反应。
+     * 岛自己持有这些事件，是同一个契约的另一面。
+     */
+    row.addEventListener('click', (e) => {
+      const target = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-block-act]') : null
+      const act = target?.dataset.blockAct
+      if (act !== 'above' && act !== 'below' && act !== 'delete') return
+      e.preventDefault()
+      e.stopPropagation()
+      opts.onAction?.(act)
+    })
+  }
   return row
 }

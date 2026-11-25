@@ -24,10 +24,7 @@ import {
   isFolded,
   isPropDef,
   LANG_PROP,
-  locate,
-  mkBlock,
   openAxisOf,
-  plainLen,
   prop,
   readEmbed,
   removableBySplice,
@@ -51,22 +48,6 @@ import { readAutomation } from '../../core/automation/automation.ts'
 import { type Registry, type MenuRequest } from '../../core/commands/index.ts'
 import { Layers, type Row } from '../../ui/overlay/layers.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
-
-/**
- * 这一行能不能接受插入点：有没有**可写**的正文槽。
- *
- * 只读行（journal 的日期投影、只读类型）与没有正文槽的行都不是光标目标：把选区
- * 投影进去会被 `reclaimCaret` 当成「跑到正文槽之外」顶回来，而「顶回来 → 按模型
- * 再投影」两头互相搬就是一个自激循环（实测：代码块末尾按 ↓ 落到下一天的日期行，
- * 一秒内上万次 `placeCaret`，界面像卡死、一个块也不建）。
- */
-function canTakeCaret(ed: BlockEditor, id: string): boolean {
-  const tx = ed.txEl(id)
-  if (!tx) return false
-  if (tx.closest('[data-readonly]')) return false
-  // 代码块的 `.tx` 是让位的空槽（正文在 CM6 里）：往里放光标只会得到一条看不见的竖线
-  return tx.dataset.codeSlot === undefined
-}
 
 export interface EditorEventsDeps {
   setEd: (e: BlockEditor) => void
@@ -167,52 +148,6 @@ function viewEvents(
             target: { blockId: block.id, surface: 'editor' },
             title: t('menu.title.block'),
           })
-        },
-        // 末行末尾 ↓/→：落到可见的下一行；没有（或那一行放不下光标）才新建
-        onExitBelow: () => {
-          const ed = active()
-          const rows = ed.rows()
-          const i = rows.findIndex((r) => r.block.id === block.id)
-          const next = i >= 0 ? rows[i + 1]?.block : undefined
-          if (next && !isDeleted(next) && canTakeCaret(ed, next.id)) {
-            ed.placeCaret(next.id, 0)
-            // 落点没落进去（行在路上被换掉／虚拟化摘了）⇒ 当没有下一行，走新建
-            if (ed.sel?.aBlock === next.id) return
-          }
-          ed.insert.insertBlockAfter(block.id, '')
-        },
-        // 首行开头 ↑/←：有上一兄弟就落到它末尾；没有就在同一层上方新建一块
-        // （顶层根插顶层；首个子块插首子块——都遵守「上面新建」而不是跳到父行）。
-        onExitAbove: () => {
-          const ed = active()
-          const loc = locate({ roots: ed.store.blocks }, block.id)
-          if (!loc) {
-            ed.insert.insertBlockBefore(block.id)
-            return
-          }
-          const siblings = loc.parent ? loc.parent.children : ed.store.blocks
-          const prev = loc.index > 0 ? siblings[loc.index - 1] : undefined
-          if (prev && !isDeleted(prev)) {
-            if (canTakeCaret(ed, prev.id)) {
-              ed.placeCaret(prev.id, plainLen(prev.content))
-              if (ed.sel?.aBlock === prev.id) return
-            } else {
-              // 上一行放不下光标（只读日期行/代码岛身体）⇒ 在上方建一块，别把光标塞进只读行
-              ed.insert.insertBlockBefore(block.id)
-              return
-            }
-          }
-          const above = mkBlock('')
-          ed.beginUndoEntry()
-          const ok = ed.write((tx) => {
-            tx.insert(above, loc.parent?.id ?? null, 0)
-            return true
-          })
-          if (!ok) {
-            ed.abortUndoEntry()
-            return
-          }
-          ed.structTail({ id: above.id, off: 0 })
         },
         // ⌘↵：与正文同一条命令（岛内接管，避免 CM6 默认插行）
         onToggleTask: () => {
@@ -708,6 +643,21 @@ function viewEvents(
     openBlock: (blockId, place) => getApp().openBlock(blockId, place),
     // 结构动作后光标不可见的兜底：所有编辑器共用同一份实现（判据在 focusSourceInMain）
     focusSource: (blockId) => focusSourceInMain(blockId),
+    /**
+     * **身体块行头的动作**（上建块／下建块／删除）：与块菜单同名项落同一条路。
+     * 只接鼠标，不碰键位——岛里不再监听方向键，结构动作在代码块里只有这一条。
+     */
+    blockAction: (act, id, owner) => {
+      if (act === 'delete') {
+        void getRegistry().invoke('core.block/delete', { blockId: id }, via)
+        return
+      }
+      if (!kb.get(id)) return
+      // 用**画这一行的那台**编辑器（预览/挂载区里的行不归当前活动那台）
+      const ed = owner ?? active()
+      if (act === 'above') ed.insert.insertBlockBefore(id, { reuseBlank: false })
+      else ed.insert.insertBlockAfter(id, '', undefined, { reuseBlank: false })
+    },
     blockMenu: (blockId, rect, appearanceHost, trigger) => {
       const ed = active()
       // 命中**已选中的块**（且多块）⇒ 多块菜单；否则清块选区，走原单块菜单

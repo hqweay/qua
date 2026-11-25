@@ -478,6 +478,43 @@ export const ALLOWED_ROW_CHILDREN: ReadonlySet<string> = new Set([
   'blk-code-host',
 ])
 
+/** 身体块行头的三个动作（与块菜单同名项同一条命令） */
+export type BlockAction = 'above' | 'below' | 'delete'
+
+/**
+ * **身体块行头的动作组**：上建块／下建块／删除。
+ *
+ * 为什么需要：代码块的正文在 CM6 岛里、露面的正文在源块——这两种块的「上下建块／删块」
+ * 没有一条可落光标的正文行，键位也就没有稳定抓手（岛内的键只该归代码编辑）。
+ * 给一条**鼠标路径**，落的还是块菜单里的同名命令。
+ *
+ * 规则：
+ *   · 只挂在**有题注行**的身体块上（代码／露面）——普通块的正文行自己就能 Enter；
+ *   · 透明度切换，不换布局（跟 `::before` 占位同一条纪律：chrome 不许推正文）；
+ *   · 不进 tab 序（与块标／折叠同一档鼠标 chrome）；点击由编辑器事件表委托，
+ *     这里只写 `data-block-act`，不认识命令。
+ */
+function makeBodyActions(id: string): HTMLElement {
+  const group = document.createElement('span')
+  group.className = 'blk-acts'
+  group.contentEditable = 'false'
+  const add = (act: BlockAction, icon: 'arrow-up' | 'arrow-down' | 'trash-2', tip: string): void => {
+    const el = document.createElement('span')
+    el.className = act === 'delete' ? 'blk-act blk-act-delete' : 'blk-act'
+    el.dataset.blockAct = act
+    el.dataset.blockActFor = id
+    el.dataset.tip = tip
+    el.setAttribute('role', 'button')
+    el.setAttribute('aria-label', tip)
+    el.appendChild(createIcon(icon, 'sm'))
+    group.appendChild(el)
+  }
+  add('above', 'arrow-up', t('menu.label.insertAbove'))
+  add('below', 'arrow-down', t('menu.label.insertBelow'))
+  add('delete', 'trash-2', t('cmd.block.delete'))
+  return group
+}
+
 /**
  * 一个可见行 → `.blk` 元素。
  *
@@ -564,6 +601,12 @@ export function makeBlockEl(
      * 不接 ⇒ 不画题注行（静态投影与没有标题需求的表面不多一个死控件）。
      */
     captionWrite?: (blockId: string, text: string) => void
+    /**
+     * **身体块行头三颗动作的落点**（上建块／下建块／删除）：题注行在编辑岛里，
+     * 点击必须由岛自己收下再交回同一条命令（外层委托会跳过岛内事件）。
+     * 不接 ⇒ 不画动作组（静态投影不多三颗点了没反应的按钮）。
+     */
+    bodyAction?: (act: BlockAction, blockId: string) => void
     /**
      * **正文里自动化块的身体**（三段式：当／如果／就）。与 `viewBody` 同一条分工
      * （`view` 不 import `ui`、装配层给画法、行内体是另一个编辑宿主）；
@@ -1121,6 +1164,8 @@ export function makeBlockEl(
         placeholder: t('ui.block.captionAdd'),
         collapsedPlaceholder: target.trim() || t('ui.block.captionAdd'),
         onCommit: (text) => opts.captionWrite!(b.id, text),
+        actions: opts.bodyAction ? makeBodyActions(b.id) : undefined,
+        onAction: (act) => opts.bodyAction?.(act, b.id),
       }))
     }
     embedBodyEl = body
@@ -1141,6 +1186,8 @@ export function makeBlockEl(
         placeholder: t('ui.block.captionAdd'),
         collapsedPlaceholder: firstLine || t('ui.block.captionAdd'),
         onCommit: (text) => opts.captionWrite!(b.id, text),
+        actions: opts.bodyAction ? makeBodyActions(b.id) : undefined,
+        onAction: (act) => opts.bodyAction?.(act, b.id),
       }))
     }
     /**

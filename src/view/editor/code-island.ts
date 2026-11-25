@@ -133,10 +133,6 @@ export interface CodeIslandMount {
   onCopyBlockText?: () => void
   /** 右键菜单：岛里没有外层编辑器的菜单委托，得由装配层接回来 */
   onContextMenu?: (anchor: DOMRect) => void
-  /** 离开代码块去下一块（末行末尾 ↓/→）：没有下一块时新建一行 */
-  onExitBelow?: () => void
-  /** 离开代码块去上一块（首行开头 ↑/←）：没有上一块时在上方新建一行 */
-  onExitAbove?: () => void
   /** ⌘↵：代码块也照常切换任务；岛内接管，避免 CM6 默认 insertBlankLine */
   onToggleTask?: () => void
 }
@@ -146,7 +142,7 @@ export interface CodeIslandHandle {
   dispose(): void
 }
 
-export function mountCodeIsland({ getEd, blockId, into, onCopyBlock, onCutBlock, onCopyBlockText, onContextMenu, onExitBelow, onExitAbove, onToggleTask }: CodeIslandMount): CodeIslandHandle {
+export function mountCodeIsland({ getEd, blockId, into, onCopyBlock, onCutBlock, onCopyBlockText, onContextMenu, onToggleTask }: CodeIslandMount): CodeIslandHandle {
   const ed = getEd()
   const initial = ed.store.find(blockId)
   const lang = canonicalLang(initial ? prop<string>(initial, '_lang') : undefined)
@@ -166,25 +162,6 @@ export function mountCodeIsland({ getEd, blockId, into, onCopyBlock, onCutBlock,
     // 只写模型光标：DOM 光标留在 CM6，调用 placeCaret 会把焦点抢回外层
     ed.sel = { aBlock: blockId, hBlock: blockId, aOff: off, hOff: off }
   }
-  /** 末行末尾是「向下」出口：↓/→ 在那里离开岛，其余位置照常走 CM6 */
-  const exitAtEnd = (v: EditorView): boolean => {
-    const sel = v.state.selection.main
-    if (!sel.empty) return false
-    const line = v.state.doc.lineAt(sel.head)
-    if (line.number !== v.state.doc.lines || sel.head !== line.to) return false
-    onExitBelow?.()
-    return true
-  }
-  /** 首行开头是反向出口：↑/← 离开到上一块（没有就新建），其余位置照常走 CM6 */
-  const exitAtStart = (v: EditorView): boolean => {
-    const sel = v.state.selection.main
-    if (!sel.empty) return false
-    const line = v.state.doc.lineAt(sel.head)
-    if (line.number !== 1 || sel.head !== line.from) return false
-    onExitAbove?.()
-    return true
-  }
-
   /**
    * 块剪贴板手势要同时满足：CM6 里单光标塌缩，且 DOM 选区也是塌缩的。
    * DOM 那一半是防「CM6 状态已空、原生选区还停在别处」的半拍差。
@@ -231,11 +208,6 @@ export function mountCodeIsland({ getEd, blockId, into, onCopyBlock, onCutBlock,
           // ⌘↵：切任务（代码块也能是任务）。岛内接管并 stopPropagation，
           // 否则 CM6 默认的 insertBlankLine 会同时插一行、应用层还会再切一次。
           { key: 'Mod-Enter', run: () => { onToggleTask?.(); return true }, stopPropagation: true },
-          // 出口：末行末尾 ↓/→ 到下一块，首行开头 ↑/← 到上一块
-          { key: 'ArrowDown', run: (v) => exitAtEnd(v) },
-          { key: 'ArrowRight', run: (v) => exitAtEnd(v) },
-          { key: 'ArrowUp', run: (v) => exitAtStart(v) },
-          { key: 'ArrowLeft', run: (v) => exitAtStart(v) },
           ...closeBracketsKeymap,
           ...defaultKeymap,
           ...searchKeymap,

@@ -91,11 +91,21 @@ export class InsertOps {
    *    不该被「/待办」翻回去 —— 那是改值，不是插入。
    *    这一条与 `toggleClosure` 分工：那个是**切换**，这个是**插入**。
    */
-  insertBlockAfter(id: string, text: string, closure?: ClosureState): string | null {
+  insertBlockAfter(
+    id: string,
+    text: string,
+    closure?: ClosureState,
+    /**
+     * 「空块原地改」的复用支。省略 ＝ 复用（斜杠菜单的口径：空行打 `/待办` 是把这一行
+     * 变成待办）；**显式的「在下方新建块」必须关掉它**——否则对一个空代码块按「新建」
+     * 会把光标放回原块，一块都不建（看起来就是按钮没反应）。
+     */
+    opts: { reuseBlank?: boolean } = {},
+  ): string | null {
     const loc = locate(this.ed.doc, id)
     if (!loc) return null
     this.ed.beginUndoEntry()
-    const blank = isBlankPlaceholder(loc.block)
+    const blank = opts.reuseBlank === false ? false : isBlankPlaceholder(loc.block)
     if (blank && text === '') {
       /**
        * 空块 ＋ 无正文：
@@ -217,11 +227,11 @@ export class InsertOps {
    *
    * 落点只由 `insertSiteOf` ＋ `tx.insert` 算（理由同 `insertBlockAfter`：树的身份只有一份）。
    */
-  insertBlockBefore(id: string): string | null {
+  insertBlockBefore(id: string, opts: { reuseBlank?: boolean } = {}): string | null {
     const loc = locate(this.ed.doc, id)
     if (!loc) return null
     this.ed.beginUndoEntry()
-    const blank = isBlankPlaceholder(loc.block)
+    const blank = opts.reuseBlank === false ? false : isBlankPlaceholder(loc.block)
     if (blank) {
       this.ed.abortUndoEntry()
       this.ed.placeCaret(loc.block.id, 0)

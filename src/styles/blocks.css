@@ -3771,6 +3771,50 @@ button.blk-auto-chip {
 .blk-caption-text:focus[data-empty='1']::before {
   content: none;
 }
+/*
+ * **身体块行头的动作组**（上建块／下建块／删除）：跟着题注行走，右对齐。
+ *
+ * 为什么不用绝对定位：题注是这一行的第一条 flex 行，动作组在这里只会把名字的省略号
+ * 往左收一点（宽度常驻、只换透明度）——不压标签槽，也不在 hover 时改行宽（那样整行
+ * 的字会抖一下）。与块标/折叠同一档鼠标 chrome：不进 tab 序。
+ */
+.blk-acts {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-1);
+  margin-left: auto;
+  flex: 0 0 auto;
+  opacity: 0;
+  transition: opacity var(--ui-dur-1) ease;
+}
+.blk:hover > .blk-code-host .blk-acts,
+.blk:hover > .blk-embed-body .blk-acts,
+.blk-acts:focus-within {
+  opacity: var(--ui-soft);
+}
+.blk-act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6em;
+  height: 1.6em;
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+}
+.blk-act:hover {
+  color: var(--ui-text);
+  background: var(--ui-bg-hover);
+  opacity: 1;
+}
+.blk-act-delete:hover {
+  color: var(--ui-danger);
+}
+@media (prefers-reduced-motion: reduce) {
+  .blk-acts {
+    transition: none;
+  }
+}
 /* 收起态的代码块用一种「合上的盒子」读法：标题就是盒面，正文不占位 */
 .blk[data-collapsed='1'] > .blk-code-host .blk-caption {
   padding: var(--ui-gap-2) var(--ui-gap-4);
