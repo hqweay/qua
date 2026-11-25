@@ -220,7 +220,8 @@
   <span class="key">modified</span>: number     <span class="cmt">最后一次改动（只在编辑边界更新，并进内容那条 upsert）</span>
   <span class="key">annos?</span>: Anno[]       <span class="cmt">可引用区间：只在被引用时才存在（不写空数组）</span>
   <span class="key">props?</span>: {            <span class="cmt">属性袋：键＝定义块的 id，不是名字</span>
-    <span class="key">_type</span>?      <span class="cmt">封闭注册表：outline（缺省）· core/divider · core/view-embed</span>
+    <span class="key">_type</span>?      <span class="cmt">封闭注册表：outline（缺省）· core/divider · core/view-embed · core/quote · core/code</span>
+    <span class="key">_lang</span>?      <span class="cmt">代码块的语言提示；不认识的名字按纯文本画、原文照存</span>
     <span class="key">_icon</span>?      <span class="cmt">lucide:&lt;name&gt; 或字面文本</span>
     <span class="key">_date</span>?      <span class="cmt">有它 ⇒ 日记块（只读、全局一天一个）</span>
     <span class="key">_aliases</span>?   <span class="cmt">地址：0..N，首个是主名，全局唯一</span>
