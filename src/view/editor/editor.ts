@@ -3570,6 +3570,7 @@ export class BlockEditor {
     if (rootEl && clientY < rootEl.getBoundingClientRect().top) return false
     const head = rootEl ? inTitleGap(rootEl, clientY) : false
 
+    const wasFolded = isFolded(this.doc, root.id)
     this.beginUndoEntry()
     unfoldBlock(this.doc, root.id)
     /**
@@ -3590,14 +3591,23 @@ export class BlockEditor {
     const reusable =
       edge && isEmptyContent(edge.content) && !hasLiveChildren(edge) && !hasBody(edge) ? edge : null
     const child = reusable ?? mkBlock('')
+    let insertedInPlace = false
     if (!reusable) {
       this.write((tx) => tx.insert(child, root.id, head ? 0 : root.children.length))
       this.finishUndoEntry('structural', Date.now())
+      /**
+       * 根行没折（unfold 是空操作）、只多一行 ⇒ 就地插 DOM，别的行一帧不离档。
+       * 根行本来折着会让一批子行突然可见（可见行集合变了），那才需要整页重画。
+       */
+      if (!wasFolded) {
+        const afterId = head ? root.id : (edge?.id ?? root.id)
+        insertedInPlace = this.render.insertRowAfter(child.id, afterId)
+      }
     } else {
       // 复用边缘空块：模型不动、撤销不记（与 `insertBlockAfter` 的空块支同一条口径）
       this.abortUndoEntry()
     }
-    this.renderAll()
+    if (!insertedInPlace) this.renderAll()
     this.placeCaret(child.id, 0)
     this.emitChange('struct')
     return true

@@ -1073,6 +1073,34 @@ export class RenderOps {
     if (this.ed.virtualize) this.measureRows([id])
     this.repaintOverlays()
   }
+  /**
+   * 点标题-正文气口建块：只往 DOM 里插新行，别的行（含根行）一帧都不离档。
+   * 整页 `renderAll` 会把根行摘下重装，三角与「＋」的 hover 淡入从 0 重来
+   * ——与打字那次同一条「不该重建的行别重建」。
+   */
+  insertRowAfter(id: string, afterId: string): boolean {
+    const row = this.ed.rowOf(id)
+    if (!row || this.ed.blockEl(id)) return false
+    const derive = this.deriveOf()
+    const nextEl = this.makeBlockEl(
+      row,
+      gutterFieldsFor([row.block], this.ed.store.blocks, derive).get(id),
+      this.belowOf([row.block], derive).get(id),
+      hasSingleLiveBlock(this.ed.doc),
+    )
+    const anchorEl = this.ed.blockEl(afterId)
+    if (!anchorEl) return false
+    anchorEl.after(nextEl)
+    this.ed.setRowEl(id, nextEl)
+    this.mounted.add(id)
+    this.rebuildAncestors()
+    this.repaintOverlays()
+    this.renderedDoc = this.ed.doc
+    this.renderedFoldSig = this.foldSig()
+    if (this.ed.virtualize) this.measureRows([id])
+    return true
+  }
+
 
   /**
    * @param gutter 这一行的 gutter 字段，**由调用方算好**：`block-dom` 是渲染层，没有森林；
