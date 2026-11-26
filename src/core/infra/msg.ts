@@ -1267,6 +1267,8 @@ export const MSG = {
   'menu.label.insertAbove': '在上方新建块',
   'menu.label.language': '语言…',
   'ui.code.lang.plain': '纯文本',
+  // 徽章的悬停提示：说的是「它是什么 ＋ 点它干什么」——只报语言名等于没说它可点
+  'ui.code.langTip': '代码语言：{label}（点击切换）',
   'menu.label.pageRef': '行内引用',
   'menu.label.dateRef': '日期',
   'menu.label.image': '图片',

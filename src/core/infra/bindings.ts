@@ -14,6 +14,7 @@
 import { evalWhen, evalWhenSafe } from './when.ts'
 // ⚠️ 三个收敛点之二：绑定表的 `label` / `keywords` 一律走 t
 import { t, type MsgId } from './msg.ts'
+import { CODE_LANG_DECLS, codeLangLabel } from './code-lang.ts'
 import type { ColorAxis, CtxKeys } from '../index.ts'
 import type { ActsOn } from './ports.ts'
 
@@ -294,18 +295,24 @@ export const BINDINGS: Binding[] = [
   { command: 'core.dock/open-block', kind: 'menu', when: 'blockMenuTarget', group: 'block/5-view', order: 55, layer: 'core' },
   // 「加到快捷」与「在右槽打开」是两条独立露面：前者只留一颗 44px 入口，后者摊一张窗口卡
   { command: 'core.dock/add-shortcut', kind: 'menu', when: 'blockMenuTarget', group: 'block/5-view', order: 56, layer: 'core' },
-  /* 代码块的语言：一族预设值，选中即写 `_lang`，正文与骨架不动 */
-  { command: 'core.block/set-lang', kind: 'menu', when: 'blockMenuTarget && blockIsCode', group: 'codeLang/1', order: 10, args: { lang: 'plain' }, layer: 'core', label: t('ui.code.lang.plain'), actsOn: 'block' },
-  { command: 'core.block/set-lang', kind: 'menu', when: 'blockMenuTarget && blockIsCode', group: 'codeLang/1', order: 20, args: { lang: 'javascript' }, layer: 'core', label: 'JavaScript', actsOn: 'block' },
-  { command: 'core.block/set-lang', kind: 'menu', when: 'blockMenuTarget && blockIsCode', group: 'codeLang/1', order: 30, args: { lang: 'typescript' }, layer: 'core', label: 'TypeScript', actsOn: 'block' },
-  { command: 'core.block/set-lang', kind: 'menu', when: 'blockMenuTarget && blockIsCode', group: 'codeLang/1', order: 40, args: { lang: 'python' }, layer: 'core', label: 'Python', actsOn: 'block' },
-  { command: 'core.block/set-lang', kind: 'menu', when: 'blockMenuTarget && blockIsCode', group: 'codeLang/1', order: 50, args: { lang: 'json' }, layer: 'core', label: 'JSON', actsOn: 'block' },
-  { command: 'core.block/set-lang', kind: 'menu', when: 'blockMenuTarget && blockIsCode', group: 'codeLang/1', order: 60, args: { lang: 'html' }, layer: 'core', label: 'HTML', actsOn: 'block' },
-  { command: 'core.block/set-lang', kind: 'menu', when: 'blockMenuTarget && blockIsCode', group: 'codeLang/1', order: 70, args: { lang: 'css' }, layer: 'core', label: 'CSS', actsOn: 'block' },
-  { command: 'core.block/set-lang', kind: 'menu', when: 'blockMenuTarget && blockIsCode', group: 'codeLang/1', order: 80, args: { lang: 'sql' }, layer: 'core', label: 'SQL', actsOn: 'block' },
-  { command: 'core.block/set-lang', kind: 'menu', when: 'blockMenuTarget && blockIsCode', group: 'codeLang/1', order: 90, args: { lang: 'bash' }, layer: 'core', label: 'Bash', actsOn: 'block' },
-  { command: 'core.block/set-lang', kind: 'menu', when: 'blockMenuTarget && blockIsCode', group: 'codeLang/1', order: 100, args: { lang: 'yaml' }, layer: 'core', label: 'YAML', actsOn: 'block' },
-  { command: 'core.block/set-lang', kind: 'menu', when: 'blockMenuTarget && blockIsCode', group: 'codeLang/1', order: 110, args: { lang: 'markdown' }, layer: 'core', label: 'Markdown', actsOn: 'block' },
+  /**
+   * 代码块的语言：**一族预设值，由语言表生成**（`core/infra/code-lang.ts` 是唯一清单）。
+   * 选中即写 `_lang`，正文与代码文档都不动。
+   *
+   * ⚠️ 别在这里手抄一份：手抄的第二份会漂成「徽章上有、菜单里没有」——
+   *    加一门语言只改那张表，加载点同表分派（测试钉住两边不漏）。
+   */
+  ...CODE_LANG_DECLS.map((d, i) => ({
+    command: 'core.block/set-lang',
+    kind: 'menu' as const,
+    when: 'blockMenuTarget && blockIsCode',
+    group: 'codeLang/1',
+    order: (i + 1) * 10,
+    args: { lang: d.id },
+    layer: 'core' as const,
+    label: codeLangLabel(d.id),
+    actsOn: 'block' as const,
+  })),
 
   /* ---- 删除：危险动作**同位** ---- */
   /**

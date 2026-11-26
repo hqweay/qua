@@ -297,7 +297,21 @@ function applyBlockType(blockId: string, typeId: string, lang?: string): boolean
     } else {
       setBlockType(b, typeId)
     }
-    if (nextLang) b.props = { ...(b.props ?? {}), [LANG_PROP]: nextLang }
+    /**
+     * **语言是「换掉」不是「加上」**：选「纯文本」＝把 `_lang` 摘掉，
+     * 盘上不留一个「说了等于没说」的值（读侧把空串当坏值，落一个空壳只是脏数据）。
+     *
+     * ⚠️ 必须换一个新 props 对象：事务的改前快照持有的是**同一个引用**，
+     *    就地 `delete` 会让「改前／改后」读到同一份东西 ⇒ 一条 op 都不产生
+     *    （表现为「点了纯文本，徽章还写着 Rust」）。
+     */
+    if (willCode) {
+      const props = { ...(b.props ?? {}) }
+      if (nextLang) props[LANG_PROP] = nextLang
+      else delete props[LANG_PROP]
+      if (Object.keys(props).length === 0) delete b.props
+      else b.props = props
+    }
   })
   return true
 }

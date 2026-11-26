@@ -516,6 +516,13 @@ export interface ViewEvents {
    */
   codeBody?: (block: Block, into: HTMLElement) => (() => void) | void
   /**
+   * **代码块语言徽章的落点**：点它换语言（`anchor` 是徽章自己的矩形）。
+   *
+   * `view` 只画「这一行是什么语言」；换语言是一次写 `_lang` 的命令，由装配层接。
+   * 不接 ⇒ 不画徽章（静态投影面没有可切换的东西）。
+   */
+  codeLangMenu?: (blockId: string, anchor: DOMRect, trigger: HTMLElement) => void
+  /**
    * **正文里查询块的身体**：由装配层用同一台 `ViewHost` 画（surface＝`inline`）。
    *
    * 与 `embedBody` 同一条分工（`view` 不 import `ui`）与同一条生命周期纪律

@@ -555,6 +555,15 @@ function pickRow(ch: TriggerChar, row: Row, mods: PickMods): void {
 const RECENT_COMMANDS_MAX = 12
 
 /**
+ * 子菜单超过这个行数就配一个搜索框。
+ *
+ * 一屏大约放得下十二三行；再多「滚动找」就开始比「打两个字过滤」慢。
+ * 定在这里而不是让每个子菜单自己声明：它问的是**这一层有多少行**，
+ * 那件事渲染层现算得到，入口说了也不算（清单会随绑定表一起长）。
+ */
+const SUBMENU_SEARCH_MIN = 12
+
+/**
  * 记一笔「最近执行」（设备态，不进库）：只认**从面板成功执行**的命令——
  * 失败与「未处理」不进名单。最新在前、去重、封顶；名单只是面板顶部的「再来一次」。
  */
@@ -663,7 +672,16 @@ function showMenu(req: MenuRequest): void {
         (b) => rowAllowed(b, surface) && !(b.command && omitted.has(b.command)),
       ),
       keyHints(),
-    ).map((r) => stampTarget(r, req.target))
+    )
+      .map((r) => stampTarget(r, req.target))
+      /**
+       * **菜单右列只放键位，不放命令 id**。
+       *
+       * 渲染层在「没有 hint」时会回落成 `r.command`（面板靠那一档让人看得见能搜什么）；
+       * 而菜单是给手用的，一串 `core.block/set-lang` 只是噪声——语言那一族几十行
+       * 会让每一行都挂同一串字。这里显式给空串，把回落关在面板那一档。
+       */
+      .map((r) => ({ ...r, hint: r.hint ?? '' }))
     /**
      * 带 `group` 的 extraRows 归到**同组绑定行的末尾**（视图/删除这类有组标题的行），
      * 无 `group` 的仍 append（原子/备注菜单整份都是这种，行为不变）。
@@ -692,8 +710,10 @@ function showMenu(req: MenuRequest): void {
       anchor: req.anchor,
       ...(req.trigger ? { trigger: req.trigger } : {}),
       title: req.title,
-      searchable: false,
-      focusSearch: false,
+      // 搜索框只给点名的长清单（见 `MenuRequest.searchable`）：搜索框抢焦点，
+      // 短菜单多它一次就是「弹出来先得按 Esc 才能用方向键」
+      searchable: req.searchable === true,
+      focusSearch: req.searchable === true,
       onPick: (row) => {
         /**
          * **子菜单是菜单的结构，不是命令**：带着同一个 target/ctx 再开一层。
@@ -701,6 +721,14 @@ function showMenu(req: MenuRequest): void {
          * 编辑器元素可找。锚点沿用父菜单：钻进去是「换一页」，不是另开一张浮层。
          */
         if (row.submenu) {
+          /**
+           * **一屏放不下的子菜单给搜索框**：语言单子已经是几十行，「滚动找名字」
+           * 比「打两个字过滤」慢一个数量级。判据按**这一层有多少行**现算——
+           * 入口不必各自声明自己长不长，短子菜单也不会平白多一个输入框。
+           */
+          const subRows = resolveBindings('menu', ctx, { prefix: row.submenu }).filter(
+            (b) => rowAllowed(b, surface) && !(b.command && omitted.has(b.command)),
+          )
           showMenu({
             kind: 'menu',
             prefix: row.submenu,
@@ -708,6 +736,7 @@ function showMenu(req: MenuRequest): void {
             ...(req.trigger ? { trigger: req.trigger } : {}),
             title: row.label,
             ...(req.target ? { target: req.target } : {}),
+            ...(subRows.length > SUBMENU_SEARCH_MIN ? { searchable: true } : {}),
           })
           return
         }

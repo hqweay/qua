@@ -19,8 +19,11 @@ import {
   DEFAULT_BLOCK_TYPE,
   DIVIDER_TYPE,
   DISPLAY_PROP,
+  LANG_PROP,
   aliasesOf,
   blockTypeOf,
+  canonicalLang,
+  codeLangLabel,
   displayNameOf,
   codeTextOf,
   embedBodyOf,
@@ -495,6 +498,7 @@ export const ALLOWED_ROW_CHILDREN: ReadonlySet<string> = new Set([
   'blk-embed-body',
   'blk-view-body',
   'blk-code-host',
+  'blk-code-lang',
   'blk-props-line',
   'blk-acts',
 ])
@@ -550,6 +554,39 @@ function makeBodyFoldToggle(blockId: string, bodyHidden: boolean, onAct: (act: B
     onAct('body-fold')
   })
   return group
+}
+
+/**
+ * **代码块的语言徽章**：这一行此刻是什么语言，点一下换。
+ *
+ * 为什么住在**标题行**而不是浮在代码面上（用户口径是「右上角」）：
+ *   · 代码面是一台可横向滚动的编辑器，浮件要么盖住第一行尾部的字，要么随滚动跑位；
+ *   · 标题行就是这一块的盒面（收起时它**就是**那个盒子）——徽章贴着它，
+ *     展开／收起两种状态都在同一个位置，且一个像素的代码都不挡；
+ *   · 与 `.blk-kind`／标签槽同一条「行级 chrome 不进 `.tx`」的纪律：
+ *     正文读数与插入点只走 `.tx`，徽章不参与（否则它会变成正文里的字）。
+ *
+ * 点击由它自己收下（与行头折叠键同一套）：外层委托会把它当「点到了块里」，
+ * 不 `stopPropagation` 就会顺手把光标/菜单一起做掉。
+ */
+function makeCodeLangChip(b: Block, onOpen: (blockId: string, anchor: DOMRect, trigger: HTMLElement) => void): HTMLElement {
+  const raw = prop<string>(b, LANG_PROP)
+  const label = codeLangLabel(raw)
+  const el = document.createElement('span')
+  el.className = 'blk-code-lang'
+  el.contentEditable = 'false'
+  el.dataset.lang = canonicalLang(raw)
+  el.setAttribute('role', 'button')
+  el.textContent = label
+  const tip = t('ui.code.langTip', { label })
+  el.dataset.tip = tip
+  el.setAttribute('aria-label', tip)
+  el.addEventListener('click', (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    onOpen(b.id, el.getBoundingClientRect(), el)
+  })
+  return el
 }
 
 /**
@@ -633,6 +670,14 @@ export function makeBlockEl(
      * 就不会为每个单元格起一台编辑器。
      */
     codeBody?: (b: Block, into: HTMLElement) => void
+    /**
+     * **代码块语言徽章的落点**（点它换语言）。
+     *
+     * 与 `codeBody` 同一条分工：`view` 只画「这一行是什么语言」，
+     * 「换语言」是一次命令（写 `_lang`），由装配层接。
+     * 不接 ⇒ 不画徽章（静态投影没有可切换的东西，也不该多一颗死按钮）。
+     */
+    codeLangMenu?: (blockId: string, anchor: DOMRect, trigger: HTMLElement) => void
     /**
      * **身体块行头那颗折叠按钮的落点**（只折身体，不折子块）。
      * 不接 ⇒ 不画动作组（静态投影不多一颗点了没反应的按钮）。
@@ -1186,6 +1231,8 @@ export function makeBlockEl(
   let embedBodyEl: HTMLElement | null = null
   /** 身体接进文档之后才执行的挂载（岛编辑器／ViewHost 的构造会量 DOM） */
   let embedMount: (() => void) | null = null
+  /** 代码块的语言徽章（行尾，标题行右侧）：装配层接了「换语言」才画 */
+  let codeLangChip: HTMLElement | null = null
   if (isEmbedBlock(b)) {
     /**
      * **露面块**：正文槽空着（它没有用户写的字），身体是另一个编辑宿主。
@@ -1264,6 +1311,8 @@ export function makeBlockEl(
     if (bodyHidden) body.dataset.folded = '1'
     embedBodyEl = body
     embedMount = bodyHidden ? null : () => opts.codeBody?.(b, body)
+    // 语言徽章：**收起态也画**（那时标题行就是整块的脸，更需要知道它是什么语言）
+    if (opts.codeLangMenu) codeLangChip = makeCodeLangChip(b, opts.codeLangMenu)
   } else if (blockTypeOf(b) === DIVIDER_TYPE) {
     const rule = document.createElement('span')
     rule.className = 'divider-rule'
@@ -1367,6 +1416,8 @@ export function makeBlockEl(
     // 视觉序＝DOM 序：行（chrome ＋ 标题）在前，身体折到下一行
     if (left) el.append(left, tx)
     else el.append(tx)
+    // 语言徽章在标题行尾、折叠键之前（信息件靠内，鼠标 chrome 靠外）
+    if (codeLangChip) el.appendChild(codeLangChip)
     if (wantBodyFold && canCarryActs) {
       el.appendChild(makeBodyFoldToggle(b.id, bodyHidden, (act) => opts.bodyAction!(act, b.id)))
     }

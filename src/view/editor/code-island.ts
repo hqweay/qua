@@ -28,6 +28,7 @@ import { search, searchKeymap } from '@codemirror/search'
 import { tags } from '@lezer/highlight'
 import {
   CODE_ISLAND_ATTR,
+  CODE_LANG_DECLS,
   CODE_MAX_HEIGHT_TOKEN,
   CODE_TEXT_PROP,
   canonicalLang,
@@ -35,21 +36,28 @@ import {
   codeTextOf,
   prop,
   type CodeLang,
+  type CodeLangDecl,
+  type NativeLang,
 } from '../../core/index.ts'
 import type { BlockEditor } from './editor.ts'
 
 const languageSlot = new Compartment()
 
+/** 语言表按 id 索引：这一层的分派只看「有没有官方包／加载点」，清单本身在 core */
+const DECL_OF: ReadonlyMap<CodeLang, CodeLangDecl> = new Map(CODE_LANG_DECLS.map((d) => [d.id, d]))
+
+/** `StreamLanguage.define` 的入参类型（legacy 模式的形状；不直接依赖 `@codemirror/streamparser`） */
+type StreamParserAny = Parameters<typeof StreamLanguage.define>[0]
+
 /**
- * 语言包按块上的语言运行时选择并异步取：全集静态引入会把十几种语言塞进首屏包。
- * 这里不是运行时拼出来的模块名，而是按已登记语言分派的按需加载点。
+ * **官方语言包**（`@codemirror/lang-*`）的按需加载点，按语言表里的家族名分派。
+ *
+ * 语言包按块上的语言运行时选择并异步取：全集静态引入会把几十种语言塞进首屏包。
+ * 这里不是运行时拼出来的模块名，而是静态可分析的 `import()` —— 每门语言一个独立 chunk。
  */
-async function loadLanguage(lang: CodeLang): Promise<Extension> {
-  switch (lang) {
-    case 'javascript':
-    case 'typescript':
-    case 'jsx':
-    case 'tsx': {
+async function loadNative(family: NativeLang, lang: CodeLang): Promise<Extension> {
+  switch (family) {
+    case 'javascript': {
       const { javascript } = await import('@codemirror/lang-javascript')
       return javascript({ typescript: lang === 'typescript' || lang === 'tsx', jsx: lang === 'jsx' || lang === 'tsx' })
     }
@@ -59,17 +67,82 @@ async function loadLanguage(lang: CodeLang): Promise<Extension> {
     case 'css': return (await import('@codemirror/lang-css')).css()
     case 'sql': return (await import('@codemirror/lang-sql')).sql()
     case 'markdown': return (await import('@codemirror/lang-markdown')).markdown()
-    case 'bash': {
-      const { shell } = await import('@codemirror/legacy-modes/mode/shell')
-      return StreamLanguage.define(shell)
-    }
-    case 'yaml': {
-      const { yaml } = await import('@codemirror/legacy-modes/mode/yaml')
-      return StreamLanguage.define(yaml)
-    }
-    default: return []
+    case 'php': return (await import('@codemirror/lang-php')).php()
   }
 }
+
+/**
+ * **legacy 模式的加载点**（键＝语言 id，不一定是模块名：`clike` 一个模块给出
+ * c／cpp／java／kotlin／scala／csharp／dart／objc 八门）。
+ *
+ * 加一门语言＝core 的语言表加一行 ＋ 这里加一行 import；两边漏一边由单测打红
+ * （`codeLangHasLoader`），不是「静默按纯文本画」。
+ */
+const LEGACY_LOADERS: Readonly<Partial<Record<CodeLang, () => Promise<StreamParserAny>>>> = {
+  bash: async () => (await import('@codemirror/legacy-modes/mode/shell')).shell,
+  yaml: async () => (await import('@codemirror/legacy-modes/mode/yaml')).yaml,
+  scss: async () => (await import('@codemirror/legacy-modes/mode/sass')).sass,
+  xml: async () => (await import('@codemirror/legacy-modes/mode/xml')).xml,
+  toml: async () => (await import('@codemirror/legacy-modes/mode/toml')).toml,
+  ini: async () => (await import('@codemirror/legacy-modes/mode/properties')).properties,
+  diff: async () => (await import('@codemirror/legacy-modes/mode/diff')).diff,
+  http: async () => (await import('@codemirror/legacy-modes/mode/http')).http,
+  latex: async () => (await import('@codemirror/legacy-modes/mode/stex')).stex,
+  protobuf: async () => (await import('@codemirror/legacy-modes/mode/protobuf')).protobuf,
+  java: async () => (await import('@codemirror/legacy-modes/mode/clike')).java,
+  kotlin: async () => (await import('@codemirror/legacy-modes/mode/clike')).kotlin,
+  scala: async () => (await import('@codemirror/legacy-modes/mode/clike')).scala,
+  c: async () => (await import('@codemirror/legacy-modes/mode/clike')).c,
+  cpp: async () => (await import('@codemirror/legacy-modes/mode/clike')).cpp,
+  csharp: async () => (await import('@codemirror/legacy-modes/mode/clike')).csharp,
+  dart: async () => (await import('@codemirror/legacy-modes/mode/clike')).dart,
+  objectivec: async () => (await import('@codemirror/legacy-modes/mode/clike')).objectiveC,
+  go: async () => (await import('@codemirror/legacy-modes/mode/go')).go,
+  rust: async () => (await import('@codemirror/legacy-modes/mode/rust')).rust,
+  swift: async () => (await import('@codemirror/legacy-modes/mode/swift')).swift,
+  ruby: async () => (await import('@codemirror/legacy-modes/mode/ruby')).ruby,
+  perl: async () => (await import('@codemirror/legacy-modes/mode/perl')).perl,
+  lua: async () => (await import('@codemirror/legacy-modes/mode/lua')).lua,
+  r: async () => (await import('@codemirror/legacy-modes/mode/r')).r,
+  julia: async () => (await import('@codemirror/legacy-modes/mode/julia')).julia,
+  groovy: async () => (await import('@codemirror/legacy-modes/mode/groovy')).groovy,
+  haskell: async () => (await import('@codemirror/legacy-modes/mode/haskell')).haskell,
+  erlang: async () => (await import('@codemirror/legacy-modes/mode/erlang')).erlang,
+  clojure: async () => (await import('@codemirror/legacy-modes/mode/clojure')).clojure,
+  scheme: async () => (await import('@codemirror/legacy-modes/mode/scheme')).scheme,
+  ocaml: async () => (await import('@codemirror/legacy-modes/mode/mllike')).oCaml,
+  fsharp: async () => (await import('@codemirror/legacy-modes/mode/mllike')).fSharp,
+  elm: async () => (await import('@codemirror/legacy-modes/mode/elm')).elm,
+  crystal: async () => (await import('@codemirror/legacy-modes/mode/crystal')).crystal,
+  coffeescript: async () => (await import('@codemirror/legacy-modes/mode/coffeescript')).coffeeScript,
+  vb: async () => (await import('@codemirror/legacy-modes/mode/vb')).vb,
+  pascal: async () => (await import('@codemirror/legacy-modes/mode/pascal')).pascal,
+  fortran: async () => (await import('@codemirror/legacy-modes/mode/fortran')).fortran,
+  matlab: async () => (await import('@codemirror/legacy-modes/mode/octave')).octave,
+  powershell: async () => (await import('@codemirror/legacy-modes/mode/powershell')).powerShell,
+  dockerfile: async () => (await import('@codemirror/legacy-modes/mode/dockerfile')).dockerFile,
+  nginx: async () => (await import('@codemirror/legacy-modes/mode/nginx')).nginx,
+  cmake: async () => (await import('@codemirror/legacy-modes/mode/cmake')).cmake,
+  verilog: async () => (await import('@codemirror/legacy-modes/mode/verilog')).verilog,
+  vhdl: async () => (await import('@codemirror/legacy-modes/mode/vhdl')).vhdl,
+  wast: async () => (await import('@codemirror/legacy-modes/mode/wast')).wast,
+}
+
+/** 这一门语言此刻有没有语法：没有就按纯文本画（`plain` 本来就没有） */
+export function codeLangHasLoader(lang: CodeLang): boolean {
+  if (lang === 'plain') return true
+  return DECL_OF.get(lang)?.native !== undefined || LEGACY_LOADERS[lang] !== undefined
+}
+
+/** 语言 → CM6 语言扩展；不认识或没有加载点 ⇒ 空扩展（纯文本） */
+export async function loadCodeLanguage(lang: CodeLang): Promise<Extension> {
+  const decl = DECL_OF.get(lang)
+  if (!decl) return []
+  if (decl.native) return loadNative(decl.native, lang)
+  const load = LEGACY_LOADERS[lang]
+  return load ? StreamLanguage.define(await load()) : []
+}
+
 
 /** 语法色只引语义 token；色值在 token 段定义，主题切换不用改这里 */
 const syntaxColors = HighlightStyle.define([
@@ -246,7 +319,7 @@ export function mountCodeIsland({ getEd, blockId, into, onCopyBlock, onCutBlock,
       ],
     }),
   })
-  void loadLanguage(lang).then((ext) => {
+  void loadCodeLanguage(lang).then((ext) => {
     if (!disposed) view.dispatch({ effects: languageSlot.reconfigure(ext) })
   })
 

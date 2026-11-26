@@ -1105,6 +1105,13 @@ export class RenderOps {
         codeBody: (b, into) => this.ed.embeds.attachCodeBody(b, into),
         // 身体块行头的三颗动作：行级 chrome 的点击 → 装配层同一个桥（不新增命令入口）
         bodyAction: (act, blockId) => this.ed.events.blockAction?.(act, blockId, this.ed),
+        // 代码块的语言徽章：装配层没接「换语言」就不画（静态投影面不接）
+        ...(this.ed.events.codeLangMenu
+          ? {
+              codeLangMenu: (blockId: string, anchor: DOMRect, trigger: HTMLElement) =>
+                this.ed.events.codeLangMenu!(blockId, anchor, trigger),
+            }
+          : {}),
         ...(this.ed.emptyPlaceholder !== undefined ? { placeholder: this.ed.emptyPlaceholder } : {}),
         /**
          * **正文里的查询体**：只有装配层接了画法、且这一份装载允许展开时才给。

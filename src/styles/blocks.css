@@ -3931,3 +3931,40 @@ button.blk-auto-chip {
   border: 1px solid var(--ui-border-subtle);
   border-radius: var(--ui-radius-md);
 }
+/*
+ * **代码语言徽章**（标题行尾、折叠键之前）：这一块是什么语言，点一下换。
+ *
+ * 为什么贴在标题行的行尾而不是浮在代码面上：代码面是一台可横向滚动的编辑器，
+ * 浮件会盖住第一行尾部的字、也会随滚动跑位；标题行是这一块的「盒面」
+ * （收起态它**就是**那个盒子），徽章贴着它两种状态都在、一格代码都不挡。
+ *
+ * 三档语气与 `.blk-kind` 同一条：贴首行（`align-self: flex-start`）＋ 补满行盒
+ * （`--blk-lh`）＋ 内部居中。常显（它回答「这是什么」），hover 才给可点的反馈。
+ */
+.blk[data-code='1'] > .blk-code-lang {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--blk-lh);
+  padding-inline: var(--ui-gap-2);
+  font-family: var(--ui-font-mono);
+  font-size: var(--ui-fs-2xs);
+  line-height: var(--ui-lh-relaxed);
+  color: var(--ui-text-tertiary);
+  white-space: nowrap;
+  cursor: pointer;
+  border-radius: var(--ui-radius-sm);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.blk[data-code='1'] > .blk-code-lang:hover {
+  color: var(--ui-text);
+  background: var(--ui-bg-hover);
+}
+/* 收起态的盒面已经是一整块面板：徽章留在盒外，不参与盒面的底色与边框 */
+.blk[data-body-collapsed='1'][data-code='1'] > .blk-code-lang,
+.blk[data-collapsed='1'][data-code='1'] > .blk-code-lang {
+  margin-inline-start: var(--ui-gap-2);
+}
+

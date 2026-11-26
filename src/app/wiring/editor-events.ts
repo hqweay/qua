@@ -18,6 +18,9 @@ import {
   cardinalityOf,
   choiceDisplayLabel,
   choicesFor,
+  CODE_LANG_DECLS,
+  canonicalLang,
+  codeLangLabel,
   embedBodyOf,
   iconOf,
   isDeleted,
@@ -672,6 +675,38 @@ function viewEvents(
     blockAction: (act, id, owner) => {
       if (act !== 'body-fold') return
       ;(owner ?? active()).toggleBodyCollapse(id)
+    },
+    /**
+     * **代码块的语言徽章**：点开一张语言单子，选中即写 `_lang`。
+     *
+     * 行由 `core/infra/code-lang.ts` 那张表生成（与块菜单里那一族行同源），
+     * 当前语言打勾；命令带显式 `blockId`，不靠「光标在哪一块」猜——
+     * 徽章在标题行尾，点它不保证光标已经落进这一块。
+     *
+     * 单子可搜索：语言表是几十行，按名字过滤比滚动快一个数量级。
+     */
+    codeLangMenu: (blockId, anchor, trigger) => {
+      const b = kb.get(blockId)
+      const current = canonicalLang(b ? prop<string>(b, LANG_PROP) : undefined)
+      layers.openMenu({
+        rows: CODE_LANG_DECLS.map((d) => ({
+          id: `lang/${d.id}`,
+          label: codeLangLabel(d.id),
+          // 勾选态是「这一块此刻是什么」：同一张单子既能读也能改。
+          // 未选中的行给空串（占位不留 `·`）：一列 `·` 只是噪声，勾只该出现在一行上
+          icon: d.id === current ? 'lucide:check' : '',
+          group: 'codeLang/1',
+        })),
+        anchor,
+        trigger,
+        title: t('menu.label.language'),
+        width: 260,
+        searchable: true,
+        onPick: (row) => {
+          const lang = row.id.slice('lang/'.length)
+          void getRegistry().invoke('core.block/set-lang', { blockId, lang }, via)
+        },
+      })
     },
     blockMenu: (blockId, rect, appearanceHost, trigger) => {
       // 菜单开在这一台身上 ⇒ 命令也作用在这一台（右键不产生焦点，不能等 onFocus）

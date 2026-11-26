@@ -285,6 +285,7 @@ export const EN3 = {
   'menu.label.insertAbove': 'Insert block above',
   'menu.label.language': 'Language...',
   'ui.code.lang.plain': 'Plain text',
+  'ui.code.langTip': 'Code language: {label} (click to change)',
   'menu.label.pageRef': 'Inline reference',
   'menu.label.dateRef': 'Date',
   'menu.label.image': 'Image',
