@@ -416,8 +416,9 @@ function viewEvents(
         },
         onChange: (kind) => change?.(kind as 'text' | 'struct' | 'view' | 'load'),
         // 投影＝同一台 ViewHost（surface 'embed'），绑定的是**这一次露面**
+        // `titleInto` 可能是 `null`：名字由宿主行的 `.tx` 承担时不画面板抬头那一条
         mountView: (hostBlock, target, el, titleInto) => {
-          const vh = getPanels().mountEmbedView(hostBlock, target, el, active, titleInto)
+          const vh = getPanels().mountEmbedView(hostBlock, target, el, active, titleInto ?? undefined)
           return () => {
             vh.dispose()
             vh.root.remove()
@@ -658,7 +659,7 @@ function viewEvents(
     // 结构动作后光标不可见的兜底：所有编辑器共用同一份实现（判据在 focusSourceInMain）
     focusSource: (blockId) => focusSourceInMain(blockId),
     /**
-     * **身体块行头的折叠按钮**：只折身体那一格（`bodyFolded`），不碰子块。
+     * **行头的身体折叠按钮**：只折身体那一格（`bodyFolded`），不碰子块。
      *
      * 用**画这一行的那台**编辑器（预览／挂载区里的行不归当前活动那台）：
      * 折叠表是每台编辑器一份的视图实例态，走「活动编辑器」会折错行。

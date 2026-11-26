@@ -57,7 +57,11 @@ export interface EmbedBodyDeps {
    * 投影跟正文里的查询块同一形状 —— 块标＋名字占一行，结果面板折在下一行。
    * 名字由 `ViewHost` 自己画（它就是那一块正文，改它＝改源块）。
    */
-  mountView: (host: Block, target: Block, into: HTMLElement, titleInto: HTMLElement) => () => void
+  /**
+   * 画一张视图。`titleInto` 是**面板抬头里那一格**（ViewHost 自己的名字）；
+   * 给 `null` ＝ 不画那一条（名字由宿主行的 `.tx` 承担，见 `mountProjection`）。
+   */
+  mountView: (host: Block, target: Block, into: HTMLElement, titleInto: HTMLElement | null) => () => void
   /** 重画某一**行**：判据翻转（镜像 ⇄ 投影）时用 */
   repaint: (blockId: string) => void
   /** 命令面（只说「移除这次露面」） */
@@ -131,25 +135,24 @@ function removeBtn(hostId: string, deps: EmbedBodyDeps): HTMLElement {
 }
 
 /**
- * **投影**：与正文里那个查询块**同一形状** —— 名字占一行（块标旁），结果面板折在下一行。
+ * **投影**：名字由**宿主行的 `.tx`** 承担（那是这次露面的名字），身体只剩结果面板。
  *
- * 为什么不把名字留在面板里（`ViewHost` 自己的抬头）：那是面板的 chrome，长得像
- * 「一张表的标题」，而这一行本来就是一个**查询块**。同一个块在正文里长什么样、
- * 在这里就长什么样 —— 只换身份标记（空心块标），不换形状。
+ * ⚠️ 2026-11-26 修订：这里曾经自带一条 `embed-title-row`（把源查询的名字画在身体里）。
+ *    那时候露面行的 `.tx` 是 `display:none`，身体首行是名字唯一的落点。现在露面行有了
+ *    可见的标题行（与代码块同形），两条名字就会在屏幕上读两遍（实测：`.tx` 与
+ *    `embed-title-row` 同一句话）。⇒ 身体不再画名字那一行，只画面板。
  *
- * 两格的分工是**折叠**的边界：`title-row` 永远在（折起来也看得见），`panel` 是
- * 「下一层」，折的就是它（`data-folded` 只藏不卸，ViewHost 的冻结与滚动还在）。
+ * 折叠的边界因此上移一层：折的是**整个身体**（`data-folded` 藏 `.blk-embed-body`），
+ * 宿主行的标题永远在 —— 「折起来还认得出这是哪个查询」由 `.tx` 保证，不靠身体自留一行。
  */
 function mountProjection(host: Block, target: Block, into: HTMLElement, deps: EmbedBodyDeps): () => void {
-  const titleRow = document.createElement('div')
-  titleRow.className = 'embed-title-row'
-  titleRow.contentEditable = 'false'
   const panel = document.createElement('div')
   panel.className = 'embed-panel'
   panel.contentEditable = 'false'
   panel.setAttribute(EDIT_ISLAND_ATTR, '1')
-  into.append(titleRow, panel)
-  return deps.mountView(host, target, panel, titleRow)
+  into.append(panel)
+  // `titleInto` 不再需要：ViewHost 自己的抬头藏起来，名字归宿主的 `.tx`
+  return deps.mountView(host, target, panel, null)
 }
 
 /** 镜像：源自己那一行 ＋ 它的子树，装进一台岛编辑器（能就地改） */

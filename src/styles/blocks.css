@@ -2888,18 +2888,33 @@
 }
 
 /*
- * **露面块**（镜像／投影）：正文槽不参与排版，身体顶替它。
+ * **露面块**（镜像／投影）：一行标题 ＋ 一个身体，与代码块同形。
  *
- * 为什么 `.tx` 是 `display:none` 而不是删掉：`.tx` 是块 DOM 的契约（光标落点、
- * 读回正文、`markCaret` 都按它找），删掉等于让这一行在一批既有路径里「不存在」。
- * 这里只让它不参与排版——它仍然是这一行的正文槽，只是这一行没有用户写的字。
+ * 标题行（`.tx`）存的是**这一次露面**的名字（`content`），可编辑；身体
+ * （`.blk-embed-body`）是**另一个编辑宿主**（岛）——里面那台编辑器再按自己的缩进
+ * 画源块。于是「同一块在别处出现」在结构上就是「这一行里住着另一份装载」，
+ * 不是把 `.blk` 套进 `.tx`。
  *
- * 身体（`.blk-embed-body`）是**另一个编辑宿主**（岛）：它顶替 `.tx` 占住同一列，
- * 里面那台编辑器再按自己的缩进画源块。于是「同一块在别处出现」在结构上就是
- * 「这一行里住着另一份装载」，不是把 `.blk` 套进 `.tx`。
+ * ⚠️ 2026-11-26 之前这里是 `display:none`（名字由身体首行承担）。那条判据的代价是
+ *    **光标永远进不去**：Enter 建兄弟块、`⌘⇧↵` 上建、菜单里的结构项全部落空，
+ *    只剩「删除」可用。现在标题行回来了，露面块与代码块/查询块走同一套键盘路径。
  */
+.blk[data-embed='1'] {
+  flex-wrap: wrap;
+  row-gap: var(--ui-gap-1);
+}
 .blk[data-embed='1'] > .tx {
-  display: none;
+  font-family: inherit;
+}
+/*
+ * 身体折到下一行、对齐正文起点（与 `.blk-view-body`／`.blk-code-host` 同一套几何：
+ * gutter 已由 `.blk` 的 padding 让出，这里只补 marker 槽）。
+ */
+.blk[data-embed='1'] > .blk-embed-body {
+  flex: 0 0 auto;
+  width: calc(100% - var(--ui-marker-slot) - var(--ui-gap-4));
+  margin-inline-start: calc(var(--ui-marker-slot) + var(--ui-gap-4));
+  min-width: 0;
 }
 .blk-embed-body {
   flex: 1 1 auto;
@@ -3751,7 +3766,14 @@ button.blk-auto-chip {
   align-items: center;
   gap: var(--ui-gap-1);
   min-height: var(--blk-lh);
-  margin-inline-start: var(--ui-gap-2);
+  /**
+   * **自己靠右，不靠 `.tx` 撑**：这一组排在 `.tx` 之后，`.tx` 是 `flex:1` 时它自然被
+   * 推到行尾；但露面行的 `.tx` 是 `display:none`（名字在身体首行），没有东西推它，
+   * 于是按钮贴在块标右边、读成「左边的一颗」。`margin-inline-start: auto` 让这一组
+   * 自己吃掉前面的余量 —— 两种行因此同一条右缘。
+   */
+  margin-inline-start: auto;
+  padding-inline-start: var(--ui-gap-2);
   opacity: 0;
   transition: opacity var(--ui-dur-1) ease;
 }
