@@ -497,7 +497,17 @@ export function setupDiagnostics(deps: DiagnosticsDeps) {
         undoDepth: mainEd.undo.depth(),
         redoDepth: mainEd.undo.redoDepth(),
         lastCommand: registry.last,
+        /**
+         * **正文那台编辑器的光标**。它与下面的 `activeSelection` 是两个事实：
+         * 命令层认的是「活动编辑器」（点进挂载区／镜像岛／代码岛就换了一台），
+         * 而正文那台的光标停在原处不动。断言要分清「光标真的到了那里」与
+         * 「正文还停在原处」——把两者混成一个字段，读到的是后者、看起来像前者失灵。
+         */
         selection: mainEd.sel,
+        /** 活动编辑器（`deps.getEd()`）的光标：命令层此刻作用于哪一块就看它 */
+        activeSelection: deps.getEd().sel,
+        /** 活动编辑器是不是正文那台（不是 ⇒ 上面两个字段会不同，那不是 bug） */
+        activeIsMain: deps.getEd() === mainEd,
         blockSelection: mainEd.bsel.hasBlockSelection(),
         blockSelectionCount: mainEd.bsel.blockSelectionCount(),
         hasLocalStorage: boot.status !== 'storage-error',

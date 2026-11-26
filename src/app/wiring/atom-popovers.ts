@@ -7,7 +7,7 @@
  * `pickRef` 就位），所以收的是 getter 不是值。
  */
 import {
-  canWriteText,
+  canRewriteContent,
   findInForest,
   hasTag,
   openActionOf,
@@ -311,7 +311,7 @@ export function setupAtomPopovers(deps: AtomPopoverDeps) {
    */
   const handleAtomMenu = (hit: AtomMenuHit, el: HTMLElement, rect: DOMRect): void => {
     const host = findInForest(deps.getWs().blocks, hit.blockId)
-    const writable = host !== undefined && canWriteText(host)
+    const writable = host !== undefined && canRewriteContent(host)
     const run = hit.runId ? findRunOrNull(hit.runId) : null
     const target = hit.to !== undefined && hit.to !== '' && findInForest(deps.getWs().blocks, hit.to) ? hit.to : undefined
     const rows: Row[] = []

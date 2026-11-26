@@ -113,14 +113,32 @@ export function typeDeclOf(b: Block): TypeDecl {
  * 所以要有一道判据挡在所有内容写路径前面 —— **一条**判据，不是每个调用点各判一次。
  *
  * ⚠️ **页与标签的正文可写**：名字住在 `_aliases`，正文是描述。
- * ⚠️ **查询/自动化块不再例外**：名字就是它们那一行，与别的行同一条写路径
+ * ⚠️ **查询/自动化块的正文也可写**：名字就是它们那一行，与别的行同一条写路径
  *    （它们不会被合并掉——`mergeIntoPrevPlan` 拒绝有身份或有身体的块）。
+ *    ⇒ 但**「按区间改写」不是这条路**：把正文里命中的词转成引用会**原地改掉名字**，
+ *    那是另一件事，判据是 `canRewriteContent`（见下），不在这里放行。
  * ⚠️ 住在类型模块而不是 `model.ts`：这条判据要看类型声明，而 `model.ts` 是
  *    零依赖叶子（依赖只能从这边指向它）。放在声明旁边也更顺：它本来就是声明里的一格。
  * ⚠️ **改名不走这条判据**：改名写的是 `_aliases`，它走 `core/alias.ts`。
  */
 export function canWriteText(b: Block): boolean {
   return !isJournalBlock(b) && !isPropDefBlock(b) && typeDeclOf(b).text !== 'readonly'
+}
+
+/**
+ * **这一行的正文能不能按区间改写**（把命中的词换成引用、把选区转成引用……）。
+ *
+ * 与 `canWriteText` 回答的不是同一个问题，别合并：
+ *   · `canWriteText` 问「这一行有没有可写的正文」——查询块的名字**是**正文，答「有」；
+ *   · 这条问「能不能只改其中一段」——名字是一个**整体**，切掉一段再拼回去就是
+ *     一次静默改名（`转换守卫页STU 查询块` → ` 查询块`，一个字节的报错都没有）。
+ *     用户要改名字，走的是「正对着这一行打字」，不是「把某个词转成引用」。
+ *
+ * 判据与 `canWriteText` 只差一条：正文是**名字**的块（查询／自动化）不给区间改写。
+ * 页与标签的正文是描述（名字在 `_aliases`），照常可改。
+ */
+export function canRewriteContent(b: Block): boolean {
+  return canWriteText(b) && !isQueryBlock(b) && !isAutomationBlock(b)
 }
 
 /**

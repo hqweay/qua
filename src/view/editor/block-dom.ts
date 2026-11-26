@@ -476,6 +476,7 @@ export const ALLOWED_ROW_CHILDREN: ReadonlySet<string> = new Set([
   'blk-embed-body',
   'blk-view-body',
   'blk-code-host',
+  'blk-props-line',
   'blk-acts',
 ])
 

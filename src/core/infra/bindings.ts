@@ -127,8 +127,12 @@ export const BINDINGS: Binding[] = [
   { command: 'core.selection/extend-down', kind: 'keymap', key: 'shift+down', when: 'editorTextFocus || blockSelection', layer: 'core', args: { dir: 1 } },
   // Esc：光标折叠（没划选文字）⇒ 选中当前块（块选区的键盘入口；跨块拖拽、块尾 ⇧↑/⇧↓ 之外的第三条路）。
   // 划选文字时不接：那是「取消文本选区」的直觉，不能反手变成选中整块。
-  // 块选区态由上面那条「清空」接；放在退档（`axisActive`）之前 ⇒ 宽屏里 Esc 第一义仍是退一档。
-  { command: 'core.selection/select-block', kind: 'keymap', key: 'escape', when: 'editorTextFocus && selectionEmpty && !blockSelection', layer: 'core' },
+  // 块选区态由上面那条「清空」接。
+  // ⚠️ `!axisActive` 是**必需的**，不是重复守卫：解析是**反向遍历、后出现者优先**，
+  //    而这条声明在 `axis-down` 之前 ⇒ 它比退档更优先。缺了它，宽屏里第一次 Esc 被
+  //    这条接走（顺手建出一个块选区），第二次 Esc 又被「清空」接走 ⇒ 退档要按三次，
+  //    而中途多出来的块选区还会让别处的 Esc 语义跟着漂（实测 T231）。
+  { command: 'core.selection/select-block', kind: 'keymap', key: 'escape', when: 'editorTextFocus && selectionEmpty && !blockSelection && !axisActive', layer: 'core' },
   { command: 'core.menu/slash', kind: 'keymap', key: 'mod+/', when: 'editorTextFocus', layer: 'core' },
   // 复制端定身份（粘贴端零打断）：块上 ⌘C＝多味复制（软内 ⌘V 贴成引用、软外贴出正文），
   // 划选 ⌘C 不在此列（键位不命中 ⇒ 原生复制文本）。⌘⇧C 两个身份档：划选＝块引＋静态锚文本，无划选＝只贴正文（复制份）。
@@ -163,8 +167,14 @@ export const BINDINGS: Binding[] = [
   // （键位只是加速器，面板照常可达）；调试开关不占 ⌘⇧V 这样的黄金位。
   { command: 'core.embed/paste', kind: 'keymap', key: 'mod+shift+v', when: 'blockFocused', args: { view: 'mirror' }, layer: 'core' },
   // Esc 的最后一层语义：档位轴退一档（常规时 `axisActive` 为假 ⇒ 不命中，Esc 落到关浮层那条）。
-  // 放在键位段末尾：解析自下而上，块选区清空（表内更早）先于它命中。
-  { command: 'core.view/axis-down', kind: 'keymap', key: 'escape', when: 'axisActive && !blockSelection', layer: 'core' },
+  //
+  // ⚠️ **`when` 里不许再挂 `!blockSelection`**（2026-11-26 修）：解析是**反向遍历、
+  //    后出现者优先**，这条声明在「块选区清空」之后 ⇒ 它在宽屏里本来就优先。挂上
+  //    `!blockSelection` 等于反过来让清选区压过退档：宽屏里只要有一个块选区在
+  //    （Esc 选中当前块那一条很容易留下一个），Esc 就再也退不出去，用户要按两次
+  //    才离开一个档位——而「离开这个档位」比「取消一次块选区」是更强、更外层的意图。
+  //    退档顺手清掉块选区，不需要单独一步。
+  { command: 'core.view/axis-down', kind: 'keymap', key: 'escape', when: 'axisActive', layer: 'core' },
 
   /* ================= 块菜单（悬停左侧拖动把手 / 圆点或右键） =================
      顶层只留「对这一块做什么」的骨架动作；「复制有几种味」「插进正文有几种原子」

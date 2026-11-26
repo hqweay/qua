@@ -2825,14 +2825,22 @@ await check('T195 查询在正文内联渲染：不打开就在原位出结果�
         rows: [...(body?.querySelectorAll('.queryview-editor .blk .tx') ?? [])].map((e) => e.textContent ?? ''),
       }
     }, qid)
+  /**
+   * 折身体的入口是**行头那颗按钮**，不是左侧三角。
+   *
+   * 左侧三角的语义是「折这一行下面**整片**」（子块层），它只在有子块的行上画；
+   * 查询块没有子块、只有一个身体 ⇒ 两颗按钮折同一件事时左侧那颗只是重复入口。
+   * 这一行的折叠由 `.blk-acts [data-block-act="body-fold"]` 承担。
+   */
   const foldOnce = () =>
     page.evaluate((id) => {
-      const fold = document.querySelector(`.blk[data-block-id="${id}"] > .left > .fold`)
+      const fold = document.querySelector(`.blk[data-block-id="${id}"] > .blk-acts [data-block-act="body-fold"]`)
       if (!fold) return false
-      fold.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+      // ⚠️ 行头那颗监听的是 `click`（左侧三角监听 `mousedown`）——两处的按下语义不同
+      fold.dispatchEvent(new MouseEvent('click', { bubbles: true }))
       return true
     }, qid)
-  assert(await foldOnce(), '查询块行要有折叠三角（身体可折）')
+  assert(await foldOnce(), '查询块行头要有折身体的按钮（身体可折）')
   await page.waitForTimeout(250)
   const folded = await foldState()
   assert(folded.collapsed && folded.folded, `折起来：行标记 collapsed、身体 data-folded：${JSON.stringify(folded)}`)
@@ -2918,23 +2926,28 @@ await check('T195 查询在正文内联渲染：不打开就在原位出结果�
 
   // 单根也能折：折的是自己行下那台视图体（同一份 Doc.folded，与正文子行同一个语义）
   const rootFold = await page.evaluate((id) => {
-    const fold = document.querySelector(`.blk[data-block-id="${id}"] > .left > .fold`)
-    fold?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    const fold = document.querySelector(`.blk[data-block-id="${id}"] > .blk-acts [data-block-act="body-fold"]`)
+    fold?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     return Boolean(fold)
   }, qid)
-  assert(rootFold, '单根的查询块也要有折叠三角')
+  assert(rootFold, '单根的查询块也要有折身体的入口（行头那颗）')
   await page.waitForTimeout(300)
   const segmentFolded = await page.evaluate((id) => {
     const row = document.querySelector(`.blk[data-block-id="${id}"]`)
     const body = row?.querySelector(':scope > .blk-view-body')
     return {
-      rowCollapsed: row?.dataset.collapsed === '1',
+      /**
+       * 行头那颗写的是**第二层折叠位**（`data-body-collapsed`），不是整片收起
+       * （`data-collapsed`）：整片收起会连带收起导轨段、让块标浮底盘，而「只收身体」
+       * 时子块还在——那些信号全会撒谎。两者刻意分开，断言读对的那一个。
+       */
+      bodyCollapsed: row?.dataset.bodyCollapsed === '1',
       marked: body?.dataset.folded === '1',
       display: body ? getComputedStyle(body).display : '',
     }
   }, qid)
   assert(
-    segmentFolded.rowCollapsed && segmentFolded.marked && segmentFolded.display === 'none',
+    segmentFolded.bodyCollapsed && segmentFolded.marked && segmentFolded.display === 'none',
     `折单根 ⇒ 行内视图体收起（只藏不卸载）：${JSON.stringify(segmentFolded)}`,
   )
 
@@ -3071,7 +3084,11 @@ await check('T196 查询块在右槽窗口也画结果：同一台 ViewHost；�
         folded: body?.dataset.folded === '1',
         rows: [...(card?.querySelectorAll('.queryview-editor .blk .tx') ?? [])].map((e) => e.textContent ?? ''),
         titleHidden: view?.querySelector('.queryview-title')?.hidden ?? false,
-        rowCollapsed: row?.dataset.collapsed === '1',
+        /**
+         * 折身体的位是 `data-body-collapsed`（第二层，只收身体），不是 `data-collapsed`
+         * （整片收起）：查询块没有子块，行头那颗按钮写的是前者。
+         */
+        rowCollapsed: row?.dataset.bodyCollapsed === '1',
       }
     }, qid)
   const first = await dockState()
@@ -3079,19 +3096,20 @@ await check('T196 查询块在右槽窗口也画结果：同一台 ViewHost；�
   assert(first.rows.length === 1, `右槽里不打开也应看到结果：${JSON.stringify(first.rows)}`)
   assert(first.titleHidden, '卡头已有块名，窗口里的视图抬头不重复')
 
-  // 折叠：根行也是查询块（有身体）⇒ 三角可折；视图体跟着收，展开后同一份结果回来
+  // 折叠：根行也是查询块（有身体）⇒ 行头那颗按钮可折；视图体跟着收，展开后同一份结果回来
   const toggle = () =>
     page.evaluate((id) => {
       const card = [...document.querySelectorAll('.dock-card')].find((c) => c.dataset.cardId === id)
-      const fold = card?.querySelector(`.blk[data-block-id="${id}"] > .left > .fold`)
+      const fold = card?.querySelector(`.blk[data-block-id="${id}"] > .blk-acts [data-block-act="body-fold"]`)
       if (!fold) return false
-      fold.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+      // 行头那颗监听 `click`（左侧三角才监听 `mousedown`）
+      fold.dispatchEvent(new MouseEvent('click', { bubbles: true }))
       return true
     }, qid)
-  assert(await toggle(), '窗口里的查询块根行要有折叠三角')
+  assert(await toggle(), '窗口里的查询块根行要有折身体的入口（行头那颗）')
   await page.waitForTimeout(300)
   const folded = await dockState()
-  assert(folded.folded && folded.rowCollapsed, `折起来：视图体 data-folded、行 collapsed：${JSON.stringify(folded)}`)
+  assert(folded.folded && folded.rowCollapsed, `折起来：视图体 data-folded、行 body-collapsed：${JSON.stringify(folded)}`)
   assert(await toggle(), '再点一次展开')
   await page.waitForTimeout(300)
   const unfolded = await dockState()
@@ -14567,8 +14585,16 @@ await check('T142 挂载区里 ↵：新块是命中块的子块、留在本栏�
       caretInMount: Boolean(a?.closest('.sec-mount')),
       rows: kids,
       // 新块在**整片森林**里的父（不靠任一视图的 doc）
+      /**
+       * 光标读**活动编辑器**：挂载区是另一台编辑器，点进去 `deps.getEd()` 就换成它，
+       * 正文那台的 `caretBlock()` 停在命中块上不动。读正文那台会把「命中块自己」
+       * 当成新块，再取它的父——于是父块判据拿到的是命中块的上一级，看起来像建错了位置。
+       *
+       * ⚠️ `walk` 存进 map 的是**父 id**（不是父块对象）——取的时候不要再 `.id` 一次，
+       *    否则永远拿到 `undefined`，读起来像「新块建在顶层」。
+       */
       parentOfNew: (() => {
-        const ed = window.__qua.__editor
+        const ed = window.__qua.activeEditor()
         const caret = ed.caretBlock()
         const map = new Map()
         for (const r of ed.store.blocks) {
@@ -24790,13 +24816,17 @@ await check('T241 搜索面右预览：就地编辑落盘、Enter 建子块并�
       found: Boolean(el),
       hasViewBody: Boolean(body),
       resultRows: body ? body.querySelectorAll('.blk, .tv-row, .qt-row').length : 0,
-      fold: Boolean(el?.querySelector('.fold')),
+      /**
+       * 折身体的入口在**行头**（`.blk-acts [data-block-act="body-fold"]`），不在左侧：
+       * 左侧三角只属于有子块的行，查询块没有子块、只有一个身体。
+       */
+      fold: Boolean(el?.querySelector('.blk-acts [data-block-act="body-fold"]')),
     }
   }, qblock)
   assert(queryPreview.found, `查询块要进预览：${JSON.stringify(queryPreview)}`)
   assert(
     queryPreview.hasViewBody && queryPreview.fold,
-    `预览里查询块要画结果体（与正文同一规则：有身体才有折叠三角）：${JSON.stringify(queryPreview)}`,
+    `预览里查询块要画结果体（与正文同一规则：有身体才有折身体的入口）：${JSON.stringify(queryPreview)}`,
   )
 
   await ctx.close()
@@ -33454,7 +33484,12 @@ await check('T344 镜像岛里按 ⌘⇧D＝摘这一次露面，源不动；从
   // 真点击把光标放进岛里的源行，再按 ⌘⇧D（与菜单走同一条删除判据）
   await page.locator(`.blk-embed-body .blk[data-block-id="${fx.rows[1]}"] > .tx`).click()
   await page.waitForTimeout(150)
-  const focused = await page.evaluate(() => window.__qua.snapshot().selection.aBlock)
+  /**
+   * 读**活动编辑器**的光标，不是正文那台的：镜像岛是另一台编辑器，点进去
+   * `deps.getEd()` 就换成它了，正文那台的 `selection` 停在原处不动——读后者
+   * 会把「光标确实进了岛」误判成「没进去」。
+   */
+  const focused = await page.evaluate(() => window.__qua.snapshot().activeSelection?.aBlock ?? '')
   assert(focused === fx.rows[1], `前置：光标在镜像岛的源行上：${focused}`)
   await page.keyboard.press('Meta+Shift+D')
   await page.waitForTimeout(350)

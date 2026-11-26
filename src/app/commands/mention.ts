@@ -15,7 +15,7 @@
  */
 import {
   blockLabel,
-  canWriteText,
+  canRewriteContent,
   convertSpotToRef,
   displayTextOf,
   ensurePageInTx,
@@ -59,7 +59,7 @@ export function mentionCommands(d: MentionDeps): Pick<App, 'convertMention' | 'c
        * 内容写闸会在发看点 `throw`，用户只会看到「点了没反应」。
        * 在入口说一句实话，模型一个字节都不动。
        */
-      if (!canWriteText(src)) {
+      if (!canRewriteContent(src)) {
         d.toast(t('ui.toast.mentionReadonly'), 'warn')
         return false
       }
@@ -85,7 +85,7 @@ export function mentionCommands(d: MentionDeps): Pick<App, 'convertMention' | 'c
       if (!spot) return false
       const src = d.kb.get(spot.blockId)
       if (!src) return false
-      if (!canWriteText(src)) {
+      if (!canRewriteContent(src)) {
         d.toast(t('ui.toast.mentionReadonly'), 'warn')
         return false
       }
