@@ -2227,6 +2227,46 @@
      滚动位在顶上或身体在视口外时不钉，留白一分都没有。内容比钉的盒子矮时
      下方留白（封顶于视口），内容更高时照常长高（不设上限，长清单在整页滚动
      里读完）。 */
+/*
+ * **段尾挂载区上方的「在这里接着写」**：`.mount` 的 `margin-top`（24px）就是正文最后
+ * 一块与查询面板之间的缝；那颗淡＋放在**缝的中间**、正文深度 1 的块标列。
+ * 点它（或点这条缝）＝在正文末尾建块（`clickEmptyArea` 的末尾支）；新块落在挂载区
+ * **之前**——挂载区是段尾 chrome，不是子块。
+ *
+ * ⚠️ **不能放 `#editor::after`**：那在挂载区**下面**（用户报过「＋跑到查询面板下面」）。
+ * ⚠️ `.sec-mount` 是编辑岛，伪元素只做视觉；命中面在缝里，所以 `pointer-events: none`。
+ * ⚠️ `top` 跟 `.mount` 的 `margin-top` 同源：改间距时两处一起想。
+ */
+#editor .sec-mount {
+  position: relative;
+}
+#editor .sec-mount::before {
+  content: '+';
+  position: absolute;
+  left: calc(var(--ui-blk-gutter) + var(--ui-indent) + var(--ui-marker-slot) / 2);
+  top: calc(var(--ui-gap-6) / -2);
+  transform: translate(-50%, -50%);
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--ui-radius-pill);
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-md);
+  line-height: 1;
+  opacity: 0;
+  transition: opacity var(--ui-dur-1) ease;
+  pointer-events: none;
+}
+#editor:hover .sec-mount::before {
+  opacity: 0.6;
+}
+@media (prefers-reduced-motion: reduce) {
+  #editor .sec-mount::before {
+    transition: none;
+  }
+}
 .mount {
   margin-top: var(--ui-gap-6);
   /* 左缘落在块标列（见上），右缘**不缩**：正文换行在 editor 内容右缘（.blk 无右内距），

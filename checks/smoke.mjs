@@ -34698,7 +34698,7 @@ await check('T363 一天的最后一块：菜单行写明原因且点不动、�
 })
 
 await check(
-  'T366 标题-正文气口/页尾空白：上边缘建在第一块之前、下边缘建在末尾；边上已有空块就聚焦（不再多建一格）',
+  'T366 标题-正文气口/查询面板上方缝隙：上边缘建在第一块之前、下边缘建在末尾；边上已有空块就聚焦（不再多建一格）',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -34751,20 +34751,20 @@ await check(
     const gap = await page.evaluate(() => {
       const el = document.querySelector('#editor .sec > .blk[data-depth="0"]')
       const r = el.getBoundingClientRect()
-      const tail = getComputedStyle(document.querySelector('#editor'), '::after')
+      const tail = getComputedStyle(document.querySelector('#editor .sec-mount'), '::before')
       return {
         pad: Number.parseFloat(getComputedStyle(el).paddingBottom) || 0,
         bottom: r.bottom,
         attr: el.dataset.titleGap ?? '',
         opacity: getComputedStyle(el, '::after').opacity,
-        tail: { content: tail.content, color: tail.color },
+        tail: { content: tail.content, opacity: tail.opacity },
       }
     })
     assert(gap.attr === '1', `主编辑面的页/日记根行应带 data-title-gap：${JSON.stringify(gap)}`)
     assert(gap.pad >= 12, `标题行下方应有气口：${JSON.stringify(gap)}`)
     assert(Number(gap.opacity) === 0, `悬停前「＋」不该常驻：${JSON.stringify(gap)}`)
-    assert(gap.tail.content === '"+"', `页尾气口应有一颗「＋」：${JSON.stringify(gap.tail)}`)
-    assert(/rgba\(0, 0, 0, 0\)/.test(gap.tail.color), `页尾「＋」悬停前不该常驻：${JSON.stringify(gap.tail)}`)
+    assert(gap.tail.content === '"+"', `查询面板上方应有一颗「＋」：${JSON.stringify(gap.tail)}`)
+    assert(Number(gap.tail.opacity) === 0, `页尾「＋」悬停前不该常驻：${JSON.stringify(gap.tail)}`)
     await page.hover('#editor .sec > .blk[data-depth="0"]')
     await page.waitForTimeout(250)
     const gapHover = await page.evaluate(() =>
@@ -34772,9 +34772,9 @@ await check(
     )
     assert(Number(gapHover) > 0.3, `悬停标题行应现「＋」：${gapHover}`)
     const tailHover = await page.evaluate(() =>
-      getComputedStyle(document.querySelector('#editor'), '::after').color,
+      getComputedStyle(document.querySelector('#editor .sec-mount'), '::before').opacity,
     )
-    assert(!/rgba\(0, 0, 0, 0\)/.test(tailHover), `悬停编辑器时页尾「＋」也应现：${tailHover}`)
+    assert(Number(tailHover) > 0.3, `悬停编辑器时查询面板上方的「＋」也应现：${tailHover}`)
     // 悬停正文第一块时也现（那颗「＋」贴着它，用户的手多半在它上面）
     await page.hover('#editor .sec > .blk[data-embed="1"]')
     await page.waitForTimeout(250)
@@ -34819,21 +34819,25 @@ await check(
     )
     assert(top1.sel === top1.live[0].id, `光标应落到新建的上边缘块：${JSON.stringify(top1)}`)
 
-    // 下边缘：末尾
-    await page.mouse.click(300, geom.editor.bottom - 40)
+    // 下边缘：**查询面板上方**那条缝（那颗＋的位置），不是面板下面的文档尾
+    const panel = await page.evaluate(() => {
+      const p = document.querySelector('#editor .sec-mount .mount')
+      return { gapY: p.getBoundingClientRect().top - 12 }
+    })
+    await page.mouse.click(400, panel.gapY)
     await page.waitForTimeout(300)
     const bottom1 = await read()
     assert(
       bottom1.live.length === 3 && !bottom1.live[2].embed,
-      `点页尾空白应建在**末尾**：${JSON.stringify(bottom1)}`,
+      `点查询面板上方的缝应在正文末尾建块（面板之前）：${JSON.stringify(bottom1)}`,
     )
     assert(bottom1.sel === bottom1.live[2].id, `光标应落到末尾新块：${JSON.stringify(bottom1)}`)
-    await page.mouse.click(300, geom.editor.bottom - 40)
+    await page.mouse.click(400, panel.gapY)
     await page.waitForTimeout(300)
     const bottom2 = await read()
     assert(
       bottom2.live.length === 3 && bottom2.sel === bottom1.live[2].id,
-      `页尾已有空块 ⇒ 复用：${JSON.stringify(bottom2)}`,
+      `末尾已有空块 ⇒ 复用：${JSON.stringify(bottom2)}`,
     )
 
     // 点在行自己的矩形里不是空白：不许建块
@@ -34896,7 +34900,7 @@ await check(
     )
 
     await ctx.close()
-    return '标题-正文气口建上边缘、页尾建下边缘、空边复用、行上不误触；journal 同一条规则'
+    return '标题-正文气口建上边缘、查询面板上方建下边缘、空边复用、行上不误触；journal 同一条规则'
   },
 )
 
