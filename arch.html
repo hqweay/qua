@@ -157,7 +157,7 @@
   <div class="stamp">
     WORKSPACE_VERSION 51<br>
     layers core ← view ← ui ← app ← host<br>
-    gate arch 33/33 · core 1779/1779（本次现算）
+    gate arch 33/33 · core 1831/1831（本次现算）
   </div>
 </header>
 
@@ -196,7 +196,7 @@
     <div class="layer l-core">
       <div class="tag">core</div>
       <div class="body">
-        <span class="files">src/core/ · 138 个模块 · 12 个域（model／kb／query／views／props／relations／identity／storage／search／infra／commands／fixtures）</span>
+        <span class="files">src/core/ · 141 个模块 · 12 个域（model／kb／query／views／props／relations／identity／storage／search／infra／commands／fixtures）</span>
         <span class="note2"><b>零 DOM</b>。模型 / 行内内容 / 树 / 查询求值 / 视图配置 / 拥有者 / 命令声明 / 绑定表 / 上下文键 / 持久化全在这层，可直接在 Node 里单测</span>
       </div>
     </div>
@@ -220,7 +220,10 @@
   <span class="key">modified</span>: number     <span class="cmt">最后一次改动（只在编辑边界更新，并进内容那条 upsert）</span>
   <span class="key">annos?</span>: Anno[]       <span class="cmt">可引用区间：只在被引用时才存在（不写空数组）</span>
   <span class="key">props?</span>: {            <span class="cmt">属性袋：键＝定义块的 id，不是名字</span>
-    <span class="key">_type</span>?      <span class="cmt">封闭注册表：outline（缺省）· core/divider · core/view-embed</span>
+    <span class="key">_type</span>?      <span class="cmt">封闭注册表：outline（缺省）· core/divider · core/view-embed · core/quote · core/code</span>
+    <span class="key">_lang</span>?      <span class="cmt">代码块的语言提示；不认识的名字按纯文本画、原文照存</span>
+    <span class="key">_code</span>?      <span class="cmt">代码文档（身体）：代码块的正文住这里，行上是标题；换骨架时清掉</span>
+    <span class="key">_callout</span>?   <span class="cmt">引述变体（封闭七值）：抬头只画语气，行是子块；换骨架时清掉</span>
     <span class="key">_icon</span>?      <span class="cmt">lucide:&lt;name&gt; 或字面文本</span>
     <span class="key">_date</span>?      <span class="cmt">有它 ⇒ 日记块（只读、全局一天一个）</span>
     <span class="key">_aliases</span>?   <span class="cmt">地址：0..N，首个是主名，全局唯一</span>
@@ -309,7 +312,7 @@
       </div>
       <div class="step">
         <div class="k">② 声明</div>
-        <div class="v">命令（200 条）</div>
+        <div class="v">命令（205 条）</div>
         <div class="d">纯语义：capability / undoable，没有 key、没有 context</div>
       </div>
       <div class="step">
@@ -348,7 +351,7 @@
     <div class="card pad">
       <div class="sec-h" style="margin:0 0 10px"><b style="font-size:13px">落盘：两种宿主，三条不可逆契约</b></div>
       <div class="kv">
-        <dt>qua.db（Electron）</dt><dd><b>每个库一份</b> SQLite（主进程单写者，WAL）。块是<b>自己的行</b>：<code>Block</code>（正文 run 序列／annos／时刻／落库编码的 <code>parent</code>＋<code>left</code>／软删；<code>_display</code>／<code>_kind</code>／<code>_date</code>／<code>_query</code>／<code>_type</code> 升列）＋ <code>BlockProperty</code>（一格一行，有序列表拆行＋<code>pos</code>）＋ <code>BlockAlias</code>（地址：原样拼写是主键，归一化键 <code>norm</code> 是按名点查的索引——「这个名字归谁」一次索引查找就够，不读全表）＋ <code>BlockList</code>（露面）＋ <code>BlockFTS</code>／<code>BlockFTSMap</code>（全文派生：contentless 两表 ＋ 稳定 rowid 映射，状态在 <code>meta</code>）＋ <code>BlockGram</code>（子串派生：trigram 分词的一张三字滑窗表，rowid <b>与正文索引行同址</b>——「库里有没有这一串」由它回答）＋ <code>BlockIndex</code>（<code>root</code>／<code>path</code>／<code>hidden</code>：位置派生）／<code>BlockRelation</code>（<code>from_id</code>／<code>to_id</code>／<code>kind</code>／<code>from_root</code>：关系派生；两张都可从内容全量重建，状态在 <code>meta</code>）＋ <code>meta</code>／<code>settings</code>／<code>op_log</code>（<b>变更流</b>，与内容行<b>同一个事务</b>追加；整份替换＝新 genesis：清旧日志、序号归零，再把这一批 op 写进去）。schema 版本＝<code>PRAGMA user_version</code>（唯一判据，当前 16）</dd>
+        <dt>qua.db（Electron）</dt><dd><b>每个库一份</b> SQLite（主进程单写者，WAL）。块是<b>自己的行</b>：<code>Block</code>（正文 run 序列／annos／时刻／落库编码的 <code>parent</code>＋<code>left</code>／软删；<code>_display</code>／<code>_kind</code>／<code>_date</code>／<code>_query</code>／<code>_type</code> 升列）＋ <code>BlockProperty</code>（一格一行，有序列表拆行＋<code>pos</code>）＋ <code>BlockAlias</code>（地址：原样拼写是主键，归一化键 <code>norm</code> 是按名点查的索引——「这个名字归谁」一次索引查找就够，不读全表）＋ <code>BlockList</code>（露面）＋ <code>BlockFTS</code>／<code>BlockFTSMap</code>（全文派生：contentless 两表 ＋ 稳定 rowid 映射，状态在 <code>meta</code>）＋ <code>BlockGram</code>（子串派生：trigram 分词的一张三字滑窗表，rowid <b>与正文索引行同址</b>——「库里有没有这一串」由它回答）＋ <code>BlockIndex</code>（<code>root</code>／<code>path</code>／<code>hidden</code>：位置派生）／<code>BlockRelation</code>（<code>from_id</code>／<code>to_id</code>／<code>kind</code>／<code>from_root</code>：关系派生；两张都可从内容全量重建，状态在 <code>meta</code>）＋ <code>meta</code>／<code>settings</code>／<code>op_log</code>（<b>变更流</b>，与内容行<b>同一个事务</b>追加；整份替换＝新 genesis：清旧日志、序号归零，再把这一批 op 写进去）。schema 版本＝<code>PRAGMA user_version</code>（唯一判据，当前 17）</dd>
         <dt>编码在哪</dt><dd>「一个块长成哪几行」只有一份定义（<code>storage/db-rows.ts</code>）；主进程只做<b>通用 SQL</b>（表名/列名白名单，不认识块）。一次编辑只写动过的那几块 ⇒ <b>写成本不随库体量增长</b></dd>
         <dt>qua.workspace（web）</dt><dd>整库（块森林；行内内容与区间都在块上），套一层信封 <code>{ backend, envelope, data }</code>。浏览器没有用户可选目录的同等语义 ⇒ 单窗口单库</dd>
         <dt>qua.device</dt><dd>设备态：主题 / 槽宽 / <b>左右槽的卡片清单</b> / 钉住清单（<b>不进 KB</b>）</dd>
@@ -783,7 +786,7 @@
   <div class="sec-h"><b>九、库内形状：一张 SQLite 文件，源表与派生表分开记账</b><i>electron/library/sqlite.ts（DDL·迁移）· src/core/storage/db-rows.ts（行编码）· derived-rows.ts（派生编码）</i></div>
   <div class="grid2">
     <div class="card pad">
-      <div class="subh">表清单 <span>schema 16 · 源表 4 · 派生 5 · 库级 4</span></div>
+      <div class="subh">表清单 <span>schema 17 · 源表 4 · 派生 5 · 库级 4</span></div>
       <table class="tbl">
         <thead><tr><th>表</th><th>键</th><th>职责与形状判据</th></tr></thead>
         <tbody>
