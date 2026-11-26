@@ -14,6 +14,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { colorOf, faceOf, iconOf, mkTagBlock, tagsById, type Block } from '../src/core/index.ts'
+import { CODE_TYPE } from '../src/core/model/types.ts'
 import { IDENTITY_COLORS, isColorValue } from '../src/core/model/model.ts'
 
 const block = (props: Block['props'], children: Block[] = []): Block => ({
@@ -31,10 +32,11 @@ test('faceOf：显式 _icon 是脸，永远赢过结构旗', () => {
   assert.equal(faceOf(tag), 'lucide:target')
 })
 
-test('faceOf：结构旗回落——标签→hash／查询→漏斗／定义→滑杆', () => {
+test('faceOf：结构旗回落——标签→hash／查询→漏斗／定义→滑杆／代码→尖括号', () => {
   assert.equal(faceOf(mkTagBlock('设计')), 'lucide:hash')
   assert.equal(faceOf(block({ _query: { where: { all: [] } } })), 'lucide:list-filter')
   assert.equal(faceOf(block({ _kind: 'select' })), 'lucide:sliders-horizontal')
+  assert.equal(faceOf(block({ _type: CODE_TYPE })), 'lucide:code')
 })
 
 test('faceOf：自位回落集比指位小一档——页/日记/普通块没有结构旗（圆点兜底）', () => {
@@ -80,6 +82,10 @@ test('iconOf：全角色默认——标签/日记/页/查询/定义各有一档'
 test('iconOf：显式 _icon 优先；普通块＝无（空白但占位）', () => {
   assert.equal(iconOf(block({ _aliases: ['a'], _lists: ['page'], _icon: 'lucide:book-open' })), 'lucide:book-open')
   assert.equal(iconOf(block(undefined)), undefined)
+})
+
+test('iconOf：代码块是类型、没有角色，入口行也给同一枚结构旗', () => {
+  assert.equal(iconOf(block({ _type: CODE_TYPE })), 'lucide:code')
 })
 
 test('iconOf：兼位按「越本质越靠前」——页＋标签读作标签', () => {

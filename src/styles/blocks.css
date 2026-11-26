@@ -3077,13 +3077,26 @@
   --blk-lh: inherit;
 }
 /*
- * **投影行的块标是空心的**：空心说的是「这一行的身体不是一份独立内容」。
+ * **投影行的块标是一枚虚线徽章**（与镜像的 M 徽章同一档）：虚线圆说
+ * 「这一行的身体不是一份独立内容」，环里的字说「露的是哪一块」——
+ * 取**源自己的脸**（查询＝漏斗；源是页/日记时补 file/calendar，见 `marker.ts`）。
+ *
+ * 曾经的 7px 空心点与 16px 的 M 徽章并排时读作两种东西，而它们同属「露面」这一族；
+ * 统一到徽章尺寸后，投影与镜像只差环里的字（投影＝源的脸，镜像＝M）。
+ * 尺寸从 `--ui-bullet-size`（5px 点）抬到 16px：点太细，读不出「这是另一种身份」。
  */
 .blk[data-embed='1'] > .left .marker::before {
+  content: '';
+  width: 16px;
+  height: 16px;
   background: transparent;
-  border: 1px solid var(--ui-text-tertiary);
-  width: calc(var(--ui-bullet-size) + 2px);
-  height: calc(var(--ui-bullet-size) + 2px);
+  border: 1px dashed var(--ui-text-tertiary);
+  /* 普通点在静息态是半透明的待命件（--ui-quiet）；徽章是身份，读满强度 */
+  opacity: 1;
+}
+/* 悬停＝让位：与镜像徽章同一条口径（特异性要压过上面那条，否则徽章与抓手叠影） */
+.blk[data-embed='1'] > .left .marker:hover::before {
+  opacity: 0;
 }
 /*
  * **镜像行的块标是一枚 M 徽章**（虚线圆 ＋ 字母）：同一颗空心点说不清两件事——

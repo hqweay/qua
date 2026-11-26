@@ -13,6 +13,7 @@
 import {
   colorOfByFind,
   faceOfByFind,
+  iconOf,
   identityDotColor,
   identityRingGradient,
   isPropDefBlock,
@@ -33,6 +34,14 @@ export interface MarkerOpts {
    * 假＝只读面（卡片：卡片的拖动另有手势——拖卡＝写值/搬组，两颗拖源语义不同会让人猜）。
    */
   handle?: boolean
+  /**
+   * **投影行要画源的脸**：露面宿主块自己没有身份（它只是一次露面），
+   * 块标上那枚字回答的是「我露的是哪一块」——所以脸取源，不取宿主。
+   *
+   * 给出这个块 ⇒ 块标是**露面徽章**（虚线圆，见 CSS）：与镜像的 M 徽章同一档，
+   * 环里的字说「是哪一块」。不给 ⇒ 普通块标，脸取自己。
+   */
+  source?: Block
 }
 
 export function buildMarker(b: Block, o: MarkerOpts): HTMLElement {
@@ -52,23 +61,33 @@ export function buildMarker(b: Block, o: MarkerOpts): HTMLElement {
   }
   /**
    * **块标＝脸位**：用户配的 `_icon`（脸）优先，缺省回落结构旗（标签=hash／查询=漏斗／
-   * 定义=滑杆），再缺省借主标签的形（归属序第一个带显式 `_icon` 的标签——与借色同一资格）；
+   * 定义=滑杆／代码=尖括号），再缺省借主标签的形（归属序第一个带显式 `_icon` 的标签——与借色同一资格）；
    * 都没有就是圆点（无脸默认）。
+   *
+   * ⚠️ 投影行取**源**的脸（`o.source`）：宿主块自己只是一次露面、没有身份；
+   *    源的脸画在虚线徽章里，同一块在原位与露面处就认得出是同一块。
+   *    源是页/日记这类自位不借角色图标的块时，补一指位档（file/calendar）——
+   *    徽章那一格里没有内容形态可读，只剩这枚字能回答「露的是哪一块」。
    *
    * ⚠️ 行为与脸无关：块标上的脸**不挂任何事件**——点它还是聚焦/打开，拖动还是把手的事。
    * ⚠️ 图标与点互斥（CSS），悬停时都让位给抓手。
    */
-  const face = faceOfByFind(b, o.find)
+  const faceBlock = o.source ?? b
+  const face = faceOfByFind(faceBlock, o.find) ?? (o.source ? iconOf(o.source) : undefined)
   if (face !== undefined) {
-    marker.classList.add(isPropDefBlock(b) ? 'marker-schema' : isQueryBlock(b) ? 'marker-query' : 'marker-face')
+    marker.classList.add(isPropDefBlock(faceBlock) ? 'marker-schema' : isQueryBlock(faceBlock) ? 'marker-query' : 'marker-face')
     const ico = document.createElement('span')
     ico.className = 'marker-ico'
-    // 脸画 md（15px）：它是用户挑的数据，不吃发丝线的亏（24 网格 2px 描边缩到 sm 的 12px
-    // 只剩 1px，抗锯齿后发灰）——与页/日记脸、查询标记菜单同档；铬件（抓手/折叠箭头）才用 sm
-    renderIcon(ico, face, 'circle-help', 'md')
+    /**
+     * 脸画 md（15px）：它是用户挑的数据，不吃发丝线的亏（24 网格 2px 描边缩到 sm 的 12px
+     * 只剩 1px，抗锯齿后发灰）——与页/日记脸、查询标记菜单同档；铬件（抓手/折叠箭头）才用 sm。
+     * **徽章例外**：16px 的虚线圆里 15px 会顶到环上，降一档到 sm，环内留一圈空。
+     */
+    if (o.source) renderIcon(ico, face, 'circle-help', 'sm')
+    else renderIcon(ico, face, 'circle-help', 'md')
     marker.appendChild(ico)
     // 属性定义的正文是定义名，行内改不了；悬停块标时把「它是什么」说清
-    if (isPropDefBlock(b)) marker.dataset.tip = t('ui.block.schemaHint')
+    if (isPropDefBlock(faceBlock)) marker.dataset.tip = t('ui.block.schemaHint')
   }
   /**
    * **自位色＝涂料，不是形状**：色只染「当前的形状」，不与形状竞争。

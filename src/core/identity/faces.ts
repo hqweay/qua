@@ -13,9 +13,9 @@
  *
  * 三条链：
  *   · **`faceOf`**（自位，块标）：显式 `_icon` ?? 结构身份默认（标签→hash／查询→漏斗／
- *     定义→滑杆）?? **主标签借形**（归属序第一个带显式 `_icon` 的标签）?? 无（调用方画圆点）。
+ *     定义→滑杆／代码→尖括号）?? **主标签借形**（归属序第一个带显式 `_icon` 的标签）?? 无（调用方画圆点）。
  *     回落集**比指位小一档**：页/日记的自位身份已由内容形态表达（首行加粗／只读日期行），
- *     file 图标在自位是纯装饰；标签/查询/定义的默认图标是**结构旗**，正文为空也成立。
+ *     file 图标在自位是纯装饰；标签/查询/定义/代码的默认图标是**结构旗**，正文为空也成立。
  *     借形与借色同一资格：归属是身份信息，形与色不该一半借一半不借——
  *     「成员不是标签所以图标不借」的旧口径随任意块自位脸入口一起废止（当时图标唯一
  *     显示位是 chip；现在块标有了自位脸，借入只是回落位，泛滥担忧由色轴同一资格承担）。
@@ -33,6 +33,7 @@
 import {
   COLOR_PROP,
   ICON_PROP,
+  blockTypeOf,
   hasList,
   isColorValue,
   isHexColor,
@@ -42,14 +43,22 @@ import {
   prop,
   type Block,
 } from '../model/model.ts'
+import { CODE_TYPE } from '../model/types.ts'
 import { resolveTagIds, tagIdsOf } from './tags.ts'
 import type { FindBlock } from '../relations/ref.ts'
 
-/** 结构旗：自位回落集（比指位小一档——页/日记在自位不借角色图标） */
+/**
+ * 结构旗：自位回落集（比指位小一档——页/日记在自位不借角色图标）。
+ *
+ * `code` 是**类型**不是身份，但它和查询/定义同一条判据：正文为空、形制还没长出来时，
+ * 「这一行是代码」只有块标能说。引文不在这里：它的左竖线已经是形状，旁边再挂一枚
+ * 引号是把同一句话说两遍（页/日记同理，由内容形态承担）。
+ */
 const STRUCTURAL_FACE: Record<string, string> = {
   tag: 'lucide:hash',
   query: 'lucide:list-filter',
   def: 'lucide:sliders-horizontal',
+  code: 'lucide:code',
 }
 
 /** 全角色默认：指位回落集（页与日记也进集——入口行要靠图标认出「这是哪类东西」） */
@@ -87,6 +96,7 @@ export function faceOf(b: Block, byId?: ReadonlyMap<string, Block>): string | un
   if (hasList(b, 'tag')) return STRUCTURAL_FACE.tag
   if (isQueryBlock(b)) return STRUCTURAL_FACE.query
   if (isPropDefBlock(b)) return STRUCTURAL_FACE.def
+  if (blockTypeOf(b) === CODE_TYPE) return STRUCTURAL_FACE.code
   if (byId) {
     for (const t of resolveTagIds(b, byId)) {
       const ico = prop<string>(t, ICON_PROP)
@@ -112,13 +122,16 @@ export function faceOfByFind(b: Block, find?: FindBlock): string | undefined {
 
 /**
  * **指位的图标**：入口行/候选行/菜单行上画什么。显式 `_icon` 优先；
- * 缺省回落到全角色默认；普通块 ⇒ `undefined`（调用方留白但占位）。
+ * 缺省回落到全角色默认；代码块是**类型**没有角色，给同一枚结构旗；
+ * 普通块 ⇒ `undefined`（调用方留白但占位）。
  */
 export function iconOf(b: Block): string | undefined {
   const explicit = prop<string>(b, ICON_PROP)
   if (explicit !== undefined && explicit.trim() !== '') return explicit
   const role = roleOf(b)
-  return role ? ROLE_ICON[role] : undefined
+  if (role) return ROLE_ICON[role]
+  if (blockTypeOf(b) === CODE_TYPE) return STRUCTURAL_FACE.code
+  return undefined
 }
 
 /** 自位色的三种回答：中性 ／ 一个色 ／ 色环（≥2 个有色标签，按归属顺序） */

@@ -1102,7 +1102,17 @@ export function makeBlockEl(
    * ⚠️ 绑定与形状分离：`data-focus-for`／`data-drag-for` 指到 `markerTargetId`
    *    （普通行＝自己，投影行＝源）——行为对「这一块」不变，只是「这一块」是谁由行决定。
    */
-  if (left) left.appendChild(buildMarker(b, { find: opts.find, targetId: markerTargetId, handle: true }))
+  if (left) {
+    left.appendChild(
+      buildMarker(b, {
+        find: opts.find,
+        targetId: markerTargetId,
+        handle: true,
+        // 投影行：脸取源（宿主块只是「谁的又一次露面」），见 `marker.ts` 的 `source`
+        ...(embedChrome === 'sourceMarker' && embedRes?.status === 'ok' ? { source: embedRes.target } : {}),
+      }),
+    )
+  }
 
   /**
    * **gutter 上的快捷入口＝一列图标**，一条归 gutter 的属性一枚（顺序沿用
