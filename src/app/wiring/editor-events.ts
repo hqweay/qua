@@ -109,6 +109,20 @@ function viewEvents(
 ): ViewEvents {
   const active = () => editor()
   /**
+   * **把「当前编辑器」切到这一台**。
+   *
+   * `App.ed` 原本只由**焦点**驱动（`onFocus` → `setEd`），而右键块标**不产生焦点**——
+   * 于是菜单里每一条位置命令（新建/上移/缩进/折叠）都落到**外层**那台上：
+   * 它看不见镜像里那一块（源不在这一屏的装载里）⇒ 每条命令各自 `return null`，
+   * 菜单照开、点了没反应。而「删除」因为单独写过分支是好的 ⇒ 半个菜单好用。
+   *
+   * 判据：**菜单开在谁身上，命令就作用于谁**。开菜单是一次显式意图，
+   * 与点进去拿走焦点同等强度，所以这里主动切，而不是等焦点自己过来。
+   */
+  const adoptEditor = (): void => {
+    if (editor() !== getApp().ed) setEd(editor())
+  }
+  /**
    * **行身体的实例缓存**（一台编辑器一份）：外来编辑会让整屏行重建，
    * 行内查询体不能随之销毁重建 —— 冻结/stale/滚动都要跨重画活下来。
    * 判据与实现见 `app/wiring/row-bodies.ts`。
@@ -654,6 +668,8 @@ function viewEvents(
       ;(owner ?? active()).toggleBodyCollapse(id)
     },
     blockMenu: (blockId, rect, appearanceHost, trigger) => {
+      // 菜单开在这一台身上 ⇒ 命令也作用在这一台（右键不产生焦点，不能等 onFocus）
+      adoptEditor()
       const ed = active()
       // 命中**已选中的块**（且多块）⇒ 多块菜单；否则清块选区，走原单块菜单
       if (ed.bsel.inBlockSelection(blockId) && ed.bsel.blockSelectionCount() > 1) {

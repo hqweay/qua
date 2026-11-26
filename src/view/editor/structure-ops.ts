@@ -62,6 +62,7 @@ function caretTargetFrom(list: readonly Block[], from: number): Block | undefine
 export class StructOps {
   constructor(private readonly ed: BlockEditor) {}
 
+
   split(id: string, offset: number): void {
     /**
      * **编辑边界**：Enter 就是离开这一行 ⇒ 先把这次正文改动当改名交出去。

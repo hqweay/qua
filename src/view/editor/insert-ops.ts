@@ -59,6 +59,21 @@ import type { BlockEditor } from './editor.ts'
 export class InsertOps {
   constructor(private readonly ed: BlockEditor) {}
 
+  /**
+   * **找到那一块**：先本视图，再退回整片森林。
+   *
+   * 只用于「**读**它的形状／写它的内容」这类不依赖「它在哪一屏」的动作
+   * （类型转换、摘露面、把引用摊开）。⚠️ **位置动作不许用它兜底**：
+   * 建块/移动的落点由 `insertSiteOf` 按「它在这棵树里的位置」算，而那个位置
+   * 可能根本不在这台编辑器的装载里 —— 真那么建出来的块没有可画的父行，
+   * 随后的重载会把**整屏**换成那一块（实测：17 块 → 1 块，屏幕上像是"什么都没了"）。
+   * 位置动作只用 `locate(this.ed.doc, …)`：找不到就是「这一屏里没有它」，
+   * 该拒绝而不是在别处动。
+   */
+  private locOf(id: string): Located | null {
+    return locate(this.ed.doc, id) ?? locate({ roots: this.ed.store.blocks }, id)
+  }
+
   /** 整块换成一段纯文本（清除所有格式与原子；命令/测试用） */
   setText(id: string, text: string): void {
     const loc = locate(this.ed.doc, id)
@@ -352,7 +367,7 @@ export class InsertOps {
      */
     const target = id !== undefined && id !== '' ? id : (this.ed.caretBlock() ?? this.ed.rows()[0]?.block.id ?? '')
     if (target === '') return null
-    const loc = locate(this.ed.doc, target) ?? locate({ roots: this.ed.store.blocks }, target)
+    const loc = this.locOf(target)
     if (!loc) return null
     this.ed.beginUndoEntry()
     const parentId = loc.parent?.id ?? null
@@ -423,7 +438,7 @@ export class InsertOps {
   insertViewAfter(id?: string, ownerProps?: Record<string, unknown>): string | null {
     const target = id !== undefined && id !== '' ? id : (this.ed.caretBlock() ?? this.ed.rows()[0]?.block.id ?? '')
     if (target === '') return null
-    const loc = locate(this.ed.doc, target) ?? locate({ roots: this.ed.store.blocks }, target)
+    const loc = this.locOf(target)
     if (!loc) return null
     this.ed.beginUndoEntry()
 
@@ -491,7 +506,7 @@ export class InsertOps {
      * 一面镜像的岛（它的 `doc.roots` 只有源那一棵）。只看本视图会让「在镜像里展开引用」
      * 这类动作找不到宿主块——不报错，只是没反应。
      */
-    const loc = locate(this.ed.doc, id) ?? locate({ roots: this.ed.store.blocks }, id)
+    const loc = this.locOf(id)
     if (!loc) return null
     this.ed.beginUndoEntry()
 
@@ -632,7 +647,7 @@ export class InsertOps {
   private insertRun(run: RunWithId): string | null {
     const id = this.ed.sel?.aBlock ?? this.ed.rows()[0]?.block.id
     if (!id) return null
-    const loc = locate(this.ed.doc, id)
+    const loc = this.locOf(id)
     if (!loc) return null
     const off = this.ed.sel?.aOff ?? 0
     this.ed.beginUndoEntry()
@@ -750,7 +765,7 @@ export class InsertOps {
    * @returns 新 run 的 id；块不在了或 offset 越界 ⇒ `null`（一个字节都不写，不静默插到别处）
    */
   insertAssetAt(blockId: string, offset: number, asset: string, snap?: { label?: string }): string | null {
-    const loc = locate(this.ed.doc, blockId)
+    const loc = this.locOf(blockId)
     if (!loc) return null
     const len = plainLen(loc.block.content)
     if (offset < 0 || offset > len) return null
