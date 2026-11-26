@@ -729,6 +729,17 @@
   opacity: var(--ui-soft);
 }
 /*
+ * **引文块**：正文槽左侧一条竖线 ＋ 内缩，让「这一段是引出的文字」一眼可辨。
+ * 线挂在 `.tx` 上而不是 `.blk`：`.blk` 左缘是 gutter（块标/导轨），线贴着文字才读成
+ * 引文；挂在 `.tx` 上也让线随折行一起长高，换行不断。
+ * 只改横向几何（border/padding-left），不动 padding-block/margin —— 垂直留白归容器，
+ * 否则行高漂移会让虚拟化估高与块标对齐一起失真。色走 token，换主题自动跟。
+ */
+.blk[data-type='core/quote'] > .tx {
+  border-left: 3px solid var(--ui-border);
+  padding-left: var(--ui-gap-4);
+}
+/*
  页 / 日记 / 被聚焦块作为**正文第一行**时更大一档（它是这一屏的「身份」，但不叫标题）。
  ⚠️ 这里**不写 font-size**：字号已经是「深度 0 ⇒ `--ui-fs-lg`」一条规则给出的。
     在这个 `.tx` 上再写一遍，就会让 `.tx` 的字号与 `.left`（gutter）的字号分家，
