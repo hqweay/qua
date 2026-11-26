@@ -497,7 +497,7 @@ export const ALLOWED_ROW_CHILDREN: ReadonlySet<string> = new Set([
   'left',
   'tx',
   'blk-kind',
-  'blk-callout',
+  'blk-callout-label',
   'blk-tags',
   'blk-embed-body',
   'blk-view-body',
@@ -600,30 +600,34 @@ function makeCodeLangChip(b: Block, onOpen: (blockId: string, anchor: DOMRect, t
  * 落进 `.tx` 会被 `readRuns` 读回正文、也被光标落到它后面打字（与标签槽同一条病）。
  * 点击自己收下（同 `makeCodeLangChip` 的 stopPropagation），不把光标/菜单一起做掉。
  */
-function makeCalloutChip(b: Block, onOpen: (blockId: string, anchor: DOMRect, trigger: HTMLElement) => void): HTMLElement {
-  const raw = prop<string>(b, CALLOUT_PROP)
-  const v = calloutDecl(raw)
-  const el = document.createElement('span')
-  el.className = 'blk-callout'
-  el.contentEditable = 'false'
-  el.dataset.callout = v.id
-  el.setAttribute('role', 'button')
+function makeCalloutChip(
+  b: Block,
+  onOpen: (blockId: string, anchor: DOMRect, trigger: HTMLElement) => void,
+): { icon: HTMLElement; label: HTMLElement } {
+  const v = calloutDecl(prop<string>(b, CALLOUT_PROP))
   const ico = document.createElement('span')
   ico.className = 'blk-callout-ico'
-  renderIcon(ico, `lucide:${v.icon}`, 'quote', 'sm')
+  ico.contentEditable = 'false'
+  ico.dataset.callout = v.id
+  ico.setAttribute('role', 'button')
+  renderIcon(ico, `lucide:${v.icon}`, 'quote', 'md')
   const label = document.createElement('span')
   label.className = 'blk-callout-label'
+  label.contentEditable = 'false'
+  label.dataset.callout = v.id
+  label.setAttribute('role', 'button')
   label.textContent = v.label
-  el.append(ico, label)
   const tip = t('ui.callout.chipTip', { label: v.label })
-  el.dataset.tip = tip
-  el.setAttribute('aria-label', tip)
-  el.addEventListener('click', (e) => {
-    e.preventDefault()
-    e.stopPropagation()
-    onOpen(b.id, el.getBoundingClientRect(), el)
-  })
-  return el
+  for (const el of [ico, label]) {
+    el.dataset.tip = tip
+    el.setAttribute('aria-label', tip)
+    el.addEventListener('click', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      onOpen(b.id, el.getBoundingClientRect(), el)
+    })
+  }
+  return { icon: ico, label }
 }
 
 /**
@@ -1299,8 +1303,9 @@ export function makeBlockEl(
   let embedMount: (() => void) | null = null
   /** 代码块的语言徽章（行尾，标题行右侧）：装配层接了「换语言」才画 */
   let codeLangChip: HTMLElement | null = null
-  /** 引述块的变体徽章（正文槽之前）：装配层接了「换变体」才画 */
-  let calloutChip: HTMLElement | null = null
+  /** 引述变体：图标进 gutter 的属性图标格、标签进正文列（装配层接了「换变体」才画） */
+  let calloutIcon: HTMLElement | null = null
+  let calloutLabel: HTMLElement | null = null
   if (isEmbedBlock(b)) {
     /**
      * **露面块**：正文槽空着（它没有用户写的字），身体是另一个编辑宿主。
@@ -1391,7 +1396,11 @@ export function makeBlockEl(
     el.dataset.quoteHead = '1'
     tx.dataset.quoteHead = '1'
     tx.setAttribute('aria-hidden', 'true')
-    if (opts.calloutMenu) calloutChip = makeCalloutChip(b, opts.calloutMenu)
+    if (opts.calloutMenu) {
+      const chip = makeCalloutChip(b, opts.calloutMenu)
+      calloutIcon = chip.icon
+      calloutLabel = chip.label
+    }
   } else {
     fill(tx)
   }
@@ -1545,8 +1554,11 @@ export function makeBlockEl(
       embedMount?.()
     }
   } else {
+    // 变体图标进 gutter 的属性图标格（与正文行的属性图标同一列）
+    if (calloutIcon) left!.appendChild(calloutIcon)
     el.appendChild(left!)
-    if (calloutChip) el.appendChild(calloutChip)
+    // 变体标签进正文列（与正文行的块文本同一列）
+    if (calloutLabel) el.appendChild(calloutLabel)
     el.appendChild(tx)
     if (kindBadge) el.appendChild(kindBadge)
     if (wantBodyFold) {

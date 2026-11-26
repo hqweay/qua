@@ -736,39 +736,57 @@
  *
  * 取色写在这里而不是 TS：换主题时 token 自动跟，组件不碰颜色字面量。
  */
-.blk-callout,
+.blk-callout-ico,
 .blk[data-quote-head],
 .blk[data-quote-line] {
   --callout-rule: 3px;
   --callout-icon-slot: 32px;
 }
-.blk-callout {
+.blk-callout-ico[data-callout='info'],
+.blk-callout-label[data-callout='info'] { --callout-c: var(--ui-ink-blue); }
+.blk-callout-ico[data-callout='warning'],
+.blk-callout-label[data-callout='warning'] { --callout-c: var(--ui-ink-yellow); }
+.blk-callout-ico[data-callout='error'],
+.blk-callout-label[data-callout='error'] { --callout-c: var(--ui-ink-red); }
+.blk-callout-ico[data-callout='tip'],
+.blk-callout-label[data-callout='tip'] { --callout-c: var(--ui-ink-green); }
+.blk-callout-ico[data-callout='important'],
+.blk-callout-label[data-callout='important'] { --callout-c: var(--ui-ink-violet); }
+.blk-callout-ico[data-callout='note'],
+.blk-callout-label[data-callout='note'] { --callout-c: var(--ui-ink-gray); }
+/* 变体图标＝gutter 的属性图标格：与 `.identity` 同一条 margin，落在同一列 */
+.blk-callout-ico {
   flex: 0 0 auto;
-  align-self: flex-start;
   display: inline-flex;
   align-items: center;
-  gap: var(--ui-gap-2);
-  /* 与 .left / .tx 同一行盒基准，块标不会与这枚脸错开 */
+  justify-content: center;
+  height: 100%;
+  margin-inline-start: calc(var(--ui-gap-4) - 1px + var(--callout-rule, 3px) + var(--ui-gap-2));
+  color: var(--callout-c);
+  cursor: pointer;
+  user-select: none;
+}
+/* 变体标签＝正文列的可点文字：与块文本同一起点、同一档字 */
+.blk-callout-label {
+  flex: 0 0 auto;
+  align-self: flex-start;
   height: 1lh;
-  /* 竖线由 .blk::before 画满整行；这里不再画一截短的，避免同一列两道线 */
-  /* 让徽章图标与正文行文字落在同一列（竖线右侧一档），参考虎鲸 */
-  padding-left: calc(var(--callout-rule, 3px) + var(--ui-gap-3));
+  display: inline-flex;
+  align-items: center;
   color: var(--callout-c);
   font-size: var(--ui-fs-md);
   font-weight: var(--ui-fw-medium);
   white-space: nowrap;
   cursor: pointer;
   user-select: none;
-}
-.blk-callout[data-callout='info'] { --callout-c: var(--ui-ink-blue); }
-.blk-callout[data-callout='warning'] { --callout-c: var(--ui-ink-yellow); }
-.blk-callout[data-callout='error'] { --callout-c: var(--ui-ink-red); }
-.blk-callout[data-callout='tip'] { --callout-c: var(--ui-ink-green); }
-.blk-callout[data-callout='important'] { --callout-c: var(--ui-ink-violet); }
-.blk-callout[data-callout='note'] { --callout-c: var(--ui-ink-gray); }
-.blk-callout:hover {
-  background: var(--ui-bg-hover);
   border-radius: var(--ui-radius-sm);
+}
+.blk-callout-ico:hover,
+.blk-callout-label:hover {
+  color: var(--ui-text);
+}
+.blk[data-quote-head] > .left {
+  width: calc(var(--ui-marker-slot) + var(--callout-icon-slot, 32px));
 }
 /*
  * **引述是行容器**：抬头只画徽章，正文住在子块里，每行一个块（可单独引用）。
