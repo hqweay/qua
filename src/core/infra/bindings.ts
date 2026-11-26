@@ -73,6 +73,9 @@ export const BINDINGS: Binding[] = [
   // 原生全选会退化成空选区（把 journal 行标成只读后实测到）⇒ 自己拼跨块 Range
   { command: 'core.editor/select-all', kind: 'keymap', key: 'mod+a', when: 'editorTextFocus', layer: 'core' },
   { command: 'core.editor/backspace', kind: 'keymap', key: 'backspace', when: 'editorTextFocus', layer: 'core' },
+  // ⌦（正向删除）：块尾与**下一块**接成一行，与 ⌫ 同一份判据、只差触发的边界。
+  // 今天普通块之间靠 Chrome 原生跨行合并，模型不跟着变（实测：DOM 合了、库里两份）⇒ 自己接管。
+  { command: 'core.editor/forward-delete', kind: 'keymap', key: 'delete', when: 'editorTextFocus', layer: 'core' },
   { command: 'core.editor/indent-block', kind: 'keymap', key: 'tab', when: 'editorTextFocus', layer: 'core' },
   { command: 'core.editor/outdent-block', kind: 'keymap', key: 'shift+tab', when: 'editorTextFocus', layer: 'core' },
   { command: 'core.editor/move-block-up', kind: 'keymap', key: 'mod+shift+up', when: 'editorTextFocus', layer: 'core' },

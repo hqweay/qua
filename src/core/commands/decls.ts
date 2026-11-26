@@ -16,6 +16,7 @@ export const COMMANDS: CommandDecl[] = [
   /* ---- 编辑器 · 结构 ---- */
   { name: 'core.editor/split-block', title: t('cmd.editor.split-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), hidden: true, keywords: ['enter', t('menu.kw.enter')] },
   { name: 'core.editor/backspace', title: t('cmd.editor.backspace'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), hidden: true },
+  { name: 'core.editor/forward-delete', title: t('cmd.editor.forward-delete'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), hidden: true },
   { name: 'core.editor/select-all', title: t('cmd.editor.select-all'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.editor'), keywords: ['select all', 'cmd+a'] },
   { name: 'core.editor/indent-block', title: t('cmd.editor.indent-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['tab', t('menu.kw.indent')] },
   { name: 'core.editor/outdent-block', title: t('cmd.editor.outdent-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['shift tab', t('menu.kw.outdent')] },

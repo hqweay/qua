@@ -22,6 +22,7 @@ import {
   removableBySplice,
   isJournal,
   locate,
+  mergeIntoNextPlan,
   mergeIntoPrevPlan,
   mkBlock,
   moveStaysInside,
@@ -36,6 +37,7 @@ import {
   unfoldBlock,
   writeBlockContent,
   type Block,
+  type MergePlan,
   type MovePlan,
 } from '../../core/index.ts'
 import { plainLen, spliceRuns, splitRuns } from '../../core/model/runs.ts'
@@ -207,19 +209,54 @@ export class StructOps {
       return
     }
     const plan = mergeIntoPrevPlan(this.ed.doc, id)
-    if (!plan) {
-      this.ed.abortUndoEntry()
+    if (plan) {
+      this.applyMerge(plan)
       return
     }
+    this.ed.abortUndoEntry()
+  }
+
+  /**
+   * `Delete`（正向删除）在**块尾**：与下一块接成一行。
+   *
+   * 与 `⌫` 走同一份判据（`mergeIntoNextPlan` 读的是同一个 `pairMergePlan`）：
+   * 两个手势回答同一件事，只有触发的边界不同。块内还有字时这不是删除行，
+   * 是「删下一个字符」——归原生（与行首退格的边界对称）。
+   *
+   * @returns 接管了才 `true`；不在块尾／跨块选区 ⇒ `false`（照常走原生）
+   */
+  forwardDeleteAtCaret(): boolean {
+    const s = this.ed.sel
+    if (!s) return false
+    const r = normSel(this.ed.doc, s)
+    if (r.startBlock !== r.endBlock) return false
+    const loc = locate(this.ed.doc, s.aBlock)
+    if (!loc) return false
+    const end = plainLen(loc.block.content)
+    if (s.aOff !== end || s.hOff !== end) return false
     /**
-     * 内容拼接在 core 层完成（`joinRuns`：边界两侧同形段合并、原子原样排队）。
-     * 被并块的字现在排在前一块内容的**末尾** ⇒ 光标落在粘接点 `plan.at`。
+     * 块尾没有可接的下一行（末块／跨到另一个根／下一块是身份块）⇒ **吞掉**，
+     * 不交给浏览器：与行首退格「没事可做也必须吃掉」同一条（原生删除看不见「块」）。
      */
+    const plan = mergeIntoNextPlan(this.ed.doc, s.aBlock)
+    if (!plan) return true
+    this.ed.beginUndoEntry()
+    this.applyMerge(plan)
+    return true
+  }
+
+  /**
+   * 两行接成一行的**唯一落点**（`⌫` 与 `Delete` 共用）：内容、子块、软删、光标一起收。
+   *
+   * ⚠️ 保留块不一定在**上面**：带身体的那一行活下来（判据在 `pairMergePlan`），
+   *    被并掉的那一行由 `plan.removed` 说，落点由 `plan.kept`／`plan.at` 说。
+   */
+  private applyMerge(plan: MergePlan): void {
     this.ed.write((tx) => {
       tx.patch(plan.kept, (b) => writeBlockContent(b, plan.content))
-      // 子块跟着并进前一块：每块一条 move（各自报自己的 parent/index）
+      // 子块跟着走：每块一条 move（各自报自己的 parent/index）
       plan.children.forEach((kid, n) => tx.move(kid, plan.kept, plan.kidsAt + n))
-      // 被并块的内容已搬进前一块 ⇒ 空壳**清空**：删除是原位标记，壳还留在树上，
+      // 被并块的内容已搬走 ⇒ 空壳**清空**：删除是原位标记，壳还留在树上，
       // 留着内容就是库里有两份同一句话（恢复出来就是重复块）
       tx.patch(plan.removed, (b) => writeBlockContent(b, []))
       tx.remove(plan.removed)
@@ -227,7 +264,13 @@ export class StructOps {
     this.ed.structTail({ id: plan.kept, off: plan.at })
   }
 
-  /** Backspace：块首合并到上一块；否则交给原生删除 */
+  /**
+   * 行首退格：块首合并到上一块；否则交给原生删除。
+   *
+   * 合并**不成立**的边界（露面／日记投影／身份块／两个身体／身体块的首个子块）
+   * 一律吞掉这一键、什么都不做 —— 「删不了」比「删错」便宜（同族：虎鲸笔记里
+   * 日记标题下的第一块，Delete 也不删）。
+   */
   backspaceAtCaret(): boolean {
     const s = this.ed.sel
     if (!s) return false

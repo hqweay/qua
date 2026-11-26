@@ -6,6 +6,7 @@ export const EN1 = {
 
   'cmd.editor.split-block': 'Split block',
   'cmd.editor.backspace': 'Backspace: merge into previous block',
+  'cmd.editor.forward-delete': 'Delete forward: merge into next block',
   'cmd.editor.select-all': 'Select all (blocks on this screen)',
   'cmd.editor.indent-block': 'Indent',
   'cmd.editor.outdent-block': 'Outdent',

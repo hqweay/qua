@@ -24,6 +24,7 @@ export const MSG = {
   /* -------------------------------------------------------- 命令 title（cmd.*） */
   'cmd.editor.split-block': '拆分块',
   'cmd.editor.backspace': '退格：合并到上一块',
+  'cmd.editor.forward-delete': '删除键：合并到下一块',
   'cmd.editor.select-all': '全选（这一屏的块）',
   'cmd.editor.indent-block': '缩进',
   'cmd.editor.outdent-block': '取消缩进',

@@ -37,6 +37,8 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
   'core.editor/backspace': (_a, app) => {    // 合并成 ⇒ 已处理；没合并 ⇒ **放行给浏览器**（原生删除：命名的威力在于**允许不处理**）
     return app.ed.struct.backspaceAtCaret()
   },
+  // 与 ⌫ 同一条口径：块尾才接行；块内还有字时是「删下一个字符」，归原生
+  'core.editor/forward-delete': (_a, app) => app.ed.struct.forwardDeleteAtCaret(),
   'core.editor/indent-block': (a, app) => {
     const id = targetBlock(a, app)
     if (!id) return false

@@ -306,6 +306,35 @@ export function prevBlock(doc: Doc, id: string): Block | null {
   return i > 0 ? all[i - 1]! : null
 }
 
+/**
+ * 上一块（**可见**文档序）：折叠子树里的块不参与。
+ *
+ * 与 `flatten` 取的文档序差别只在折叠：收起的子块**不在屏幕上**。行首退格拿它当
+ * 「上一行」，就会把这一行的字接进一个看不见的块里——块消失、字进了一个不展开
+ * 就找不到的地方（与 `⌫` 在根行首吞掉是同一族的坑）。
+ */
+export function prevVisibleBlock(doc: Doc, id: string): Block | null {
+  const rows = visibleRows(doc)
+  const i = rows.findIndex((r) => r.block.id === id)
+  if (i < 0) return null
+  for (let k = i - 1; k >= 0; k--) if (!rows[k]!.hidden) return rows[k]!.block
+  return null
+}
+
+/**
+ * 下一块（**可见**文档序）：折叠子树里的块不参与。
+ *
+ * `Delete` 往下一看：`flatten` 会把收起的整棵子树排在中间，照它取「下一块」，
+ * 一次删除键就会把**看不见的子块**并进当前行。
+ */
+export function nextVisibleBlock(doc: Doc, id: string): Block | null {
+  const rows = visibleRows(doc)
+  const i = rows.findIndex((r) => r.block.id === id)
+  if (i < 0) return null
+  for (let k = i + 1; k < rows.length; k++) if (!rows[k]!.hidden) return rows[k]!.block
+  return null
+}
+
 /** 子树里全部后代（先序，不含自己） */
 export function descendants(b: Block): Block[] {
   const out: Block[] = []
@@ -674,69 +703,135 @@ export function insertFirstChild(doc: Doc, id: string): Block | null {
 /**
  * 合并的**落点计划**：只算，不动。
  *
- * 前一块的正文不是内容（标签名／字段名／日期投影）⇒ 计划为空：合并的语义是
- * 「把这块的正文接到前一块正文后面」，前一块没有可写的正文，这块的正文无处可去 ——
+ * 上行写在上、下行写在下，粘接点 `at` 是**上行原来的长度**；上下行的子块都按原序
+ * 接到保留块的那一头（`kidsAt` 说接在哪）。**谁活下来由身体决定**，不一定是上行：
+ * 见 `pairMergePlan`。
+ *
+ * 上行或下行的正文不是内容（标签名／字段名／日期投影）⇒ 计划为空：合并的语义是
+ * 「把两行的字接成一行」，有一头没有可写的正文，另一头的字无处可去 ——
  * 继续做只会静默丢掉它，或往只读的日期行里塞字。
  *
  * ⚠️ **折叠态不跟着搬**：被并掉的块曾收着还是开着，是「那一行当时怎么显示」，
- *    不是它的内容。把它写到前一块上，等于按一次退格就顺手改掉了另一行的显示。
+ *    不是它的内容。把它写到保留块上，等于按一次键就顺手改掉了另一行的显示。
  *    折叠表里那条残留键读不到（块 id 已经不在树里），也不需要清。
  */
 export interface MergePlan {
   kept: string
   removed: string
-  /** 粘接点：前一块**原**正文长度（合并后光标落在这） */
+  /** 粘接点：**上行**原正文长度（合并后光标落在这） */
   at: number
-  /** 合并后的行内内容 */
+  /** 合并后的行内内容（上行的字在前） */
   content: ReturnType<typeof joinRuns>
-  /** 被并块的直接子块（按原序挂到前一块末尾） */
+  /** 被并掉的块的直接子块（按原序挂到保留块上 `kidsAt` 那一头） */
   children: string[]
-  /** 前一块此刻的子块数：子块依次落在它后面 */
+  /** 保留块此刻已有几个子块：被并块的孩子依次落在它们之后（0 表示落在最前） */
   kidsAt: number
 }
 
-export function mergeIntoPrevPlan(doc: Doc, id: string): MergePlan | null {
-  const loc = locate(doc, id)
-  if (!loc) return null
-  const prev = prevBlock(doc, id)
-  if (!prev) return null
-  if (!canWriteText(prev)) return null
-  /**
-   * **有名字或有身体的块不往上一块里并**：合并会把它软删掉——名字（身份）与身体
-   * （查询条件／代码文档／露面目标）都跟着陪葬，而用户只按了一次退格。
-   * 名字型正文（查询/自动化）现在与普通正文同一条写路径，所以这道闸必须显式存在。
-   */
-  if (hasIdentity(loc.block) || hasBody(loc.block)) return null
+/**
+ * **相邻两行合成一行**的计划（`⌫` 与 `Delete` 共用这一份判据）。
+ *
+ * 两个手势回答的是同一件事——「把这一对行接成一行」——只是触发的边界不同：
+ * `⌫` 在下一行的行首，`Delete` 在上一行的行尾。所以落点只有一个答案。
+ *
+ * 谁活下来由**身体**决定：
+ *   · 下行没有身体 ⇒ **上行**活下来（常规：下行并进上一块，字接在它后面）；
+ *   · 下行有身体（查询条件／代码文档／自动化定义／激活看法）⇒ **下行**活下来，
+ *     上行的字接到它的行首。身体没有别处可放：让上行活下来，那格 `_code`／`_query`
+ *     就随空壳一起进回收站，而用户只按了一次删除键。身体那一行留在原位，
+ *     丢掉的只是**上一行**的字（已经并进它的标题，⌘Z 一步回来）。
+ *
+ * 不成立（`null`）的几种，理由各不相同：
+ *   · 下行是身份块（页／标签／日记／定义）：并掉它＝删掉一个名字；
+ *   · 上行正文只读（日记投影／字段定义）或**露面行**（`.tx` 是 `display:none` 的空槽，
+ *     并进去就是写进一个谁也看不见的格子）；
+ *   · 两边都有身体：一份标题装不下两个身体，没有答案；
+ *   · 下行是上行的**首个子块**：让下行活下来会把它的祖先摘掉（移动成环）。
+ */
+function pairMergePlan(doc: Doc, upper: Block, lower: Block): MergePlan | null {
+  const upperLoc = locate(doc, upper.id)
+  const lowerLoc = locate(doc, lower.id)
+  if (!upperLoc || !lowerLoc) return null
+  if (!hasBody(lower)) {
+    // 身份块不能当被并掉的那一头：并掉它＝删掉一个名字／一次露面
+    if (hasIdentity(lower)) return null
+    if (!canWriteText(upper)) return null
+    return {
+      kept: upper.id,
+      removed: lower.id,
+      at: plainLen(upper.content),
+      content: joinRuns(upper.content, lower.content),
+      children: lower.children.map((b) => b.id),
+      kidsAt: upper.children.length,
+    }
+  }
+  // 身体那一行活下来：它自己的正文必须可写（露面行是隐藏空槽，写进去＝看不见）
+  if (!canWriteText(lower)) return null
+  if (hasBody(upper)) return null
+  // 上行的字接进下行 ⇒ 上行的名字（身份）与身体都不能陪葬
+  if (!canWriteText(upper) || hasIdentity(upper)) return null
+  // 下行住在上行里面（上行是它的祖先）⇒ 移子块会成环
+  if (hasDescendant(doc, upper.id, lower.id)) return null
   return {
-    kept: prev.id,
-    removed: id,
-    at: plainLen(prev.content),
-    content: joinRuns(prev.content, loc.block.content),
-    children: loc.block.children.map((b) => b.id),
-    kidsAt: prev.children.length,
+    kept: lower.id,
+    removed: upper.id,
+    at: plainLen(upper.content),
+    content: joinRuns(upper.content, lower.content),
+    children: upper.children.map((b) => b.id),
+    kidsAt: 0,
   }
 }
 
-/** Backspace 合并：把 id 块并入前一块（**前一块保留 id**） */
+/** `⌫`：把 id 块与**上一块**合成一行（上一块取可见行，收起的子块不参与） */
+export function mergeIntoPrevPlan(doc: Doc, id: string): MergePlan | null {
+  const loc = locate(doc, id)
+  if (!loc) return null
+  const prev = prevVisibleBlock(doc, id)
+  if (!prev) return null
+  return pairMergePlan(doc, prev, loc.block)
+}
+
+/**
+ * `Delete`（正向删除）：把 id 块与**下一块**合成一行。
+ *
+ * 「下一块」取**可见**文档序：折叠起来的子块不参与——用户看不见那一行，
+ * 一次删除键把当前的子块并进当前行，等于凭空改掉半个看不见的子树。
+ *
+ * 跨根不并：根是这一屏的装载单位（与 `⌫` 在根行首吞掉是同一条判据）。
+ */
+export function mergeIntoNextPlan(doc: Doc, id: string): MergePlan | null {
+  const loc = locate(doc, id)
+  if (!loc) return null
+  const next = nextVisibleBlock(doc, id)
+  if (!next) return null
+  if (locate(doc, next.id)?.parent === null) return null
+  return pairMergePlan(doc, loc.block, next)
+}
+
+/** 合并（直写路径）：把 id 块与**上一块**接成一行；保留块由计划决定（见 `pairMergePlan`） */
 export function mergeIntoPrev(doc: Doc, id: string): { kept: string; removed: string; at: number } | null {
   const plan = mergeIntoPrevPlan(doc, id)
   if (!plan) return null
-  const loc = locate(doc, plan.removed)!
-  const prev = locate(doc, plan.kept)!.block
-  // 被并块的 annos 按粘接点平移后并进保留块。anno id 不变 ⇒ 指向它的引用自动跟着走，
-  // 不需要改任何边：引用指向的是 id，不是块
-  const movedAnnos = shiftAnnos(loc.block.annos, plan.at)
-  prev.children.push(...loc.block.children)
-  writeBlockContent(prev, plan.content)
-  if (movedAnnos.length) prev.annos = [...(prev.annos ?? []), ...movedAnnos]
+  const removedLoc = locate(doc, plan.removed)!
+  const kept = locate(doc, plan.kept)!.block
+  /**
+   * 被并块的 annos 按**它在合并后那一行里的起点**平移。保留块在上时（常规），
+   * 被并块的字接在后面 ⇒ 起点是粘接点；保留块在下时（身体块），被并块的字在前面 ⇒ 起点是 0。
+   */
+  const removedAt = plan.kept === id ? 0 : plan.at
+  const movedAnnos = shiftAnnos(removedLoc.block.annos, removedAt)
+  // 子块落在计划说的那一头：常规接在后面，身体块吞上一块时接在**最前**
+  kept.children.splice(plan.kidsAt, 0, ...removedLoc.block.children)
+  writeBlockContent(kept, plan.content)
+  if (movedAnnos.length) kept.annos = [...(kept.annos ?? []), ...movedAnnos]
   // 被并块**原位标记**（不摘树，与 `removeBlock` 同一条口径）：内容已搬走，壳清空——
   // 留着内容就是库里有两份同一句话。annos 已搬走，同样先摘掉再写，别让映射层白重定位一次
   // 值属性**不搬进保留块**：合并把两行捏成一行，属性袋只有一个，保留块保自己的那份，
   // 被并块的随壳软删（⌘Z／回收站可回）。与拆块的「下半不继承值属性」是同一条答案——
   // 值属性只描述写它的那一行；被并块那句的属性没有可落的新行。
-  loc.block.annos = undefined
-  writeBlockContent(loc.block, [])
-  loc.block.props = { ...(loc.block.props ?? {}), [DELETED_AT_PROP]: Date.now() }
+  removedLoc.block.annos = undefined
+  writeBlockContent(removedLoc.block, [])
+  removedLoc.block.props = { ...(removedLoc.block.props ?? {}), [DELETED_AT_PROP]: Date.now() }
   return { kept: plan.kept, removed: plan.removed, at: plan.at }
 }
 
