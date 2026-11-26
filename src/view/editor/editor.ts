@@ -3606,6 +3606,13 @@ export class BlockEditor {
     } else {
       // 复用边缘空块：模型不动、撤销不记（与 `insertBlockAfter` 的空块支同一条口径）
       this.abortUndoEntry()
+      /**
+       * 只是把光标挪到已存在的空行 ⇒ 没有新行、模型没动。整页 `renderAll` 会把
+       * 根行摘下重装、三角与「＋」淡入从 0 重来（连点「＋」时读作闪）。只在
+       * `unfoldBlock` 真展开了根行（一批子行突然可见）时才需要重画。
+       */
+      if (wasFolded) this.renderAll()
+      insertedInPlace = true
     }
     if (!insertedInPlace) this.renderAll()
     this.placeCaret(child.id, 0)

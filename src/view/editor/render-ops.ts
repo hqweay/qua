@@ -532,6 +532,12 @@ export class RenderOps {
       this.attachInlineBody(block, el)
       const embedShell = el.querySelector<HTMLElement>('.blk-embed-body[data-embed-body-for]')
       if (embedShell && this.ed.events.embedBody) this.ed.embeds.attach(block, embedShell)
+      // 代码岛的身体也要接回：漏了它，`disposeAll` 的延后一拍会把 CM6 真拆掉
+      // ——行还在、标题还在、语言徽章还在，就是代码面空了（不可见，不报错）。
+      const codeHost = el.querySelector<HTMLElement>('.blk-code-host[data-code-body-for]')
+      if (codeHost && codeHost.dataset.folded !== '1' && this.ed.events.codeBody) {
+        this.ed.embeds.attachCodeBody(block, codeHost)
+      }
     }
     this.mounted = new Set([...kept.keys()].filter((id) => Boolean(this.ed.blockEl(id))))
     this.markCaret()
