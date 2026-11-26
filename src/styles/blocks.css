@@ -740,6 +740,7 @@
 .blk[data-quote-head],
 .blk[data-quote-line] {
   --callout-rule: 3px;
+  --callout-icon-slot: 32px;
 }
 .blk-callout {
   flex: 0 0 auto;
@@ -812,7 +813,11 @@
  */
 .blk[data-quote-line] {
   padding-left: calc(var(--ui-blk-gutter) + var(--quote-depth, var(--depth)) * var(--ui-indent));
-  column-gap: calc(var(--ui-gap-4) + var(--ui-marker-slot) + var(--ui-gap-4));
+  column-gap: var(--ui-gap-4);
+}
+/* 固定宽：竖线右侧那一格始终给属性图标留着——图标有无都不推正文 */
+.blk[data-quote-line] > .left {
+  width: calc(var(--ui-marker-slot) + var(--callout-icon-slot, 32px));
 }
 .blk[data-quote-line] > .left .marker::before {
   opacity: 0;
