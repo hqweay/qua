@@ -151,3 +151,61 @@ test('多选菜单：删除压轴分节，不占首行（与单块菜单同一�
   const clearIdx = sorted.findIndex((b) => b.command === 'core.selection/clear')
   assert.ok(clearIdx >= 0 && clearIdx < sorted.length - 1, '取消选择应在删除之上')
 })
+
+/**
+ * **同一个键的多条绑定：谁赢由声明顺序决定，而顺序是反的。**
+ *
+ * `resolveKey` 排完层序后**反向遍历**，第一条 `when` 成立的胜出 ⇒ **后声明者优先**。
+ * 这个方向反直觉（读代码从上往下看，会以为先声明先赢），本仓为此真红过一次：
+ * `select-block` 声明在 `axis-down` 之前，注释还写着「放在退档之前 ⇒ 宽屏里 Esc 第一义
+ * 仍是退一档」——而反向遍历让**后**声明的 `axis-down` 才优先，注释说的顺序是反的。
+ * 后果不是「顺序不对」，是**宽屏里退一个档位要按三次 Esc**。
+ *
+ * 所以：同一键上多于一條时，顺序是**承重的**，不能靠读代码时的心算。
+ */
+test('同键多绑定的优先级＝声明顺序的倒序：恒真那条最前（兜底），Esc 四层按外层意图排列', () => {
+  const km = BINDINGS.filter((b) => b.kind === 'keymap' && b.key)
+  const byKey = new Map<string, typeof km>()
+  for (const b of km) {
+    const list = byKey.get(b.key!) ?? []
+    list.push(b)
+    byKey.set(b.key!, list)
+  }
+  /**
+   * ① **恒真（`when: ''`）的那条必须在本键的最前声明**——它是**兜底**。
+   *
+   *    反向遍历 ⇒ 最先声明的最后被求值。恒真那条排在最后声明的位置，就等于
+   *    抢在所有更具体的绑定之前：它后面那些 `when` 写得再准也没机会求值，
+   *    表现为「某个键在某些状态下失灵」，而失灵的那条永远查不到（它根本没被求值）。
+   *    反过来，它排在最前 ⇒ 只在没有任何更具体的绑定命中时才轮到它，正是兜底该有的位置。
+   */
+  for (const [key, list] of byKey) {
+    const always = list.findIndex((b) => (b.when ?? '') === '')
+    assert.ok(
+      always === -1 || always === 0,
+      `键 ${key} 上恒真（when: ''）的绑定必须最前声明（它是兜底；排在后面会抢在更具体的绑定之前）：${JSON.stringify(list.map((b) => ({ cmd: b.command, when: b.when })))}`,
+    )
+  }
+
+  /**
+   * ② **Esc 的四层语义按这个顺序**（后声明者优先 ⇒ 从下往上读）：
+   *    退档 ＞ 选中当前块 ＞ 清块选区 ＞ 关浮层。
+   *
+   *    判据是**意图的外层程度**：离开一个档位是比「取消一次选区」更外层的动作，
+   *    所以 `axis-down` 必须压轴、且它的 `when` **不许**再挂 `!blockSelection`
+   *    （挂了就等于让清选区反过来压过退档，用户要按两次才离开一个档位）。
+   *    这条断言钉的是**顺序与 when 的组合**，不是某一条绑定长什么样——
+   *    想改 Esc 的语义，改完这里必须跟着改，改不动就说明你在无意中改语义。
+   */
+  const esc = (byKey.get('escape') ?? []).map((b) => b.command)
+  assert.deepEqual(
+    esc,
+    ['core.layer/close', 'core.selection/clear', 'core.selection/select-block', 'core.view/axis-down'],
+    `Esc 的四层按「外层意图优先」排列（反向遍历 ⇒ 数组末尾最优先）：${JSON.stringify(esc)}`,
+  )
+  const axisDown = (byKey.get('escape') ?? []).find((b) => b.command === 'core.view/axis-down')
+  assert.ok(
+    !(axisDown?.when ?? '').includes('blockSelection'),
+    `退档的 when 不许挂 blockSelection：挂了就等于让「清选区」压过「退档」，宽屏里要按两次才出去`,
+  )
+})
