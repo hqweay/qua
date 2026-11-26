@@ -1060,6 +1060,22 @@ export class RenderOps {
      * 整行重装仍留给结构变化（折叠／换类型等）——那时 gutter 真的要重画。
      */
     if (keepGutter) {
+      /*
+       * 几何/上下文格子以**这一拍的新行**为准：`.left` 节点留着（悬停/三角稳定），
+       * 但 `--depth`／`data-depth`／引述上下文这些决定缩进与竖线的属性必须跟上。
+       * 否则「先发生一次结构/装载变化、紧接着打字」时，旧行会带着上一拍的深度，
+       * 表现为「输入文本时块错位」（反链面板里正在输入的那一行缩进跳掉）。
+       */
+      for (const prop of ['--depth', '--quote-depth']) {
+        const v = nextEl.style.getPropertyValue(prop)
+        if (v) el.style.setProperty(prop, v)
+        else el.style.removeProperty(prop)
+      }
+      for (const k of ['data-depth', 'data-quote', 'data-quote-line', 'data-quote-head']) {
+        const v = nextEl.getAttribute(k)
+        if (v === null) el.removeAttribute(k)
+        else el.setAttribute(k, v)
+      }
       for (const c of [...el.childNodes]) {
         if (c instanceof HTMLElement && c.classList.contains('left')) continue
         c.remove()
