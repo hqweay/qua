@@ -1260,12 +1260,22 @@ export function bindEditorEvents(br: EditorBridge): () => void {
      * ⇒ 同样附「移除这次露面」。岛内更深的行是源子树自己的内容，菜单照旧、不加段。
      */
     const body = target.closest<HTMLElement>('.blk-embed-body')
+    /**
+     * **右键落在某一次露面里 ⇒ 菜单带上这次露面的两件事**（看法／移除／在它上下建块）。
+     *
+     * 判据是「**在不在那格身体里**」，不是「点的是不是岛首行」（2026-11-26 修订）：
+     * 镜像的身体里除了源那一行，还有它的整棵子树、卡片与卡片之间的空白、
+     * 以及投影的面板——那些位置点下去，用户心里想的仍然是「这一次露面」。
+     * 只认岛首行时，右键身体空白出来的是一份**没有露面那几条**的普通块菜单
+     * （实测：用户报「右键块标也总没生效，效果还是光标在的那行右键」）。
+     *
+     * ⚠️ `blockId` 仍是**块标绑的那一块**（投影行＝源，镜像岛首行＝源）；
+     *    露面自己的身份走 `appearanceHost`，两者分工不变。
+     */
     if (body?.dataset.embedBodyFor) {
       const first = body.querySelector<HTMLElement>('.blk[data-depth="0"]')
-      if (first?.dataset.blockId && first.dataset.blockId === el.dataset.blockId) {
-        br.onBlockMenu(el.dataset.blockId, rect, body.dataset.embedBodyFor, first)
-        return
-      }
+      br.onBlockMenu(el.dataset.blockId, rect, body.dataset.embedBodyFor, first ?? undefined)
+      return
     }
     br.onBlockMenu(el.dataset.blockId, rect, undefined, target instanceof HTMLElement ? target : undefined)
   })
