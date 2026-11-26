@@ -663,8 +663,8 @@ export function makeBlockEl(
     /** 空块占位（给了就盖过默认那两句；见 `ViewOpts.placeholder`） */
     placeholder?: string
     ancestors?: readonly string[]
-    /** 最近祖先是引述容器 ⇒ 这一行是引述的一条正文行（画共用竖线） */
-    quoteLine?: string | false
+    /** 引述容器的变体与深度：抬头与其正文行共用一条竖线、同一档缩进 */
+    quoteCtx?: { variant: string; depth: number } | null
     folded?: FoldState
     gutter?: readonly GutterField[]
     find?: FindBlock
@@ -852,9 +852,15 @@ export function makeBlockEl(
   if (bodyFolded && !folded) el.dataset.bodyCollapsed = '1'
   if (closure) el.dataset.closure = closure
   if (r.hasChildren) el.dataset.hasChildren = '1'
-  if (opts.quoteLine) {
+  if (opts.quoteCtx) {
+    // 正文行：与抬头共用一条竖线；把它按容器的深度画，不按自己的深度另起一档
     el.dataset.quoteLine = '1'
-    el.dataset.quote = opts.quoteLine
+    el.dataset.quote = opts.quoteCtx.variant
+    el.style.setProperty('--quote-depth', String(opts.quoteCtx.depth))
+  } else if (blockTypeOf(b) === QUOTE_TYPE) {
+    // 抬头本身：变体与深度同源（CSS 用它把竖线画在正文行同一列）
+    el.dataset.quote = prop<string>(b, CALLOUT_PROP) ?? 'quote'
+    el.style.setProperty('--quote-depth', String(r.depth))
   }
   // 角色进 DOM：页 / 日记作为**正文第一行**时靠它取样式。
   // 兼位块把**全部角色**写进同一个属性（空格分隔，选择器用 `~=`）——

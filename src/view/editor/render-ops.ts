@@ -1173,14 +1173,14 @@ export class RenderOps {
          */
         titleGap: this.ed.allowBlankCreate,
         ancestors: this.ancestors.get(r.block.id) ?? [],
-        quoteLine: (() => {
+        quoteCtx: (() => {
           const chain = this.ancestors.get(r.block.id) ?? []
           for (let i = chain.length - 1; i >= 0; i--) {
             const a = this.ed.store.find(chain[i]!)
-            if (!a) continue
-            return blockTypeOf(a) === QUOTE_TYPE ? (prop<string>(a, CALLOUT_PROP) ?? 'quote') : false
+            if (!a || blockTypeOf(a) !== QUOTE_TYPE) continue
+            return { variant: prop<string>(a, CALLOUT_PROP) ?? 'quote', depth: i }
           }
-          return false
+          return null
         })(),
         folded: foldStateOf(this.ed.doc),
         // 第二层：只收身体那张表（`bodyFolded`），与 `folded` 一起决定身体可不可见

@@ -736,8 +736,12 @@
  *
  * 取色写在这里而不是 TS：换主题时 token 自动跟，组件不碰颜色字面量。
  */
+.blk-callout,
+.blk[data-quote-head],
+.blk[data-quote-line] {
+  --callout-rule: 3px;
+}
 .blk-callout {
-  --callout-c: var(--ui-identity-cyan);
   flex: 0 0 auto;
   align-self: flex-start;
   display: inline-flex;
@@ -745,8 +749,9 @@
   gap: var(--ui-gap-2);
   /* 与 .left / .tx 同一行盒基准，块标不会与这枚脸错开 */
   height: 1lh;
-  border-left: 3px solid var(--callout-c);
-  padding-left: var(--ui-gap-3);
+  /* 竖线由 .blk::before 画满整行；这里不再画一截短的，避免同一列两道线 */
+  /* 让徽章图标与正文行文字落在同一列（竖线右侧一档），参考虎鲸 */
+  padding-left: calc(var(--callout-rule, 3px) + var(--ui-gap-3));
   color: var(--callout-c);
   font-size: var(--ui-fs-md);
   font-weight: var(--ui-fw-medium);
@@ -766,23 +771,51 @@
 }
 /*
  * **引述是行容器**：抬头只画徽章，正文住在子块里，每行一个块（可单独引用）。
- * 竖线跨整组：抬头徽章的左缘 + 每条正文行的左缘画同一条线（同一个 `--callout-c`），
- * 颜色按最近祖先上的变体取（渲染层把最近祖先的 `_callout` 写到行上）。
+ * 视觉上只有**一条竖线**：抬头徽章左缘 + 每条正文行左缘，都按 `--quote-depth`
+ * （容器的深度）定位到同一列，而不是各行按自己的 `--depth` 排——后者会画出
+ * 逐级右移的楼梯线（实测：抬头与正文行差一整格）。
+ *
+ * 正文行不画块标（参考虎鲸：行内没有圆点，只有最左那颗抓手），也不画灰导轨
+ * （那个灰线是「折叠祖先」的暗示，在引述里由竖线本身承担，两条线会读成两套）。
+ * 竖线用 `::before` 画满整行高，行间无 vertical padding ⇒ 相邻行拼成连续一条。
  */
+.blk[data-quote],
 .blk[data-quote-line] {
   --callout-c: var(--ui-identity-cyan);
 }
-.blk[data-quote-line][data-quote='info'] { --callout-c: var(--ui-ink-blue); }
-.blk[data-quote-line][data-quote='warning'] { --callout-c: var(--ui-ink-yellow); }
-.blk[data-quote-line][data-quote='error'] { --callout-c: var(--ui-ink-red); }
-.blk[data-quote-line][data-quote='tip'] { --callout-c: var(--ui-ink-green); }
-.blk[data-quote-line][data-quote='important'] { --callout-c: var(--ui-ink-violet); }
-.blk[data-quote-line][data-quote='note'] { --callout-c: var(--ui-ink-gray); }
-.blk[data-quote-line] > .tx {
-  border-left: 3px solid var(--callout-c);
-  padding-left: var(--ui-gap-3);
+.blk[data-quote='info'] { --callout-c: var(--ui-ink-blue); }
+.blk[data-quote='warning'] { --callout-c: var(--ui-ink-yellow); }
+.blk[data-quote='error'] { --callout-c: var(--ui-ink-red); }
+.blk[data-quote='tip'] { --callout-c: var(--ui-ink-green); }
+.blk[data-quote='important'] { --callout-c: var(--ui-ink-violet); }
+.blk[data-quote='note'] { --callout-c: var(--ui-ink-gray); }
+/* 这一列 = 容器深度的正文左缘（gutter + depth*indent），与徽章的竖线同一 x */
+.blk[data-quote-head]::before,
+.blk[data-quote-line]::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--ui-blk-gutter) + var(--quote-depth, var(--depth)) * var(--ui-indent) + var(--ui-marker-slot) + var(--ui-gap-4));
+  width: var(--callout-rule, 3px);
+  background: var(--callout-c);
+  pointer-events: none;
 }
 .blk[data-quote-head] > .tx {
+  display: none;
+}
+/*
+ * 正文行：整格 gutter 收掉（参考虎鲸：行首没有圆点、没有缩进），
+ * 文字从竖线右侧一档开始，与抬头徽章里的图标对齐。
+ * 块标元素仍在 DOM（拖动/折叠/右键都还认它），只是不占宽、静止态不可见。
+ */
+.blk[data-quote-line] {
+  padding-left: calc(var(--ui-blk-gutter) + var(--quote-depth, var(--depth)) * var(--ui-indent) + var(--ui-marker-slot) + var(--ui-gap-4) + var(--callout-rule, 3px) + var(--ui-gap-3));
+}
+.blk[data-quote-line] > .left {
+  display: none;
+}
+.blk[data-quote-line] > .rails {
   display: none;
 }
 /*
