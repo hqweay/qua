@@ -641,6 +641,45 @@ export class RenderOps {
     if (!now) return false
     return rendered.length === now.length && rendered.every((x, i) => x === now[i])
   }
+  /**
+   * 日记流收成单日：新装载的行是旧行的一个**子集**，且留下的行自己没变。
+   * 不整页拆建，只把走掉的行就地删掉——留下的行（连它的 hover chrome、身体、
+   * 编辑岛）一帧都没离开文档，三角／「＋」的淡入不会从 0 重来。
+   * 用 id 集判去留（不看位置）：虚拟化下窗口切片也能安全对账。
+   */
+  collapseToRoot(): boolean {
+    const rows = this.ed.rows()
+    const live = new Set(rows.map((r) => r.block.id))
+    const domRows = [...this.ed.container.querySelectorAll<HTMLElement>('.blk[data-block-id]')]
+    const byId = new Map(domRows.map((e) => [e.dataset.blockId ?? '', e]))
+    // 新行必须全是旧 DOM 里已有的，且深度没变：真收成单日只减不增、目标根仍是 depth 0。
+    // zoom 进子块那种「深度变了」的装载不满足 ⇒ 退回整页重装，别把行留在旧层级。
+    for (const r of rows) {
+      const el = byId.get(r.block.id)
+      if (!el || el.dataset.depth !== String(r.depth)) return false
+    }
+    for (const rowEl of domRows) {
+      const id = rowEl.dataset.blockId
+      if (!id || live.has(id)) continue
+      this.ed.embeds.disposeRow(id)
+      rowEl.remove()
+      this.ed.dropRowEl(id)
+      this.mounted.delete(id)
+      this.forgetHeight(id)
+    }
+    // 空段壳（被删空的那些天）跟着退掉；只认没有 .blk 子行的段
+    for (const sec of [...this.ed.container.querySelectorAll<HTMLElement>(':scope > .sec')]) {
+      if (!sec.querySelector(':scope > .blk')) sec.remove()
+    }
+    this.rebuildAncestors()
+    this.repaintOverlays()
+    this.markCaret()
+    this.ed.bsel.paintBlockSel()
+    this.renderedFoldSig = this.foldSig()
+    this.renderedWithEvents = this.eventsPresent()
+    this.renderedDoc = this.ed.doc
+    return true
+  }
 
   renderAll(): void {
     /**

@@ -3798,7 +3798,7 @@ export class BlockEditor {
 
   /* ------------------------------------------------------ 页面装载 */
 
-  loadPage(doc: Doc, caret?: { blockId: string; off: number }): void {
+  loadPage(doc: Doc, caret?: { blockId: string; off: number }, collapseTargetId?: string): void {
     /**
      * **换视图不再是「索引可能过期」的时机**。
      *
@@ -3823,6 +3823,16 @@ export class BlockEditor {
      * 而后者本来就该按「重新装载」给上。
      */
     const sameRoots = this.doc.roots.length === doc.roots.length && this.doc.roots.every((b, i) => b.id === doc.roots[i]!.id)
+    /**
+     * 日记流收成单日：目标根那一行自己没变（日期、气口、折叠都没动），只是别的天走了。
+     * 整页 `renderAll` 会把所有行摘下来重装，留下的目标行也跟着离档一瞬 ⇒ 三角与「＋」
+     * 的 hover 淡入从 0 重来（重复点同一天读作闪）。这里只把走掉的行就地删掉，
+     * 目标行一直留在文档里。别的装载形状（换页／切看法）抬头会变，不走这条。
+     */
+    const collapse =
+      collapseTargetId && !sameRoots && this.doc.roots.length > doc.roots.length && doc.roots.some((b) => b.id === collapseTargetId)
+        ? collapseTargetId
+        : null
     this.doc = doc
     /**
      * **换装载单位 ⇒ 实测高整表作废**：同一块 id 在另一份 `Doc` 里可能带着不同的
@@ -3844,7 +3854,7 @@ export class BlockEditor {
     // 行内内容住块上：换视图只换 roots，没有第二份锚点数组要替换。
     // **不清 undo**——undo 是 store 全局的，加载反链/查询视图不能清掉正文的撤销栈。
     this.sel = caret ? { aBlock: caret.blockId, aOff: caret.off, hBlock: caret.blockId, hOff: caret.off } : null
-    this.renderAll()
+    if (!(collapse && this.render.collapseToRoot())) this.renderAll()
     // 装载之后光标块不在这一屏里（刷新把结果重算了、落点不在新装载）⇒ 回源
     this.ensureCaretVisible()
     this.events.change?.('load')

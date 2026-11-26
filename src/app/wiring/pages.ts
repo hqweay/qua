@@ -584,7 +584,7 @@ export function setupPages(deps: PagesDeps) {
       bodyFolded,
       ...(viewRootId ? { viewRootId } : {}),
       ...(defaultDisplay !== undefined ? { displayProps: defaultDisplay } : {}),
-    })
+    }, undefined, only?.id)
     if (tab) tab.doc = mainEd.doc
     // 装载之后才建挂载区：它按**段根**建实例，而段是 `loadPage` 造出来的
     renderMounts()
