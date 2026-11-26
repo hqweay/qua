@@ -1481,32 +1481,6 @@ export function makeBlockEl(
    */
   const canCarryActs = embedChrome !== 'island'
 
-  if (embedBodyEl) {
-    /**
-     * 露面行的 DOM 序＝视觉序：投影行**先 chrome 后身体**（块标回左边）；
-     * 镜像行没有宿主 chrome——岛首行就是这一行，块标列由 CSS 对齐。
-     */
-    // 视觉序＝DOM 序：行（chrome ＋ 标题）在前，身体折到下一行
-    if (left) el.append(left, tx)
-    else el.append(tx)
-    // 语言徽章在标题行尾、折叠键之前（信息件靠内，鼠标 chrome 靠外）
-    if (codeLangChip) el.appendChild(codeLangChip)
-    if (wantBodyFold && canCarryActs) {
-      el.appendChild(makeBodyFoldToggle(b.id, bodyHidden, (act) => opts.bodyAction!(act, b.id)))
-    }
-    el.appendChild(embedBodyEl)
-    // 身体接进文档之后再画：岛编辑器／ViewHost 的构造会量 DOM
-    embedMount?.()
-  } else {
-    el.appendChild(left!)
-    if (calloutChip) el.appendChild(calloutChip)
-    el.appendChild(tx)
-    if (kindBadge) el.appendChild(kindBadge)
-    if (wantBodyFold) {
-      el.appendChild(makeBodyFoldToggle(b.id, bodyHidden, (act) => opts.bodyAction!(act, b.id)))
-    }
-  }
-
   /**
    * **标签槽**：挂在正文槽**之后**（行右端），是 `.blk` 的直接子节点。
    *
@@ -1515,6 +1489,11 @@ export function makeBlockEl(
    * ⚠️ 无标签不生成节点（`makeTagsEl` 返回 null ⇒ 不留空槽）。
    * ⚠️ `ALLOWED_ROW_CHILDREN` 已登记 `blk-tags`：漏了它，第一次收光标
    *    （`reclaimCaret`）就会把这枚槽当游离节点删掉。
+   *
+   * ⚠️ **必须在任何行下身体之前 append**（2026-11-26 修订）：这一格也装着引用数
+   *    徽标，而它属于**名字那一行**。此前它排在身体之后 ⇒ 代码块（身体 `flex-basis:
+   *    100%` 折行）的引用数掉到代码面**下面**；查询块的正文体是同一个坑的下一格。
+   *    判据一句话：**名字那一行里的东西，都排在身体之前**。
    */
   const tags = makeTagsEl(
     b,
@@ -1522,7 +1501,58 @@ export function makeBlockEl(
     opts.refBadge,
     opts.onReorderTags ? (full) => opts.onReorderTags!(b.id, full) : undefined,
   )
-  if (tags) el.appendChild(tags)
+  /**
+   * **活的露面行不画宿主自己的标签/引用数**：这一行展示的是**源**（块标、名字、折叠
+   * 都绑源），源自己的标签与引用数由身体里的源行/名字行承担。宿主块的身份仍住在
+   * 它的配置面板里——在这行并排画两份，读者会读成「源有两个引用数」。
+   *
+   * 源不在（悬空／坏指针／自指）时没有身体里的源行可承担 ⇒ 宿主身份照常画。
+   */
+  const hostChrome = embedRes !== null && embedRes.status === 'ok' ? null : tags
+
+  if (embedBodyEl) {
+    /**
+     * 露面行的 DOM 序＝视觉序：**名字那一行在前，身体在后**。
+     *
+     * · 代码块：标题行（块标＋标题＋语言＋标签/引用）在前，代码面折到下一行；
+     * · 投影：名字在身体里的 `embed-title-row`，身体就是那一行 ⇒ 身体在前，
+     *   折叠键排在身体之后（同一行的最右端，不压源自己的标签/引用数）；
+     * · 镜像：宿主没有 chrome（岛首行就是这一行，块标列由 CSS 对齐）。
+     */
+    if (left) el.append(left, tx)
+    else el.append(tx)
+    // 语言徽章在标题行尾、折叠键之前（信息件靠内，鼠标 chrome 靠外）
+    if (codeLangChip) el.appendChild(codeLangChip)
+    if (embedKind === 'view') {
+      /**
+       * 投影没有宿主标题行：身体里的源名字行才是这一行的第一行 ⇒ 身体先占位，
+       * 折叠键跟在其后。此前这颗键是绝对定位在行右上角，正好压在源自己的
+       * 引用数徽标上（用户实测「折叠图标和引用数目重叠」）。
+       */
+      el.appendChild(embedBodyEl)
+      embedMount?.()
+      if (wantBodyFold && canCarryActs) {
+        el.appendChild(makeBodyFoldToggle(b.id, bodyHidden, (act) => opts.bodyAction!(act, b.id)))
+      }
+    } else {
+      if (wantBodyFold && canCarryActs) {
+        el.appendChild(makeBodyFoldToggle(b.id, bodyHidden, (act) => opts.bodyAction!(act, b.id)))
+      }
+      if (hostChrome) el.appendChild(hostChrome)
+      el.appendChild(embedBodyEl)
+      // 身体接进文档之后再画：岛编辑器／ViewHost 的构造会量 DOM
+      embedMount?.()
+    }
+  } else {
+    el.appendChild(left!)
+    if (calloutChip) el.appendChild(calloutChip)
+    el.appendChild(tx)
+    if (kindBadge) el.appendChild(kindBadge)
+    if (wantBodyFold) {
+      el.appendChild(makeBodyFoldToggle(b.id, bodyHidden, (act) => opts.bodyAction!(act, b.id)))
+    }
+    if (hostChrome) el.appendChild(hostChrome)
+  }
 
   /**
    * **块下属性行**：有值、且没画在块标后的属性（`select`/`checkbox` 有图标就不重复）。

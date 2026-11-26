@@ -372,6 +372,10 @@ export function makeTagChipEl(tagId: string, name: string, color?: string): HTML
  * 数字取 `RefSummary.total`（引用次数，不是来源块数），0 次不生成节点 —— 同 `.fold`
  * 的口径，不是 hidden：绝大多数块没有引用，留空槽是纯噪声。
  *
+ * **只有数字 ＋ 底色，没有图标**（用户口径，与 Orca／思源同一类）：箭头在行尾是
+ * 第二套「引用」词表，而数字本身已经说清；底色把它和正文分开、也说明它能点开。
+ * 「点开会看什么」由浮层脚注与 aria-label 承担，不靠一枚缩小的图标。
+ *
  * ⚠️ 只带 `data-ref-count-for`：
  *   · 不带 `data-ref-to` —— 那是「点了一个指向 X 的露面」的判据，带上会被事件层
  *     抢先接走、直接导航到目标块，而这枚 chip 要做的是就地展开列表；
@@ -387,11 +391,7 @@ export function makeRefBadgeEl(hostId: string, summary: RefSummary): HTMLElement
   el.className = 'tag-chip ref-badge'
   el.dataset[REF_BADGE_ATTR] = hostId
   el.contentEditable = 'false'
-
-  const ico = document.createElement('span')
-  ico.className = 'ref-badge-ico'
-  renderIcon(ico, 'lucide:corner-up-left', 'corner-up-left', 'sm')
-  el.append(ico, document.createTextNode(String(summary.total)))
+  el.textContent = String(summary.total)
 
   // 说明走 aria-label 而不是 data-tip：hover 已经会弹浮层了，再叠一条 tip 是两层说明。
   // 那句话搬到浮层脚注里给眼睛看（ui.refs.peekFoot），这里只留读屏用的一份。

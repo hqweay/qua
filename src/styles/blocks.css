@@ -817,6 +817,10 @@
 .blk[data-quote-line] > .left .marker::before {
   opacity: 0;
 }
+/* 属性图标（任务框/属性格）落在竖线右侧自己的一格，不压在竖线上 */
+.blk[data-quote-line] > .left .identity {
+  margin-inline-start: calc(var(--ui-gap-4) - 1px + var(--callout-rule, 3px) + var(--ui-gap-2));
+}
 .blk[data-quote-line]:hover > .left .marker .grip {
   opacity: var(--ui-soft);
 }
@@ -2331,11 +2335,16 @@
  * ⚠️ **不能放 `#editor::after`**：那在挂载区**下面**（用户报过「＋跑到查询面板下面」）。
  * ⚠️ `.sec-mount` 是编辑岛，伪元素只做视觉；命中面在缝里，所以 `pointer-events: none`。
  * ⚠️ `top` 跟 `.mount` 的 `margin-top` 同源：改间距时两处一起想。
+ * ⚠️ **只给主编辑面自己那一段**（`#editor > .sec >`，直接子代）：编辑岛里也有
+ *    `.sec-mount`（镜像的身体、投影的标题行、查询结果的行）——它们是**另一台编辑器**
+ *    的段尾，在那一台里「建块」不归外层管，可那颗＋照样会画出来（点了什么都不发生，
+ *    用户实测「镜像块底部也有个＋，没效果」）。判据是「这一段是不是主编辑面的段」，
+ *    不是「在不在 #editor 里面」。
  */
-#editor .sec-mount {
+#editor > .sec > .sec-mount {
   position: relative;
 }
-#editor .sec-mount::before {
+#editor > .sec > .sec-mount::before {
   content: '+';
   position: absolute;
   left: calc(var(--ui-blk-gutter) + var(--ui-indent) + var(--ui-marker-slot) / 2);
@@ -2354,11 +2363,11 @@
   transition: opacity var(--ui-dur-1) ease;
   pointer-events: none;
 }
-#editor:hover .sec-mount::before {
+#editor:hover > .sec > .sec-mount::before {
   opacity: 0.6;
 }
 @media (prefers-reduced-motion: reduce) {
-  #editor .sec-mount::before {
+  #editor > .sec > .sec-mount::before {
     transition: none;
   }
 }
@@ -3044,6 +3053,7 @@
 .tag-chip[data-dragging] {
   opacity: var(--ui-faint);
 }
+/* 引用数徽标的样子住在 `block-refs.css`（它连同 hover 浮层是同一个东西）。 */
 
 /* ：块选区（跨块拖拽/全选块）。
    颜色只用语义 token（--ui-*），不直接引 --c-*（arch 19）。
@@ -3087,23 +3097,17 @@
   display: none;
 }
 /*
- * **投影行的行头折叠按钮走绝对定位**。
+ * **投影行的行头折叠按钮就在名字那一行的最右端**（2026-11-26 修订）。
  *
- * 普通行的 `.blk-acts` 排在 `.tx` 之后、靠 `margin-inline-start: auto` 吃掉余量靠右；
- * 露面行的 `.tx` 是 `display:none`，flex 里没有那一格，而身体是 `flex: 1 1 auto`
- * 吃满整行 ⇒ 自动外边距没有余量可吃，按钮会贴在身体前面（读成「左边的一颗」）。
- * 所以这一族贴着行的右上角浮着：不占身体宽度、不推正文，与「悬停才现」同一档。
+ * 曾经它绝对定位在行的右上角：因为露面行的 `.tx` 是 `display:none`，当时身体里
+ * 的标题行被当成「身体」，row 级按钮无处可依。但那个位置正好压在源自己的
+ * 引用数徽标上（用户实测「折叠图标和引用数目重叠」）。
  *
- * ⚠️ 只有**投影**有这一组（镜像的 chrome 全在岛首行，见 `block-dom` 的 `canCarryActs`）。
+ * 现在按钮排在**身体之后**（DOM 序由 `block-dom` 保证）：身体是 `flex: 1 1 auto`，
+ * 按钮落下时身体已经吃了名字那一行的宽度 ⇒ 按钮贴着这一行的右端，
+ * 与名字/引用数同一行、互不重叠。只有**投影**有这一组
+ * （镜像的 chrome 全在岛首行，见 `block-dom` 的 `canCarryActs`）。
  */
-.blk[data-embed='1'] > .blk-acts {
-  position: absolute;
-  top: 0;
-  inset-inline-end: 0;
-  margin-inline-start: 0;
-  padding-inline-start: var(--ui-gap-2);
-  z-index: var(--ui-z-rail);
-}
 .blk-embed-body {
   flex: 1 1 auto;
   min-width: 0;
@@ -3186,11 +3190,14 @@
  * **镜像行的块标是一枚 M 徽章**（虚线圆 ＋ 字母）：同一颗空心点说不清两件事——
  * 「投影＝结果视图」与「镜像＝同一个块又出现了一次」。镜像要的是后者：
  * 这一行不是一块新内容，而是那一块的镜面，所以给它一枚自成形状的徽章，
- * 不和普通块标（5px 实心点）、投影块标（7px 空心点）挤在同一档里。
+ * 不和普通块标（5px 实心点）、投影块标（16px 虚线圆＋源的脸）挤在同一档里。
  *
  * 尺寸从 `--ui-bullet-size` 抬到 16px：普通点太细，读不出「这是另一种身份」；
  * 虚线圆在静止态就把「镜面／非实体」说出口，不靠颜色深浅。
  * 字母是**形状**不是文案（ASCII，不进 `msg.ts`，也不随语言切）——它和圆一起构成徽章本身。
+ *
+ * ⚠️ **徽章环里的字只有 M**：源自己若带脸（代码＝`<>`、显式 `_icon`、借标签的形），
+ *    那一枚 `.marker-ico` 要让位——M 本身就是这一档的字，叠两颗字读成一团。
  *
  * ⚠️ 悬停整颗让位给抓手——但**必须在这里重声明**（见下一条）：上面这条有 7 个选择器单元，
  *    它的 `opacity: 1` 会压掉基线的 `.blk .marker:hover::before { opacity: 0 }`（3 个单元）。
@@ -3212,6 +3219,10 @@
   line-height: 1;
   /* 普通点在静息态是半透明的待命件（--ui-quiet）；徽章是身份，读满强度 */
   opacity: 1;
+}
+/* 徽章环里的字就是 M：源的脸让位（否则 M 与 `<>`／借来的图标叠成一团） */
+.blk[data-embed='1'] .blk-embed-body .blk[data-depth='0'] > .left .marker .marker-ico {
+  display: none;
 }
 /* 悬停＝让位：与基线同一条口径，只是特异性要压过上面那条（否则徽章与抓手叠影） */
 .blk[data-embed='1'] .blk-embed-body .blk[data-depth='0'] > .left .marker:hover::before {

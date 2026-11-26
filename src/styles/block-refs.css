@@ -1,19 +1,23 @@
 /*
   引用数徽标 ＋ hover 反链浮层。
 
-  视觉口径：徽标是**元数据**，不是标签。所以它与彩色 `.tag-chip` 同形、同一条槽，
-  但常态无底色、字用三级色；只有指针压上去才浮出中性底。一行里两者不会互相抢。
+  视觉口径：徽标是**元数据**，不是标签。它与彩色 `.tag-chip` 同槽，但只画
+  **数字 ＋ 中性底**、不挂图标（用户口径，与 Orca／思源同一类）：箭头是第二套
+  「引用」词表，而数字本身已经说清；底色把计数从正文里托出来，也说明它能点开。
+  常态就带底（它是常驻信号，不是悬停件），指针压上去只加深字色。
 
   浮层里挂的是**真正的挂载区**（MountArea），不是另画一份结果列表：
   外壳复用 `.popover`，正文的行高/缩进/chip 全用块渲染层现成的样式，
   这里只裁掉「临时预览用不上」的 chrome，并给 body 限高。
 */
 
-/* 行尾 / 引用栏抬头：与标签 chip 同槽，靠「无底色 + 三级字色」区分身份 */
+/* 行尾 / 引用栏抬头：与标签 chip 同槽，靠「纯数字 ＋ 中性底」区分身份 */
 .tag-chip.ref-badge {
-  gap: var(--ui-gap-2);
-  background: transparent;
-  color: var(--ui-text-tertiary);
+  justify-content: center;
+  min-width: 1.6em;
+  padding-inline: 4px;
+  background: var(--ui-bg-hover);
+  color: var(--ui-text-secondary);
   opacity: 1;
   font-variant-numeric: tabular-nums;
 }
@@ -22,10 +26,6 @@
   color: var(--ui-text);
   text-decoration: none;
   opacity: 1;
-}
-.ref-badge-ico {
-  display: inline-flex;
-  align-items: center;
 }
 
 /*
