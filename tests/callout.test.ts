@@ -8,6 +8,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { CALLOUT_IDS, CALLOUT_VARIANTS, canonicalCallout, calloutDecl } from '../src/core/infra/callout.ts'
 import { systemPropViolation } from '../src/core/props/system-props.ts'
+import { CALLOUT_PROP, QUOTE_TYPE, blockLabel, mkBlock } from '../src/core/index.ts'
+import { t } from '../src/core/infra/msg.ts'
 
 test('七种变体齐全且顺序固定（菜单顺序＝表顺序）', () => {
   assert.deepEqual([...CALLOUT_IDS], ['quote', 'info', 'warning', 'error', 'tip', 'important', 'note'])
@@ -26,4 +28,11 @@ test('缺省是普通引述，未知值按缺省画但不写进盘', () => {
   // 收端只认封闭集：脏值进不了系统键
   assert.equal(systemPropViolation('_callout', 'warning'), null)
   assert.ok(systemPropViolation('_callout', 'bogus') !== null)
+})
+
+test('引述容器的名字＝变体名，不是「无标题」（面包屑/引用读同一份）', () => {
+  const q = mkBlock('', { props: { _type: QUOTE_TYPE } })
+  assert.equal(blockLabel(q), t('ui.callout.quote'))
+  const info = mkBlock('', { props: { _type: QUOTE_TYPE, [CALLOUT_PROP]: 'info' } })
+  assert.equal(blockLabel(info), t('ui.callout.info'))
 })

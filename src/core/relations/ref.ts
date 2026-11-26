@@ -24,7 +24,9 @@ import { t } from '../infra/msg.ts'
 import { aliasLeaf, primaryAliasOf } from '../identity/alias.ts'
 import { colorOfByFind, faceOfByFind } from '../identity/faces.ts'
 import { isJournal, journalDate, journalDateLabel } from '../identity/journal.ts'
-import { hasList, type Block } from '../model/model.ts'
+import { CALLOUT_PROP, hasList, prop, type Block } from '../model/model.ts'
+import { isQuoteContainer } from '../model/types.ts'
+import { calloutLabel } from '../infra/callout.ts'
 import { tagIdsOf } from '../identity/tags.ts'
 import type { Content } from '../model/runs.ts'
 
@@ -167,7 +169,12 @@ export function blockSummary(b: Block, find?: FindBlock, budget = 2): string {
  * （裸 id 尤其不许露——用户没有可以从 4 位 hex 里认出哪块是哪块的能力）。
  */
 export function blockLabel(b: Block, find?: FindBlock, budget = 2): string {
-  return blockSummary(b, find, budget) || t('ui.page.untitled')
+  const summary = blockSummary(b, find, budget)
+  if (summary !== '') return summary
+  // 引述容器正文为空（行在子块里）：它的名字就是变体名（信息/警告…），
+  // 不是「无标题」——面包屑、引用 chip 读同一份答案。
+  if (isQuoteContainer(b)) return calloutLabel(prop<string>(b, CALLOUT_PROP))
+  return t('ui.page.untitled')
 }
 
 /**
