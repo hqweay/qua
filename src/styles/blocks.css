@@ -805,15 +805,20 @@
   display: none;
 }
 /*
- * 正文行：整格 gutter 收掉（参考虎鲸：行首没有圆点、没有缩进），
- * 文字从竖线右侧一档开始，与抬头徽章里的图标对齐。
- * 块标元素仍在 DOM（拖动/折叠/右键都还认它），只是不占宽、静止态不可见。
+ * 正文行：文字像普通块一样从「块标列 + 一档间隔」之后开始——竖线在块标右侧，
+ * 文字再往右一个正常块的缩进，不与竖线贴脸。块标静止时不可见（没有圆点），
+ * 悬停整行才浮出抓手；元素一直在 DOM 且带 data-focus-for，点击仍能聚焦这一行。
+ * 灰导轨在引述里不画：竖线已经承担「这是一组」的信号，两条线会读成两套。
  */
 .blk[data-quote-line] {
-  padding-left: calc(var(--ui-blk-gutter) + var(--quote-depth, var(--depth)) * var(--ui-indent) + var(--ui-marker-slot) + var(--ui-gap-4) + var(--callout-rule, 3px) + var(--ui-gap-3));
+  padding-left: calc(var(--ui-blk-gutter) + var(--quote-depth, var(--depth)) * var(--ui-indent));
+  column-gap: calc(var(--ui-gap-4) + var(--ui-marker-slot) + var(--ui-gap-4));
 }
-.blk[data-quote-line] > .left {
-  display: none;
+.blk[data-quote-line] > .left .marker::before {
+  opacity: 0;
+}
+.blk[data-quote-line]:hover > .left .marker .grip {
+  opacity: var(--ui-soft);
 }
 .blk[data-quote-line] > .rails {
   display: none;
