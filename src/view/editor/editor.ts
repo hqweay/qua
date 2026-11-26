@@ -3454,10 +3454,17 @@ export class BlockEditor {
     if (!this.allowBlankCreate) return false
     this.bsel.clearBlockSelection()
     const rows = this.rows()
-    /** `row`/`grid`：先找列。列不存在（点在列缝／边距上）⇒ 不建块 */
+    /**
+     * **目标段**：这一下要建到哪一段里。
+     *
+     * ⚠️ **column 也要按点击位置定段**。日记流是 N 段叠起来的，点第一天的空白
+     *    必须落在第一天里；这里曾经对 column 直接取 `roots[last]` ⇒ 不管点哪一天，
+     *    块都建到**最后一天**去，还被下面「必须在最后一行之下」的守卫挡住 ⇒
+     *    用户看到的是「点空白没反应」（块其实建在了看不见的地方）。
+     */
     let secId = ''
     if (this.layout !== 'column') {
-      // 只认本编辑器自己的段：嵌套编辑岛（露面身体／挂载区／查询结果）里也有 `.sec`
+      /** `row`/`grid`：先找列。列不存在（点在列缝／边距上）⇒ 不建块 */
       const sec = [...this.container.querySelectorAll<HTMLElement>(':scope > .sec')].find((el) => {
         const r = el.getBoundingClientRect()
         return r.width > 0 && clientX >= r.left && clientX <= r.right
@@ -3469,18 +3476,50 @@ export class BlockEditor {
       }
       secId = sec?.dataset.sec ?? ''
       if (secId === '') return false
+    } else {
+      /**
+       * 列布局：点在哪一段的矩形里就归哪一段；点在所有段**之下**（文档底部的气口）
+       * 归最后一段 —— 那是「接着往下写」。
+       *
+       * 只认**有段根**的段（`data-sec` 非空）：虚拟化切片从段中间开始时那一段没有
+       * 段根行，建进去的块没有家（与 `render-ops` 发挂载区槽同一条判据）。
+       */
+      const secs = [...this.container.querySelectorAll<HTMLElement>(':scope > .sec')].filter(
+        (el) => el.dataset.sec !== '' && el.dataset.sec !== undefined,
+      )
+      const hit =
+        secs.find((el) => {
+          const r = el.getBoundingClientRect()
+          return clientY >= r.top && clientY <= r.bottom
+        }) ?? secs.filter((el) => el.getBoundingClientRect().bottom <= clientY).pop()
+      secId = hit?.dataset.sec ?? ''
     }
     const root = secId ? this.doc.roots.find((r) => r.id === secId) : this.doc.roots[this.doc.roots.length - 1]
     if (!root) return false
-    // 目标段的最后一行（column ＝ 全文档最后一行；row/grid ＝ 该列最后一行）
+    /**
+     * 目标段的最后一行（column ＝ 该段最后一行；row/grid ＝ 该列最后一行）。
+     *
+     * ⚠️ 段内空白**也算**（2026-11-26 修订）：判据从「必须在最后一行之下」放宽成
+     *    「在这一段里、且不在某一行上」。原来那条只在 column 下才等价于「文档底部」，
+     *    而 column 的日记流有多段 ⇒ 点中间某一天的空白永远落在别的段的最后一行之上，
+     *    被直接判成不建块。真正的防误触目标只有一条：**别把行与行之间的缝当成空白**
+     *    （点行与行之间该是那一行的正文），所以判据落在「点的位置有没有命中某一行」。
+     */
     let last: VisibleRow | undefined
     let cur = ''
     for (const r of rows) {
       if (r.depth === 0) cur = r.block.id
       if (secId === '' || cur === secId) last = r
     }
-    const lastEl = last ? this.blockEl(last.block.id) : null
-    if (lastEl && clientY < lastEl.getBoundingClientRect().bottom) return false
+    if (!last) return false
+    /** 点在**某一行自己的矩形里** ⇒ 那是行内的事（选字/落光标），不是空白 */
+    const onRow = rows.some((r) => {
+      const el = this.blockEl(r.block.id)
+      if (!el) return false
+      const box = el.getBoundingClientRect()
+      return clientY >= box.top && clientY <= box.bottom
+    })
+    if (onRow) return false
 
     this.beginUndoEntry()
     unfoldBlock(this.doc, root.id)

@@ -10,7 +10,7 @@ import { CODE_TYPE, QUOTE_TYPE } from '../../core/index.ts'
 import { MISSING_ASSET_HASH, SEED_ASSET_HASH } from '../../core/fixtures/assets.ts'
 import type { App, Handler } from '../../core/infra/ports.ts'
 import { buildCopyHtml } from '../../view/editor/clipboard-flavor.ts'
-import { curBlock, S } from './shared.ts'
+import { curBlock, S, targetBlock } from './shared.ts'
 
 /**
  * 块复制的多味载体（引用意图）：正文味给外部应用，HTML 载荷给本应用
@@ -37,45 +37,45 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
   'core.editor/backspace': (_a, app) => {    // 合并成 ⇒ 已处理；没合并 ⇒ **放行给浏览器**（原生删除：命名的威力在于**允许不处理**）
     return app.ed.struct.backspaceAtCaret()
   },
-  'core.editor/indent-block': (_a, app) => {
-    const id = curBlock(app)
+  'core.editor/indent-block': (a, app) => {
+    const id = targetBlock(a, app)
     if (!id) return false
     app.ed.struct.indent(id)
     return true
   },
-  'core.editor/outdent-block': (_a, app) => {
-    const id = curBlock(app)
+  'core.editor/outdent-block': (a, app) => {
+    const id = targetBlock(a, app)
     if (!id) return false
     app.ed.struct.outdent(id)
     return true
   },
-  'core.editor/move-block-up': (_a, app) => {
-    const id = curBlock(app)
+  'core.editor/move-block-up': (a, app) => {
+    const id = targetBlock(a, app)
     if (!id) return false
     app.ed.struct.move(id, -1)
     return true
   },
-  'core.editor/move-block-down': (_a, app) => {
-    const id = curBlock(app)
+  'core.editor/move-block-down': (a, app) => {
+    const id = targetBlock(a, app)
     if (!id) return false
     app.ed.struct.move(id, 1)
     return true
   },
-  'core.editor/toggle-collapse': (_a, app) => {
-    const id = curBlock(app)
+  'core.editor/toggle-collapse': (a, app) => {
+    const id = targetBlock(a, app)
     if (!id) return false
     app.ed.toggleCollapse(id)
     return true
   },
   'core.editor/toggle-children-collapse': (a, app) => {
     // 导轨点击带着显式 blockId（它不改光标，目标块不一定是聚焦块）；键位／面板走聚焦块
-    const id = typeof a.blockId === 'string' && a.blockId !== '' ? a.blockId : curBlock(app)
+    const id = targetBlock(a, app)
     if (!id) return false
     app.ed.toggleChildrenCollapse(id)
     return true
   },
   'core.editor/duplicate-block': (a, app) => {
-    const id = S(a.blockId) || curBlock(app)
+    const id = targetBlock(a, app)
     if (!id) return false
     if (!app.duplicateBlock(id)) return false
     app.toast(t('ui.toast.blockDuplicated'))
@@ -92,7 +92,7 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     const embedHost = S(a.embedHost) || app.ed.embedHostId
     // 摘露面不发「已删除」——删的是这一次的露面，源与其正文一个字节没动
     if (embedHost) return app.removeEmbed(embedHost)
-    const id = S(a.blockId) || curBlock(app)
+    const id = targetBlock(a, app)
     return id ? app.deleteBlock(id) : false
   },
   /**
@@ -147,7 +147,7 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     return app.convertMention(S(a.blockId), S(a.to), Number(a.start), Number(a.end))
   },
   'core.editor/toggle-closure': (a, app) => {
-    const id = S(a.blockId) || curBlock(app)
+    const id = targetBlock(a, app)
     if (!id) return false
     return app.toggleClosure(id, S(a.propId) || undefined)
   },
@@ -159,14 +159,14 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
    *    那种情况是标签声明给的，静默就会变成「点了没反应」。
    */
   'core.editor/clear-closure': (a, app) => {
-    const id = S(a.blockId) || curBlock(app)
+    const id = targetBlock(a, app)
     if (!id) return false
     const r = app.clearClosure(id)
     if (r === 'declared') app.toast(t('ui.closure.declaredByTag'), 'info')
     return r !== 'none'
   },
   'core.editor/insert-block': (a, app) => {
-    const id = S(a.blockId) || curBlock(app)
+    const id = targetBlock(a, app)
     if (!id) return false
     const text = S(a.text, '')
     const type = S(a.type, 'paragraph')
@@ -189,18 +189,18 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
   },
   // 缺省目标取光标所在块（curBlock），不是「当前打开的那一屏」——
   // 日记流里 activeId 是第一个根，新块会飞到流顶部而不是光标处
-  'core.editor/insert-block-before': (_a, app) => {
-    const id = curBlock(app)
+  'core.editor/insert-block-before': (a, app) => {
+    const id = targetBlock(a, app)
     if (!id) return false
     return app.ed.insert.insertBlockBefore(id) !== null
   },
-  'core.editor/insert-child': (_a, app) => {
-    const id = curBlock(app)
+  'core.editor/insert-child': (a, app) => {
+    const id = targetBlock(a, app)
     if (!id) return false
     return app.ed.insert.insertChild(id) !== null
   },
-  'core.editor/insert-parent-sibling': (_a, app) => {
-    const id = curBlock(app)
+  'core.editor/insert-parent-sibling': (a, app) => {
+    const id = targetBlock(a, app)
     if (!id) return false
     return app.ed.insert.insertParentSibling(id) !== null
   },
@@ -259,7 +259,7 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
    * 与 `copy-ref`（引文快照 JSON）分开：那个是给人看的引文，这个是给库内粘贴用的指针。
    */
   'core.editor/copy-block-ref': (a, app) => {
-    const id = S(a.blockId) || curBlock(app)
+    const id = targetBlock(a, app)
     if (!id) return false
     copyRefs(app, [id])
     return true
