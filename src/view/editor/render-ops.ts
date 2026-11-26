@@ -1027,11 +1027,17 @@ export class RenderOps {
      *    它换的是 `.tx` 所在的那一行 ⇒ 输入法正持有的文本节点被换掉，预编辑串当场落成正文。
      */
     if (this.ed.deferWhileComposing()) return
-    const row = this.ed.rowOf(id) ?? {
-      block,
-      depth: depthOf(this.ed.doc, id),
-      hidden: false,
-      hasChildren: hasLiveChildren(block),
+    /**
+     * 行不在这一拍的可见行里时回落到 `depthOf(doc, id)`。但**块根本不在本编辑器的
+     * 装载里**（`depthOf` 返 `-1`）时绝不能硬画：`--depth = -1` 会把 padding-left 算成
+     * 负数 ⇒ 行左移出界（实测：反链面板点外面失焦那一刻，子行瞬跳一下再恢复）。
+     * 这种行是「正在重装载」的中间态，交给紧随其后的整页重画收口。
+     */
+    let row = this.ed.rowOf(id)
+    if (!row) {
+      const depth = depthOf(this.ed.doc, id)
+      if (depth < 0) return
+      row = { block, depth, hidden: false, hasChildren: hasLiveChildren(block) }
     }
     /**
      * 身体有无就是「这批子块归谁画」的开关：单行重画只能换这一行，翻开关时
