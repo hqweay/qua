@@ -116,7 +116,14 @@ export type PanelsDeps = {
    * **给一台视图编辑器接上与正文同一套事件**（`main.ts` 的 `viewEvents` 是唯一一份）。
    * 挂载区、查询结果都走它 —— 各接一半的代价是「面板里点引用不跳」这类静默漏接。
    */
-  wireEditor: (editor: BlockEditor, change: (kind: string) => void, via: string, inlineViewBodies?: boolean) => void
+  wireEditor: (
+    editor: BlockEditor,
+    change: (kind: string) => void,
+    via: string,
+    inlineViewBodies?: boolean,
+    /** 编辑岛的装载者（壳在它那台 doc 里）；投影抬头里的名字编辑器会用到 */
+    owner?: BlockEditor,
+  ) => void
   /**
    * **「指向某块的露面」被点**（行内引用 / 行尾标签 chip 共用同一条口径）。
    * 由装配层注入，本层不认识「去哪」的语义；`el` 只是浮层锚点，可省。
@@ -1192,7 +1199,12 @@ export function setupPanels(deps: PanelsDeps) {
         scheduleBadge()
       },
       onFocus: (editor) => deps.setEd(editor),
-      wire: (editor, change) => deps.wireEditor(editor, change, 'query'),
+      /**
+       * 投影抬头里的名字编辑器也是岛：它的菜单带着「这一次露面」的两条建块，
+       * 而壳在 `source`（装载这一屏的编辑器）的 doc 里 ⇒ 把装载者一起递进去。
+       */
+      wire: (editor, change) =>
+        deps.wireEditor(editor, change, 'query', false, opts?.source?.() ?? edOfMount(hostId)),
       toast: (text, kind) => app.toast(text, kind),
       invoke: (name, args) => void deps.getRegistry().invoke(name, args, 'queryview'),
       // 视图切换是下拉：贴着按钮弹「视图…」菜单（行仍由装配层现画）

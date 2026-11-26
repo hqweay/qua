@@ -34697,6 +34697,280 @@ await check('T363 一天的最后一块：菜单行写明原因且点不动、�
   return '最后一块删不掉：菜单行写明原因、点不动；命令拒绝并 toast；库不变'
 })
 
+await check(
+  'T366 点页头/页尾空白：上边缘建在第一行之前、下边缘建在末尾；边上已有空块就聚焦（不再多建一格）',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+
+    // 源页（镜像的目标）
+    await page.evaluate(() => window.__qua.invoke('core.page/create'))
+    await page.waitForTimeout(250)
+    await page.keyboard.type('源页')
+    await page.waitForTimeout(150)
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(150)
+    await page.keyboard.type('源一')
+    await page.waitForTimeout(150)
+    const srcId = await page.evaluate(() => window.__qua.__editor.doc.roots[0].id)
+
+    // 宿主页：只留一块镜像（删掉建页时带的空行）
+    await page.evaluate(() => window.__qua.invoke('core.page/create'))
+    await page.waitForTimeout(250)
+    await page.keyboard.type('宿主页')
+    await page.waitForTimeout(150)
+    await page.evaluate(([target]) => {
+      window.__qua.invoke('core.embed/insert', {
+        blockId: window.__qua.__editor.doc.roots[0].id,
+        targetId: target,
+        view: 'mirror',
+      })
+    }, [srcId])
+    await page.waitForTimeout(500)
+    const extras = await page.evaluate(() =>
+      window.__qua.__editor.doc.roots[0].children
+        .filter((b) => !b.props?._embed && !b.props?._deletedAt)
+        .map((b) => b.id),
+    )
+    for (const id of extras) {
+      await page.evaluate((bid) => window.__qua.invoke('core.block/delete', { blockId: bid }), id)
+      await page.waitForTimeout(120)
+      const ok = page.locator('.confirm-ok')
+      if (await ok.count()) {
+        await ok.click()
+        await page.waitForTimeout(120)
+      }
+    }
+    const only = await page.evaluate(() => {
+      const live = window.__qua.__editor.doc.roots[0].children.filter((b) => !b.props?._deletedAt)
+      return { n: live.length, embed: Boolean(live[0]?.props?._embed) }
+    })
+    assert(only.n === 1 && only.embed, `前置：宿主页只该剩一块镜像：${JSON.stringify(only)}`)
+
+    const geom = await page.evaluate(() => {
+      const box = (sel) => {
+        const r = document.querySelector(sel).getBoundingClientRect()
+        return { top: r.top, bottom: r.bottom }
+      }
+      return { doc: box('#doc'), editor: box('#editor') }
+    })
+    const read = () =>
+      page.evaluate(() => {
+        const ed = window.__qua.__editor
+        const root = ed.doc.roots[0]
+        return {
+          live: root.children
+            .filter((b) => !b.props?._deletedAt)
+            .map((b) => ({ id: b.id, embed: Boolean(b.props?._embed), text: b.content.map((r) => r.v ?? '').join('') })),
+          sel: ed.sel?.aBlock ?? '',
+        }
+      })
+
+    // 上边缘：第一行之前（页头那块空白）
+    await page.mouse.click(300, geom.doc.top + 8)
+    await page.waitForTimeout(300)
+    const top1 = await read()
+    assert(
+      top1.live.length === 2 && !top1.live[0].embed && top1.live[1].embed,
+      `点页头空白应建在镜像**之前**（不是末尾）：${JSON.stringify(top1)}`,
+    )
+    assert(top1.sel === top1.live[0].id, `光标应落到新建的上边缘块：${JSON.stringify(top1)}`)
+
+    // 再点一次：同一条边上已有空块 ⇒ 聚焦它，不再多建一格
+    await page.mouse.click(300, geom.doc.top + 8)
+    await page.waitForTimeout(300)
+    const top2 = await read()
+    assert(
+      top2.live.length === 2 && top2.sel === top1.live[0].id,
+      `页头已有空块 ⇒ 复用（不越点越多）：${JSON.stringify(top2)}`,
+    )
+
+    // 下边缘：末尾
+    await page.mouse.click(300, geom.editor.bottom - 40)
+    await page.waitForTimeout(300)
+    const bottom1 = await read()
+    assert(
+      bottom1.live.length === 3 && !bottom1.live[2].embed,
+      `点页尾空白应建在**末尾**：${JSON.stringify(bottom1)}`,
+    )
+    assert(bottom1.sel === bottom1.live[2].id, `光标应落到末尾新块：${JSON.stringify(bottom1)}`)
+    await page.mouse.click(300, geom.editor.bottom - 40)
+    await page.waitForTimeout(300)
+    const bottom2 = await read()
+    assert(
+      bottom2.live.length === 3 && bottom2.sel === bottom1.live[2].id,
+      `页尾已有空块 ⇒ 复用：${JSON.stringify(bottom2)}`,
+    )
+
+    // 点在行自己的矩形里不是空白：不许建块
+    const rowPos = await page.evaluate(() => {
+      const el = document.querySelector('#editor .sec > .blk[data-embed="1"] .blk[data-depth="0"] .tx')
+      const r = el.getBoundingClientRect()
+      return { x: r.x + 12, y: r.top + r.height / 2 }
+    })
+    await page.mouse.click(rowPos.x, rowPos.y)
+    await page.waitForTimeout(250)
+    const onRow = await read()
+    assert(onRow.live.length === 3, `点在行自己的矩形里不是空白：${JSON.stringify(onRow)}`)
+
+    // journal：一天只有一块镜像时，页头空白也建在那一天的第一个子块位（不是别的天）
+    await page.evaluate(() => window.__qua.invoke('core.journal/today', { date: '2027-08-09' }))
+    await page.waitForTimeout(400)
+    const dayId = await page.evaluate(
+      () => window.__qua.__editor.doc.roots.find((b) => b.props?._date)?.id,
+    )
+    await page.evaluate(
+      ([day, target]) =>
+        window.__qua.invoke('core.embed/insert', { blockId: day, targetId: target, view: 'mirror' }),
+      [dayId, srcId],
+    )
+    await page.waitForTimeout(500)
+    const dayExtras = await page.evaluate((day) => {
+      const d = window.__qua.__editor.store.find(day)
+      return d.children.filter((b) => !b.props?._embed && !b.props?._deletedAt).map((b) => b.id)
+    }, dayId)
+    for (const id of dayExtras) {
+      await page.evaluate((bid) => window.__qua.invoke('core.block/delete', { blockId: bid }), id)
+      await page.waitForTimeout(120)
+      const ok = page.locator('.confirm-ok')
+      if (await ok.count()) {
+        await ok.click()
+        await page.waitForTimeout(120)
+      }
+    }
+    const dayTop = await page.evaluate(() => document.querySelector('#doc').getBoundingClientRect().top)
+    await page.mouse.click(300, dayTop + 8)
+    await page.waitForTimeout(350)
+    const j = await page.evaluate((day) => {
+      const d = window.__qua.__editor.store.find(day)
+      const live = d.children.filter((b) => !b.props?._deletedAt)
+      return {
+        n: live.length,
+        firstEmbed: Boolean(live[0]?.props?._embed),
+        firstId: live[0]?.id ?? '',
+        sel: window.__qua.__editor.sel?.aBlock ?? '',
+      }
+    }, dayId)
+    assert(
+      j.n === 2 && !j.firstEmbed && j.sel === j.firstId,
+      `journal 单块镜像的天：页头空白也建在第一天之前：${JSON.stringify(j)}`,
+    )
+
+    await ctx.close()
+    return '页头/页尾空白各建一条边、空边复用、行上不误触；journal 单块镜像的天同一条规则'
+  },
+)
+
+await check(
+  'T367 露面行菜单的两条「在上下新建块」打在壳上：镜像岛里开的菜单、投影标题行开的菜单都要生效',
+  async () => {
+    const { ctx, page } = await freshPage(browser, base)
+    await page.evaluate(() => window.__qua.quiet(true))
+
+    // 源页（镜像/投影的目标）
+    await page.evaluate(() => window.__qua.invoke('core.page/create'))
+    await page.waitForTimeout(250)
+    await page.keyboard.type('源页')
+    await page.waitForTimeout(150)
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(150)
+    await page.keyboard.type('源一')
+    await page.waitForTimeout(150)
+    const srcId = await page.evaluate(() => window.__qua.__editor.doc.roots[0].id)
+
+    /** 建一个只留一块露面的宿主页，返回它的根 id */
+    const hostWith = async (view) => {
+      await page.evaluate(() => window.__qua.invoke('core.page/create'))
+      await page.waitForTimeout(250)
+      await page.keyboard.type(view === 'mirror' ? '镜像宿主' : '投影宿主')
+      await page.waitForTimeout(150)
+      await page.evaluate(
+        ([target, v]) =>
+          window.__qua.invoke('core.embed/insert', {
+            blockId: window.__qua.__editor.doc.roots[0].id,
+            targetId: target,
+            view: v,
+          }),
+        [srcId, view],
+      )
+      await page.waitForTimeout(600)
+      const extras = await page.evaluate(() =>
+        window.__qua.__editor.doc.roots[0].children
+          .filter((b) => !b.props?._embed && !b.props?._deletedAt)
+          .map((b) => b.id),
+      )
+      for (const id of extras) {
+        await page.evaluate((bid) => window.__qua.invoke('core.block/delete', { blockId: bid }), id)
+        await page.waitForTimeout(120)
+        const ok = page.locator('.confirm-ok')
+        if (await ok.count()) {
+          await ok.click()
+          await page.waitForTimeout(120)
+        }
+      }
+      return page.evaluate(() => window.__qua.__editor.doc.roots[0].id)
+    }
+
+    const live = (rootId) =>
+      page.evaluate((rid) => {
+        const root = window.__qua.__editor.store.find(rid)
+        return {
+          kids: root.children
+            .filter((b) => !b.props?._deletedAt)
+            .map((b) => ({ id: b.id, embed: Boolean(b.props?._embed) })),
+          sel: window.__qua.__editor.sel?.aBlock ?? '',
+        }
+      }, rootId)
+
+    const rightClick = async (pos, pick) => {
+      await page.mouse.click(pos.x, pos.y, { button: 'right' })
+      await page.waitForTimeout(350)
+      await page.locator(`.layer-item[data-id="${pick}"]`).click()
+      await page.waitForTimeout(450)
+    }
+
+    // 镜像：右键 M 徽章（岛内开的菜单）
+    const host1 = await hostWith('mirror')
+    const mirrorPos = await page.evaluate(() => {
+      const m = document.querySelector('.blk-embed-body .blk[data-depth="0"] .left .marker')
+      const r = m.getBoundingClientRect()
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+    })
+    const a = await live(host1)
+    await rightClick(mirrorPos, 'appearance-insert-below')
+    const below = await live(host1)
+    assert(
+      below.kids.length === a.kids.length + 1 && below.kids[0].embed && !below.kids[1].embed,
+      `镜像「在下方新建块」应紧挨着壳之后建一块：${JSON.stringify({ before: a, after: below })}`,
+    )
+    assert(below.sel === below.kids[1].id, `光标应落到新建的那一块：${JSON.stringify(below)}`)
+    await rightClick(mirrorPos, 'appearance-insert-above')
+    const above = await live(host1)
+    assert(
+      above.kids.length === below.kids.length + 1 && !above.kids[0].embed && above.kids[1].embed,
+      `镜像「在上方新建块」应紧挨着壳之前建一块：${JSON.stringify({ before: below, after: above })}`,
+    )
+
+    // 投影：右键标题行（ViewHost 里的名字编辑器，岛内开的菜单）
+    const host2 = await hostWith('table')
+    const titlePos = await page.evaluate(() => {
+      const el = document.querySelector('.embed-title-row .tx') ?? document.querySelector('.embed-title-row')
+      const r = el.getBoundingClientRect()
+      return { x: r.x + Math.min(20, r.width / 2), y: r.y + r.height / 2 }
+    })
+    const p = await live(host2)
+    await rightClick(titlePos, 'appearance-insert-below')
+    const pBelow = await live(host2)
+    assert(
+      pBelow.kids.length === p.kids.length + 1 && pBelow.kids[0].embed && !pBelow.kids[1].embed,
+      `投影标题行的「在下方新建块」也要打在壳上：${JSON.stringify({ before: p, after: pBelow })}`,
+    )
+
+    await ctx.close()
+    return '镜像岛与投影标题行的两条建块都落在壳的相邻位（不再点菜单没反应）'
+  },
+)
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

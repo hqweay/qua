@@ -106,6 +106,11 @@ function viewEvents(
   via: string,
   /** 这一面是不是「块的真实位置」（正文/侧槽窗口）：只有它把查询结果画在自己行下 */
   inlineViewBodies = false,
+  /**
+   * **装载这台编辑器的外层编辑器**（只有编辑岛有）：露面身体里的岛，壳却住在外层
+   * 的装载里。菜单两条「在上下建块」要打在壳上 ⇒ 必须知道壳在哪台编辑器的 doc 里。
+   */
+  owner?: BlockEditor,
 ): ViewEvents {
   const active = () => editor()
   /**
@@ -410,7 +415,8 @@ function viewEvents(
       const dispose = mountEmbedBody(block, holder, {
         store: blocks,
         run,
-        wire: (ed2, change2) => wireViewEditor(ed2, change2, via),
+        // 岛里的菜单要够到壳：把「装载这份身体的编辑器」一起递进去（见 viewEvents 的 owner）
+        wire: (ed2, change2) => wireViewEditor(ed2, change2, via, false, active()),
         onFocus: (next) => {
           setEd(next)
         },
@@ -797,6 +803,27 @@ function viewEvents(
             if (embed) viewMenus.openEmbedViewMenu(embed)
             return
           }
+          /**
+           * **露面行的两条「在上下建块」不能走 `App.ed`**：壳住在外层编辑器里，
+           * 而菜单可能是岛里开的（`App.ed` = 岛）⇒ 命令的 `locate` 在岛里找不到壳，
+           * 静默早退（实测：菜单点了没反应）。直接走**看得见壳**那台编辑器的插入 API
+           * —— 与命令 handler 同一对调用（`insertBlockBefore` / `insertBlockAfter(id, '')`），
+           * 不另算一份落点。
+           *
+           * 谁看得见壳：
+           *   · 岛里开的菜单 ⇒ `owner`（装载这份身体的编辑器）；
+           *   · 外层开的菜单（投影的宿主块标）⇒ 开菜单的这台自己。
+           * `getApp().ed` 在这里不可靠：`blockMenu` 为了光标去 `placeCaret(源)`，
+           * 源不在外层时会顺手把活动编辑器切进岛里的标题行（实测）。
+           */
+          if (appearanceHost && (row.id === 'appearance-insert-above' || row.id === 'appearance-insert-below')) {
+            const opener = editor()
+            const target = owner ?? (opener.rowOf(appearanceHost) ? opener : getApp().ed)
+            if (!target.rowOf(appearanceHost)) return
+            if (row.id === 'appearance-insert-above') target.insert.insertBlockBefore(appearanceHost)
+            else target.insert.insertBlockAfter(appearanceHost, '')
+            return
+          }
           if (!row.command) return
           const args = (row.args as Record<string, unknown> | undefined) ?? {}
           void getRegistry().invoke(row.command, args, 'menu')
@@ -818,8 +845,10 @@ function wireViewEditor(
   via: string,
   /** 这个表面是不是「正文」：只有正文与右槽窗口渲染块的行内结果 */
   inlineViewBodies = false,
+  /** 编辑岛的装载者（壳在它那台 doc 里）；非岛的表面不传 */
+  owner?: BlockEditor,
 ): void {
-  editor.events = viewEvents(() => editor, change, via, inlineViewBodies)
+  editor.events = viewEvents(() => editor, change, via, inlineViewBodies, owner)
 }
 
 

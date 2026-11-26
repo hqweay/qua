@@ -3438,21 +3438,23 @@ export class BlockEditor {
   /* ------------------------------------------------------- 空白处建块 */
 
   /**
-   * **点空白处 ⇒ 在当前 section 下面建一个子块**（推广到 N 段）。
+   * **点空白处 ⇒ 在点的那一段的边上建一个子块**（上边缘＝第一个子块之前，下边缘＝末尾）。
    *
    * ⚠️ **修订历史**：v1 建「最后一行之后的同级块」⇒ 在**空 journal** 上就是建到了
-   *    `roots[1]`（死区），一下次保存即丢。之后改成「当前对象的子块」。
-   *    现在有 N 段（日记流）：点击点在**整个文档最后一行之下**，视觉上属于**最后一段**
-   *    （日记流里是最早的一天）⇒ 建它的最后一个子块。N=1 时与旧行为完全一致。
-   *    `row`/`grid` 排列下段是**列**：先按点击的横向位置找列（`.sec` 的盒子），
-   *    再对**那一段**做「最后一行之下」判据——点哪列的空白就落到哪天。
+   *    `roots[1]`（死区），一下次保存即丢。之后改成「当前对象的子块」，只认**文档底部**。
+   *    有 N 段（日记流）后按点击位置定段；2026-11-26 又放宽成「段内不落在行上就算空白」。
+   *    **同一天再补上边缘**：此前一律落到末尾，于是一个只有一块露面的页/一天
+   *    **没有入口在它上面建块**——露面的名字住在身体首行，`.tx` 是隐藏的，光标永远
+   *    进不去，任何靠光标/菜单的路径都得为它单开一条。把**页头那条空白**也映射成
+   *    「第一行之前」之后，能力只依赖**点的位置**，与行的类型（段落/代码/查询/露面）无关。
    *
-   * 落点判据（`clientY`）：只在**目标段最后一行可见块的底边之下**才算空白 —— 否则
-   * `#scroll` 里与正文同高的左右留白也会误触。
+   * 落点判据：**点的位置有没有命中某一行**。命中的是行内的事（选字/落光标），不是空白；
+   * 没命中才算空白。空白再按**第一行之上／最后一行之下**分两条边——上边插到第一个
+   * 子块之前，下边插到末尾。段内其余空白（行缝）仍归末尾，与旧行为一致。
    *
-   * ⚠️ 虚拟化下最后一行可能没挂 DOM ⇒ 取不到 rect 时**放行**（宁可建块，也别「点了没反应」）。
-   * ⚠️ 段与段之间的「缝」暂不单独建块（见 `待定-日记流.md`）；首版只认全局底部（column）
-   *    与列内底部（row/grid）。
+   * ⚠️ 虚拟化下第一/最后一行可能没挂 DOM ⇒ 取不到 rect 时**不判上边缘**（走旧行为）：
+   *    宁可少一个入口，也别把「滚到中间点了一下」误判成页头。
+   * ⚠️ 段与段之间的「缝」暂不单独建块（见 `待定-日记流.md`）；缝归**上一段**末尾。
    */
   clickEmptyArea(clientY: number, clientX = 0, place: OpenAction = 'center'): boolean {
     if (!this.allowBlankCreate) return false
@@ -3468,7 +3470,13 @@ export class BlockEditor {
      */
     let secId = ''
     if (this.layout !== 'column') {
-      /** `row`/`grid`：先找列。列不存在（点在列缝／边距上）⇒ 不建块 */
+      /**
+       * `row`/`grid`：先按**横向位置**找列。列不存在（点在列缝／左右边距上）⇒ 不建块。
+       *
+       * ⚠️ 只按 x 找、不要求 y 落在列盒里：列的**上下**是同一段的两条边，
+       *    点列顶上/底下那点空白要留给下面「上边缘/下边缘」判据；要求 y 在盒里
+       *    会把这两条边直接判死（旧行为就是点不中）。
+       */
       const sec = [...this.container.querySelectorAll<HTMLElement>(':scope > .sec')].find((el) => {
         const r = el.getBoundingClientRect()
         return r.width > 0 && clientX >= r.left && clientX <= r.right
@@ -3482,11 +3490,15 @@ export class BlockEditor {
       if (secId === '') return false
     } else {
       /**
-       * 列布局：点在哪一段的矩形里就归哪一段；点在所有段**之下**（文档底部的气口）
-       * 归最后一段 —— 那是「接着往下写」。
+       * 列布局：点在哪一段的矩形里就归哪一段；点在所有段**之上/之下**（文档头/尾的
+       * 气口）归第一/最后一段 —— 两头都是「接着这一段写」。
        *
        * 只认**有段根**的段（`data-sec` 非空）：虚拟化切片从段中间开始时那一段没有
        * 段根行，建进去的块没有家（与 `render-ops` 发挂载区槽同一条判据）。
+       *
+       * ⚠️ `secs[0]` 兜底是给**真的段盒**（日记段）的：单页的 `.sec` 是
+       *    `display:contents`，rect 全零，`bottom <= clientY` 会把它兜住；
+       *    日记流的第一天没有「上一段的底边」可依，只能按顺序取第一段。
        */
       const secs = [...this.container.querySelectorAll<HTMLElement>(':scope > .sec')].filter(
         (el) => el.dataset.sec !== '' && el.dataset.sec !== undefined,
@@ -3495,13 +3507,15 @@ export class BlockEditor {
         secs.find((el) => {
           const r = el.getBoundingClientRect()
           return clientY >= r.top && clientY <= r.bottom
-        }) ?? secs.filter((el) => el.getBoundingClientRect().bottom <= clientY).pop()
+        }) ??
+        secs.filter((el) => el.getBoundingClientRect().bottom <= clientY).pop() ??
+        secs[0]
       secId = hit?.dataset.sec ?? ''
     }
     const root = secId ? this.doc.roots.find((r) => r.id === secId) : this.doc.roots[this.doc.roots.length - 1]
     if (!root) return false
     /**
-     * 目标段的最后一行（column ＝ 该段最后一行；row/grid ＝ 该列最后一行）。
+     * 目标段的**第一条/最后一条**可见行（column ＝ 该段；row/grid ＝ 该列）。
      *
      * ⚠️ 段内空白**也算**（2026-11-26 修订）：判据从「必须在最后一行之下」放宽成
      *    「在这一段里、且不在某一行上」。原来那条只在 column 下才等价于「文档底部」，
@@ -3509,11 +3523,15 @@ export class BlockEditor {
      *    被直接判成不建块。真正的防误触目标只有一条：**别把行与行之间的缝当成空白**
      *    （点行与行之间该是那一行的正文），所以判据落在「点的位置有没有命中某一行」。
      */
+    let first: VisibleRow | undefined
     let last: VisibleRow | undefined
     let cur = ''
     for (const r of rows) {
       if (r.depth === 0) cur = r.block.id
-      if (secId === '' || cur === secId) last = r
+      if (secId === '' || cur === secId) {
+        if (!first) first = r
+        last = r
+      }
     }
     if (!last) return false
     /** 点在**某一行自己的矩形里** ⇒ 那是行内的事（选字/落光标），不是空白 */
@@ -3524,35 +3542,40 @@ export class BlockEditor {
       return clientY >= box.top && clientY <= box.bottom
     })
     if (onRow) return false
+    /**
+     * **上边缘 vs 下边缘**：点在第一条可见行之上＝上边缘，其余空白（末尾/行缝）＝下边缘。
+     *
+     * ⚠️ 第一行没挂 DOM（虚拟化切片/离屏）⇒ 不判上边缘。点的是**这一屏**的空白，
+     *    不是文档头；拿不到几何就当旧行为（末尾），不能猜。
+     */
+    const firstEl = first ? this.blockEl(first.block.id) : undefined
+    const head = firstEl ? clientY < firstEl.getBoundingClientRect().top : false
 
     this.beginUndoEntry()
     unfoldBlock(this.doc, root.id)
     /**
-     * **复用末尾空块，不无中生有**：点底部若最后一段末尾已有一个空块（既无文字也无子块），
-     * 直接聚焦它，避免「点一次多一个空块」越点越多。只有末尾没有空块时才新建。
-     * 判据收紧到「空文本且空子树」——空标题但带子块的块不当作可复用空块。
+     * **复用边缘空块，不无中生有**：点的那条边若已经有一个空块（无正文、无子块、无身体），
+     * 直接聚焦它，避免「点一次多一个空块」越点越多；只有边上没有空块时才新建。
      * ⚠️ 复用支**模型不动、撤销不记**（与 `insertBlockAfter` 的空块支同一条口径）：
      *    记了就会吃掉一次 ⌘Z——按一次「什么都不变」的动作，退一步却退到上一次改动之前。
-     * ⚠️ 「末尾那块」只能从**活着的**子块里取：软删的块还在 `children` 里，按长度取会
+     * ⚠️ 「边缘那块」只能从**活着的**子块里取：软删的块还在 `children` 里，按长度取会
      *    拿到一个屏幕上不存在的块 ⇒ `placeCaret` 找不到节点、静默返回 ⇒ 点了完全没反应。
      */
-    const tail = liveChildren(root)
-    const lastChild = tail[tail.length - 1]
+    const kids = liveChildren(root)
+    const edge = head ? kids[0] : kids[kids.length - 1]
     /**
-     * 「可复用的末尾空块」＝真是空行（无正文、无子块、**无身体**）。
+     * 「可复用的边缘空块」＝真是空行（无正文、无子块、**无身体**）。
      * 有身体的块（代码/查询/露面）不是空行：复用它等于把点击当成「聚焦这一块」，
-     * 而用户点的是「我还想往下写」。
+     * 而用户点的是「我还想在这里写」。
      */
-    const emptyTail =
-      lastChild && isEmptyContent(lastChild.content) && !hasLiveChildren(lastChild) && !hasBody(lastChild)
-        ? lastChild
-        : null
-    const child = emptyTail ?? mkBlock('')
-    if (!emptyTail) {
-      this.write((tx) => tx.insert(child, root.id, root.children.length))
+    const reusable =
+      edge && isEmptyContent(edge.content) && !hasLiveChildren(edge) && !hasBody(edge) ? edge : null
+    const child = reusable ?? mkBlock('')
+    if (!reusable) {
+      this.write((tx) => tx.insert(child, root.id, head ? 0 : root.children.length))
       this.finishUndoEntry('structural', Date.now())
     } else {
-      // 复用末尾空块：模型不动、撤销不记（与 `insertBlockAfter` 的空块支同一条口径）
+      // 复用边缘空块：模型不动、撤销不记（与 `insertBlockAfter` 的空块支同一条口径）
       this.abortUndoEntry()
     }
     this.renderAll()

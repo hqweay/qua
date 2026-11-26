@@ -2525,7 +2525,8 @@ const {
   },
   atomClick: (atom, el, mods) => popovers.handleAtomClick(atom, el, mods, 'table'),
   // 挂载区/查询结果接的是**同一份**事件表（差别只在「装载谁」）
-  wireEditor: (editor, change, via, inlineViewBodies) => wireViewEditor(editor, change, via, inlineViewBodies),
+  wireEditor: (editor, change, via, inlineViewBodies, owner) =>
+    wireViewEditor(editor, change, via, inlineViewBodies, owner),
   getWs: () => ws,
   getEd: () => ed,
   setEd: (next) => {
