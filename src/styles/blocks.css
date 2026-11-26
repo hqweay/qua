@@ -729,15 +729,61 @@
   opacity: var(--ui-soft);
 }
 /*
- * **引文块**：正文槽左侧一条竖线 ＋ 内缩，让「这一段是引出的文字」一眼可辨。
- * 线挂在 `.tx` 上而不是 `.blk`：`.blk` 左缘是 gutter（块标/导轨），线贴着文字才读成
- * 引文；挂在 `.tx` 上也让线随折行一起长高，换行不断。
- * 只改横向几何（border/padding-left），不动 padding-block/margin —— 垂直留白归容器，
- * 否则行高漂移会让虚拟化估高与块标对齐一起失真。色走 token，换主题自动跟。
+ * **引述块 ＝ 变体徽章 ＋ 正文**。变体是 `_callout` 的一个封闭值（不是一个块类型），
+ * 徽章住在正文槽之外：落进 `.tx` 就会被 `readRuns` 读回正文、光标也会落到它后面打字。
+ * 竖线画在徽章左缘，贴着「信息/警告…」那枚脸，读成一段被引出的文字；
+ * 只动横向几何，不碰 padding-block/margin，行高与虚拟化估高不变。
+ *
+ * 取色写在这里而不是 TS：换主题时 token 自动跟，组件不碰颜色字面量。
  */
-.blk[data-type='core/quote'] > .tx {
-  border-left: 3px solid var(--ui-border);
-  padding-left: var(--ui-gap-4);
+.blk-callout {
+  --callout-c: var(--ui-identity-cyan);
+  flex: 0 0 auto;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+  /* 与 .left / .tx 同一行盒基准，块标不会与这枚脸错开 */
+  height: 1lh;
+  border-left: 3px solid var(--callout-c);
+  padding-left: var(--ui-gap-3);
+  color: var(--callout-c);
+  font-size: var(--ui-fs-md);
+  font-weight: var(--ui-fw-medium);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+.blk-callout[data-callout='info'] { --callout-c: var(--ui-ink-blue); }
+.blk-callout[data-callout='warning'] { --callout-c: var(--ui-ink-yellow); }
+.blk-callout[data-callout='error'] { --callout-c: var(--ui-ink-red); }
+.blk-callout[data-callout='tip'] { --callout-c: var(--ui-ink-green); }
+.blk-callout[data-callout='important'] { --callout-c: var(--ui-ink-violet); }
+.blk-callout[data-callout='note'] { --callout-c: var(--ui-ink-gray); }
+.blk-callout:hover {
+  background: var(--ui-bg-hover);
+  border-radius: var(--ui-radius-sm);
+}
+/*
+ * **引述是行容器**：抬头只画徽章，正文住在子块里，每行一个块（可单独引用）。
+ * 竖线跨整组：抬头徽章的左缘 + 每条正文行的左缘画同一条线（同一个 `--callout-c`），
+ * 颜色按最近祖先上的变体取（渲染层把最近祖先的 `_callout` 写到行上）。
+ */
+.blk[data-quote-line] {
+  --callout-c: var(--ui-identity-cyan);
+}
+.blk[data-quote-line][data-quote='info'] { --callout-c: var(--ui-ink-blue); }
+.blk[data-quote-line][data-quote='warning'] { --callout-c: var(--ui-ink-yellow); }
+.blk[data-quote-line][data-quote='error'] { --callout-c: var(--ui-ink-red); }
+.blk[data-quote-line][data-quote='tip'] { --callout-c: var(--ui-ink-green); }
+.blk[data-quote-line][data-quote='important'] { --callout-c: var(--ui-ink-violet); }
+.blk[data-quote-line][data-quote='note'] { --callout-c: var(--ui-ink-gray); }
+.blk[data-quote-line] > .tx {
+  border-left: 3px solid var(--callout-c);
+  padding-left: var(--ui-gap-3);
+}
+.blk[data-quote-head] > .tx {
+  display: none;
 }
 /*
  页 / 日记 / 被聚焦块作为**正文第一行**时更大一档（它是这一屏的「身份」，但不叫标题）。

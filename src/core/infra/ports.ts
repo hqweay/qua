@@ -16,6 +16,7 @@
  */
 import type { BlockEditor } from '../../view/editor/editor.ts'
 import type { ColorAxis, CtxKeys } from '../index.ts'
+import type { CalloutVariant } from '../infra/callout.ts'
 import type { UndoKind } from '../model/undo.ts'
 import type { QueryNode, QuerySpec, SortKey } from '../query/query.ts'
 import type { AutomationDef } from '../automation/automation.ts'
@@ -621,6 +622,13 @@ export interface App {
    *    否则插件或更新版本写的类型会在这一层被抹掉。
    */
   setBlockType(blockId: string, typeId: string, lang?: string): boolean
+  /**
+   * 写引述块的变体（`_callout`）：封闭七值，脏值不写；缺省变体＝摘键。
+   * 与 `setBlockType` 同一条「属性写＋重画这一行」的路径，改完徽章当场变色。
+   */
+  setCalloutVariant(blockId: string, variant: CalloutVariant): boolean
+  /** 把一块转成引述容器：原正文搬进首个子块（每行一块可引用），抬头只画徽章 */
+  convertToQuote(blockId: string, variant?: string): boolean
   /**
    * 删一个行内原子（引用 / 标签）。
    *

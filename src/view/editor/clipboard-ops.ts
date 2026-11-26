@@ -209,7 +209,11 @@ export class ClipboardOps {
           }
           return b
         }
-        // 解析结果是普通描述树，按显式栈插入；块树遍历仍只走 `walkForest` 一个入口
+        /**
+         * 解析结果是普通描述树，按显式栈插入；块树遍历仍只走 `walkForest` 一个入口。
+         * 引述粘贴成**行容器**：抬头只带变体，引文正文落成首个子块（每行一块，可单独引用）；
+         * 抬头自己的 children 从 index 1 接起（0 被首行占了）。其余类型一节点一块。
+         */
         const insertTree = (nodes: readonly ParsedBlock[], parentId: string | null, at: number): void => {
           type Frame = { nodes: readonly ParsedBlock[]; parentId: string | null; at: number; i: number }
           const stack: Frame[] = [{ nodes, parentId, at, i: 0 }]
@@ -222,23 +226,40 @@ export class ClipboardOps {
             const node = f.nodes[f.i++]!
             const b = make(node)
             tx.insert(b, f.parentId, f.at++)
-            if (node.children.length > 0) stack.push({ nodes: node.children, parentId: b.id, at: 0, i: 0 })
+            if (node.kind === 'quote') {
+              writeBlockContent(b, [])
+              tx.insert(mkBlock(runsOf(node.inline)), b.id, 0)
+              if (node.children.length > 0) stack.push({ nodes: node.children, parentId: b.id, at: 1, i: 0 })
+            } else if (node.children.length > 0) {
+              stack.push({ nodes: node.children, parentId: b.id, at: 0, i: 0 })
+            }
           }
         }
+
         if (takeover) {
           const first = blocks[0]!
-          tx.patch(targetId, (b) => {
-            if (first.kind === 'quote') setBlockType(b, QUOTE_TYPE)
-            else if (first.kind === 'divider') setBlockType(b, DIVIDER_TYPE)
-            else if (first.kind === 'fence') {
-              setBlockType(b, CODE_TYPE)
-              const lang = normalizeStoredLang(first.lang)
-              if (lang) b.props = { ...(b.props ?? {}), [LANG_PROP]: lang }
-            } else setBlockType(b, DEFAULT_BLOCK_TYPE)
-            writeBlockContent(b, first.kind === 'fence' ? [] : runsOf(first.inline))
-            if (first.kind === 'fence') b.props = { ...(b.props ?? {}), [CODE_TEXT_PROP]: first.code ?? '' }
-          })
-          insertTree(first.children, targetId, 0)
+          if (first.kind === 'quote') {
+            // 抬头留空（只画徽章），引文正文搬进首个子块
+            tx.patch(targetId, (b) => {
+              setBlockType(b, QUOTE_TYPE)
+              writeBlockContent(b, [])
+            })
+            const line = mkBlock(runsOf(first.inline))
+            tx.insert(line, targetId, 0)
+            insertTree(first.children, targetId, 1)
+          } else {
+            tx.patch(targetId, (b) => {
+              if (first.kind === 'divider') setBlockType(b, DIVIDER_TYPE)
+              else if (first.kind === 'fence') {
+                setBlockType(b, CODE_TYPE)
+                const lang = normalizeStoredLang(first.lang)
+                if (lang) b.props = { ...(b.props ?? {}), [LANG_PROP]: lang }
+              } else setBlockType(b, DEFAULT_BLOCK_TYPE)
+              writeBlockContent(b, first.kind === 'fence' ? [] : runsOf(first.inline))
+              if (first.kind === 'fence') b.props = { ...(b.props ?? {}), [CODE_TEXT_PROP]: first.code ?? '' }
+            })
+            insertTree(first.children, targetId, 0)
+          }
           insertTree(blocks.slice(1), floc.parent?.id ?? null, floc.index + 1)
         } else {
           insertTree(blocks, floc.parent?.id ?? null, floc.index + 1)

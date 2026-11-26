@@ -18,7 +18,7 @@
  * ⚠️ 这不是「视图类型系统」（29 那套要独立布局状态才升格）。它只是**最小的渲染分派**，
  * 目的是让「槽里是块、块由渲染器画」这个形状现在就在，而不是等视图系统落地才做。
  */
-import { blockTypeOf, CODE_TYPE, DEFAULT_BLOCK_TYPE, DIVIDER_TYPE, QUOTE_TYPE, plainText, blockLabel, isJournal, journalDate, journalDateLabel, openActionOf, prop, type Block, type FindBlock, type OpenAction } from '../../core/index.ts'
+import { blockTypeOf, CALLOUT_PROP, calloutDecl, calloutLabel, CODE_TYPE, DEFAULT_BLOCK_TYPE, DIVIDER_TYPE, QUOTE_TYPE, plainText, blockLabel, isJournal, journalDate, journalDateLabel, openActionOf, prop, type Block, type FindBlock, type OpenAction } from '../../core/index.ts'
 import { renderIcon, type IconName } from '../../view/icons.ts'
 
 /** 渲染一个块时能拿到的东西（后续会加：上下文键、命令执行、订阅） */
@@ -159,7 +159,29 @@ const staticTypedRenderer = (type: string, icon: IconName): BlockRenderer => ({
   },
 })
 
-const quoteRenderer = staticTypedRenderer(QUOTE_TYPE, 'quote')
+
+/**
+ * 引述抬头在静态面（卡片/表格/搜索）画变体名＋第一行正文：正文住子块里，
+ * 光画抬头的 `content` 会是一片空白。静态面不展开整组，只给一句可认的摘要。
+ */
+const quoteRenderer: BlockRenderer = {
+  match: (b) => blockTypeOf(b) === QUOTE_TYPE,
+  render: (b, ctx) => {
+    const row = document.createElement('button')
+    row.type = 'button'
+    row.className = 'page-item'
+    if (ctx.isActive(b.id)) row.dataset.active = '1'
+    const ico = document.createElement('span')
+    ico.className = 'p-ico'
+    renderIcon(ico, calloutDecl(prop<string>(b, CALLOUT_PROP)).icon as IconName, 'quote')
+    const title = document.createElement('span')
+    title.className = 'p-title ui-ellipsis ui-ellipsis-grow'
+    title.textContent = calloutLabel(prop<string>(b, CALLOUT_PROP))
+    row.append(ico, title)
+    bindRowClick(row, b, ctx)
+    return row
+  },
+}
 const codeRenderer = staticTypedRenderer(CODE_TYPE, 'code')
 
 /** 兜底：任何块都能画一行纯文本（保证「不认识的块」不会消失） */

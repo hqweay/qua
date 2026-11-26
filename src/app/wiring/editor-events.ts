@@ -13,6 +13,9 @@ import { mountEmbedBody } from '../../ui/block-ui/embed-body.ts'
 import type { BlockEditor, ViewEvents } from '../../view/editor/editor.ts'
 import { assetViewOf } from '../../view/asset-views.ts'
 import {
+  CALLOUT_VARIANTS,
+  CALLOUT_PROP,
+  canonicalCallout,
   belowFieldsRows,
   blockLabel,
   cardinalityOf,
@@ -705,6 +708,35 @@ function viewEvents(
         onPick: (row) => {
           const lang = row.id.slice('lang/'.length)
           void getRegistry().invoke('core.block/set-lang', { blockId, lang }, via)
+        },
+      })
+    },
+    /**
+     * **引述块的变体徽章**：点开一张七选一的类型单，选中即写 `_callout`。
+     *
+     * 行由 `core/infra/callout.ts` 那张表生成（与徽章同源），当前变体打勾；
+     * 菜单标题就是参考图里的「类型」，宽度收窄到七行刚好一屏。
+     */
+    calloutMenu: (blockId, anchor, trigger) => {
+      const b = kb.get(blockId)
+      const current = canonicalCallout(b ? prop<string>(b, CALLOUT_PROP) : undefined)
+      layers.openMenu({
+        rows: CALLOUT_VARIANTS.map((v) => ({
+          id: `callout/${v.id}`,
+          label: v.label,
+          icon: `lucide:${v.icon}`,
+          // 勾只出现在一行上：未选中行给空串，不留一列 `·` 噪声
+          hint: v.id === current ? '✓' : '',
+          group: 'callout/1',
+        })),
+        anchor,
+        trigger,
+        title: t('ui.callout.typeTitle'),
+        width: 240,
+        searchable: false,
+        onPick: (row) => {
+          const variant = row.id.slice('callout/'.length)
+          void getRegistry().invoke('core.block/set-callout', { blockId, variant }, via)
         },
       })
     },

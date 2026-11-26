@@ -137,6 +137,12 @@ export const DELETED_AT_PROP = '_deletedAt' as const
 export const LANG_PROP = '_lang'
 
 /**
+ * 引述块的变体（`_callout`）：引述/信息/警告/错误/提示/重要/注意。
+ * 缺键＝引述（与 `_lang` 缺键＝纯文本同款读法）；值域与图标/取色在 `core/infra/callout.ts`。
+ */
+export const CALLOUT_PROP = '_callout'
+
+/**
  * **代码正文**（`_code`）：`core/code` 块的文档。
  *
  * 为什么不是 `content`：`content` 是**这一块在大纲里那一行**说的话（标题/描述），
@@ -271,6 +277,7 @@ export function hasLiveChildren(b: Block): boolean {
 export type SystemPropId =
   | '_type'
   | typeof LANG_PROP
+  | typeof CALLOUT_PROP
   | typeof CODE_TEXT_PROP
   | typeof ICON_PROP
   | typeof COLOR_PROP

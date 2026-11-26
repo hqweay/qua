@@ -522,6 +522,8 @@ export interface ViewEvents {
    * 不接 ⇒ 不画徽章（静态投影面没有可切换的东西）。
    */
   codeLangMenu?: (blockId: string, anchor: DOMRect, trigger: HTMLElement) => void
+  /** 引述块变体徽章的落点：点它换 `_callout`（`view` 只画当前变体，`app` 接命令） */
+  calloutMenu?: (blockId: string, anchor: DOMRect, trigger: HTMLElement) => void
   /**
    * **正文里查询块的身体**：由装配层用同一台 `ViewHost` 画（surface＝`inline`）。
    *

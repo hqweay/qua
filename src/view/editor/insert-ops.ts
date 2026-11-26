@@ -6,6 +6,8 @@
  * 撤销粒度的口径：用户按的是**一次**插入，同一个动作里造出的多个块共用一个撤销条目。
  */
 import {
+  QUOTE_TYPE,
+  CALLOUT_PROP,
   CODE_TYPE,
   DIVIDER_TYPE,
   EMBED_PROP,
@@ -45,6 +47,7 @@ import {
 import {
   insertRunAt,
   plainLen,
+  plainText,
   removeRunById,
   textRuns,
   type AssetRun,
@@ -229,6 +232,53 @@ export class InsertOps {
     }
     this.ed.structTail({ id: b.id, off: 0 })
     return b.id
+  }
+
+  /**
+   * 插入一个**引述容器**：抬头块只画变体徽章，正文住在第一行子块里。
+   *
+   * 为什么是两块一笔（`beginUndoEntry`）：每一行要能单独引用 ⇒ 行必须是独立的块；
+   * 而用户按的是「插一条引述」这一次动作 ⇒ 抬头＋首行同笔撤销。空块原地换骨架时
+   * 原内容搬进首行（不丢字），否则抬头留空、在下面新建一整组。
+   */
+  insertQuoteAfter(id: string, variant?: string): string | null {
+    const loc = locate(this.ed.doc, id)
+    if (!loc) return null
+    this.ed.beginUndoEntry()
+    const head = isBlankPlaceholder(loc.block) ? loc.block : mkBlock('')
+    const line = mkBlock('')
+    const carried = isBlankPlaceholder(loc.block) ? '' : plainText(loc.block.content)
+    if (carried !== '') writeBlockContent(line, textRuns(carried))
+    const decorate = (b: Block) => {
+      setBlockType(b, QUOTE_TYPE)
+      if (variant) b.props = { ...(b.props ?? {}), [CALLOUT_PROP]: variant }
+    }
+    const ok = this.ed.write((tx) => {
+      if (head === loc.block) {
+        // 空块原地换骨架：先清掉占位正文，子树继续挂在它下面（抬头接管）
+        tx.patch(head.id, (b) => {
+          writeBlockContent(b, [])
+          decorate(b)
+        })
+        tx.insert(line, head.id, 0)
+      } else {
+        decorate(head)
+        const site = insertSiteOf(loc, { blank: false })
+        if (!site || site.kind === 'replace') return false
+        const at = site.kind === 'first-child' ? { parentId: site.parentId, index: 0 } : site
+        tx.insert(head, at.parentId, at.index)
+        tx.insert(line, head.id, 0)
+      }
+      return true
+    })
+    if (!ok) {
+      this.ed.abortUndoEntry()
+      return null
+    }
+    unfoldBlock(this.ed.doc, head.id)
+    // 光标落在首行：抬头是 chrome，不是写字的地方
+    this.ed.structTail({ id: line.id, off: 0 })
+    return line.id
   }
 
   /**

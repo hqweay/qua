@@ -38,6 +38,10 @@ import {
   type RowDerive,
   type ShellCol,
   type VisibleRow,
+  blockTypeOf,
+  CALLOUT_PROP,
+  QUOTE_TYPE,
+  prop,
 } from '../../core/index.ts'
 import { type GroupHead } from '../../core/model/model.ts'
 import { plainText } from '../../core/model/runs.ts'
@@ -1169,6 +1173,15 @@ export class RenderOps {
          */
         titleGap: this.ed.allowBlankCreate,
         ancestors: this.ancestors.get(r.block.id) ?? [],
+        quoteLine: (() => {
+          const chain = this.ancestors.get(r.block.id) ?? []
+          for (let i = chain.length - 1; i >= 0; i--) {
+            const a = this.ed.store.find(chain[i]!)
+            if (!a) continue
+            return blockTypeOf(a) === QUOTE_TYPE ? (prop<string>(a, CALLOUT_PROP) ?? 'quote') : false
+          }
+          return false
+        })(),
         folded: foldStateOf(this.ed.doc),
         // 第二层：只收身体那张表（`bodyFolded`），与 `folded` 一起决定身体可不可见
         bodyFolded: this.ed.doc.bodyFolded,
@@ -1204,6 +1217,13 @@ export class RenderOps {
           ? {
               codeLangMenu: (blockId: string, anchor: DOMRect, trigger: HTMLElement) =>
                 this.ed.events.codeLangMenu!(blockId, anchor, trigger),
+            }
+          : {}),
+        // 引述徽章：装配层没接「换变体」就不画（静态投影面不接）
+        ...(this.ed.events.calloutMenu
+          ? {
+              calloutMenu: (blockId: string, anchor: DOMRect, trigger: HTMLElement) =>
+                this.ed.events.calloutMenu!(blockId, anchor, trigger),
             }
           : {}),
         ...(this.ed.emptyPlaceholder !== undefined ? { placeholder: this.ed.emptyPlaceholder } : {}),

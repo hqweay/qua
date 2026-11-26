@@ -20,9 +20,10 @@ import {
 } from '../src/core/index.ts'
 import { systemPropViolation } from '../src/core/props/system-props.ts'
 
-test('引文与代码块：正文可写，代码块多开一行内换行能力', () => {
+test('引文是行容器（抬头只读，正文在子块）；代码块正文可写且能跨行', () => {
   assert.equal(TYPE_DECLS[QUOTE_TYPE]?.children, 'content')
-  assert.equal(TYPE_DECLS[QUOTE_TYPE]?.text, 'editable')
+  // 抬头只画变体徽章；正文每行一个子块 ⇒ 可单独引用
+  assert.equal(TYPE_DECLS[QUOTE_TYPE]?.text, 'readonly')
   assert.notEqual(TYPE_DECLS[QUOTE_TYPE]?.multiline, true)
   assert.equal(TYPE_DECLS[CODE_TYPE]?.children, 'content')
   assert.equal(TYPE_DECLS[CODE_TYPE]?.text, 'editable')

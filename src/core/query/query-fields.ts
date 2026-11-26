@@ -19,6 +19,7 @@
 import { allPropDefs, propDisplayLabels, propKindOf, cardinalityOf, isEngineProp, systemQueryFieldLabel, QUERYABLE_SYSTEM_PROPS } from '../props/props.ts'
 import type { PropKind } from '../props/props.ts'
 import type { Cardinality } from '../props/props.ts'
+import { CALLOUT_PROP } from '../model/model.ts'
 import type { Block } from '../model/model.ts'
 
 export interface QueryFieldOption {
@@ -68,7 +69,7 @@ export function fieldCoverageOf(records: readonly { values: Readonly<Record<stri
  * `_tags` **不进**：「有任意标签」由标签行空值承载（拼回 `_tags exists`），
  * 而 `eq` 要标签块 id，用户填不出——下拉不给「必然填错」的入口。
  */
-const QUERY_FIELD_SYSTEM_SLOTS = ['_date', '_aliases', '_type'] as const satisfies readonly (typeof QUERYABLE_SYSTEM_PROPS)[number][]
+const QUERY_FIELD_SYSTEM_SLOTS = ['_date', '_aliases', '_type', CALLOUT_PROP] as const satisfies readonly (typeof QUERYABLE_SYSTEM_PROPS)[number][]
 
 /** 条件树字段下拉：属性定义（先序）＋ 系统槽；顺序＝前者按库、后者固定 */
 export function queryFieldsOf(forest: readonly Block[], coverage?: FieldCoverage): QueryFieldOption[] {

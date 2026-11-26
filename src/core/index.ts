@@ -45,6 +45,7 @@ export * from './query/query-tree.ts'
 export * from './automation/automation.ts'
 export * from './markdown/parse.ts'
 export * from './infra/code-lang.ts'
+export * from './infra/callout.ts'
 /** 候选流分页的装载结果形状（`ui` 与 `app/boot` 的共用契约；`ui` 不许 import `app`） */
 export type { CandidateLoadStep, CandidateWindowRequest } from './storage/library-client.ts'
 export * from './views/view.ts'

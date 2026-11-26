@@ -26,6 +26,7 @@
 import {
   ACTIVE_VIEW_PROP,
   ALIASES_PROP,
+  CALLOUT_PROP,
   CODE_TEXT_PROP,
   COLOR_PROP,
   DEFAULT_DISPLAY_PROPS_PROP,
@@ -39,6 +40,7 @@ import {
   LISTS_PROP,
   VIEWS_PROP,
 } from '../model/model.ts'
+import { CALLOUT_IDS, type CalloutVariant } from '../infra/callout.ts'
 import { isAliasesValue } from '../identity/alias.ts'
 import { isCodeTextValue, isColorValue, isDisplayValue, isIconValue, isListsValue } from '../model/model.ts'
 import { TAGS_PROP, isTagRefList } from '../identity/tags.ts'
@@ -94,6 +96,8 @@ export const SYSTEM_PROP_CHECKS: Readonly<Record<string, (value: unknown) => boo
   // 结构槽（model.ts）
   _type: () => true, // 开放：未知 id 读侧降级，写侧不假装认识
   [LANG_PROP]: (v) => typeof v === 'string' && v.trim() !== '',
+  // 引述变体是封闭集：写侧只收七种规范名，未知值进不了盘（读侧仍按缺省降级画）
+  [CALLOUT_PROP]: (v) => typeof v === 'string' && CALLOUT_IDS.includes(v as CalloutVariant),
   [CODE_TEXT_PROP]: isCodeTextValue,
   [ICON_PROP]: isIconValue,
   [COLOR_PROP]: isColorValue, // 身份色：色板封闭集（identity/faces.ts 的链只认封闭集内的值）

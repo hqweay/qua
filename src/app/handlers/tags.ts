@@ -4,7 +4,7 @@
  * 「这块是什么」用角色（`as-page` / `as-tag`），「这一块归在谁下面」用归属边
  * （`core.belongs-to/*`）——两件事，两个区段。
  */
-import { canConvertBlockType, CODE_TYPE } from '../../core/index.ts'
+import { canConvertBlockType, canonicalCallout, CODE_TYPE, QUOTE_TYPE, type CalloutVariant } from '../../core/index.ts'
 import type { Handler } from '../../core/infra/ports.ts'
 import { curBlock, S } from './shared.ts'
 export const TAGS_HANDLERS: Record<string, Handler> = {
@@ -59,6 +59,7 @@ export const TAGS_HANDLERS: Record<string, Handler> = {
     if (!id || !type) return false
     const b = app.ed.store.find(id)
     if (!b || !canConvertBlockType(b)) return false
+    if (type === QUOTE_TYPE) return app.convertToQuote(id, S(a.variant, '') || undefined)
     const lang = S(a.lang, '')
     return app.setBlockType(id, type, lang === '' ? undefined : lang)
   },
@@ -69,6 +70,17 @@ export const TAGS_HANDLERS: Record<string, Handler> = {
     const lang = S(a.lang, '')
     if (!id || !lang) return false
     return app.setBlockType(id, CODE_TYPE, lang === 'plain' ? undefined : lang)
+  },
+  /**
+   * 引述块的变体：只改 `_callout`，正文与骨架不动。
+   * 值必须落在七值表内（未知写法按缺省画，但不写进盘）——与 `set-lang` 的宽容不同，
+   * 变体是封闭枚举，收端不替用户猜。
+   */
+  'core.block/set-callout': (a, app) => {
+    const id = S(a.blockId) || curBlock(app)
+    const raw = S(a.variant, '')
+    if (!id || raw === '' || canonicalCallout(raw) !== raw) return false
+    return app.setCalloutVariant(id, raw as CalloutVariant)
   },
   /**
    * **块级标签的两个入口**（属性面板用）。

@@ -92,6 +92,7 @@ export const EN1 = {
   'cmd.block.as-page': 'Mark as page',
   'cmd.block.set-type': 'Set block type',
   'cmd.block.set-lang': 'Set code language',
+  'cmd.block.set-callout': 'Set callout type',
   'cmd.block.unpage': 'Unmark as page',
   'cmd.block.extract-to-page': 'Extract to page',
   'cmd.block.as-tag': 'Mark as tag',

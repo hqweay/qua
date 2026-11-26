@@ -26,6 +26,7 @@ import {
   isDeleted,
   hasList,
   isPropDefBlock,
+  CALLOUT_PROP,
   prop,
   type Block,
   type BlockProps,
@@ -39,6 +40,8 @@ import { derivedId, pad, uuidv7Hex } from '../model/ids.ts'
 import { journalDate, todayISO } from '../identity/journal.ts'
 import { allTags, resolveTagIds, TAGS_PROP, tagIdsOf, tagsById } from '../identity/tags.ts'
 import { t } from '../infra/msg.ts'
+import { canonicalCallout } from '../infra/callout.ts'
+import { QUOTE_TYPE } from '../model/types.ts'
 import { checkExternalUrl } from '../relations/link.ts'
 import { CLOSURE_USE, isUseId, useIsUnique, type UseId } from './uses.ts'
 
@@ -1128,6 +1131,7 @@ export const QUERYABLE_SYSTEM_PROPS = [
   '_date',
   '_kind',
   '_type',
+  CALLOUT_PROP,
   ALIASES_PROP,
   TAGS_PROP,
   BELONGS_TO_PROP,
@@ -1164,6 +1168,7 @@ export function systemQueryFieldLabel(propId: string): string | undefined {
   if (propId === '_date') return t('ui.query.sysField.date')
   if (propId === '_kind') return t('ui.query.sysField.kind')
   if (propId === '_type') return t('ui.query.sysField.type')
+  if (propId === CALLOUT_PROP) return t('ui.query.sysField.callout')
   if (propId === ALIASES_PROP) return t('ui.query.sysField.aliases')
   if (propId === TAGS_PROP) return t('ui.query.sysField.tags')
   if (propId === BELONGS_TO_PROP) return t('ui.query.sysField.belongsTo')
@@ -1209,6 +1214,11 @@ function readSystemField(block: Block, propId: string, table: FieldTable): Field
      * 与 `core/created` 同档）；「非默认类型」用 `neq`。
      */
     return { declared: true, value: blockTypeOf(block) }
+  }
+  if (propId === CALLOUT_PROP) {
+    // 只有引述块有这一栏（其余块答「没声明」）；缺键＝引述，与视图上的缺省同一份读法。
+    if (blockTypeOf(block) !== QUOTE_TYPE) return { declared: false, value: undefined }
+    return { declared: true, value: canonicalCallout(prop<string>(block, CALLOUT_PROP)) }
   }
   if (propId === ALIASES_PROP) {
     const names = aliasesOf(block)

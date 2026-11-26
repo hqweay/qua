@@ -10,6 +10,12 @@
  * `getEd`/`getMainEd`/三个 app 委托同为闭包——运行期才会调。
  */
 import {
+  CALLOUT_PROP,
+  canonicalCallout,
+  mkBlock,
+  DEFAULT_CALLOUT,
+  QUOTE_TYPE,
+  type CalloutVariant,
   blockLabel,
   blockTypeOf,
   canConvertBlockType,
@@ -219,6 +225,25 @@ function setBlockIcon(blockId: string, icon: string | null): boolean {
 }
 
 /**
+ * 设引述变体（`_callout`）：缺省变体＝摘键，盘上不留「引述」这个说了等于没说的值。
+ * 与设脸同一条写路径（属性写＋重画这一行），徽章当场跟着变；脏值由系统键判据挡在发看点。
+ */
+function setCalloutVariant(blockId: string, variant: CalloutVariant): boolean {
+  const b = findInForest(ws.blocks, blockId)
+  if (!b || blockTypeOf(b) !== QUOTE_TYPE) return false
+  const current = canonicalCallout(prop<string>(b, CALLOUT_PROP))
+  if (current === variant) return false
+  writeProps(blockId, () => {
+    const props = { ...(b.props ?? {}) }
+    if (variant === DEFAULT_CALLOUT) delete props[CALLOUT_PROP]
+    else props[CALLOUT_PROP] = variant
+    if (Object.keys(props).length === 0) delete b.props
+    else b.props = props
+  })
+  return true
+}
+
+/**
  * 把一个块从某个列表里摘掉。
  *
  * 摘 `tag` 时**提示不阻止**（与删标签同一套形状）：成员与声明会失效，但**值一个字节不动**
@@ -316,6 +341,32 @@ function applyBlockType(blockId: string, typeId: string, lang?: string): boolean
   return true
 }
 
+
+/**
+ * 把一块转成引述容器：原正文搬进首个子块（每行一块，可单独引用），抬头留空只画徽章。
+ * 与 `applyBlockType` 分开是因为它要**插一个子块**，不是一次属性 patch 能表达的。
+ */
+function convertToQuote(blockId: string, variant?: string): boolean {
+  const b = findInForest(ws.blocks, blockId)
+  if (!b || !canConvertBlockType(b) || blockTypeOf(b) === QUOTE_TYPE) return false
+  const carried = plainText(b.content)
+  const sel = getEd().sel
+  const r = txRun((tx) => {
+    tx.patch(blockId, (x) => {
+      setBlockType(x, QUOTE_TYPE)
+      writeBlockContent(x, [])
+      if (variant) x.props = { ...(x.props ?? {}), [CALLOUT_PROP]: variant }
+    })
+    const line = mkBlock(carried === '' ? [] : textRuns(carried))
+    tx.insert(line, blockId, 0)
+  }, getMainEd())
+  blocks.record(r.undo, sel, 'other', Date.now())
+  repaintBlock(blockId)
+  scheduleProperties()
+  scheduleSave()
+  scheduleBadge()
+  return true
+}
 /**
  * `ref` 值的显示名（块下属性行用）。与属性面板同一条兜底：
  * 目标没了就说「已删除」，不把 32 位 id 露给用户。
@@ -373,8 +424,10 @@ const openPropsLineMenu = (blockId: string, anchor: DOMRect): void => {
     addBlockRole,
     setBlockColor,
     setBlockIcon,
+    setCalloutVariant,
     removeBlockRole,
     applyBlockType,
+    convertToQuote,
     refLabelOf,
     propsLineModeOf,
     openPropsLineMenu,

@@ -18,6 +18,7 @@ import {
   hasIdentity,
   hasLiveChildren,
   indentMove,
+  isQuoteContainer,
   isEmbedBlock,
   removableBySplice,
   isJournal,
@@ -81,6 +82,11 @@ export class StructOps {
      * 两种块同一条口径：Enter ＝ **在下方新建一块**，原行一个字节不动。
      * 落点走 `insertBlockAfter` 那一份（不在这里再算一遍兄弟位）。
      */
+    // 引述抬头是行容器：Enter 在容器里落下一行（子块），不是在容器外插兄弟
+    if (isQuoteContainer(loc.block)) {
+      this.ed.insert.insertChild(id)
+      return
+    }
     if (!canWriteText(loc.block) || hasBody(loc.block)) {
       this.ed.insert.insertBlockAfter(id, '', undefined, { reuseBlank: false })
       return

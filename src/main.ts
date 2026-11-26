@@ -1185,6 +1185,8 @@ const {
   addBlockRole,
   setBlockColor,
   setBlockIcon,
+  setCalloutVariant,
+  convertToQuote,
   removeBlockRole,
   applyBlockType,
   refLabelOf,
@@ -1948,6 +1950,8 @@ const app: App = {
   /** 按名字落页（同名地址复用）：新建页候选的新建行与搜索面的「创建」同一条判据 */
   openOrCreatePage: (name) => openOrCreatePage(name),
   setBlockType: (blockId, typeId, lang) => applyBlockType(blockId, typeId, lang),
+  setCalloutVariant: (blockId, variant) => setCalloutVariant(blockId, variant),
+  convertToQuote: (blockId, variant) => convertToQuote(blockId, variant),
   /** 复制一块到它自己后面；正文里沿用编辑器（落点结构判据），记录面走库级插入。 */
   duplicateBlock: (blockId) => {
     if (locate(ed.doc, blockId)) return ed.struct.duplicate(blockId)

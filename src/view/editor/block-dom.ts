@@ -16,6 +16,9 @@
 import {
   CODE_TYPE,
   CLOSURE_USE,
+  CALLOUT_PROP,
+  calloutDecl,
+  QUOTE_TYPE,
   DEFAULT_BLOCK_TYPE,
   DIVIDER_TYPE,
   DISPLAY_PROP,
@@ -494,6 +497,7 @@ export const ALLOWED_ROW_CHILDREN: ReadonlySet<string> = new Set([
   'left',
   'tx',
   'blk-kind',
+  'blk-callout',
   'blk-tags',
   'blk-embed-body',
   'blk-view-body',
@@ -590,6 +594,39 @@ function makeCodeLangChip(b: Block, onOpen: (blockId: string, anchor: DOMRect, t
 }
 
 /**
+ * **引述块的变体徽章**：图标＋「信息/警告…」，点开七选一切换 `_callout`。
+ *
+ * 住在 `.tx` **之外**、正文槽之前：变体名是 chrome，不是这一行说的话——
+ * 落进 `.tx` 会被 `readRuns` 读回正文、也被光标落到它后面打字（与标签槽同一条病）。
+ * 点击自己收下（同 `makeCodeLangChip` 的 stopPropagation），不把光标/菜单一起做掉。
+ */
+function makeCalloutChip(b: Block, onOpen: (blockId: string, anchor: DOMRect, trigger: HTMLElement) => void): HTMLElement {
+  const raw = prop<string>(b, CALLOUT_PROP)
+  const v = calloutDecl(raw)
+  const el = document.createElement('span')
+  el.className = 'blk-callout'
+  el.contentEditable = 'false'
+  el.dataset.callout = v.id
+  el.setAttribute('role', 'button')
+  const ico = document.createElement('span')
+  ico.className = 'blk-callout-ico'
+  renderIcon(ico, `lucide:${v.icon}`, 'quote', 'sm')
+  const label = document.createElement('span')
+  label.className = 'blk-callout-label'
+  label.textContent = v.label
+  el.append(ico, label)
+  const tip = t('ui.callout.chipTip', { label: v.label })
+  el.dataset.tip = tip
+  el.setAttribute('aria-label', tip)
+  el.addEventListener('click', (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    onOpen(b.id, el.getBoundingClientRect(), el)
+  })
+  return el
+}
+
+/**
  * 一个可见行 → `.blk` 元素。
  *
  * **DOM 契约就在这里**：`data-block-id`／`data-depth`／`data-has-children`／
@@ -626,6 +663,8 @@ export function makeBlockEl(
     /** 空块占位（给了就盖过默认那两句；见 `ViewOpts.placeholder`） */
     placeholder?: string
     ancestors?: readonly string[]
+    /** 最近祖先是引述容器 ⇒ 这一行是引述的一条正文行（画共用竖线） */
+    quoteLine?: string | false
     folded?: FoldState
     gutter?: readonly GutterField[]
     find?: FindBlock
@@ -678,6 +717,12 @@ export function makeBlockEl(
      * 不接 ⇒ 不画徽章（静态投影没有可切换的东西，也不该多一颗死按钮）。
      */
     codeLangMenu?: (blockId: string, anchor: DOMRect, trigger: HTMLElement) => void
+    /**
+     * **引述块变体徽章的落点**（点它换引述/信息/警告…）。
+     * 与 `codeLangMenu` 同一条分工：`view` 只画当前变体，「换变体」是命令（写 `_callout`）。
+     * 不接 ⇒ 不画徽章（静态投影没有可切换的东西）。
+     */
+    calloutMenu?: (blockId: string, anchor: DOMRect, trigger: HTMLElement) => void
     /**
      * **身体块行头那颗折叠按钮的落点**（只折身体，不折子块）。
      * 不接 ⇒ 不画动作组（静态投影不多一颗点了没反应的按钮）。
@@ -807,6 +852,10 @@ export function makeBlockEl(
   if (bodyFolded && !folded) el.dataset.bodyCollapsed = '1'
   if (closure) el.dataset.closure = closure
   if (r.hasChildren) el.dataset.hasChildren = '1'
+  if (opts.quoteLine) {
+    el.dataset.quoteLine = '1'
+    el.dataset.quote = opts.quoteLine
+  }
   // 角色进 DOM：页 / 日记作为**正文第一行**时靠它取样式。
   // 兼位块把**全部角色**写进同一个属性（空格分隔，选择器用 `~=`）——
   // 只写一个会等于按数组顺序裁决，而角色的顺序不承载语义。
@@ -1243,6 +1292,8 @@ export function makeBlockEl(
   let embedMount: (() => void) | null = null
   /** 代码块的语言徽章（行尾，标题行右侧）：装配层接了「换语言」才画 */
   let codeLangChip: HTMLElement | null = null
+  /** 引述块的变体徽章（正文槽之前）：装配层接了「换变体」才画 */
+  let calloutChip: HTMLElement | null = null
   if (isEmbedBlock(b)) {
     /**
      * **露面块**：正文槽空着（它没有用户写的字），身体是另一个编辑宿主。
@@ -1328,6 +1379,12 @@ export function makeBlockEl(
     rule.className = 'divider-rule'
     rule.setAttribute('aria-hidden', 'true')
     tx.appendChild(rule)
+  } else if (blockTypeOf(b) === QUOTE_TYPE) {
+    // 行容器抬头：只画变体徽章，正文槽恒空（正文在子块里，每行一个可引用的块）
+    el.dataset.quoteHead = '1'
+    tx.dataset.quoteHead = '1'
+    tx.setAttribute('aria-hidden', 'true')
+    if (opts.calloutMenu) calloutChip = makeCalloutChip(b, opts.calloutMenu)
   } else {
     fill(tx)
   }
@@ -1435,8 +1492,10 @@ export function makeBlockEl(
     // 身体接进文档之后再画：岛编辑器／ViewHost 的构造会量 DOM
     embedMount?.()
   } else {
-    if (kindBadge) el.append(left!, tx, kindBadge)
-    else el.append(left!, tx)
+    el.appendChild(left!)
+    if (calloutChip) el.appendChild(calloutChip)
+    el.appendChild(tx)
+    if (kindBadge) el.appendChild(kindBadge)
     if (wantBodyFold) {
       el.appendChild(makeBodyFoldToggle(b.id, bodyHidden, (act) => opts.bodyAction!(act, b.id)))
     }

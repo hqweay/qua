@@ -66,6 +66,13 @@ export const DIVIDER_TYPE = 'core/divider'
 
 /** 引文与代码块的类型 id：声明、插入入口与静态投影共用同一份 id */
 export const QUOTE_TYPE = 'core/quote'
+/**
+ * 引述块是**行容器**：它的正文是抬头（可选标题），真正的文字住在子块里——
+ * 每一行一个块，各有 id ⇒ 可单独引用。判据只认类型；外观变体住 `_callout`。
+ */
+export function isQuoteContainer(b: Block): boolean {
+  return blockTypeOf(b) === QUOTE_TYPE
+}
 export const CODE_TYPE = 'core/code'
 
 /**
@@ -85,7 +92,8 @@ export const TYPE_DECLS: Record<string, TypeDecl> = {
    * 正文只读：那一行画的是「这次露面」的抬头与身体，不是用户写的字。
    */
   [EMBED_TYPE]: { id: EMBED_TYPE, children: 'none', text: 'readonly' },
-  [QUOTE_TYPE]: { id: QUOTE_TYPE, children: 'content', text: 'editable' },
+  /** 引述是**行容器**：抬头只画变体徽章，正文住在子块里，每行一个块（可单独引用）。抬头正文只读，不会在徽章后面打字。 */
+  [QUOTE_TYPE]: { id: QUOTE_TYPE, children: 'content', text: 'readonly' },
   [CODE_TYPE]: { id: CODE_TYPE, children: 'content', text: 'editable', multiline: true },
 }
 
