@@ -26,14 +26,14 @@ Interested, have questions, or just want to chat? Join the QQ group "qua 双链�
 
 **Windows desktop app** (x64): download the latest `.exe` installer from [Releases](https://github.com/hqweay/qua/releases) and double-click to install. The installer is unsigned, so if SmartScreen blocks it, click More info → Run anyway.
 
-Both desktop apps use SQLite for storage and full-text search, with a more complete feature set than the browser version. After installing **0.1.0-beta.9**, you can check for updates from the “Qua” menu and download future installers in-app (the final install step is still manual).
+Both desktop apps use SQLite for storage and full-text search, with a more complete feature set than the browser version. After installing **0.1.0-beta.9**, you can check for updates from the "Qua" menu and download future installers in-app (the final install step is still manual).
 
 ### About the beta
 
 Qua is still in beta, so there are a few things worth spelling out up front:
 
 - **Old data may not survive a version upgrade.** When the data format changes, we switch straight to the new format rather than writing a migration. Before a format change, the desktop app automatically leaves a `backups/` snapshot in the repo directory; to be extra safe, copy the entire repo directory ("Documents/Qua") before upgrading.
-- **No import/export or cloud sync yet**—your data lives only on your own computer (or in your browser).
+- **No file import/export or cloud sync yet**—your data lives only on your own computer (or in your browser). Pasting Markdown already works (headings, lists, quotes, and fenced code become blocks), but that is the editor's input surface, not file import.
 - **The interface comes in Chinese and English**, follows your system language by default, and can be switched in Settings.
 - The app checks for a new version every 5 hours and mentions it in the "Qua" menu; installing it is still up to you.
 - If you run into any problems, let us know in [Issues](https://github.com/hqweay/qua/issues).
@@ -66,7 +66,7 @@ The outline is the default shape, not the only one. The direct children of a pag
 - **Tabs**: one child at a time.
 - **Outline**: switch back and the child rows return exactly as they were—every reading renders the same set of children.
 
-Switching views never rearranges content, and changing a view never touches data. The same block stays visible in the body, in a dock window, and in the mount area—same content, same configuration.
+Switching views never rearranges content, and changing a view never touches data. The same block stays visible in the body, in a dock window, and in the mount area—same content, same configuration. A dock window has the same anatomy as the center: the content root is followed by the same query and backlink mount sections, not a body-only snapshot.
 
 ![Mind map: the root sits in the middle and branches spread to both sides; nodes are the blocks themselves, click to jump there](shots/view-思维导图.png)
 
@@ -76,7 +76,15 @@ Switching views never rearranges content, and changing a view never touches data
 
 **Write**: the body is an editable tree of blocks. Bold, italic, highlight, inline code, text color, and background color all travel with the text; `[[references]]`, `#tags`, `@names`, external links, and images are self-contained inline units, so adding or deleting them never damages the characters nearby—deleting at the end of a line won't break a reference into stray characters, and deleting text won't turn a tag into a handful of `#` symbols. Shortcuts step aside during IME composition, so Chinese input is never interrupted. Select a span of text to add a **note** (comments follow the text) or set a color from the selection bubble; cross-block selections under the same parent block can be deleted or edited directly (the first and last paragraphs merge into one). Select several blocks to drag them as a group, delete them in bulk, or indent them—`⌘⇧A` upgrades "this line's text" to "these blocks".
 
-![Slash menu: type / at the start of a line to insert a to-do, query block, reference, date, or image in place](shots/overlay-斜杠菜单.png)
+**Callouts** are line-by-line containers: the header only shows the tone, and clicking it switches among seven tones (quote / info / warning / error / tip / important / note). Every line is its own block with its own id and can be referenced separately; indent one level and it becomes an ordinary block, while the tone's rail runs through the whole group. The tone is a **value**, not a type—a query can filter "callout type = warning" in one condition. The slash menu (/quote), the block menu ("Turn into ▸ Quote"), and pasting Markdown's `>` all produce the same shape.
+
+**Code blocks** show their language in a badge on the title row; click the badge to switch (59 languages have real syntax and are searchable). The editing surface is CodeMirror: syntax highlighting, auto-indent, bracket matching, in-block search (`⌘F`), multiple selections, and IME, with undo shared with the rest of the app. The code lives in the block's body and the title is its name; the body folds on its own while the title and language badge stay put. Code blocks hold no bold, references, or tags—it is code, not rich text.
+
+**Paste Markdown** is an explicit command (`⌘P` → "Paste Markdown", or the block menu): headings become a tree of parent and child blocks, lists become indented blocks, `>` becomes a callout, fenced code becomes a code block, and bold / italic / strikethrough / links / inline code land as usual. Syntax the model can't hold yet—tables, task lists—is kept verbatim with a one-line notice: nothing is silently swallowed and nothing pretends to have converted. The default `⌘V` is untouched.
+
+**Body folding** is a second fold position: the button on the row head collapses only the body while the children stay; the triangle on the left collapses the whole subtree. Code blocks and query blocks have bodies, and so can ordinary blocks; the two folds are independent.
+
+![Slash menu: type / at the start of a line to insert a to-do, callout, code block, reference, date, or image in place](shots/overlay-斜杠菜单.png)
 
 **Capture**: quick notes land in today's daily note; `⌘T` brings you back to today any time, `⌘⇧R` reviews the last three days (`⌘⌥⇧R` the last seven); `@` mentions pages and blocks, creating a page on the spot if no page with that name exists; every daily note and page can be given an **icon and color**, so you can tell at a glance what's what. The daily-note host also carries a few built-in sections: references, created today, notes, and mentions.
 
@@ -118,13 +126,15 @@ Tags answer "whose content is this"; field values answer "what does this content
 | Key | What it does |
 |---|---|
 | `Enter` / `⇧Enter` | create the next sibling / a child at the insertion point |
+| `Tab` / `⇧Tab` | indent / outdent |
 | `⌥Enter` (`Alt+Enter` on Windows) | create a sibling at the current block's parent level |
 | `⌘⇧N` | new page (asks for a name first; an existing page with that name opens instead of creating a duplicate) |
-| `Tab` / `⇧Tab` | indent / outdent |
 | `⌘⏎` | toggle to-do completion |
 | `⌘B` / `⌘I` / `⌘E` / `` ⌘` `` | bold / italic / highlight / inline code (select text first) |
 | `⌘⇧K` / `@` / `#` | insert an inline reference / reference a page or block / insert an inline tag |
-| `⌘.` | fold / unfold the current block |
+| `⌘.` | fold / unfold the current block's children |
+| `/` | insert menu at line start: to-do, callout, code block, query, image… |
+| `⌘F` | inside a code block = in-block search; elsewhere = app search |
 | `⌘Z` / `⌘⇧Z` | undo / redo (while the editor has focus) |
 | `⌘⇧A` | select this line → these blocks |
 | `⌘P` | command palette (also holds actions without a keybinding; palette commands can all be assigned keys in Settings) |
@@ -135,6 +145,8 @@ Tags answer "whose content is this"; field values answer "what does this content
 | `⌘⇧?` | binding table (keymap / menu / slash / selection; commands without bindings are in `⌘P`) |
 
 Mouse: the block handle sits to the left of each row and turns into a drag grip on hover; left-click focuses, right-click opens the menu, drag reorders. `Shift+click` opens a window in the side dock, `⌥+click` shows property details in place, and `⌘⌥+click` (`Ctrl+Alt+click` on Windows/Linux) opens the block in its parent and scrolls to it. Rows in record views (table / cards / list / calendar) open the same block menu on right-click—the menu opens for the block you clicked, deletion and copying are undoable, and only actions that make sense for a block appear (indent/fold and other editor-dependent ones don't).
+
+Callout behavior lives in the header: click the tone badge to switch variants; the slash menu, block menu, and Markdown paste all create them. Code-block behavior lives in the title row: click the language badge to switch languages; the row-head button folds only the body.
 
 ---
 
@@ -148,11 +160,13 @@ Mouse: the block handle sits to the left of each row and turns into a drag grip 
 
 ## Current limitations
 
-- No import/export (Markdown and other formats are not supported yet) and no cloud sync.
-- The desktop app is unsigned (on macOS, right-click → Open the first time). It checks for a new version every 5 hours and mentions it in the “Qua” menu; from 0.1.0-beta.9 onward it can download the installer in-app, but installing it (and the final macOS drag step) is still up to you. Back up the library directory before upgrading.
+- No file import/export (Markdown paste is the editor's input surface, not file import) and no cloud sync.
+- The desktop app is unsigned (on macOS, right-click → Open the first time). It checks for a new version every 5 hours and mentions it in the "Qua" menu; from 0.1.0-beta.9 onward it can download the installer in-app, but installing it (and the final macOS drag step) is still up to you. Back up the library directory before upgrading.
 - Cross-block merging has unfinished edges: a cross-block selection that spans different parents, or whose first block is a section root (the first level of a page or daily note), can't be deleted or replaced yet.
 - Inline assets and attachments currently accept images only; an attachment value can also be an external link.
 - Automation actions are a small closed set of built-in operations—no scripting. Richer workflows will have to wait for a plugin system.
+- Code blocks are an editor, not an IDE: no completion, diagnostics, formatting, or language services, and no rich text inside code.
+- A callout's header is a tone badge, not an editable title; to name one, put the name in one of its lines.
 - The mind map reads child blocks only (query hits are a flat batch with no root), and does not fold or drag yet.
 - The interface is available in Chinese and English (system language by default, switchable in Settings); there is no mobile app, collaboration, or plugin system, and none of those are near-term goals.
 
