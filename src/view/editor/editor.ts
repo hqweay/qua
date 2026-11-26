@@ -137,7 +137,7 @@ import { AliasClaimError } from '../../core/kb/unsupported.ts'
 import { ensureTaskStatusInTx } from '../../core/kb/ensure-task.ts'
 // 用户可见文案一律走 t
 import { t } from '../../core/infra/msg.ts'
-import { ALLOWED_ROW_CHILDREN, EDIT_ISLAND_ATTR, inlineBodyKind, isReadonlyBlock, rowHasEmbedViewBody, type BlockAction } from './block-dom.ts'
+import { ALLOWED_ROW_CHILDREN, EDIT_ISLAND_ATTR, inTitleGap, inlineBodyKind, isReadonlyBlock, rowHasEmbedViewBody, type BlockAction } from './block-dom.ts'
 import { ReloadPolicy } from './reload-policy.ts'
 import { spanAt, type PlainSpan } from './hit-paint.ts'
 import { AnnoHover, type AnnoHitSpan } from './anno-hover.ts'
@@ -751,7 +751,12 @@ export class BlockEditor {
   private edited = new Set<string>()
   /** 「点空白建块」的监听面：比 container 大一圈，见 `ViewOpts.blankArea` */
   blankArea: HTMLElement
-  private allowBlankCreate: boolean
+  /**
+   * 这一面允不允许「点空白建块」。
+   * ⚠️ 公开：渲染层要按它决定**页/日记根行有没有标题-正文气口**（`data-title-gap`），
+   *    连离屏预量那条路径也要带上——否则量出来的行高会比真行短 16px。
+   */
+  readonly allowBlankCreate: boolean
   /** 关掉的实例不许删装载根；协作对象 `StructOps.remove` 也要读它 */
   allowRootRemove: boolean
   /** 删空窗口时补一块空块；协作对象 `StructOps.remove` 也要读它 */
@@ -3515,7 +3520,7 @@ export class BlockEditor {
     const root = secId ? this.doc.roots.find((r) => r.id === secId) : this.doc.roots[this.doc.roots.length - 1]
     if (!root) return false
     /**
-     * 目标段的**第一条/最后一条**可见行（column ＝ 该段；row/grid ＝ 该列）。
+     * 目标段的**最后一条**可见行（column ＝ 该段；row/grid ＝ 该列）。
      *
      * ⚠️ 段内空白**也算**（2026-11-26 修订）：判据从「必须在最后一行之下」放宽成
      *    「在这一段里、且不在某一行上」。原来那条只在 column 下才等价于「文档底部」，
@@ -3523,33 +3528,36 @@ export class BlockEditor {
      *    被直接判成不建块。真正的防误触目标只有一条：**别把行与行之间的缝当成空白**
      *    （点行与行之间该是那一行的正文），所以判据落在「点的位置有没有命中某一行」。
      */
-    let first: VisibleRow | undefined
     let last: VisibleRow | undefined
     let cur = ''
     for (const r of rows) {
       if (r.depth === 0) cur = r.block.id
-      if (secId === '' || cur === secId) {
-        if (!first) first = r
-        last = r
-      }
+      if (secId === '' || cur === secId) last = r
     }
     if (!last) return false
-    /** 点在**某一行自己的矩形里** ⇒ 那是行内的事（选字/落光标），不是空白 */
+    /**
+     * 点在**某一行自己的矩形里** ⇒ 那是行内的事（选字/落光标），不是空白。
+     * ⚠️ 页/日记根行下面的**标题-正文气口**不算这一行的内容（`inTitleGap`）：
+     *    它是空白，也是「在第一块之前建块」的命中面。
+     */
     const onRow = rows.some((r) => {
       const el = this.blockEl(r.block.id)
       if (!el) return false
+      if (inTitleGap(el, clientY)) return false
       const box = el.getBoundingClientRect()
       return clientY >= box.top && clientY <= box.bottom
     })
     if (onRow) return false
     /**
-     * **上边缘 vs 下边缘**：点在第一条可见行之上＝上边缘，其余空白（末尾/行缝）＝下边缘。
+     * **上边缘只有一条**：页/日记根行下面的**标题-正文气口**。
      *
-     * ⚠️ 第一行没挂 DOM（虚拟化切片/离屏）⇒ 不判上边缘。点的是**这一屏**的空白，
-     *    不是文档头；拿不到几何就当旧行为（末尾），不能猜。
+     * 标题**上方**那条文档头留白不再是入口（用户口径：它只是页边距，点它不像
+     * 「在正文上面建块」）⇒ 点了**什么也不做**，不悄悄跑到末尾去建。
+     * 根行没挂 DOM（虚拟化/离屏）时判不出口袋，按旧行为归末尾。
      */
-    const firstEl = first ? this.blockEl(first.block.id) : undefined
-    const head = firstEl ? clientY < firstEl.getBoundingClientRect().top : false
+    const rootEl = this.blockEl(root.id)
+    if (rootEl && clientY < rootEl.getBoundingClientRect().top) return false
+    const head = rootEl ? inTitleGap(rootEl, clientY) : false
 
     this.beginUndoEntry()
     unfoldBlock(this.doc, root.id)

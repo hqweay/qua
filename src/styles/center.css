@@ -607,10 +607,11 @@
   ⚠️ 不把 `#editor` 撑满视口（曾试过 `min-height: calc(100vh - …)`，探针实测
      空态会多出一条滚动条：scrollH 757 > clientH 720）⇒ 空白由 `#scroll` 承担，
      监听面也放在 `#scroll` 上，不需要改布局高度。
-  ⚠️ 不画常驻 `+` 图标（那是可发现性成本）：悬停浮现一条极弱的线即可。
+  ⚠️ 不画**常驻** `+`：悬停才现——一条极弱的线 ＋ 一颗淡 `+`（与标题-正文气口那颗
+     同一个块标列、同一档强度）。
 */
 #editor::after {
-  content: '';
+  content: '+';
   display: block;
   /*
     这一格有三个用途，共用同一段空白：
@@ -623,11 +624,22 @@
       内容收起，这段空白替它托住页高，滚动位原地不动。设计档即下面的兜底 200px。
   */
   min-height: var(--doc-tail-h, 200px);
+  /*
+   * 「在这里接着写」那一颗：与标题-正文气口同一列（正文深度 1 的块标列）、同一档强度。
+   * 平时 `color: transparent`（不常驻）；悬停编辑器时与下面那条线一起浮现。
+   */
+  padding-left: calc(var(--ui-blk-gutter) + var(--ui-indent) + var(--ui-marker-slot) / 2);
+  color: transparent;
+  font-size: var(--ui-fs-md);
+  line-height: 1;
   border-bottom: 1px solid transparent;
-  transition: border-color var(--ui-dur-1) ease;
+  transition:
+    border-color var(--ui-dur-1) ease,
+    color var(--ui-dur-1) ease;
 }
 #editor:hover::after {
   border-bottom-color: var(--ui-border);
+  color: var(--ui-text-tertiary);
 }
 @media (prefers-reduced-motion: reduce) {
   #editor::after {

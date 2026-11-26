@@ -14,7 +14,7 @@
  *   2. **键位一个都不在这里处理**——全部交给绑定表，这里只碰「输入与拖拽」。
  */
 import { bindDropTarget, isRefDrag, noteDragRef, setDragBlock, zoneHint, zoneRefHint } from '../dnd.ts'
-import { EDIT_ISLAND_ATTR, inForeignIsland as foreignIsland } from './block-dom.ts'
+import { EDIT_ISLAND_ATTR, inForeignIsland as foreignIsland, inTitleGap } from './block-dom.ts'
 import { refsFromHtml } from './clipboard-flavor.ts'
 import type { ClipboardRefs } from './clipboard-flavor.ts'
 import type { TriggerChar } from '../../core/infra/trigger.ts'
@@ -897,7 +897,13 @@ export function bindEditorEvents(br: EditorBridge): () => void {
      * ⚠️ 这条对块标同样致命（块标＝zoom）：所以 `.blk` 与 `#crumbs-trail` 都要进判据。
      */
     const path = e.composedPath()
-    const inBlock = path.some((n) => n instanceof HTMLElement && n.classList.contains('blk'))
+    /**
+     * **标题与正文之间的气口不是「行内」**：它是根行下面的 padding，点它要能
+     * 建块。判据（`inTitleGap`）只认页/日记根行的那条带子；其余 `.blk` 一律算行内。
+     */
+    const inBlock = path.some(
+      (n) => n instanceof HTMLElement && n.classList.contains('blk') && !inTitleGap(n, e.clientY),
+    )
     const inCrumb = path.some((n) => n instanceof HTMLElement && n.id === 'crumbs-trail')
     /**
      * **别的视图**（挂载区 / 查询结果 / 反链）各有自己的编辑器实例，而它们的 DOM 可能落在

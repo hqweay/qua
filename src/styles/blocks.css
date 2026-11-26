@@ -744,9 +744,11 @@
   只 column（单列流）给段盒——row/grid 下段已经是列，列间由容器的 gap 分开，
   再画一条线就是重复表达。
 
-  ⚠️ **段的呼吸写在段（`.sec`）上，不写在块上**：块的 padding-block／margin 必须
-     为 0（间距所有权归容器）。`.sec` 缺省是 `display: contents`（零几何影响），
+  ⚠️ **段的呼吸写在段（`.sec`）上，不写在块上**：块与块之间的 padding-block／margin
+     必须为 0（间距所有权归容器）。`.sec` 缺省是 `display: contents`（零几何影响），
      这里只把**日记段**变成真实盒子，其它段仍不占布局。
+     ⚠️ 唯一例外是下面那条**标题与正文之间的交互气口**：它不是块间距，是命中面，
+     而且必须算进行高（虚拟化的实测高与总高才对得上）——所以它只能住 root 行的 padding。
   ⚠️ 段首留白是「一天」的边界，不是块间距：日期行离上一天的挂载区太近时，
      两天的内容会读成同一段。线画在段顶，留白在线下——日期行因此仍贴着
      自己那一天的内容，而不是飘在两段中间。
@@ -759,6 +761,54 @@
   margin-top: var(--ui-gap-6);
   padding-top: var(--ui-gap-4);
   border-top: 1px solid var(--ui-border-subtle);
+}
+/*
+ * **标题与正文之间的气口**（页/日记根行下面那 16px）。
+ *
+ * 为什么它住 root 行的 `padding-bottom` 而不是 `.sec`：
+ *   · 它是**命中面**——点它 = 在第一块之前建块（判据在 `clickEmptyArea`；
+ *     `editor-events` 的 `inBlock` 也把它当空白，否则点在行里的事件会被吞掉）；
+ *   · 它必须**算进行高**（虚拟化按实测行高量总高）；`margin` 不进
+ *     `getBoundingClientRect`，量出来会短一截。
+ *
+ * 悬停 root 行（或正文第一块）时在**正文块标列**（根深度 + 1）现一颗淡「＋」：
+ * 空白不会自己说明它可以点。伪元素不吃指针事件——点「＋」就是点那条气口。
+ *
+ * 谁有这一格**由渲染层打属性**（`data-title-gap="1"`）：只给主编辑面的页/日记
+ * 根行（`makeBlockEl` 的 `opts.titleGap`）。用属性而不是 `#editor` 选择器，
+ * 是因为离屏预量用的临时容器不是 `#editor`——选择器匹配不到会把行高量短 16px，
+ * 虚拟化的总高跟着漂。判据的另一半在 `block-dom.ts` 的 `inTitleGap`。
+ */
+.blk[data-title-gap='1'] {
+  padding-bottom: var(--ui-gap-5);
+}
+.blk[data-title-gap='1']::after {
+  content: '+';
+  position: absolute;
+  left: calc(var(--ui-blk-gutter) + var(--ui-indent) + var(--ui-marker-slot) / 2);
+  bottom: 8px;
+  transform: translate(-50%, 50%);
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--ui-radius-pill);
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-md);
+  line-height: 1;
+  opacity: 0;
+  transition: opacity var(--ui-dur-1) ease;
+  pointer-events: none;
+}
+.blk[data-title-gap='1']:hover::after,
+.sec:has(> .blk[data-title-gap='1'] + .blk:hover) > .blk[data-title-gap='1']::after {
+  opacity: 0.6;
+}
+@media (prefers-reduced-motion: reduce) {
+  .blk[data-title-gap='1']::after {
+    transition: none;
+  }
 }
 .blk.drag-src {
   opacity: var(--ui-faint);

@@ -449,6 +449,25 @@ export function inForeignIsland(ev: Event, own: Element | null): boolean {
 }
 
 /**
+ * **点在「标题与正文之间的气口」里吗**（页/日记根行下面那 16px）。
+ *
+ * 那段 padding 属于 root 行，但**不是标题的内容**：它是「在第一块之前建块」的
+ * 命中面。事件层（`inBlock`）与编辑器（`clickEmptyArea` 的 `onRow`）都要把这条
+ * 带子当空白 —— 判据只写这一份。
+ *
+ * 契约只有一条：渲染层给主编辑面的页/日记根行打 `data-title-gap="1"`
+ * （`makeBlockEl` 的 `opts.titleGap`；查询结果/挂载区的 depth 0 行不打）。
+ * 高度从 computed style 读，别在 JS 里再抄一个 16。
+ */
+export function inTitleGap(el: HTMLElement, clientY: number): boolean {
+  if (el.dataset.titleGap !== '1') return false
+  const pad = Number.parseFloat(getComputedStyle(el).paddingBottom) || 0
+  if (pad <= 0) return false
+  const box = el.getBoundingClientRect()
+  return clientY > box.bottom - pad && clientY <= box.bottom
+}
+
+/**
  * **一个 `.blk` 允许有哪些直接子节点** —— 这是行的 DOM 契约清单，只有渲染层能增项。
  *
  * 为什么需要它：整片编辑区是**一个** contenteditable 容器，所以行容器 `.blk` 自己也可编辑。
@@ -638,6 +657,14 @@ export function makeBlockEl(
      */
     defBody?: (b: Block, into: HTMLElement) => void
     /**
+     * **页/日记根行下面要不要留「标题-正文气口」**（主编辑面给 `true`）。
+     *
+     * 它是一条 16px 的 padding，也是「在第一块之前建块」的命中面（见 `inTitleGap`
+     * 与 `blocks.css`）。用参数而不是 `#editor` 选择器：离屏预量用的是文档外的临时
+     * 容器，选择器匹配不到就会把行高量短 16px，虚拟化的总高跟着漂。
+     */
+    titleGap?: boolean
+    /**
      * **块下属性行**：有值、且没画在块标后的属性（派生见 `belowFieldsFor`）。
      *
      * `view` 只交代「这一行有这一格」并把它算进高度；值文本与点击（开属性面板）
@@ -741,6 +768,14 @@ export function makeBlockEl(
   // ⚠️ 这只是**外观**差异，语义上它仍是一块（2026-10-20 去掉「标题」概念后的口径）
   const roles = identityTags(b)
   if (roles.length) el.dataset.role = roles.join(' ')
+  /**
+   * **标题-正文气口**：只给主编辑面的页/日记根行（`opts.titleGap` 由那台编辑器给）。
+   * 用属性而不是 `#editor` 选择器：离屏预量的临时容器不是 `#editor`，选择器匹配不到
+   * 就会把行高量短 16px（虚拟化的总高跟着漂）。判据的另一半在 `inTitleGap`。
+   */
+  if (opts.titleGap === true && r.depth === 0 && (roles.includes('page') || roles.includes('journal'))) {
+    el.dataset.titleGap = '1'
+  }
   el.style.setProperty('--depth', String(r.depth))
 
   /**

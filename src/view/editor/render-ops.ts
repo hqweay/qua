@@ -1069,6 +1069,11 @@ export class RenderOps {
         ),
       {
         single,
+        /**
+         * **标题-正文气口**：只有「点空白能建块」的编辑面（主编辑面）才给。
+         * 离屏预量也走这个 wrapper ⇒ 量到的行高与真行一致（含那 16px）。
+         */
+        titleGap: this.ed.allowBlankCreate,
         ancestors: this.ancestors.get(r.block.id) ?? [],
         folded: foldStateOf(this.ed.doc),
         // 第二层：只收身体那张表（`bodyFolded`），与 `folded` 一起决定身体可不可见
