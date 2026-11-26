@@ -15,6 +15,7 @@
  */
 import { EMBED_TYPE } from '../views/embed.ts'
 import {
+  CALLOUT_PROP,
   DEFAULT_BLOCK_TYPE,
   blockTypeOf,
   hasList,
@@ -167,6 +168,8 @@ export function setBlockType(b: Block, typeId: string): boolean {
   if (typeId !== CODE_TYPE) delete props._lang
   // 代码文档只对代码骨架有意义；换回普通骨架后它就成了看不见的旧解释
   if (typeId !== CODE_TYPE) delete props._code
+  // 引述变体同理：转回正文后它只是一份没人读的旧解释
+  if (typeId !== QUOTE_TYPE) delete props[CALLOUT_PROP]
   // 属性袋也不留空壳：`{}` 与「没有属性」在快照比较里是两种东西
   if (Object.keys(props).length === 0) delete b.props
   else b.props = props
@@ -176,8 +179,17 @@ export function setBlockType(b: Block, typeId: string): boolean {
 /**
  * 换骨架的准入：身份块的名字与日记的日期都不住在正文里，改 `_type` 会换掉渲染骨架
  * 却改不动那一格内容；只读类型根本没有可写正文。入口与命令处理器共用这一份判据。
+ *
+ * 引述是**行容器**：抬头只读（变体徽章），但它的子块是可写内容，换骨架仍有意义
+ * （例如转回正文摘掉竖线）。否则引述一旦造成就没有回头路。
  */
 export function canConvertBlockType(b: Block): boolean {
   // 查询/自动化是**有身体的对象**：换骨架会留下一份读不出来的旧配置（条件/定义没有落点）
-  return canWriteText(b) && !isQueryBlock(b) && !isAutomationBlock(b) && !hasList(b, 'page') && !hasList(b, 'tag')
+  return (
+    (canWriteText(b) || isQuoteContainer(b)) &&
+    !isQueryBlock(b) &&
+    !isAutomationBlock(b) &&
+    !hasList(b, 'page') &&
+    !hasList(b, 'tag')
+  )
 }

@@ -21067,7 +21067,7 @@ await check('T199 关联型引用默认折叠、传递型默认摊开：引用�
 
 await check(
   'T200 露面行的块标回左边且绑源：镜像＝岛首行顶到块标列（宿主行无 chrome）；投影＝画绑源块标；'
-  + '右键源行菜单带「移除这次露面」；查询块块标是漏斗',
+  + '右键露面身体里任意一行菜单都带「移除这次露面」；查询块块标是漏斗',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
     await page.evaluate(() => window.__qua.quiet(true))
@@ -21109,7 +21109,7 @@ await check(
     }, fx.host)
     assert(align !== null && align.dx <= 2, `岛首行块标与普通行块标同一列：dx=${align?.dx}`)
 
-    /* ── 右键岛里的源行 ⇒ 菜单开在源上且带露面段；岛内深层行不带 ── */
+    /* ── 右键岛里的任意一行（源行或深层行）⇒ 菜单都带露面段（整格身体都是这次露面） ── */
     const ctxMenu = (sid, inIsland) =>
       page.evaluate(
         ({ sid, inIsland }) => {
@@ -21126,8 +21126,8 @@ await check(
     await page.keyboard.press('Escape')
     const deepMenu = await ctxMenu(fx.c1, true)
     assert(
-      !deepMenu.some((t) => t?.includes('移除这次露面')),
-      `右键岛内深层行不该带露面段（它是源子树自己的内容）：${JSON.stringify(deepMenu)}`,
+      deepMenu.some((t) => t?.includes('移除这次露面')),
+      `右键岛内深层行同样在这一次露面的身体里 ⇒ 菜单也带露面段：${JSON.stringify(deepMenu)}`,
     )
     await page.keyboard.press('Escape')
 
@@ -34751,7 +34751,7 @@ await check(
     const gap = await page.evaluate(() => {
       const el = document.querySelector('#editor .sec > .blk[data-depth="0"]')
       const r = el.getBoundingClientRect()
-      const tail = getComputedStyle(document.querySelector('#editor .sec-mount'), '::before')
+      const tail = getComputedStyle(document.querySelector('#editor > .sec > .sec-mount'), '::before')
       return {
         pad: Number.parseFloat(getComputedStyle(el).paddingBottom) || 0,
         bottom: r.bottom,
@@ -34772,7 +34772,7 @@ await check(
     )
     assert(Number(gapHover) > 0.3, `悬停标题行应现「＋」：${gapHover}`)
     const tailHover = await page.evaluate(() =>
-      getComputedStyle(document.querySelector('#editor .sec-mount'), '::before').opacity,
+      getComputedStyle(document.querySelector('#editor > .sec > .sec-mount'), '::before').opacity,
     )
     assert(Number(tailHover) > 0.3, `悬停编辑器时查询面板上方的「＋」也应现：${tailHover}`)
     // 悬停正文第一块时也现（那颗「＋」贴着它，用户的手多半在它上面）
@@ -34821,7 +34821,7 @@ await check(
 
     // 下边缘：**查询面板上方**那条缝（那颗＋的位置），不是面板下面的文档尾
     const panel = await page.evaluate(() => {
-      const p = document.querySelector('#editor .sec-mount .mount')
+      const p = document.querySelector('#editor > .sec > .sec-mount .mount')
       return { gapY: p.getBoundingClientRect().top - 12 }
     })
     await page.mouse.click(400, panel.gapY)

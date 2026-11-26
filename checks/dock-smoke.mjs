@@ -645,6 +645,11 @@ await check('A2 通用块样式 padding-block / margin 为 0（S2：豁免只有
    *    ⚠️ 2026-10-20：**甲/乙/丙三皮肤整体删除**，内建只有一种样式
    *       ⇒ 原先「甲必须全 0、丙卡片允许 inset」的两段测量失去对象。
    *       现在的口径更简单也更严：**单一样式下所有块都该全零**（没有卡片渲染器了）。
+   *
+   *    ⚠️ 2026-11-26：**标题-正文气口**（页/日记根行的 `data-title-gap`）是本口径下
+   *       第一个**渲染器 inset**：它是一条可点的命中面（点它＝在第一块之前建块），
+   *       必须算进行高，所以只能住 `padding-bottom`（见 `styles/blocks.css` 那段论证）。
+   *       豁免只给它：仍要求 margin 为 0，且只有根行带这一格；别的块照旧全零。
    */
   const read = () =>
     page.evaluate(() =>
@@ -652,6 +657,7 @@ await check('A2 通用块样式 padding-block / margin 为 0（S2：豁免只有
         const s = getComputedStyle(el)
         return {
           depth: el.dataset.depth,
+          titleGap: el.dataset.titleGap === '1',
           pad: parseFloat(s.paddingTop) + parseFloat(s.paddingBottom),
           mar: parseFloat(s.marginTop) + parseFloat(s.marginBottom),
         }
@@ -659,12 +665,14 @@ await check('A2 通用块样式 padding-block / margin 为 0（S2：豁免只有
     )
 
   const all = await read()
-  const bad = all.filter((x) => x.pad > 0.5 || x.mar > 0.5)
+  const bad = all.filter((x) => (x.titleGap ? x.pad > 16.5 || x.mar > 0.5 : x.pad > 0.5 || x.mar > 0.5))
   assert(all.length > 0, '应有块')
-  assert(bad.length === 0, `块的 padding-block/margin 必须为 0（间距归容器）：${JSON.stringify(bad.slice(0, 4))}`)
+  assert(bad.length === 0, `块的 padding-block/margin 必须为 0（只在标题-正文气口留一格）：${JSON.stringify(bad.slice(0, 4))}`)
+  const gaps = all.filter((x) => x.titleGap).length
+  assert(gaps > 0, '主编辑面的页根行应带标题-正文气口（缺了行高会短 16px）')
 
   await ctx.close()
-  return `单一内建样式：${all.length} 块全零 padding-block/margin（三皮肤已删）`
+  return `单一内建样式：${all.length} 块全零 padding-block/margin（${gaps} 条根行的气口是唯一 inset）`
 })
 
 /* ---------------------------------------------------------------- A3 */

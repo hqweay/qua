@@ -353,7 +353,12 @@ function applyBlockType(blockId: string, typeId: string, lang?: string): boolean
 function convertToQuote(blockId: string, variant?: string): boolean {
   const b = findInForest(ws.blocks, blockId)
   if (!b || !canConvertBlockType(b) || blockTypeOf(b) === QUOTE_TYPE) return false
-  const carried = plainText(b.content)
+  /**
+   * 代码块的正文在身体（`_code`），`content` 只是标题。换骨架会清掉 `_code`
+   * （参数只对原骨架有意义），所以搬进首行前要按来源选对那一格——否则
+   * 一次「转为引文」会把整段代码静默丢掉，撤销之外没有读路径能找回来。
+   */
+  const carried = blockTypeOf(b) === CODE_TYPE ? codeTextOf(b) : plainText(b.content)
   const sel = getEd().sel
   const r = txRun((tx) => {
     tx.patch(blockId, (x) => {
