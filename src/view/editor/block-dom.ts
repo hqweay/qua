@@ -664,7 +664,7 @@ export function makeBlockEl(
     placeholder?: string
     ancestors?: readonly string[]
     /** 引述容器的变体与深度：抬头与其正文行共用一条竖线、同一档缩进 */
-    quoteCtx?: { variant: string; depth: number } | null
+    quoteCtx?: { variant: string; depth: number; direct: boolean } | null
     folded?: FoldState
     gutter?: readonly GutterField[]
     find?: FindBlock
@@ -853,10 +853,11 @@ export function makeBlockEl(
   if (closure) el.dataset.closure = closure
   if (r.hasChildren) el.dataset.hasChildren = '1'
   if (opts.quoteCtx) {
-    // 正文行：与抬头共用一条竖线；把它按容器的深度画，不按自己的深度另起一档
-    el.dataset.quoteLine = '1'
+    // 竖线贯穿整组：所有后代都带变体与容器深度（CSS 用它把竖线画在同一列）
     el.dataset.quote = opts.quoteCtx.variant
     el.style.setProperty('--quote-depth', String(opts.quoteCtx.depth))
+    // 只有直接子块是「引述的一行」：平铺、无块标；孙块按普通块展示
+    if (opts.quoteCtx.direct) el.dataset.quoteLine = '1'
   } else if (blockTypeOf(b) === QUOTE_TYPE) {
     // 抬头本身：变体与深度同源（CSS 用它把竖线画在正文行同一列）
     el.dataset.quote = prop<string>(b, CALLOUT_PROP) ?? 'quote'

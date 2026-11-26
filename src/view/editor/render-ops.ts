@@ -1178,7 +1178,13 @@ export class RenderOps {
           for (let i = chain.length - 1; i >= 0; i--) {
             const a = this.ed.store.find(chain[i]!)
             if (!a || blockTypeOf(a) !== QUOTE_TYPE) continue
-            return { variant: prop<string>(a, CALLOUT_PROP) ?? 'quote', depth: i }
+            // 只有**直接子块**是引述的一行（平铺、无块标）；更深的后代按普通块画，
+            // 但仍带 data-quote 让竖线贯穿整组。
+            return {
+              variant: prop<string>(a, CALLOUT_PROP) ?? 'quote',
+              depth: i,
+              direct: i === chain.length - 1,
+            }
           }
           return null
         })(),

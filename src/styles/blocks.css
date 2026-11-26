@@ -791,8 +791,7 @@
 .blk[data-quote='important'] { --callout-c: var(--ui-ink-violet); }
 .blk[data-quote='note'] { --callout-c: var(--ui-ink-gray); }
 /* 这一列 = 容器深度的正文左缘（gutter + depth*indent），与徽章的竖线同一 x */
-.blk[data-quote-head]::before,
-.blk[data-quote-line]::before {
+.blk[data-quote]::before {
   content: '';
   position: absolute;
   top: 0;
