@@ -53,6 +53,12 @@ export const SEED_EN: Record<string, string> = {
   '任务': 'Task',
   '发布': 'Publish',
   '证据': 'Evidence',
+  '这一版多了两种行：引述块有七种语气，代码块常显语言徽章——斜杠菜单里都能造。':
+    'This build adds two new row kinds: quote callouts with seven tones, and code blocks with an always-visible language badge — both live in the slash menu.',
+  '粘一段 Markdown（标题、列表、引述、代码围栏）会直接变成一组块，而不是一坨纯文本。':
+    'Paste a Markdown snippet (headings, lists, quotes, fenced code) and it becomes a tree of blocks instead of one blob of text.',
+  '块的身体能单独折起来：子块还在，只收住正文那一段。':
+    'A block body can fold on its own: the children stay, and only the body is collapsed.',
   '这一屏全是演示内容，但**真的能改**：关掉重开，改动还在。':
     'This whole screen is demo content, but **you can really edit it**: close and reopen, and your changes are still there.',
   '屏幕底部那条「今天的待办」是一条查询：自动收集今天还没做完的事。':
@@ -155,6 +161,17 @@ export const SEED_EN: Record<string, string> = {
     'A sentence with four formats: **a bold conclusion**, *an italic qualifier*, ==a highlighted keyword==, and `inline code`.',
   '标记顺序不能错：==先高亮== 再 **后加粗**，两个区间都得落在自己那几个字上。':
     'Mark order matters: ==highlight first== then **bold second** — each range must land on exactly its own words.',
+  '引述是行容器：抬头只画语气，每一行都是独立的块，能单独引用。':
+    'A callout is a row container: the header only shows the tone, and every line is its own block that can be referenced separately.',
+  '这一行有自己的 id——行尾写引用，就能跳回这一行本身。':
+    'This line has its own id — reference it from another line and you can jump back to this very row.',
+  '点抬头换语气：引述／信息／警告／错误／提示／重要／注意。':
+    'Click the header to switch tones: quote / info / warning / error / tip / important / note.',
+  '变体是值，不是另一个类型：查询可以按「引述类型」把警告筛出来。':
+    'The tone is a value, not another type: a query can filter "Callout type = warning".',
+  '代码块把语言写在徽章上，点它就能换；59 门有语法，可搜。':
+    'A code block shows its language in a badge; click it to switch. 59 languages have real syntax and are searchable.',
+  '一段代码': 'A Code Sample',
   '这一页引用了 [[欢迎使用相]]——那一页右槽的「反链」里，来源就是这一页。':
     'This page references [[Welcome to Qua]] — in that page\'s "Backlinks" panel, this is the source.',
   '一行里混着引用与图片也能继续打字：[[欢迎使用相]] ![[写作-第二张.png]]':
@@ -251,6 +268,12 @@ export const SEED_EN: Record<string, string> = {
   '视图显示与排序': 'View Display and Sorting',
   '任何块都能配看法': 'Views on Any Block',
   '新子块自动打标签': 'Auto-tag New Children',
+  '引述块': 'Callout Blocks',
+  '代码块': 'Code Blocks',
+  '粘贴 Markdown': 'Paste Markdown',
+  '正文折叠': 'Body Folding',
+  '块窗口': 'Block Windows',
+  '新建页先问名字': 'Name a New Page First',
   '大文档秒开': 'Large Documents Open Instantly',
   '行内形状语言': 'Inline Shape Language',
   '字段入口三面共用': 'One Field Entry, Three Surfaces',

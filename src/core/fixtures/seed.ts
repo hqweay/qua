@@ -32,6 +32,10 @@ import {
   appendEdge,
   ALIASES_PROP,
   CHILD_PROPS_PROP,
+  CODE_TEXT_PROP,
+  CODE_TYPE,
+  CALLOUT_PROP,
+  QUOTE_TYPE,
   declareField,
   DEFAULT_PROP,
   derivedId,
@@ -148,6 +152,9 @@ export function seedWorkspace(): Workspace {
     { text: '把这份欢迎页改成自己的笔记', tags: ['任务', '发布'], task: false },
     { text: '把斜杠菜单和命令面板各试一遍', tags: ['任务', '证据'], task: true },
     ...filler([
+      '这一版多了两种行：引述块有七种语气，代码块常显语言徽章——斜杠菜单里都能造。',
+      '粘一段 Markdown（标题、列表、引述、代码围栏）会直接变成一组块，而不是一坨纯文本。',
+      '块的身体能单独折起来：子块还在，只收住正文那一段。',
       '这一屏全是演示内容，但**真的能改**：关掉重开，改动还在。',
       '屏幕底部那条「今天的待办」是一条查询：自动收集今天还没做完的事。',
       '右槽是检视与反链：选中一块，就能看到谁在引用它、它身上有哪些属性。',
@@ -286,6 +293,31 @@ export function seedWorkspace(): Workspace {
     //    或导航走人（那是原子的正常行为），量到的就不再是「换行编辑」。
     { text: '一段带四种格式的句子：**加粗的结论**、*斜体的限定*、==高亮的关键词==、`行内代码`。' },
     { text: '标记顺序不能错：==先高亮== 再 **后加粗**，两个区间都得落在自己那几个字上。' },
+    // **引述块**是行容器：抬头只画变体（正文只读），每一行是独立子块 ⇒ 可单独引用
+    { text: '引述是行容器：抬头只画语气，每一行都是独立的块，能单独引用。' },
+    {
+      text: '',
+      props: { _type: QUOTE_TYPE, [CALLOUT_PROP]: 'tip' },
+      children: [
+        { text: '这一行有自己的 id——行尾写引用，就能跳回这一行本身。' },
+        { text: '点抬头换语气：引述／信息／警告／错误／提示／重要／注意。' },
+      ],
+    },
+    {
+      text: '',
+      props: { _type: QUOTE_TYPE, [CALLOUT_PROP]: 'warning' },
+      children: [{ text: '变体是值，不是另一个类型：查询可以按「引述类型」把警告筛出来。' }],
+    },
+    // **代码块**的正文住在 `_code`（身体），这一行是标题；标题行尾常显语言徽章
+    { text: '代码块把语言写在徽章上，点它就能换；59 门有语法，可搜。' },
+    {
+      text: '一段代码',
+      props: {
+        _type: CODE_TYPE,
+        _lang: 'ts',
+        [CODE_TEXT_PROP]: 'const block = { id, content, children }\n// 行是块，代码是身体；标题行上的徽章说的就是这门语言\n',
+      },
+    },
     { text: '这一页引用了 [[欢迎使用相]]——那一页右槽的「反链」里，来源就是这一页。' },
     { text: '一行里混着引用与图片也能继续打字：[[欢迎使用相]] ![[写作-第二张.png]]' },
     { text: s('降级样本 · 超长块：') + (getLocale() === 'en' ? SEED_EN_LONG_PARAGRAPH : longParagraph()) },
@@ -669,6 +701,12 @@ function featureInstances(tagId: string): Block[] {
     record(s('新版提示'), FEATURE_STATUS_SHIPPED_ID, '2026-11-22'),
     record(s('任何块都能配看法'), FEATURE_STATUS_SHIPPED_ID, '2026-11-22'),
     record(s('新子块自动打标签'), FEATURE_STATUS_SHIPPED_ID, '2026-11-22'),
+    record(s('引述块'), FEATURE_STATUS_SHIPPED_ID, '2026-11-27'),
+    record(s('代码块'), FEATURE_STATUS_SHIPPED_ID, '2026-11-26'),
+    record(s('粘贴 Markdown'), FEATURE_STATUS_SHIPPED_ID, '2026-11-26'),
+    record(s('正文折叠'), FEATURE_STATUS_SHIPPED_ID, '2026-11-26'),
+    record(s('块窗口'), FEATURE_STATUS_SHIPPED_ID, '2026-11-25'),
+    record(s('新建页先问名字'), FEATURE_STATUS_SHIPPED_ID, '2026-11-25'),
     record(s('引用某一段'), FEATURE_STATUS_EXPLORING_ID),
     record(s('定时提醒')),
     record(s('图库管理'), FEATURE_STATUS_SHELVED_ID),
