@@ -532,7 +532,6 @@ function makeBodyFoldToggle(blockId: string, bodyHidden: boolean, onAct: (act: B
   return group
 }
 
-
 /**
  * 一个可见行 → `.blk` 元素。
  *
@@ -1195,23 +1194,13 @@ export function makeBlockEl(
       if (folded) body.dataset.folded = '1'
     }
     /**
-     * **露面行有自己的标题行**（2026-11-26 修订，推翻 366 D7 的那一条）。
-     *
-     * 366 当时的判据是「名字由身体首行承担，再叠一条标题会读两遍」。那条在**投影**上
-     * 成立（身体首行就是源的名字行），但在**镜像**上不成立：镜像身体首行是**源块那一行**
-     * （它本来就要显示，那是源的内容），而露面的名字说的是「这是谁的镜像」——两句话不同。
-     *
-     * 更关键的是代价不对称：`.tx` 恒隐藏时**光标永远进不去**，于是 Enter 建兄弟块、
-     * `⌘⇧↵` 上建、右键菜单里的结构项全部落空，只剩「删除」可用（它有单独分支）。
-     * 一个没有正文行的块，键盘路径整条断掉 —— 为了省一行标题，换来的是三种块三种形状、
-     * 一堆"露面特判"（`typeDeclOf`、行头按钮的绝对定位、位置命令的目标选择）。
-     *
-     * ⇒ 露面块与代码块**同形**：一行标题（存 `content`，可编辑）＋ 一个身体。
-     * 标题行的占位是**源的名字**（没有标题时它读起来就是「谁的镜像」）。
+     * **露面行没有自己的标题行**：这一行就是「那一块的又一次露面」。
+     * 它的名字由**身体自己的首行**承担（投影里就是 Query 行、镜像里就是源那一行）——
+     * 再往上叠一条宿主标题，同一个名字会读两遍。`.tx` 因此恒空（位留着，光标与 ⌘A
+     * 的既有判据都按 `.tx` 认块）。
      */
-    const srcName = embedRes?.status === 'ok' ? blockLabel(embedRes.target, opts.find) : ''
-    if (isEmptyContent(b.content)) tx.dataset.ph = srcName || t('ui.block.captionAdd')
-    fill(tx)
+    tx.dataset.embedSlot = '1'
+    tx.setAttribute('aria-hidden', 'true')
     embedBodyEl = body
     embedMount = () => opts.embedBody?.(b, body)
   } else if (blockTypeOf(b) === CODE_TYPE) {
@@ -1311,21 +1300,38 @@ export function makeBlockEl(
 
   /**
    * **行头的身体折叠按钮**：`.tx` 之后（靠它 `flex:1` 推到行右端），只在真有身体的
-   * 行上画（代码文档／查询结果／自动化定义体／定义值投影／露面）。
+   * 普通行上画（代码文档／查询结果／自动化定义体／定义值投影）。
    *
-   * ⚠️ **露面块现在也在这一档**：它的 `.tx` 从 366 D7 的「恒隐藏」改回了可见的标题行
-   *    （见上面露面分支的说明）⇒ 与代码块同形，不再需要单独一条判据。
+   * ⚠️ **露面投影行也要**（`embedBodyFoldable`）：它的身体是一整块结果面板，
+   *    折它是「这一块自己怎么显示」。而它没有子块 ⇒ 左侧那颗三角不存在
+   *    （三角只给有子块的行）⇒ **行头这颗是它唯一的折叠入口**。
+   *    ⚠️ 它挂在 `.blk-acts` 上、排在 `.tx` 之后；露面行的 `.tx` 是 `display:none`，
+   *    没有东西把这一组推到行尾 ⇒ CSS 里给 `[data-embed='1'] > .blk-acts` 单独
+   *    一条绝对定位（贴行的右上角），见 `blocks.css`。
+   * ⚠️ **代码块走 `embedBodyEl` 那一支**（它的身体也是 `.blk-code-host`），
+   *    但它的 `.tx` 是**可见的标题行**，所以按钮照画。
    */
   const wantBodyFold = Boolean(opts.bodyAction) && (inlineBody || codeBodyFoldable || embedBodyFoldable)
+  /**
+   * 这一行的 `.tx` 撑不撑得住靠右的按钮：露面行的 `.tx` 是 `display:none`，
+   * 其余（含代码块）都是可见的正文／标题行。判据按「`.tx` 可见」，
+   * 不按「走哪个身体分支」——代码块与露面块共用 `embedBodyEl`，但两者的 `.tx` 不同。
+   *
+   * ⚠️ **镜像行不画**（`embedChrome === 'island'`）：它的 chrome 全在岛首行那颗块标上，
+   *    宿主行连 `.left` 都没有；宿主行再挂一组按钮会与岛内的折叠三角重复，
+   *    而且没有块标列可依。镜像的折叠由**岛内那一行**承担（与「折源的那一层」同一条）。
+   */
+  const canCarryActs = embedChrome !== 'island'
+
   if (embedBodyEl) {
     /**
-     * 露面行的 DOM 序＝视觉序：投影行**先 chrome 后标题**；镜像行没有宿主 chrome
-     * （岛首行就是这一行，块标列由 CSS 对齐）。
+     * 露面行的 DOM 序＝视觉序：投影行**先 chrome 后身体**（块标回左边）；
+     * 镜像行没有宿主 chrome——岛首行就是这一行，块标列由 CSS 对齐。
      */
     // 视觉序＝DOM 序：行（chrome ＋ 标题）在前，身体折到下一行
     if (left) el.append(left, tx)
     else el.append(tx)
-    if (wantBodyFold) {
+    if (wantBodyFold && canCarryActs) {
       el.appendChild(makeBodyFoldToggle(b.id, bodyHidden, (act) => opts.bodyAction!(act, b.id)))
     }
     el.appendChild(embedBodyEl)

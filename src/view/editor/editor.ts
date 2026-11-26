@@ -2126,15 +2126,17 @@ export class BlockEditor {
   selectAll(): boolean {
     this.bsel.clearBlockSelection()
     /**
-     * 起选点要避开**只读行**：Chrome 会把「起点在 `contenteditable=false`
-     * 子树里」的选区钳成空选区（实测：起点在容器／只读行 ⇒ 0 字 1 块；
-     * 起点在第一行普通文本 ⇒ 88 字 3 块）。所以从第一个可编辑行起选。
-     *
-     * ⚠️ **露面行不再排除**（2026-11-26）：它的 `.tx` 从「恒隐藏」改回了可见的标题行
-     *    （与代码块同形）⇒ 它自己就有可编辑的正文槽，没有「模型偏移与 DOM 对不上」的
-     *    问题。排除它会让「⌘A 选中整篇」的终点停在它前面，而它明明就在正文里。
+     * ⚠️ **起选点必须避开只读行**：Chrome 会把「起点在 `contenteditable=false`
+     *    子树里」的选区**钳成空选区**（实测：起点在容器／只读行 ⇒ 0 字 1 块；
+     *    起点在第一行普通文本 ⇒ 88 字 3 块）。所以从**第一个可编辑行**起选。
      */
-    const rows = this.rows().filter((r) => !isReadonlyBlock(r.block))
+    /**
+     * 嵌入宿主行不在文本跨度里：它自己没有正文宿主（`.tx` 落到岛内源行的头上），
+     * 模型偏移与 DOM 对不上——第一次 ⌘A 之后 syncSel 读回的 hOff 会偏离 plainLen，
+     * 第二次 ⌘A 的「已全选 ⇒ 升级块选区」判据就永远差着一截。岛是独立编辑域，
+     * 文本选区本来就不跨进去（块选区仍含嵌入行：块粒度是行的归属，不是文本）。
+     */
+    const rows = this.rows().filter((r) => !isReadonlyBlock(r.block) && !isEmbedBlock(r.block))
     if (rows.length === 0) return false
     const first = rows[0]!.block
     const last = rows[rows.length - 1]!.block
@@ -2817,9 +2819,9 @@ export class BlockEditor {
      * 查询块／投影行没有子块，它们的「下一层」是**身体**（结果视图）：
      * 点线与点三角同效——折身体，行自己不折（折完行还看得见，线也还在）。
      *
-     * ⚠️ 走 `toggleBodyCollapse` 而不是 `toggleCollapse`（2026-11-26）：没有子块的块
-     *    两层折叠**等价**，而它的行头按钮写的是 `bodyFolded`。两条入口各写一位时，
-     *    线折了、按钮的图标却还说「展开着」——同一个事实两个答案。叶子统一走身体那一位。
+     * ⚠️ 走 `toggleBodyCollapse` 而不是 `toggleCollapse`：没有子块的块两层折叠
+     * **等价**，而它的行头按钮写的是 `bodyFolded`。两条入口各写一位时，
+     * 线折了、按钮的图标却还说「展开着」—— 同一个事实两个答案。
      */
     if (!hasLiveChildren(loc.block)) {
       if (this.bodyFoldable(loc.block)) this.toggleBodyCollapse(id)

@@ -416,9 +416,8 @@ function viewEvents(
         },
         onChange: (kind) => change?.(kind as 'text' | 'struct' | 'view' | 'load'),
         // 投影＝同一台 ViewHost（surface 'embed'），绑定的是**这一次露面**
-        // `titleInto` 可能是 `null`：名字由宿主行的 `.tx` 承担时不画面板抬头那一条
         mountView: (hostBlock, target, el, titleInto) => {
-          const vh = getPanels().mountEmbedView(hostBlock, target, el, active, titleInto ?? undefined)
+          const vh = getPanels().mountEmbedView(hostBlock, target, el, active, titleInto)
           return () => {
             vh.dispose()
             vh.root.remove()
@@ -659,7 +658,7 @@ function viewEvents(
     // 结构动作后光标不可见的兜底：所有编辑器共用同一份实现（判据在 focusSourceInMain）
     focusSource: (blockId) => focusSourceInMain(blockId),
     /**
-     * **行头的身体折叠按钮**：只折身体那一格（`bodyFolded`），不碰子块。
+     * **身体块行头的折叠按钮**：只折身体那一格（`bodyFolded`），不碰子块。
      *
      * 用**画这一行的那台**编辑器（预览／挂载区里的行不归当前活动那台）：
      * 折叠表是每台编辑器一份的视图实例态，走「活动编辑器」会折错行。
@@ -710,8 +709,45 @@ function viewEvents(
         // 判据与删除入口同一份：只拦**会触发补块**的内容块（有身份的块走库级软删）。
         ...(appearanceHost
           ? {
-              omitCommands: ['core.block/delete'],
+              /**
+               * **删掉绑定表里那两条「新建块」**：它们被 `stampTarget` 灌成**源**的 id
+               * （块标绑源），而源可能是森林顶层的块 ⇒ 落点退成「给源加子块」，
+               * 与字面不符。下面两条显式项把目标改成**壳**。
+               */
+              omitCommands: ['core.block/delete', 'core.editor/insert-block', 'core.editor/insert-block-before'],
               extraRows: [
+                /**
+                 * **在这一次露面这一行的上下建块**（2026-11-26）。
+                 *
+                 * 为什么需要：露面行的正文槽是 `display:none`（它的名字由身体首行承担），
+                 * 光标**永远进不去** ⇒ Enter／`⌘⇧↵`／菜单里那两条结构项全部落空，
+                 * 只剩「删除」可用（它有单独分支）。而露面块**占着一个真实的位置**
+                 * （父＋序号都在），「在这一行旁边加一行」是个成立的动作。
+                 *
+                 * ⚠️ **落点是壳，不是源**：
+                 *   · 壳有位置（父＋序号），**总能建**；
+                 *   · 源可能是**森林顶层**的块 —— 那里没有兄弟位（`insertSiteOf` 会退成
+                 *     「首个子块」），于是「在下方新建块」会静默变成「给源加子块」，
+                 *     与字面不符（实测）；
+                 *   · 用户点的是「这一页的这一行」，新块就该出现在它旁边。
+                 *
+                 * 源自己的结构由**镜像身体里那台岛编辑器**负责：在岛里按 Enter 就是给源加块，
+                 * 那两条入口语义不同、各有各的落点，不该合成一条。
+                 */
+                {
+                  id: 'appearance-insert-above',
+                  label: t('menu.label.insertAbove'),
+                  group: 'block/2-structure',
+                  command: 'core.editor/insert-block-before',
+                  args: { blockId: appearanceHost },
+                },
+                {
+                  id: 'appearance-insert-below',
+                  label: t('menu.label.insertBelow'),
+                  group: 'block/2-structure',
+                  command: 'core.editor/insert-block',
+                  args: { type: 'paragraph', blockId: appearanceHost },
+                },
                 {
                   id: 'appearance-views',
                   label: t('ui.embed.viewMenuRow'),

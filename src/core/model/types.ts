@@ -13,7 +13,7 @@
  * ⚠️ 依赖方向：本模块 → `model.ts`，单向。`model.ts` 是零依赖叶子，
  *    反过来 import 会成环（`blockTypeOf` 与 `DEFAULT_BLOCK_TYPE` 留在那里）。
  */
-import { EMBED_TYPE, isEmbedBlock } from '../views/embed.ts'
+import { EMBED_TYPE } from '../views/embed.ts'
 import {
   DEFAULT_BLOCK_TYPE,
   blockTypeOf,
@@ -78,17 +78,13 @@ export const TYPE_DECLS: Record<string, TypeDecl> = {
   [DEFAULT_BLOCK_TYPE]: { id: DEFAULT_BLOCK_TYPE, children: 'content', text: 'editable' },
   [DIVIDER_TYPE]: { id: DIVIDER_TYPE, children: 'none', text: 'readonly', deleteOnBackspace: true },
   /**
-   * **露面块**（镜像／投影）：一行标题 ＋ 一个身体，与代码块同形。
+   * **露面块**（镜像／投影）：它自己不写正文、不能有子块。
    *
    * 为什么 `children: 'none'`：它的孩子是谁这个问题有两个答案（`children` 还是源的子块），
    * 所以数据上只留一个——子块归源，露面只画。
-   *
-   * `text: 'editable'`：那一行是**这一次露面的名字**（`content`，可编辑）。它曾经是
-   * `readonly`（名字由身体首行承担），代价是光标永远进不去 ⇒ Enter 建兄弟块、
-   * `⌘⇧↵` 上建、菜单里的结构项全部落空，只剩「删除」可用。一个没有正文行的块，
-   * 键盘路径整条断掉 —— 为省一行标题换来三种块三种形状，不值。
+   * 正文只读：那一行画的是「这次露面」的抬头与身体，不是用户写的字。
    */
-  [EMBED_TYPE]: { id: EMBED_TYPE, children: 'none', text: 'editable' },
+  [EMBED_TYPE]: { id: EMBED_TYPE, children: 'none', text: 'readonly' },
   [QUOTE_TYPE]: { id: QUOTE_TYPE, children: 'content', text: 'editable' },
   [CODE_TYPE]: { id: CODE_TYPE, children: 'content', text: 'editable', multiline: true },
 }
@@ -99,18 +95,8 @@ export const TYPE_DECLS: Record<string, TypeDecl> = {
  * ⚠️ **不认识的类型降级成默认类型的声明**：未知类型仍然要画出来（兜底渲染），
  *    数据也一个字节不能丢。降级是**读侧**的事：写侧可以写进一个本版不认识的
  *    id（可能是别的版本或插件写的），读的时候不认识就按大纲行对待。
- *
- * ⚠️ **派生身份优先于 `_type`**（2026-11-26 修订）：露面块的身份来自 `props._embed`
- *    （`isEmbedBlock`），它**从来不带 `_type`** —— 所以按 `blockTypeOf` 查会落进默认
- *    类型，把「露面不许有子块」这条声明整个绕过（实测：`insertChild(露面)` 真的建出了
- *    子块，而 `TYPE_DECLS` 里明明写着 `children: 'none'`）。
- *
- *    这不是给露面开特例：**能改骨架的类型写在 `_type`，靠数据派生的身份写在数据里**，
- *    两条都要能回答「这一块长什么样、能装什么」。判据收在这一处，`children`／`text`
- *    的所有消费方（10 处）同时正确 —— 在调用点各判一次必然漏。
  */
 export function typeDeclOf(b: Block): TypeDecl {
-  if (isEmbedBlock(b)) return TYPE_DECLS[EMBED_TYPE] ?? TYPE_DECLS[DEFAULT_BLOCK_TYPE]!
   return TYPE_DECLS[blockTypeOf(b)] ?? TYPE_DECLS[DEFAULT_BLOCK_TYPE]!
 }
 

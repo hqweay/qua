@@ -2888,48 +2888,36 @@
 }
 
 /*
- * **露面块**（镜像／投影）：一行标题 ＋ 一个身体，与代码块同形。
+ * **露面块**（镜像／投影）：正文槽不参与排版，身体顶替它。
  *
- * 标题行（`.tx`）存的是**这一次露面**的名字（`content`），可编辑；身体
- * （`.blk-embed-body`）是**另一个编辑宿主**（岛）——里面那台编辑器再按自己的缩进
- * 画源块。于是「同一块在别处出现」在结构上就是「这一行里住着另一份装载」，
- * 不是把 `.blk` 套进 `.tx`。
+ * 为什么 `.tx` 是 `display:none` 而不是删掉：`.tx` 是块 DOM 的契约（光标落点、
+ * 读回正文、`markCaret` 都按它找），删掉等于让这一行在一批既有路径里「不存在」。
+ * 这里只让它不参与排版——它仍然是这一行的正文槽，只是这一行没有用户写的字。
  *
- * ⚠️ 2026-11-26 之前这里是 `display:none`（名字由身体首行承担）。那条判据的代价是
- *    **光标永远进不去**：Enter 建兄弟块、`⌘⇧↵` 上建、菜单里的结构项全部落空，
- *    只剩「删除」可用。现在标题行回来了，露面块与代码块/查询块走同一套键盘路径。
- */
-.blk[data-embed='1'] {
-  flex-wrap: wrap;
-  row-gap: var(--ui-gap-1);
-}
-/*
- * **标题对齐正文列，不是块标列**。
- *
- * 普通行的 `.tx` 前面有一格 `.left`（块标 20px ＋ gap 10），所以它天然落在正文列；
- * 露面行**没有 `.left`**（它的块标由镜像岛首行那颗承担）⇒ 标题会直接顶到行首 padding，
- * 落在**块标列**上，比同深度的正文左 30px。实测：depth 1 的普通行正文在 343，
- * 露面行标题在 313 —— 整块看起来「向左塌出去」，与上一行对不齐。
- *
- * 用 `margin-inline-start` 而不是 `padding-inline-start`：要的是**盒子起点**对齐
- * （标题的盒与身体同一条左缘），padding 只挪文字、盒子仍留在块标列，两条左缘看起来
- * 还是错开的。
+ * 身体（`.blk-embed-body`）是**另一个编辑宿主**（岛）：它顶替 `.tx` 占住同一列，
+ * 里面那台编辑器再按自己的缩进画源块。于是「同一块在别处出现」在结构上就是
+ * 「这一行里住着另一份装载」，不是把 `.blk` 套进 `.tx`。
  */
 .blk[data-embed='1'] > .tx {
-  font-family: inherit;
-  margin-inline-start: calc(var(--ui-marker-slot) + var(--ui-gap-4));
-  /* 身体按同一格让出宽度，两格才能等宽等起点 */
-  width: calc(100% - var(--ui-marker-slot) - var(--ui-gap-4));
+  display: none;
 }
 /*
- * 身体折到下一行、对齐正文起点（与 `.blk-view-body`／`.blk-code-host` 同一套几何：
- * gutter 已由 `.blk` 的 padding 让出，这里只补 marker 槽）。
+ * **投影行的行头折叠按钮走绝对定位**。
+ *
+ * 普通行的 `.blk-acts` 排在 `.tx` 之后、靠 `margin-inline-start: auto` 吃掉余量靠右；
+ * 露面行的 `.tx` 是 `display:none`，flex 里没有那一格，而身体是 `flex: 1 1 auto`
+ * 吃满整行 ⇒ 自动外边距没有余量可吃，按钮会贴在身体前面（读成「左边的一颗」）。
+ * 所以这一族贴着行的右上角浮着：不占身体宽度、不推正文，与「悬停才现」同一档。
+ *
+ * ⚠️ 只有**投影**有这一组（镜像的 chrome 全在岛首行，见 `block-dom` 的 `canCarryActs`）。
  */
-.blk[data-embed='1'] > .blk-embed-body {
-  flex: 0 0 auto;
-  width: calc(100% - var(--ui-marker-slot) - var(--ui-gap-4));
-  margin-inline-start: calc(var(--ui-marker-slot) + var(--ui-gap-4));
-  min-width: 0;
+.blk[data-embed='1'] > .blk-acts {
+  position: absolute;
+  top: 0;
+  inset-inline-end: 0;
+  margin-inline-start: 0;
+  padding-inline-start: var(--ui-gap-2);
+  z-index: var(--ui-z-rail);
 }
 .blk-embed-body {
   flex: 1 1 auto;
@@ -2974,39 +2962,18 @@
  * 就落进宿主行的块标列，正文起点与普通行完全一致 ⇒ 镜像在几何上不再是
  * 「一行里嵌了另一份装载」，而是「那一块就在这里」（岛内更深的行按同一个
  * indent 阶梯自然对齐外层网格）。
- *
- * ⚠️ **必须写成与上一条同档的选择器**（2026-11-26）：上一条是
- *    `.blk[data-embed='1'] > .blk-embed-body`（两个属性/类 ＋ 一个类 = 0,3,0），
- *    这里若只写 `.blk-embed-body[data-embed-body='mirror']`（0,2,0）就**压不过它**，
- *    身体拿到的仍是 `marker-slot + gap`，整面镜子右移一整格（实测：岛首行块标 355，
- *    该在 313）。两边同档，减法才算在同一个基准上。
  */
-.blk[data-embed='1'] > .blk-embed-body[data-embed-body='mirror'] {
-  /**
-   * **镜像的身体从行首 padding 起算**（不是从正文列）。
-   *
-   * 岛首行自己带一个 gutter（`--ui-blk-gutter`）＋它自己的 padding；要让它的块标
-   * 落进**宿主行同深度的块标列**，身体的起点就得退到「行首 padding 的起点」，
-   * 也就是把上一条补的那格 `marker-slot + gap` 整个退回去。
-   *
-   * 实测校准（depth 1，行首 padding 36）：身体起点 301 ⇒ 岛首行块标 313 ＝
-   * 普通行同深度的块标列。差 1px 以内肉眼不可见，按 token 算即可。
-   */
-  margin-inline-start: 0;
+.blk-embed-body[data-embed-body='mirror'] {
+  margin-left: calc(-1 * var(--ui-blk-gutter));
 }
 /*
  * **岛首行与宿主行同一字号**：深度判据是岛内的相对深度（源在岛里是根），
  * 字号得跟着宿主行走——镜像嵌在子块里时首行不该放大成顶层字。
- *
- * 同理**缩进**：岛首行的 `--depth` 是 0，它按 `--ui-blk-gutter` 补自己那一格 padding；
- * 而镜像身体已经退到宿主行的行首，再补一格就整面镜子右移 12px（实测：块标 325，
- * 该在 313）。所以岛首行不补那一格 —— 它的块标列由**宿主行**决定。
  */
 .blk[data-embed='1'] .blk-embed-body .blk[data-depth='0'] {
   font-size: inherit;
   /* 字号跟着宿主行走 ⇒ 行盒 token 也得跟着（否则岛内旁注件按 lg 补行盒） */
   --blk-lh: inherit;
-  padding-left: 0;
 }
 /*
  * **投影行的块标是空心的**：空心说的是「这一行的身体不是一份独立内容」。
@@ -3802,14 +3769,7 @@ button.blk-auto-chip {
   align-items: center;
   gap: var(--ui-gap-1);
   min-height: var(--blk-lh);
-  /**
-   * **自己靠右，不靠 `.tx` 撑**：这一组排在 `.tx` 之后，`.tx` 是 `flex:1` 时它自然被
-   * 推到行尾；但露面行的 `.tx` 是 `display:none`（名字在身体首行），没有东西推它，
-   * 于是按钮贴在块标右边、读成「左边的一颗」。`margin-inline-start: auto` 让这一组
-   * 自己吃掉前面的余量 —— 两种行因此同一条右缘。
-   */
-  margin-inline-start: auto;
-  padding-inline-start: var(--ui-gap-2);
+  margin-inline-start: var(--ui-gap-2);
   opacity: 0;
   transition: opacity var(--ui-dur-1) ease;
 }
