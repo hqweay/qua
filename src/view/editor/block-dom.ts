@@ -479,50 +479,55 @@ export const ALLOWED_ROW_CHILDREN: ReadonlySet<string> = new Set([
   'blk-acts',
 ])
 
-/** 身体块行头的三个动作（与块菜单同名项同一条命令） */
-export type BlockAction = 'above' | 'below' | 'delete'
+/**
+ * 身体块行头的动作：**只折身体**（`bodyFolded`，与「整片收起」是两张表）。
+ *
+ * 曾经这里有「上建块／下建块／删除」三颗：它们的理由是「代码块的正文在 CM6 岛里，
+ * 上下建块与删除没有可落光标的正文行」。那三条现在都有更短的路径——
+ * 标题行本身就是普通正文槽（Enter 建兄弟块、`⌘⇧↵` 上建、右键块标菜单），
+ * 三颗常驻按钮只是把同一条命令抄了一遍，还把行头读成了工具条。
+ */
+export type BlockAction = 'body-fold'
 
 /**
- * **身体块行头的动作组**：上建块／下建块／删除。
+ * **身体块行头的那颗折叠按钮**：只折身体，不折子块。
  *
- * 为什么需要：代码块的正文在 CM6 岛里、露面的正文在源块——这两种块的「上下建块／删块」
- * 没有一条可落光标的正文行，键位也就没有稳定抓手（岛内的键只该归代码编辑）。
- * 给一条**鼠标路径**，落的还是块菜单里的同名命令。
+ * 为什么需要它（而不是复用左侧那颗三角）：有身体的块下面有**两层**东西——
+ * 身体（这一块自己的内容：代码文档／查询结果）与子块（挂在它下面的别的块）。
+ * 左侧三角折的是**整片**（`folded`），按下去子块跟着收，于是「留着子块只看代码」
+ * 这条最常用的事没有入口。这颗按钮写的是另一张表（`bodyFolded`），只收身体那一格。
  *
  * 规则：
- *   · 只挂在**有题注行**的身体块上（代码／露面）——普通块的正文行自己就能 Enter；
+ *   · 只挂在**这一行真有身体**的块上（代码／查询／露面投影）——普通块没有可收的身体；
  *   · 透明度切换，不换布局（跟 `::before` 占位同一条纪律：chrome 不许推正文）；
- *   · 不进 tab 序（与块标／折叠同一档鼠标 chrome）；点击由编辑器事件表委托，
+ *   · 不进 tab 序（与块标／折叠同一档鼠标 chrome）；点击由组自己收下，
  *     这里只写 `data-block-act`，不认识命令。
+ *   · 图标恒画 `chevron-down`，收起态由 CSS 旋转（与左侧三角同一套语言）。
  */
-function makeBodyActions(onAct: (act: BlockAction) => void): HTMLElement {
+function makeBodyFoldToggle(blockId: string, bodyHidden: boolean, onAct: (act: BlockAction) => void): HTMLElement {
   const group = document.createElement('span')
   group.className = 'blk-acts'
   group.contentEditable = 'false'
-  const add = (act: BlockAction, icon: 'arrow-up' | 'arrow-down' | 'trash-2', tip: string): void => {
-    const el = document.createElement('span')
-    el.className = act === 'delete' ? 'blk-act blk-act-delete' : 'blk-act'
-    el.dataset.blockAct = act
-    el.dataset.tip = tip
-    el.setAttribute('role', 'button')
-    el.setAttribute('aria-label', tip)
-    el.appendChild(createIcon(icon, 'sm'))
-    group.appendChild(el)
-  }
-  add('above', 'arrow-up', t('menu.label.insertAbove'))
-  add('below', 'arrow-down', t('menu.label.insertBelow'))
-  add('delete', 'trash-2', t('cmd.block.delete'))
+  const el = document.createElement('span')
+  el.className = 'blk-act'
+  el.dataset.blockAct = 'body-fold'
+  el.dataset.blockActFor = blockId
+  el.setAttribute('role', 'button')
+  const tip = bodyHidden ? t('ui.block.foldExpand') : t('ui.block.foldBody')
+  el.dataset.tip = tip
+  el.setAttribute('aria-label', tip)
+  el.appendChild(createIcon('chevron-down', 'sm'))
+  group.appendChild(el)
   /**
-   * 点击在**组自己**身上收：三颗是行级 chrome（不是编辑岛），但外层编辑器的点击委托
-   * 会把它当「点到了块里」继续往下分派——这里收口后交给同一条结构命令。
+   * 点击在**组自己**身上收：行级 chrome（不是编辑岛），但外层编辑器的点击委托
+   * 会把它当「点到了块里」继续往下分派——这里收口后交给同一个桥。
    */
   group.addEventListener('click', (e) => {
-    const el = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-block-act]') : null
-    const act = el?.dataset.blockAct
-    if (act !== 'above' && act !== 'below' && act !== 'delete') return
+    const hit = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-block-act]') : null
+    if (hit?.dataset.blockAct !== 'body-fold') return
     e.preventDefault()
     e.stopPropagation()
-    onAct(act)
+    onAct('body-fold')
   })
   return group
 }
@@ -609,10 +614,16 @@ export function makeBlockEl(
      */
     codeBody?: (b: Block, into: HTMLElement) => void
     /**
-     * **身体块行头三颗动作的落点**（上建块／下建块／删除）：与块菜单同名项同一条命令。
-     * 不接 ⇒ 不画动作组（静态投影不多三颗点了没反应的按钮）。
+     * **身体块行头那颗折叠按钮的落点**（只折身体，不折子块）。
+     * 不接 ⇒ 不画动作组（静态投影不多一颗点了没反应的按钮）。
      */
     bodyAction?: (act: BlockAction, blockId: string) => void
+    /**
+     * **「只收身体」那张表**（`Doc.bodyFolded`）：与 `folded` 分开的第二层。
+     *
+     * 不传 ⇒ 当作全展开（静态投影没有折叠态，也不该假装有）。
+     */
+    bodyFolded?: FoldState
     /**
      * **正文里自动化块的身体**（三段式：当／如果／就）。与 `viewBody` 同一条分工
      * （`view` 不 import `ui`、装配层给画法、行内体是另一个编辑宿主）；
@@ -637,6 +648,14 @@ export function makeBlockEl(
 ): HTMLElement {
   const b = r.block
   const folded = opts.folded?.[b.id] === true
+  /**
+   * **身体自己收起来了没有**（第二张表 `bodyFolded`）。
+   *
+   * 与 `folded` 分开：`folded` 是「这一行下面整片收起」（身体 ＋ 子块），
+   * 这一位只收身体那一格。身体可见 ⟺ 两位都为假。
+   */
+  const bodyFolded = opts.bodyFolded?.[b.id] === true
+  const bodyHidden = folded || bodyFolded
   /**
    * 露面行的**归属**先算（foldable／导轨／块标绑定都要用它）：
    *   · 普通行（含查询行）＝`own`：块标绑行自己；
@@ -706,6 +725,13 @@ export function makeBlockEl(
   const typeId = blockTypeOf(b)
   if (typeId !== DEFAULT_BLOCK_TYPE) el.dataset.type = typeId
   if (folded && foldable) el.dataset.collapsed = '1'
+  /**
+   * **只收身体**（第二层折叠）：与 `data-collapsed` 分开一位。
+   *
+   * 不复用 `data-collapsed`：那一格会连带收起导轨段（「这一行的子树没了」）、
+   * 让块标浮底盘、让左侧三角常驻——而「只收身体」时子块还在，那些信号全会撒谎。
+   */
+  if (bodyFolded && !folded) el.dataset.bodyCollapsed = '1'
   if (closure) el.dataset.closure = closure
   if (r.hasChildren) el.dataset.hasChildren = '1'
   // 角色进 DOM：页 / 日记作为**正文第一行**时靠它取样式。
@@ -965,9 +991,14 @@ export function makeBlockEl(
    * 折叠态的可发现性由**块标自身的环**承担（D2 的明文口径），不靠常驻箭头。
    *
    * ⚠️ 既无子块也**无身体**时**不生成这个节点**（R2）——空行的三角是纯噪声。
-   *    查询块的身体（结果视图）同样可折，所以 `foldable` 不只等于 `hasChildren`。
+   *
+   * ⚠️ **有子块才画这颗三角**（2026-11-26 修订）：它的语义是「折这一行下面**整片**」。
+   *    身体块的行头另有一颗「只折身体」的按钮（`.blk-acts` 里的 `body-fold`），
+   *    两颗同时在同一个行上、折的又是同一件事时，左侧这颗就只是重复的入口。
+   *    没有子块的块（查询／代码／露面投影）本来就只折身体 ⇒ 交给行头那颗。
+   *    有子块的身体块两层都要 ⇒ 左侧折整片、行头折身体，各说一件事。
    */
-  if (left && foldable) {
+  if (left && r.hasChildren) {
     const fold = document.createElement('span')
     fold.className = 'fold'
     fold.dataset.foldFor = b.id
@@ -1188,14 +1219,15 @@ export function makeBlockEl(
     body.dataset.codeBodyFor = b.id
     /**
      * 收起态**不挂 CM6**：折叠是阅读态，长代码不该为一行标题付一台编辑器。
-     * 展开由 `toggleCollapse` 重画这一行（`renderBlock`），这才会重新走 `codeBody`。
+     * 展开由 `toggleBodyCollapse`／`toggleCollapse` 重画这一行（`renderBlock`），
+     * 这才会重新走 `codeBody`。
      *
-     * ⚠️ `folded` 对**有身体的块**是「收起整个容器」：身体与子块一起藏。只折子块
-     *    是另一条入口（导轨／`toggleChildrenCollapsed`）；一个折叠位不能同时表达两层。
+     * ⚠️ 身体看得见 ⟺ `folded` 与 `bodyFolded` **都为假**：整片收起（`folded`）
+     *    当然也收起身体，只折身体（`bodyFolded`）不动子块。两层各有一个位。
      */
-    if (folded) body.dataset.folded = '1'
+    if (bodyHidden) body.dataset.folded = '1'
     embedBodyEl = body
-    embedMount = folded ? null : () => opts.codeBody?.(b, body)
+    embedMount = bodyHidden ? null : () => opts.codeBody?.(b, body)
   } else if (blockTypeOf(b) === DIVIDER_TYPE) {
     const rule = document.createElement('span')
     rule.className = 'divider-rule'
@@ -1266,6 +1298,26 @@ export function makeBlockEl(
     kindBadge.textContent = t(`ui.props.kind.${propKindOf(b)}`)
   }
 
+  /**
+   * **行头的身体折叠按钮**：`.tx` 之后（靠它 `flex:1` 推到行右端），只在真有身体的
+   * 普通行上画（代码文档／查询结果／自动化定义体／定义值投影）。
+   *
+   * ⚠️ **不画在露面行上**：露面行的 `.tx` 是 `display:none`（它没有用户写的字，
+   *    名字由身体首行承担）——挂上去会被挤到块标右边，读成「左边的一颗按钮」。
+   *    露面的折叠走块标旁的三角（有子块／投影面板时）与右键块标菜单，
+   *    与它「没有自己那一行」的身份同一条口径。
+   * ⚠️ **代码块走 `embedBodyEl` 那一支**（它的身体也是 `.blk-code-host`），
+   *    但它的 `.tx` 是**可见的标题行**，所以按钮照画 —— 判据按「有 `.tx` 可撑」
+   *    而不是按「走哪个分支」。
+   */
+  const wantBodyFold = Boolean(opts.bodyAction) && (inlineBody || codeBodyFoldable)
+  /**
+   * 这一行的 `.tx` 撑不撑得住靠右的按钮：露面行的 `.tx` 是 `display:none`，
+   * 其余（含代码块）都是可见的正文／标题行。判据按「`.tx` 可见」，
+   * 不按「走哪个身体分支」——代码块与露面块共用 `embedBodyEl`，但两者的 `.tx` 不同。
+   */
+  const canCarryActs = !isEmbedBlock(b)
+
   if (embedBodyEl) {
     /**
      * 露面行的 DOM 序＝视觉序：投影行**先 chrome 后身体**（块标回左边）；
@@ -1274,8 +1326,8 @@ export function makeBlockEl(
     // 视觉序＝DOM 序：行（chrome ＋ 标题）在前，身体折到下一行
     if (left) el.append(left, tx)
     else el.append(tx)
-    if (opts.bodyAction && markerTargetId === b.id) {
-      el.appendChild(makeBodyActions((act) => opts.bodyAction!(act, b.id)))
+    if (wantBodyFold && canCarryActs) {
+      el.appendChild(makeBodyFoldToggle(b.id, bodyHidden, (act) => opts.bodyAction!(act, b.id)))
     }
     el.appendChild(embedBodyEl)
     // 身体接进文档之后再画：岛编辑器／ViewHost 的构造会量 DOM
@@ -1283,6 +1335,9 @@ export function makeBlockEl(
   } else {
     if (kindBadge) el.append(left!, tx, kindBadge)
     else el.append(left!, tx)
+    if (wantBodyFold) {
+      el.appendChild(makeBodyFoldToggle(b.id, bodyHidden, (act) => opts.bodyAction!(act, b.id)))
+    }
   }
 
   /**
@@ -1344,9 +1399,10 @@ export function makeBlockEl(
     /**
      * 折叠时**只藏身体、不卸载**：ViewHost 的冻结结果与滚动位置还在，
      * 展开是瞬间的；卸载会在每次折一下的时候重查一遍。
-     * 所有位置（正文子行／聚焦单根／窗口根行）折的都是这一格 `data-folded`。
+     * 所有位置（正文子行／聚焦单根／窗口根行）折的都是这一格 `data-folded`；
+     * 整片收起与只折身体两层的答案在这里合成一格（`bodyHidden`）。
      */
-    if (folded) body.dataset.folded = '1'
+    if (bodyHidden) body.dataset.folded = '1'
     el.appendChild(body)
     // 按源分派（`inlineBodyKind`：与保留行接回共用一份答案）：自动化块画三段式定义体；
     // 定义块/标签画属性定义投影；其余（查询／children 源）画视图宿主

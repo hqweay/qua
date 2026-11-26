@@ -50,6 +50,8 @@ export interface LibrarySettingsPort {
 export interface LibraryState {
   dock: Prefs['dock']
   folded: FoldState
+  /** 只收身体那一层（与 `folded` 并列的第二张表） */
+  bodyFolded?: FoldState
   mountViews: Prefs['mountViews']
   journalMounts: Prefs['journalMounts']
   /** 命令面板固定（常用）的手动自动化 id；引用库对象，跟库走 */
@@ -88,6 +90,13 @@ export interface DeviceState {
   prefs: Prefs
   /** 折叠态（块 id → 收起）。只记收起的，见 `FoldState` */
   folded: FoldState
+  /**
+   * **只收身体**（块 id → 收起）：与 `folded` 分开的第二层。
+   *
+   * 有身体的块（代码／查询）下面有两层东西，一颗位表达不了两个事实。
+   * 与 `folded` 同一条口径：设备态、按块 id、不进库内容。
+   */
+  bodyFolded: FoldState
 }
 
 export type DeviceSaveResult = { ok: true } | { ok: false; error: unknown }
@@ -111,7 +120,7 @@ export interface DeviceStore {
 const NO_KB_CHANGE: Change[] = []
 
 /** 兜底值：每次都给一份新的（`DEFAULT_PREFS` 里的 `dock` 是共享对象，直接返回会被调用方改坏） */
-const defaultDevice = (): DeviceState => ({ prefs: normalizePrefs(undefined), folded: {} })
+const defaultDevice = (): DeviceState => ({ prefs: normalizePrefs(undefined), folded: {}, bodyFolded: {} })
 
 /**
  * 折叠表的归一：**只留 `true`**，其余一律丢掉。
@@ -156,13 +165,14 @@ export function createDeviceStore(port: StoragePort, library?: LibrarySettingsPo
       if (!value || typeof value !== 'object' || Array.isArray(value)) {
         return library ? mergeLibraryState(defaultDevice().prefs, null) : defaultDevice()
       }
-      const { prefs, folded } = value as { prefs?: unknown; folded?: unknown }
+      const { prefs, folded, bodyFolded } = value as { prefs?: unknown; folded?: unknown; bodyFolded?: unknown }
       // 形状兜底归 `normalizePrefs` / `normalizeFoldState`（缺字段补默认、坏键丢掉）；这里只挡住「整格不是对象」
       const prefsRaw = prefs && typeof prefs === 'object' ? (prefs as Partial<Prefs>) : undefined
       if (!library) {
         return {
           prefs: normalizePrefs(prefsRaw),
           folded: normalizeFoldState(folded),
+          bodyFolded: normalizeFoldState(bodyFolded),
         }
       }
       // 有库面 ⇒ 那四格**只认库侧**（缺省为空/默认；设备键里被搬走的字段是孤儿，不捡）
@@ -183,7 +193,7 @@ export function createDeviceStore(port: StoragePort, library?: LibrarySettingsPo
         // 设备偏好不是库内容：没有 op，如实报空（适配器只看 payload）
         ops: [],
         changes: NO_KB_CHANGE,
-        payload: JSON.stringify({ prefs: state.prefs, folded: state.folded } satisfies DeviceState),
+        payload: JSON.stringify({ prefs: state.prefs, folded: state.folded, bodyFolded: state.bodyFolded } satisfies DeviceState),
         savedAt: Date.now(),
       }
       const r = await port.commit(batch)
@@ -192,6 +202,7 @@ export function createDeviceStore(port: StoragePort, library?: LibrarySettingsPo
         const libState: LibraryState = {
           dock: state.prefs.dock,
           folded: state.folded,
+          bodyFolded: state.bodyFolded,
           mountViews: state.prefs.mountViews,
           journalMounts: state.prefs.journalMounts,
           palettePins: state.prefs.palettePins,
@@ -224,5 +235,6 @@ function mergeLibraryState(prefsRaw: Partial<Prefs> | undefined, lib: Partial<Li
       libraryKeys: lib?.keys as Prefs['libraryKeys'] | undefined,
     }),
     folded: normalizeFoldState(lib?.folded),
+    bodyFolded: normalizeFoldState(lib?.bodyFolded),
   }
 }

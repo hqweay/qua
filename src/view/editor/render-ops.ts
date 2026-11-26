@@ -22,7 +22,7 @@ import {
   hasAnyFieldOf,
   hasLiveChildren,
   hasSingleLiveBlock,
-  isFolded,
+  bodyVisible,
   journalDateLabel,
   locate,
   noteSourceCellsOf,
@@ -31,6 +31,7 @@ import {
   walkForest,
   type Block,
   type BelowFields,
+  type FoldState,
   type GutterField,
   type NoteSourceCell,
   type RefView,
@@ -389,11 +390,17 @@ export class RenderOps {
    */
   private renderedFoldSig = ''
   private foldSig(): string {
-    const fs = foldStateOf(this.ed.doc)
-    return Object.keys(fs)
-      .filter((k) => fs[k] === true)
-      .sort()
-      .join(',')
+    /**
+     * **两张表都要进签名**：`folded`（整片收起）与 `bodyFolded`（只收身体）都会
+     * 写进构造期的行标志与身体的 `data-folded`，只算一张就会让另一张的变更
+     * 被「保留行原样换回」吞掉（点了行头按钮，行元素换回来还是旧态）。
+     */
+    const join = (t: FoldState | undefined): string =>
+      Object.keys(t ?? {})
+        .filter((k) => t![k] === true)
+        .sort()
+        .join(',')
+    return `${join(foldStateOf(this.ed.doc))}|${join(this.ed.doc.bodyFolded)}`
   }
 
   /** 折叠标志被**就地**重画过（`paintFold`，不重建 DOM）⇒ DOM 与折叠态重新一致 */
@@ -1064,6 +1071,8 @@ export class RenderOps {
         single,
         ancestors: this.ancestors.get(r.block.id) ?? [],
         folded: foldStateOf(this.ed.doc),
+        // 第二层：只收身体那张表（`bodyFolded`），与 `folded` 一起决定身体可不可见
+        bodyFolded: this.ed.doc.bodyFolded,
         gutter,
         find,
         /**
@@ -1277,12 +1286,16 @@ export class RenderOps {
       visibleRowHeight(
       r.block,
       this.extraHeads(r),
+      /**
+       * 身体看得见才占高 —— 两层折叠位都要看（`bodyVisible`）：只判 `isFolded`
+       * 会让「只收了身体」的行在虚拟化里仍按带身体算，滚动条系统性偏大。
+       */
       (Boolean(this.ed.events.viewBody || this.ed.events.automationBody || this.ed.events.defBody) &&
         rowHasInlineViewBody(r) &&
-        !isFolded(this.ed.doc, r.block.id)) ||
+        bodyVisible(this.ed.doc, r.block.id)) ||
         (Boolean(this.ed.events.embedBody) &&
           rowHasEmbedViewBody(r.block, (id) => this.ed.store.find(id)) &&
-          !isFolded(this.ed.doc, r.block.id)),
+          bodyVisible(this.ed.doc, r.block.id)),
       // 行数由装配层给（密度档 ＋ 单块展开）；没有这一格 ⇒ 不画属性区
       propsRows(r.block.id, below?.get(r.block.id)),
       ),

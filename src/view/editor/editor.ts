@@ -35,11 +35,14 @@ import {
   typeDeclOf,
   selToTextRanges,
   isFolded,
+  isBodyFolded,
+  bodyVisible,
   isJournal,
   focusRootOf,
   isEmbedBlock,
   toggleChildrenCollapsed,
   toggleCollapsed,
+  toggleBodyCollapsed,
   unfoldBlock,
   dropRefused,
   type RowVerdict,
@@ -2714,9 +2717,12 @@ export class BlockEditor {
       /**
        * 代码块的身体是 CM6：收起要**真卸掉**（折叠态不挂第二编辑器），展开再重画
        * 这一行把它挂回来。查询体／投影体不同：它们只藏不卸，冻结结果与滚动还在。
+       *
+       * ⚠️ 判据看**两层**（`bodyHidden`）：身体可能是被行头那颗「只折身体」收起来的，
+       *    只看 `folded` 会把它当成「还开着」，于是收起分支不卸 CM6、展开分支不挂回来。
        */
       if (el?.dataset.code === '1') {
-        if (isFolded(this.doc, id)) {
+        if (!bodyVisible(this.doc, id)) {
           this.paintFold(id)
           this.embeds.disposeRow(id)
         } else {
@@ -2732,18 +2738,62 @@ export class BlockEditor {
     this.emitChange('view')
   }
 
+  /**
+   * **只折 / 展这一块的身体**（行头那颗按钮的唯一动作）。
+   *
+   * 与 `toggleCollapse` 的分工（这是「两层」这件事的落点）：
+   *   · `toggleCollapse`（左侧三角／`⌘.`）—— 折**整片**：身体与子块一起收；
+   *   · 本方法（行头按钮）—— 只收**身体那一格**，子块照常在上面。
+   *
+   * 动作语义是「让身体可见」而不是「翻一位」（判据在 `core/tree.ts` 的
+   * `toggleBodyCollapsed`）：身体已经看不见时，这一下把两个位一起清 —— 否则
+   * 「被三角收起、再点行头按钮」会没反应。
+   *
+   * ⚠️ **不进撤销栈**：与 `toggleCollapse` 同一条理由 —— 折叠不是内容。
+   */
+  toggleBodyCollapse(id: string): void {
+    const loc = locate(this.doc, id)
+    if (!loc) return
+    // 这个表面不画身体 ⇒ 折了没有任何可见效果，别白画一屏
+    if (!this.bodyFoldable(loc.block)) return
+    if (!toggleBodyCollapsed(this.doc, id)) return
+    /**
+     * **身体收起不重排整屏**：可见行集合没变（只藏身体那一格），重排会重建 ViewHost
+     * （冻结结果与滚动位置都丢）。
+     *
+     * 代码块例外：身体是 CM6，收起要**真卸掉**（折叠态不挂第二编辑器），
+     * 展开再重画这一行把它挂回来 —— 与 `toggleCollapse` 的代码块支同一条口径。
+     */
+    const el = this.blockEl(id)
+    if (el?.dataset.code === '1') this.renderBlock(id)
+    else this.paintFold(id)
+    this.emitChange('view')
+  }
+
   /** 把折叠态画到**已经挂着**的那一行上（不重建 DOM；查询身体折叠走这里） */
   private paintFold(id: string): void {
     const el = this.blockEl(id)
     if (!el) return
     const folded = isFolded(this.doc, id)
+    const bodyOnlyFolded = !folded && isBodyFolded(this.doc, id)
+    /**
+     * **行上的「收起」标记看两层**，但写两位不同：
+     *   · `data-collapsed` —— 整片收起（导轨段消失、块标浮底盘、左侧三角常驻）；
+     *   · `data-body-collapsed` —— 只收身体（子块还在，上面那些信号都不能动）。
+     * 合成一位会让「只收了身体」的行看起来连子块也收了。
+     */
     if (folded) el.dataset.collapsed = '1'
     else delete el.dataset.collapsed
+    if (bodyOnlyFolded) el.dataset.bodyCollapsed = '1'
+    else delete el.dataset.bodyCollapsed
+    const bodyHidden = folded || bodyOnlyFolded
     const fold = el.querySelector<HTMLElement>(':scope > .left > .fold')
     if (fold) fold.dataset.tip = folded ? t('ui.block.foldExpand') : t('ui.block.foldCollapse')
+    const act = el.querySelector<HTMLElement>(':scope > .blk-acts > [data-block-act="body-fold"]')
+    if (act) act.dataset.tip = bodyHidden ? t('ui.block.foldExpand') : t('ui.block.foldBody')
     const body = el.querySelector<HTMLElement>(':scope > .blk-view-body, :scope > .blk-embed-body, :scope > .blk-code-host')
     if (body) {
-      if (folded) body.dataset.folded = '1'
+      if (bodyHidden) body.dataset.folded = '1'
       else delete body.dataset.folded
     }
     this.render.noteFoldPainted()

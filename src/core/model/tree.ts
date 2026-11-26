@@ -1350,6 +1350,82 @@ export function toggleCollapsed(doc: Doc, id: string): boolean {
   return true
 }
 
+/* ------------------------------------------- 身体折叠（第二层） */
+
+/**
+ * **身体自己收起来了没有**（`bodyFolded` 那一张表）。
+ *
+ * 与 `isFolded` 分开：`folded` 说「这一行下面整片收起来」（身体 ＋ 子块），
+ * 这一位只说「身体那一格收起来」。有身体的块下面有两层，一颗位表达不了两个事实。
+ *
+ * 聚焦豁免与 `isFolded` 同一条：这一屏只剩它一个根时，把身体收起来等于把整屏收成
+ * 一行标题 —— 与「折了聚焦根」是同一种「点了没反应」。
+ */
+export function isBodyFolded(doc: Doc, id: string): boolean {
+  return focusExempt(doc, id) ? false : doc.bodyFolded?.[id] === true
+}
+
+/**
+ * **身体此刻看得见吗** —— 两个位都为假才看得见。
+ *
+ * 所有画身体的读路径都该问这一条，而不是各读一个位：整片收起当然也收起身体，
+ * 只读 `bodyFolded` 会让「三角折了容器、身体还挂着」。
+ */
+export function bodyVisible(doc: Doc, id: string): boolean {
+  return !isFolded(doc, id) && !isBodyFolded(doc, id)
+}
+
+/**
+ * 写「只收身体」这一位 —— 与 `writeFold` 同一条入口防：
+ * **没有身体的块不记这个事实**（记了就是一块永远点不开的空壳），`v === false` 永远放行。
+ *
+ * ⚠️ 显式收身体时同样清掉 `focusRootOpen`：聚焦期间这一位默认被豁免，
+ *    不清就等于「点了没反应」（与 `writeFold` 同一条理由）。
+ */
+function writeBodyFold(doc: Doc, id: string, v: boolean): void {
+  const b = locate(doc, id)?.block
+  if (v && (!b || !hasBody(b))) return
+  if (v && doc.focusRootId === id) delete doc.focusRootOpen
+  const next = { ...(doc.bodyFolded ?? {}) }
+  if (v) next[id] = true
+  else delete next[id]
+  doc.bodyFolded = next
+}
+
+export function setBodyCollapsed(doc: Doc, id: string, v: boolean): boolean {
+  const loc = locate(doc, id)
+  // 展开永远放行（展开是用来清的）；收起要求这一块真有身体
+  if (!loc || (v && !hasBody(loc.block))) return false
+  writeBodyFold(doc, id, v)
+  return true
+}
+
+/**
+ * **折 / 展这一块的身体**（行头那颗按钮的唯一动作）。
+ *
+ * 动作定义成「**让身体可见**」而不是「翻一位」：身体看得见 ⇒ 收起来（写 `bodyFolded`）；
+ * 身体已经看不见（不论是被 `folded` 还是 `bodyFolded` 藏的）⇒ **两个位一起清**，
+ * 一次点击就把身体拿回来。这样按钮的图标方向永远诚实，也不会出现「按了没反应」。
+ *
+ * ⚠️ 不碰子块：`folded` 只在「已经收着、这次要展开」时才被清 —— 收身体的这一下
+ *    从不写 `folded`，所以有子块的代码块折身体时子块照常在上面。
+ * ⚠️ **聚焦根豁免照 `writeFold` 那条**：聚焦期间它默认展开（`isBodyFolded` 恒假），
+ *    但用户显式收它 ⇒ 以这次为准 —— `writeBodyFold` 顺手清掉 `focusRootOpen`，
+ *    这一下当场生效。否则「点了没反应」。
+ */
+export function toggleBodyCollapsed(doc: Doc, id: string): boolean {
+  const loc = locate(doc, id)
+  if (!loc || !hasBody(loc.block)) return false
+  if (bodyVisible(doc, id)) {
+    writeBodyFold(doc, id, true)
+  } else {
+    // 两个位都清：身体可能是被「整片收起」藏起来的，只清一位等于没动
+    writeFold(doc, id, false)
+    writeBodyFold(doc, id, false)
+  }
+  return true
+}
+
 /**
  * **折 / 展一个块的全部直接子块**（调研 ；对的修订）。
  *

@@ -1500,38 +1500,57 @@ await check('T23 gutter 三件：块标与把手合并、三角悬停才现、�
   assert(r.bulletSize === '5px' && r.caretSize === '11px', `token 取值应对齐设计稿（5px / 11px）：${r.bulletSize}/${r.caretSize}`)
 
   // R2：**既无子块也无身体**的行不生成 `.fold` 节点（不是 visibility:hidden）。
-  // 「身体」有两种：视图身体（viewBody）与嵌入体（镜像行的源子树）——后者同样可折。
+  //
+  // ⚠️ 2026-11-26 修订：**左侧三角只属于「有子块」或「露面」的行**。
+  //    身体块的折叠搬到了行头（`.blk-acts [data-block-act="body-fold"]`）——
+  //    一个行上两颗折同一件事的件是重复入口，而「只折身体、留着子块」只有行头那颗能做。
+  //    露面行例外：它的 `.tx` 是 `display:none`，行头按钮在那一行会挤到块标右边，
+  //    所以它的折叠仍由块标旁那颗三角承担（没有行头入口可替代）。
   const foldOnLeaf = await page.evaluate(() => {
     const rows = [...document.querySelectorAll('#editor .blk')]
-    const leaves = rows.filter((el) => !el.dataset.hasChildren && el.dataset.viewBody !== '1' && el.dataset.embed !== '1')
-    const bodies = rows.filter((el) => el.dataset.viewBody === '1' || el.dataset.embed === '1')
+    const leaves = rows.filter((el) => !el.dataset.hasChildren && el.dataset.embed !== '1')
+    const bodies = rows.filter((el) => el.dataset.viewBody === '1' && !el.dataset.hasChildren)
+    const bodyFoldOf = (el) => el.querySelector(':scope > .blk-acts [data-block-act="body-fold"]')
     return {
       leafCount: leaves.length,
       withFold: leaves.filter((el) => el.querySelector('.fold')).length,
-      // 对照：有子块的行必须生成
+      // 对照：有子块的行必须生成左侧三角
       parentsWithFold: rows.filter((el) => el.dataset.hasChildren && el.querySelector('.fold')).length,
       parentCount: rows.filter((el) => el.dataset.hasChildren).length,
-      // 查询块／镜像行的身体也可折：这一类行（没有 children）同样要有三角
+      // 没有子块但有身体的行：不画左侧三角，改由行头那颗按钮承担
       bodyCount: bodies.length,
       bodiesWithFold: bodies.filter((el) => el.querySelector('.fold')).length,
+      bodiesWithBodyFold: bodies.filter((el) => bodyFoldOf(el)).length,
+      // 露面行：身体存在、行头不画按钮（它的 `.tx` 撑不住），左侧三角留着
+      embedCount: rows.filter((el) => el.dataset.embed === '1').length,
+      embedWithActs: rows.filter((el) => el.dataset.embed === '1' && bodyFoldOf(el)).length,
     }
   })
   assert(foldOnLeaf.leafCount > 0, '假数据里应有无子块的行')
   assert(
     foldOnLeaf.withFold === 0,
-    `既无子块也无身体的行不该生成 .fold 节点（R2），实际 ${foldOnLeaf.withFold}/${foldOnLeaf.leafCount}`,
+    `没有子块的行不该生成左侧三角（R2：折叠入口归行头），实际 ${foldOnLeaf.withFold}/${foldOnLeaf.leafCount}`,
   )
   assert(
     foldOnLeaf.parentsWithFold === foldOnLeaf.parentCount,
     `有子块的行都应生成 .fold：${foldOnLeaf.parentsWithFold}/${foldOnLeaf.parentCount}`,
   )
   assert(
-    foldOnLeaf.bodyCount > 0 && foldOnLeaf.bodiesWithFold === foldOnLeaf.bodyCount,
-    `有身体（查询结果）的行也要有折叠三角：${foldOnLeaf.bodiesWithFold}/${foldOnLeaf.bodyCount}`,
+    foldOnLeaf.bodyCount > 0 && foldOnLeaf.bodiesWithBodyFold === foldOnLeaf.bodyCount,
+    `有身体的行都要有行头折叠按钮：${foldOnLeaf.bodiesWithBodyFold}/${foldOnLeaf.bodyCount}`,
+  )
+  assert(
+    foldOnLeaf.bodiesWithFold === 0,
+    `有身体但没有子块的行不该再画左侧三角（一颗行上不留两个折叠入口）：${foldOnLeaf.bodiesWithFold}`,
+  )
+  assert(
+    foldOnLeaf.embedWithActs === 0,
+    `露面行不画行头按钮（它的 .tx 是 display:none，挂上去会被挤到块标右边）：${foldOnLeaf.embedWithActs}/${foldOnLeaf.embedCount}`,
   )
 
   // 折叠态：**块标浮起一块淡底盘 ＋ 三角常驻**（折叠态不能只靠悬停件自明）
-  await page.locator('.blk').first().locator('.fold').click({ force: true })
+  // ⚠️ 用「第一颗左侧三角」而不是「第一行的三角」：左侧三角现在只属于有子块的行。
+  await page.locator('#editor .fold').first().click({ force: true })
   const collapsed = await page.evaluate(() => {
     const blk = document.querySelector('#editor .blk[data-collapsed="1"]')
     const marker = blk.querySelector('.marker')

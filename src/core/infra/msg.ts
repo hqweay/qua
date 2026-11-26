@@ -1520,6 +1520,7 @@ export const MSG = {
   /* ---------------------------------------------------------------- 块（view） */
   'ui.block.foldExpand': '展开（点击）',
   'ui.block.foldCollapse': '折叠（点击）',
+  'ui.block.foldBody': '折叠内容（子块留着）',
   'ui.block.foldLine': '折叠 / 展开子块（点击）',
   'ui.block.caption': '标题',
   'ui.block.captionAdd': '添加标题',

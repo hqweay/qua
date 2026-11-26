@@ -1446,6 +1446,7 @@ function swapWorkspace(next: Workspace, save: boolean): void {
    * 这里只有同一库的演示切换。
    */
   device.folded = {}
+  device.bodyFolded = {}
   scheduleDeviceSave()
   blocks.reset(next.blocks)
   // 角标的全库答案按库算：旧库的缓存不能跟着块 id 过河
@@ -1468,7 +1469,7 @@ function swapWorkspace(next: Workspace, save: boolean): void {
   // ⚠️ 光标必须落在**第一个可编辑的行**上（日记流的第一段是只读日期行）。
   //    原来固定 `roots[0]`，于是载入假数据后光标停在日期行、第一行看着「没有名字」。
   const caret = firstEditableRoot(roots[0])
-  mainEd.loadPage({ roots, folded: device.folded }, { blockId: caret?.id ?? '', off: 0 })
+  mainEd.loadPage({ roots, folded: device.folded, bodyFolded: device.bodyFolded }, { blockId: caret?.id ?? '', off: 0 })
   renderMounts()
   chrome.renderEmptyHint(activeBlock().children)
   initTabs()
@@ -2304,7 +2305,7 @@ ed = new BlockEditor({
    * 折叠态是**设备**那份（`qua.device`）：换机器就是另一份，换库时由 `replaceWorkspace` 清空。
    * 中心是**聚焦面**：装载只剩一个根时，它自己的折叠在这一屏不生效（聚焦即展开）。
    */
-  doc: { roots: bootRoots, folded: device.folded },
+  doc: { roots: bootRoots, folded: device.folded, bodyFolded: device.bodyFolded },
   focusSurface: true,
   /**
    * 写入事务入口。source 由**编辑器自己**注入（见 `Run`）；`mainEd` 只是兜底

@@ -644,19 +644,14 @@ function viewEvents(
     // 结构动作后光标不可见的兜底：所有编辑器共用同一份实现（判据在 focusSourceInMain）
     focusSource: (blockId) => focusSourceInMain(blockId),
     /**
-     * **身体块行头的动作**（上建块／下建块／删除）：与块菜单同名项落同一条路。
-     * 只接鼠标，不碰键位——岛里不再监听方向键，结构动作在代码块里只有这一条。
+     * **身体块行头的折叠按钮**：只折身体那一格（`bodyFolded`），不碰子块。
+     *
+     * 用**画这一行的那台**编辑器（预览／挂载区里的行不归当前活动那台）：
+     * 折叠表是每台编辑器一份的视图实例态，走「活动编辑器」会折错行。
      */
     blockAction: (act, id, owner) => {
-      if (act === 'delete') {
-        void getRegistry().invoke('core.block/delete', { blockId: id }, via)
-        return
-      }
-      if (!kb.get(id)) return
-      // 用**画这一行的那台**编辑器（预览/挂载区里的行不归当前活动那台）
-      const ed = owner ?? active()
-      if (act === 'above') ed.insert.insertBlockBefore(id, { reuseBlank: false })
-      else ed.insert.insertBlockAfter(id, '', undefined, { reuseBlank: false })
+      if (act !== 'body-fold') return
+      ;(owner ?? active()).toggleBodyCollapse(id)
     },
     blockMenu: (blockId, rect, appearanceHost, trigger) => {
       const ed = active()

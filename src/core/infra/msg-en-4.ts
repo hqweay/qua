@@ -71,6 +71,7 @@ export const EN4 = {
   'ui.refPicker.blocks': '{count} blocks',
   'ui.block.foldExpand': 'Expand (click)',
   'ui.block.foldCollapse': 'Collapse (click)',
+  'ui.block.foldBody': 'Collapse content, keep child blocks',
   'ui.block.caption': 'Title',
   'ui.block.captionAdd': 'Add a title',
   'ui.block.foldLine': 'Collapse / expand child blocks (click)',

@@ -1,6 +1,14 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { toggleChildrenCollapsed, toggleCollapsed, visibleRows } from '../src/core/model/tree.ts'
+import {
+  bodyVisible,
+  isBodyFolded,
+  setBodyCollapsed,
+  toggleBodyCollapsed,
+  toggleChildrenCollapsed,
+  toggleCollapsed,
+  visibleRows,
+} from '../src/core/model/tree.ts'
 import type { Block, Doc } from '../src/core/model/model.ts'
 
 const mk = (id: string, text = '', children: Block[] = []): Block => ({ id, text, children })
@@ -188,4 +196,71 @@ test('组里只有查询块（无 children）⇒ 仍然折得动（不是 null�
   assert.equal(toggleChildrenCollapsed(doc, 'p'), true)
   assert.equal(folded(doc, 'q1'), true)
   assert.equal(folded(doc, 'q2'), true)
+})
+
+/* ---------------------------------------- 第二层：只收身体（`bodyFolded`） */
+
+/**
+ * 有身体的块下面有**两层**东西（身体 ＋ 子块），一颗位表达不了两个事实。
+ * 这一组钉的是「两个位各自只回答一件事」以及行头那颗按钮的动作语义。
+ */
+test('只收身体：子块照常在上面，整片折叠位一个字节没动', () => {
+  const kid = mk('k1', 'k1')
+  const code = mk('c1', 'code title', [kid])
+  code.props = { _type: 'core/code', _code: 'x = 1' }
+  const doc: Doc = { roots: [code], folded: {}, bodyFolded: {} }
+
+  assert.equal(toggleBodyCollapsed(doc, 'c1'), true)
+  assert.equal(doc.bodyFolded?.['c1'], true, '身体收起来了')
+  assert.equal(folded(doc, 'c1'), false, '子块没被收：整片折叠位不该被写')
+  // 子块行仍在可见行里
+  const rows = visibleRows(doc).filter((r) => !r.hidden).map((r) => r.block.id)
+  assert.deepEqual(rows, ['c1', 'k1'])
+})
+
+test('身体已经看不见时再点一次 ⇒ 两个位一起清（不是翻一位）', () => {
+  const code = mk('c1', 'code title')
+  code.props = { _type: 'core/code', _code: 'x = 1' }
+  const doc: Doc = { roots: [code], folded: { c1: true }, bodyFolded: {} }
+
+  // 此刻身体看不见（被 `folded` 藏的）；按钮的语义是「让身体可见」⇒ 清两位
+  assert.equal(toggleBodyCollapsed(doc, 'c1'), true)
+  assert.equal(folded(doc, 'c1'), false)
+  assert.equal(doc.bodyFolded?.['c1'], undefined)
+  assert.equal(bodyVisible(doc, 'c1'), true)
+})
+
+test('没有身体的块写不进「只收身体」：不记一个不存在的事实', () => {
+  const plain = mk('p1', 'just text')
+  const doc: Doc = { roots: [plain], folded: {}, bodyFolded: {} }
+  assert.equal(setBodyCollapsed(doc, 'p1', true), false)
+  assert.equal(doc.bodyFolded?.['p1'], undefined)
+  // 展开永远放行（展开是用来清的）
+  doc.bodyFolded = { p1: true }
+  assert.equal(setBodyCollapsed(doc, 'p1', false), true)
+  assert.deepEqual(doc.bodyFolded, {})
+})
+
+test('整片收起当然也收起身体：bodyVisible 看两位', () => {
+  const q = mk('q1', 'q')
+  q.props = { _query: { where: { kind: 'any' } } }
+  const doc: Doc = { roots: [q], folded: { q1: true }, bodyFolded: {} }
+  assert.equal(bodyVisible(doc, 'q1'), false, 'folded 在场 ⇒ 身体不可见')
+  doc.folded = {}
+  doc.bodyFolded = { q1: true }
+  assert.equal(bodyVisible(doc, 'q1'), false, 'bodyFolded 在场 ⇒ 身体不可见')
+  doc.bodyFolded = {}
+  assert.equal(bodyVisible(doc, 'q1'), true)
+})
+
+test('聚焦根的身体同样豁免；用户显式收它 ⇒ 以这次为准（清豁免位，当场生效）', () => {
+  const code = mk('c1', 'code title')
+  code.props = { _type: 'core/code', _code: 'x = 1' }
+  const doc: Doc = { roots: [code], folded: {}, bodyFolded: { c1: true }, focusRootId: 'c1', focusRootOpen: true }
+  assert.equal(isBodyFolded(doc, 'c1'), false, '聚焦期间不生效（表里有位也不收）')
+  assert.equal(bodyVisible(doc, 'c1'), true, '所以屏幕上身体是展开的')
+  // 用户显式收 ⇒ 与 `writeFold` 同一条口径：以这次为准
+  assert.equal(toggleBodyCollapsed(doc, 'c1'), true)
+  assert.equal(doc.focusRootOpen, undefined, '豁免位被清掉，这一下才落得下去')
+  assert.equal(isBodyFolded(doc, 'c1'), true, '身体当场收起来')
 })

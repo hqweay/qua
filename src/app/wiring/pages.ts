@@ -302,6 +302,8 @@ export function setupPages(deps: PagesDeps) {
       roots,
       // 每个 tab 自己的一份折叠表：共用一个对象会让一个 tab 的折叠串到另一个 tab
       folded: { ...mainEd.doc.folded },
+      // 两层折叠表各带一份：漏了 `bodyFolded`，新 tab 里收起的身体会全部展开
+      bodyFolded: { ...(mainEd.doc.bodyFolded ?? {}) },
       ...(viewRootId ? { viewRootId } : {}),
     }
     return {
@@ -567,6 +569,11 @@ export function setupPages(deps: PagesDeps) {
     // 折叠态是**视图**的一份：当前 tab 的那份（拿不到 tab 时退回编辑器手上的那份）
     const folded = tab ? { ...tab.doc.folded } : mainEd.doc.folded
     /**
+     * **第二层折叠表同样要跟着装载走**：只带 `folded` 会让「只收身体」的那些行
+     * 每次换页／重开都回到展开态（表在 `device` 里，读得到却没人递给编辑器）。
+     */
+    const bodyFolded = tab ? { ...(tab.doc.bodyFolded ?? {}) } : (mainEd.doc.bodyFolded ?? {})
+    /**
      * **默认看法的显示白名单**（`_defaultDisplayProps`）：单根块自己的那一份。
      * 命名视图激活时它不生效——那批 children 归视图宿主画，默认大纲不是这一屏的看法。
      */
@@ -574,6 +581,7 @@ export function setupPages(deps: PagesDeps) {
     mainEd.loadPage({
       roots,
       folded,
+      bodyFolded,
       ...(viewRootId ? { viewRootId } : {}),
       ...(defaultDisplay !== undefined ? { displayProps: defaultDisplay } : {}),
     })

@@ -3735,11 +3735,14 @@ button.blk-auto-chip {
   min-width: 0;
 }
 /*
- * **身体块行头的动作组**（上建块／下建块／删除）：行级 chrome，跟标题同一行、靠右。
+ * **身体块行头的折叠按钮**（只折身体，不折子块）：行级 chrome，跟名字同一行、靠右。
  *
- * 为什么是行项而不是绝对定位：它和标题共享第一行，宽度常驻、只换透明度——hover
+ * 为什么是行项而不是绝对定位：它和名字共享第一行，宽度常驻、只换透明度——hover
  * 不改行宽（改了整行的字会抖一下），也不压标签槽（标签槽排在它后面）。
- * 与块标/折叠同一档鼠标 chrome：不进 tab 序，点击由组自己收下再交给结构命令。
+ * 与块标/折叠同一档鼠标 chrome：不进 tab 序，点击由组自己收下再交给折叠桥。
+ *
+ * ⚠️ 靠右靠的是 `.tx` 的 `flex:1`：这一组是 `.tx` 之后的 flex 项。
+ *    露面行的 `.tx` 是 `display:none`，所以那一类行不画这一组（见 `block-dom`）。
  */
 .blk-acts {
   flex: 0 0 auto;
@@ -3771,16 +3774,30 @@ button.blk-auto-chip {
   background: var(--ui-bg-hover);
   opacity: 1;
 }
-.blk-act-delete:hover {
-  color: var(--ui-danger);
+/* 身体收起时这颗按钮常驻（收起态不能只靠悬停件自明，与左侧三角同一条口径） */
+.blk[data-body-collapsed='1'] > .blk-acts,
+.blk[data-collapsed='1'] > .blk-acts {
+  opacity: var(--ui-quiet);
+}
+/* 图标恒画 `chevron-down`，收起态旋转 90°（与左侧三角同一套语言） */
+.blk-act .ico {
+  transition: transform 120ms ease;
+}
+.blk[data-body-collapsed='1'] .blk-act .ico,
+.blk[data-collapsed='1'] .blk-act .ico {
+  transform: rotate(-90deg);
 }
 @media (prefers-reduced-motion: reduce) {
   .blk-acts {
     transition: none;
   }
+  .blk-act .ico {
+    transition: none;
+  }
 }
 /* 收起态的代码块用一种「合上的盒子」读法：标题就是盒面（`.tx`），正文不占位 */
-.blk[data-collapsed='1'][data-code='1'] > .tx {
+.blk[data-collapsed='1'][data-code='1'] > .tx,
+.blk[data-body-collapsed='1'][data-code='1'] > .tx {
   padding: var(--ui-gap-2) var(--ui-gap-4);
   background: var(--ui-code-bg);
   border: 1px solid var(--ui-border-subtle);

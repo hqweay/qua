@@ -89,8 +89,10 @@ export function setupPersistence(deps: PersistenceDeps) {
        *    无条件排一次就会让「敲一个字」顺便重写一遍设备字节（偏好与折叠表同一份 payload）。
        *    这里比内容而不是比引用：原地改写也不会让这份落盘悄悄失效。
        */
-      if (!sameFold(device.folded, next)) {
+      const nextBody = mainEd.doc.bodyFolded ?? {}
+      if (!sameFold(device.folded, next) || !sameFold(device.bodyFolded, nextBody)) {
         device.folded = next
+        device.bodyFolded = nextBody
         scheduleDeviceSave()
       }
     }
