@@ -1058,6 +1058,9 @@ export function makeBlockEl(
     rails.setAttribute('aria-hidden', 'true')
     rails.contentEditable = 'false'
     for (let k = 0; k < ancestors.length; k++) {
+      // 引述容器那一列由变体竖线（::before）承担，不再叠一条灰导轨；
+      // 其它祖先列照画 ⇒ 外侧的页/父导轨在引述区不断（实测：只藏直系行会让它断）。
+      if (opts.quoteCtx && k === opts.quoteCtx.depth) continue
       const rail = document.createElement('span')
       rail.className = 'rail'
       rail.dataset.foldLineFor = ancestors[k]!

@@ -846,9 +846,6 @@
 .blk[data-quote-line]:hover > .left .marker .grip {
   opacity: var(--ui-soft);
 }
-.blk[data-quote-line] > .rails {
-  display: none;
-}
 /*
  页 / 日记 / 被聚焦块作为**正文第一行**时更大一档（它是这一屏的「身份」，但不叫标题）。
  ⚠️ 这里**不写 font-size**：字号已经是「深度 0 ⇒ `--ui-fs-lg`」一条规则给出的。

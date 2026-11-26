@@ -13,6 +13,7 @@ import {
   CALLOUT_PROP,
   canonicalCallout,
   mkBlock,
+  descendants,
   DEFAULT_CALLOUT,
   QUOTE_TYPE,
   type CalloutVariant,
@@ -240,6 +241,9 @@ function setCalloutVariant(blockId: string, variant: CalloutVariant): boolean {
     if (Object.keys(props).length === 0) delete b.props
     else b.props = props
   })
+  // 变体色是按最近祖先算到**每一行**上的（`data-quote`）：只重画抬头，子行会停在旧色
+  // ⇒ 整组一起重画，竖线颜色才一起切。
+  for (const d of descendants(b)) repaintBlock(d.id)
   return true
 }
 
