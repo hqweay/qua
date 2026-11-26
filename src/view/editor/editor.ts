@@ -1477,8 +1477,12 @@ export class BlockEditor {
       })
   }
 
-  renderBlock(id: string): void {
-    this.render.renderBlock(id)
+  /**
+   * @param keepGutter 打字时只改 content，gutter 的输入（属性／结构／折叠／身份）一个没变。
+   *    换掉 `.left` 会让三角与块标的淡入过渡每键从 0 重来（悬停时读作抖动）。
+   */
+  renderBlock(id: string, keepGutter = false): void {
+    this.render.renderBlock(id, keepGutter)
   }
 
   applyWindow(centerId?: string): void {
@@ -2628,7 +2632,7 @@ export class BlockEditor {
     const caret = this.sel ? this.sel.aOff : null
     this.finishUndoEntry(kind, at)
     if (reRender) {
-      this.renderBlock(id)
+      this.renderBlock(id, true)
       if (caret !== null) this.placeCaret(id, Math.min(caret, plainLen(block.content)))
       // **改名传播**：这一块可能是别处引用的目标 ⇒ 引用它的那些块也要重画（显示名现算）。
       // 改动只影响「指向它的 run 所在的块」，不是全视图重渲染。

@@ -962,7 +962,7 @@ export class RenderOps {
     //    等于每窗两次强制布局。
   }
 
-  renderBlock(id: string): void {
+  renderBlock(id: string, keepGutter = false): void {
     this.probe.renderBlockCalls++
     /**
      * 找块用 **store 的索引**（O(1)），不用 `locate(doc, id)`（全树 DFS）。
@@ -1003,8 +1003,29 @@ export class RenderOps {
       this.belowOf([row.block], derive).get(row.block.id),
       hasSingleLiveBlock(this.ed.doc),
     )
-    el.replaceWith(nextEl)
-    this.ed.setRowEl(id, nextEl)
+    /**
+     * 打字只改 content，gutter 的输入（属性／结构／折叠／身份）一个没变。
+     * 别用 `replaceWith` 把整行摘下来重装——那样 `.left` 会先离档再回来，三角与
+     * 块标的 `:hover` 淡入过渡每键从 0 重来（悬停时读作抖动）。
+     * 让 `el` 一直留在文档里，只换掉 content 派生的那些子节点，`.left` 原封不动。
+     * 整行重装仍留给结构变化（折叠／换类型等）——那时 gutter 真的要重画。
+     */
+    if (keepGutter) {
+      for (const c of [...el.childNodes]) {
+        if (c instanceof HTMLElement && c.classList.contains('left')) continue
+        c.remove()
+      }
+      for (const c of [...nextEl.childNodes]) {
+        if (c instanceof HTMLElement && c.classList.contains('left')) continue
+        el.appendChild(c)
+      }
+      // `data-rev` 是「这行画下时的修订号」：`holdRows` 用它判这行是不是旧到不能留。
+      // `el` 留着没换，这一格得自己跟上，否则下一次整页重画会白把这一行当旧行重建。
+      el.dataset.rev = nextEl.dataset.rev
+    } else {
+      el.replaceWith(nextEl)
+      this.ed.setRowEl(id, nextEl)
+    }
     /**
      * 这一行的 DOM 刚被换掉：表里那个实测高是**换之前**的（改长／改短都算），
      * 现在量一次；量不到（不在窗口里）就删掉，退回估算。
