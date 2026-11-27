@@ -31,7 +31,9 @@ import {
   ICON_PROP,
   COLOR_PROP,
   CALLOUT_PROP,
+  LANG_PROP,
   calloutGroupChoices,
+  codeLangChoices,
   calloutTypesOf,
   prop,
   isJournal,
@@ -1266,6 +1268,8 @@ export function setupPanels(deps: PanelsDeps) {
          * 动态词汇」的先例。
          */
         if (propId === CALLOUT_PROP) return calloutGroupChoices(calloutTypesOf((id) => kb.get(id)))
+        // `_lang` 是静态语言表；未知语言由值控件按 `open` 照原文显示（不在这里造选项）
+        if (propId === LANG_PROP) return codeLangChoices()
         const def = kb.get(propId)
         if (!def) return []
         const records = allChoicesOf(def)

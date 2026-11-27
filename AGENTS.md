@@ -238,7 +238,7 @@ pnpm gate:fast --plan   # 只打「这次会跑哪些 / 跳过哪些」，不真
 pnpm test:one tests/x.test.ts   # 只跑这几个单测文件（~0.2s）
 QUA_SMOKE_ONLY="T187" pnpm check:smoke   # 只跑名字含这个子串的冒烟用例（~5s）。⚠️ 跑的是 dist，不替你构建：改完 src 先 `pnpm build:test` 再点射，否则测的是旧产物（症状：typecheck 绿但「新方法 missing／行为没变」；QUA_NO_DEV=1 时尤其如此——验的是构建产物，不去连 5180 的 dev 服务器）
 pnpm gate:web       # 同 gate，但不含 Electron（CI 的 Linux job 用这个）
-pnpm dev            # vite + electron 一起起（src/** 热更新；electron/*.ts 改动要重跑）
+pnpm dev            # vite + electron 一起起（src/** 只热更新渲染层；electron/*.ts 与主进程 import 的 core 模块改动要重跑）
 pnpm dev:web        # 只起 vite → http://127.0.0.1:5180/
 pnpm arch:check     # 只跑架构静态断言（秒级）
 pnpm lint           # oxlint correctness，只扫 tsc 不看的三个目录（tests/checks/scripts，~0.1s）

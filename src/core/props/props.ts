@@ -21,6 +21,7 @@ import {
   ALIASES_PROP,
   COLOR_PROP,
   ICON_PROP,
+  LANG_PROP,
   aliasesOf,
   blockTypeOf,
   isDeleted,
@@ -41,7 +42,8 @@ import { journalDate, todayISO } from '../identity/journal.ts'
 import { allTags, resolveTagIds, TAGS_PROP, tagIdsOf, tagsById } from '../identity/tags.ts'
 import { t } from '../infra/msg.ts'
 import { DEFAULT_CALLOUT } from '../infra/callout.ts'
-import { QUOTE_TYPE } from '../model/types.ts'
+import { normalizeStoredLang } from '../infra/code-lang.ts'
+import { CODE_TYPE, QUOTE_TYPE } from '../model/types.ts'
 import { checkExternalUrl } from '../relations/link.ts'
 import { CLOSURE_USE, isUseId, useIsUnique, type UseId } from './uses.ts'
 
@@ -1132,6 +1134,7 @@ export const QUERYABLE_SYSTEM_PROPS = [
   '_kind',
   '_type',
   CALLOUT_PROP,
+  LANG_PROP,
   ALIASES_PROP,
   TAGS_PROP,
   BELONGS_TO_PROP,
@@ -1169,6 +1172,7 @@ export function systemQueryFieldLabel(propId: string): string | undefined {
   if (propId === '_kind') return t('ui.query.sysField.kind')
   if (propId === '_type') return t('ui.query.sysField.type')
   if (propId === CALLOUT_PROP) return t('ui.query.sysField.callout')
+  if (propId === LANG_PROP) return t('ui.query.sysField.lang')
   if (propId === ALIASES_PROP) return t('ui.query.sysField.aliases')
   if (propId === TAGS_PROP) return t('ui.query.sysField.tags')
   if (propId === BELONGS_TO_PROP) return t('ui.query.sysField.belongsTo')
@@ -1189,6 +1193,8 @@ export function systemQueryFieldLabel(propId: string): string | undefined {
  * | `_date` | `journalDate(b) !== ''`（`isJournalBlock` 同一份） | 日期串 |
  * | `_kind` | `isPropDefBlock(b)` | `text`／`date`… |
  * | `_type` | 恒在（`blockTypeOf`：没键＝默认类型） | 类型 id（未知 id 合法，读侧降级） |
+ * | `_callout` | `blockTypeOf === QUOTE_TYPE` | 类型记录 id（缺键＝`quote`） |
+ * | `_lang` | `blockTypeOf === CODE_TYPE` | 规范语言 id（缺键＝`plain`；未知原文保留） |
  * | `_aliases` | `aliasesOf(b)` 非空 | 地址数组（`eq` 按任一元素判） |
  * | `_tags` | 归属边里**有活着的标签**（屏幕画得出来的那些） | 标签块 id 数组 |
  * | `_belongsTo` | 边数组**非空**（悬空上级也算——归属面板把悬空画成待清理的 chip） | 上级 id 数组 |
@@ -1222,6 +1228,18 @@ function readSystemField(block: Block, propId: string, table: FieldTable): Field
     if (blockTypeOf(block) !== QUOTE_TYPE) return { declared: false, value: undefined }
     const raw = prop<string>(block, CALLOUT_PROP)
     return { declared: true, value: typeof raw === 'string' && raw !== '' ? raw : DEFAULT_CALLOUT }
+  }
+  if (propId === LANG_PROP) {
+    /**
+     * 只有代码块有这一栏；缺键＝纯文本（与徽章/语言表的读法同一条）。
+     *
+     * ⚠️ 值走 **`normalizeStoredLang`**（认识的收成规范名、不认识的原文保留），
+     * 不是 `canonicalLang`——后者是**渲染口径**，把 `zig` 收成 `plain`（不高亮）。
+     * 用错它，`eq:'plain'` 会命中 `_lang:'zig'`：屏幕写 zig、查询说纯文本。
+     */
+    if (blockTypeOf(block) !== CODE_TYPE) return { declared: false, value: undefined }
+    const raw = prop<string>(block, LANG_PROP)
+    return { declared: true, value: normalizeStoredLang(typeof raw === 'string' ? raw : undefined) ?? 'plain' }
   }
   if (propId === ALIASES_PROP) {
     const names = aliasesOf(block)

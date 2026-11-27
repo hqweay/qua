@@ -11,9 +11,10 @@ import { collatorLocale } from '../infra/locale.ts'
  * 与 `view.ts` 的两条类型引用（`Source`／调用方拿 `ViewRecord`）编译期擦除，
  * 运行时依赖单向（records → view 的列词汇，再 → 各读路径模块）。
  */
-import { hasList, isDeleted, liveChildren, blockTypeOf, CALLOUT_PROP, type Block, type BlockProps } from '../model/model.ts'
-import { QUOTE_TYPE } from '../model/types.ts'
+import { hasList, isDeleted, liveChildren, blockTypeOf, CALLOUT_PROP, LANG_PROP, type Block, type BlockProps } from '../model/model.ts'
+import { CODE_TYPE, QUOTE_TYPE } from '../model/types.ts'
 import { DEFAULT_CALLOUT } from '../infra/callout.ts'
+import { normalizeStoredLang } from '../infra/code-lang.ts'
 import { displayNameOf } from '../identity/alias.ts'
 import { journalDateInChain } from '../identity/journal.ts'
 import { tagIdsOf } from '../identity/tags.ts'
@@ -92,18 +93,31 @@ function recordOf(block: Block, path: readonly Block[], kb: KbClient): ViewRecor
 }
 
 /**
- * 记录上的「值」投影：属性袋原样，**只补一个缺省**——引述块的 `_callout`。
+ * 记录上的「值」投影：属性袋原样，**只改两个由类型声明拥有的系统槽**——
+ * `_callout` 补缺省类型、`_lang` 补纯文本并归一别名。
  *
- * 缺键在模型里的读法就是缺省类型（与 `_lang` 缺键＝纯文本同一条）。分组与覆盖率
- * 只看属性袋的话，默认类型的引述会落进「未设置」——它的类型明明就是「引述」。
+ * 缺键在模型里的读法就是缺省值（`readField` 同一条）；分组与覆盖率只看属性袋的话，
+ * 默认类型的引述／没写语言的代码块会落进「未设置」——它们的值明明就是「引述」「纯文本」。
  * 补的是**投影**不是数据：盘上仍没有这一格，写入仍按「缺省＝摘键」。
+ *
+ * `_lang` 还多一步**归一**（`ts` → `typescript`）：分组键与选项 id 同源，
+ * 否则组头读不出语言名；未知语言原文保留（与查询的值投影同一份 `normalizeStoredLang`）。
  */
 function valuesOf(block: Block): BlockProps {
   const props = block.props ?? {}
-  if (blockTypeOf(block) !== QUOTE_TYPE) return props
-  const raw = props[CALLOUT_PROP]
-  if (typeof raw === 'string' && raw !== '') return props
-  return { ...props, [CALLOUT_PROP]: DEFAULT_CALLOUT }
+  const type = blockTypeOf(block)
+  if (type === QUOTE_TYPE) {
+    const raw = props[CALLOUT_PROP]
+    if (typeof raw === 'string' && raw !== '') return props
+    return { ...props, [CALLOUT_PROP]: DEFAULT_CALLOUT }
+  }
+  if (type === CODE_TYPE) {
+    const raw = props[LANG_PROP]
+    const lang = normalizeStoredLang(typeof raw === 'string' ? raw : undefined) ?? 'plain'
+    if (raw === lang) return props
+    return { ...props, [LANG_PROP]: lang }
+  }
+  return props
 }
 
 /**

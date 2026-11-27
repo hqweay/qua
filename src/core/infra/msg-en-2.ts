@@ -302,6 +302,7 @@ export const EN2 = {
   'ui.query.sysField.date': 'Journal date',
   'ui.query.sysField.kind': 'Definition kind',
   'ui.query.sysField.type': 'Block type',
+  'ui.query.sysField.lang': 'Code language',
   'ui.query.sysField.aliases': 'Aliases',
   'ui.query.sysField.tags': 'Tags',
   'ui.query.sysField.belongsTo': 'Parent it belongs to',

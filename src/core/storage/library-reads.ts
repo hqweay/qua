@@ -410,6 +410,20 @@ export type CandidatePlan =
   | { k: 'note' }
   | { k: 'ref'; to?: string; kinds: string[] }
   | { k: 'prop'; name: string }
+  /**
+   * **块类型在 `Block.type` 列上**（`_type` 升列，不在 `BlockProperty`）。
+   *
+   * 为什么需要这个计划：matcher 的 `_type` 读的是 `blockTypeOf`（缺键＝默认类型），
+   * 而候选若落到 `{k:'prop', name:'_type'}` 就去查属性行——那是一张空表（`_type`
+   * 被 `NOT_A_PROP` 排除），候选会静默变成空集。这里把「列」这层存储事实直接编进计划。
+   *
+   * `mode` 的两种取值对应两条**精确**的存储谓词：
+   *   · `eq`：`b.type = ?`；`includeDefault` 时并上 `b.type IS NULL`（缺键＝默认类型）。
+   *   · `neqDefault`：`b.type IS NOT NULL AND b.type != ?`（NULL 就是默认类型，必须排除）。
+   * `neq` 非默认类型不给计划（`NULL != X` 也是真命中，`b.type != X` 会漏），由调用方退 `visible`。
+   */
+  | { k: 'type'; type: string; mode: 'eq'; includeDefault?: true }
+  | { k: 'type'; type: string; mode: 'neqDefault' }
   | { k: 'kind' }
   /**
    * **有 `_query`（查询视图块）**——`b.query` 是 `_query` 升出来的列。
@@ -493,6 +507,10 @@ export function isCandidatePlan(v: unknown, depth = 0): v is CandidatePlan {
       )
     case 'prop':
       return typeof v.name === 'string' && v.name !== ''
+    case 'type':
+      if (typeof v.type !== 'string') return false
+      if (v.mode === 'eq') return v.includeDefault === undefined || v.includeDefault === true
+      return v.mode === 'neqDefault' && v.includeDefault === undefined
     case 'journalDay':
       return typeof v.date === 'string' && v.date !== ''
     case 'text':
@@ -840,6 +858,18 @@ export function candidatePlanSql(
           )`,
         [plan.name, `"${plan.name}"`, `"${plan.name}"`],
       )
+    case 'type':
+      /**
+       * `_type` 升成了 `Block.type` 列，`includeDefault` 表示「缺键＝默认类型」也命中。
+       * `neqDefault` 只由缺省类型产生：NULL 就是缺省，必须排除（`b.type != ?` 在 SQL
+       * 里对 NULL 是 unknown，不会自动排除，所以显式写 `is not null`）。
+       */
+      if (plan.mode === 'eq') {
+        return plan.includeDefault === true
+          ? wrap(`select b.id as id from ${B} b where (b.type is null or b.type = ?) and ${visible('b')}`, [plan.type])
+          : wrap(`select b.id as id from ${B} b where b.type = ? and ${visible('b')}`, [plan.type])
+      }
+      return wrap(`select b.id as id from ${B} b where b.type is not null and b.type != ? and ${visible('b')}`, [plan.type])
     case 'kind':
       return wrap(`select b.id as id from ${B} b where b.kind is not null and ${visible('b')}`, [])
     case 'query':
@@ -953,6 +983,7 @@ function planIsExact(plan: CandidatePlan, derived: boolean): boolean {
     case 'journalDay':
     case 'note':
     case 'kind':
+    case 'type':
     case 'aliased':
       return true
     /**

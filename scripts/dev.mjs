@@ -47,7 +47,7 @@ function run(cmd, args, opts = {}) {
   return c
 }
 
-/* 1. 先把 electron/*.ts 编译出来（main.ts 改了要重启 pnpm dev，这里不做热重启） */
+/* 1. 先把主进程编译出来（electron/*.ts 与它 import 的 core 模块改了要重启 pnpm dev，这里不做热重启） */
 const build = run(process.execPath, [`${root}scripts/build-electron.mjs`])
 build.on('exit', (code) => {
   if (code !== 0) {

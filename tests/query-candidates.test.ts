@@ -23,11 +23,12 @@ import { readCandidatePage, readBlockTreeRows, readIdentityRows } from '../elect
 import { rowsToWorkspace } from '../src/core/storage/db-rows.ts'
 import { rebuildDerivedWrites } from '../src/core/storage/derived-rows.ts'
 import { candidateBuildOf } from '../src/core/storage/query-candidates.ts'
-import { candidatePlanSql } from '../src/core/storage/library-reads.ts'
+import { candidatePlanSql, isCandidatePlan } from '../src/core/storage/library-reads.ts'
 import { BlockStore } from '../src/core/model/store.ts'
 import { Workset } from '../src/core/storage/workset.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
 import { ROLE_KINDS, type RoleKind } from '../src/core/index.ts'
+import { QUERYABLE_SYSTEM_PROPS } from '../src/core/props/props.ts'
 import type { QuerySpec, QueryContext, Block } from '../src/core/index.ts'
 
 const TODAY = '2026-11-19'
@@ -101,6 +102,19 @@ function seed(): RowWrite[] {
     block('gone', null, null, { deleted: 7 }),
     block('g1', 'gone', null),
     block('DEF', null, null, { kind: 'text' }),
+    /**
+     * **块类型与类型声明的缺省夹具**：
+     *   · `CODE1` 的 `_type` 升在 `Block.type` 列上（不在属性行）——候选若去
+     *     `BlockProperty` 找就是空集；`CODE_PLAIN` 缺 `_lang`（缺省＝纯文本）；
+     *   · `QUOTE_DEF` 是**缺键的引述**（缺省类型 `quote`），候选必须靠类型而不是
+     *     `_callout` 行命中；`QUOTE_INFO` 才有 `_callout` 行。
+     */
+    block('CODE1', null, null, { type: 'core/code' }),
+    prop('CODE1', '_lang', 0, 'ts'),
+    block('CODE_PLAIN', null, null, { type: 'core/code' }),
+    block('QUOTE_DEF', null, null, { type: 'core/quote' }),
+    block('QUOTE_INFO', null, null, { type: 'core/quote' }),
+    prop('QUOTE_INFO', '_callout', 0, 'info'),
     /**
      * 三种**派生身份**各一块（`{role}` 的七值里三格要它们在场）。
      * `BROKEN_Q` 是**合法状态**，不是坏数据：`_query` 的读侧刻意不判 corrupt
@@ -313,8 +327,39 @@ const CASES: { name: string; spec: QuerySpec; opts?: { selfId?: string; today?: 
   { name: 'ref 指名', spec: { where: { ref: 'PAGE_X' } } },
   { name: 'ref 不限目标', spec: { where: { ref: {} } } },
   { name: 'prop 系统槽 _date', spec: { where: { prop: { id: '_date', exists: true } } } },
+  { name: 'prop 系统槽 _kind', spec: { where: { prop: { id: '_kind', eq: 'text' } } } },
+  { name: 'prop 系统槽 _aliases', spec: { where: { prop: { id: '_aliases', eq: 'X页' } } } },
+  { name: 'prop 系统槽 _tags', spec: { where: { prop: { id: '_tags', eq: 'TAG_A' } } } },
+  { name: 'prop 系统槽 _belongsTo', spec: { where: { prop: { id: '_belongsTo', eq: 'TAG_A' } } } },
+  { name: 'prop 引擎槽 core/created', spec: { where: { prop: { id: 'core/created', eq: 1 } } } },
+  { name: 'prop 引擎槽 core/modified', spec: { where: { prop: { id: 'core/modified', eq: 1 } } } },
   { name: 'prop 定义槽 eq', spec: { where: { prop: { id: 'DEF', eq: '状态值' } } } },
   { name: 'prop exists:false', spec: { where: { prop: { id: 'DEF', exists: false } } } },
+  /**
+   * 升列／缺省值／`empty` 三条候选错配的钉子：
+   *   · `_type` 在 `Block.type` 列上；
+   *   · `_callout` 缺键＝缺省类型（不靠属性行）；
+   *   · `empty:true` 命中「没有这一栏」的块（行存在性的反面）。
+   */
+  { name: 'prop _type eq 缺省类型（缺键＝默认）', spec: { where: { prop: { id: '_type', eq: 'outline' } } } },
+  { name: 'prop _type eq 代码块', spec: { where: { prop: { id: '_type', eq: 'core/code' } } } },
+  { name: 'prop _type neq 缺省类型', spec: { where: { prop: { id: '_type', neq: 'outline' } } } },
+  { name: 'prop _type exists:true', spec: { where: { prop: { id: '_type', exists: true } } } },
+  { name: 'prop _type exists:false（恒不命中）', spec: { where: { prop: { id: '_type', exists: false } } } },
+  { name: 'prop _type empty:true', spec: { where: { prop: { id: '_type', empty: true } } } },
+  { name: 'prop _callout eq 缺省类型（缺键＝quote）', spec: { where: { prop: { id: '_callout', eq: 'quote' } } } },
+  { name: 'prop _callout eq 非缺省', spec: { where: { prop: { id: '_callout', eq: 'info' } } } },
+  { name: 'prop _callout neq 非缺省', spec: { where: { prop: { id: '_callout', neq: 'info' } } } },
+  { name: 'prop _callout exists:true', spec: { where: { prop: { id: '_callout', exists: true } } } },
+  { name: 'prop _callout empty:true', spec: { where: { prop: { id: '_callout', empty: true } } } },
+  { name: 'prop _callout empty:false', spec: { where: { prop: { id: '_callout', empty: false } } } },
+  { name: 'prop _lang eq 规范名（别名归一）', spec: { where: { prop: { id: '_lang', eq: 'typescript' } } } },
+  { name: 'prop _lang eq 缺省（缺键＝plain）', spec: { where: { prop: { id: '_lang', eq: 'plain' } } } },
+  { name: 'prop _lang exists:true', spec: { where: { prop: { id: '_lang', exists: true } } } },
+  { name: 'prop _lang exists:false', spec: { where: { prop: { id: '_lang', exists: false } } } },
+  { name: 'prop _lang empty:true', spec: { where: { prop: { id: '_lang', empty: true } } } },
+  { name: 'prop _lang empty:false', spec: { where: { prop: { id: '_lang', empty: false } } } },
+  { name: 'not: prop _type eq 代码块（精确子集）', spec: { where: { not: { prop: { id: '_type', eq: 'core/code' } } } } },
   { name: 'up 日记天', spec: { where: { up: { role: 'journal' } } } },
   { name: 'up 指名块之下', spec: { where: { up: { is: 'PAGE_DAY' } } } },
   { name: 'down 引用源', spec: { where: { down: { ref: 'PAGE_X' } } } },
@@ -380,6 +425,107 @@ test('候选计划 ⊇ 真命中，且候选装载后求值 == 整库求值（�
           assert.ok(!candidates.includes('g1'), '可信时软删子树的后代不该进候选')
         }
       }
+    }
+  })
+})
+
+/**
+ * **候选只能读「与 matcher 同投影」能证明的存储事实**。
+ *
+ * 这一条不靠手挑的求值用例，而是直接看**计划形状**：`_type` 必须走列、`_callout`
+ * 必须并上引述类型、`empty:true` 必须退全域。三处任一落回 `{k:'prop'}`，
+ * 桌面分页路径就会静默漏行（web 整库路径看不出来）。
+ */
+test('_type / _callout 的候选走列与类型，不再下推成属性行', () => {
+  withDb((db) => {
+    applyRowWrites(db, rebuildDerivedWrites(readContentRows(db)))
+    const { forest } = baseline(db)
+    const plan = (spec: QuerySpec) => candidateBuildOf(spec, undefined, forest, {}).plan
+
+    assert.deepEqual(plan({ where: { prop: { id: '_type', eq: 'core/code' } } }), {
+      k: 'type',
+      type: 'core/code',
+      mode: 'eq',
+    })
+    assert.deepEqual(plan({ where: { prop: { id: '_type', eq: 'outline' } } }), {
+      k: 'type',
+      type: 'outline',
+      mode: 'eq',
+      includeDefault: true,
+    })
+    assert.deepEqual(plan({ where: { prop: { id: '_type', neq: 'outline' } } }), {
+      k: 'type',
+      type: 'outline',
+      mode: 'neqDefault',
+    })
+    assert.equal(plan({ where: { prop: { id: '_type', exists: true } } }).k, 'visible')
+    assert.equal(plan({ where: { prop: { id: '_type', exists: false } } }).k, 'none')
+    assert.equal(plan({ where: { prop: { id: '_callout', empty: true } } }).k, 'visible')
+    assert.equal(plan({ where: { prop: { id: '_callout', exists: false } } }).k, 'visible')
+    assert.equal(plan({ where: { prop: { id: '_callout', exists: true } } }).k, 'any')
+
+    const typeCands = allCandidateIds(db, plan({ where: { prop: { id: '_type', eq: 'core/code' } } }), 4000)
+    assert.ok(typeCands.includes('CODE1'), '块类型在列上，候选必须含代码块')
+    assert.ok(!typeCands.includes('QUOTE_DEF'), '非代码块不该进候选')
+
+    const outline = allCandidateIds(db, plan({ where: { prop: { id: '_type', eq: 'outline' } } }), 4000)
+    assert.ok(outline.includes('PAGE_X'), '缺 _type 键＝默认类型，候选必须含')
+    assert.ok(!outline.includes('CODE1'))
+
+    const callout = allCandidateIds(db, plan({ where: { prop: { id: '_callout', eq: 'quote' } } }), 4000)
+    assert.ok(callout.includes('QUOTE_DEF'), '缺 _callout 键的引述（缺省 quote）必须在候选里')
+    assert.ok(callout.includes('QUOTE_INFO'), '候选是超集：带 _callout 行的引述也可以在里面')
+
+    assert.equal(plan({ where: { prop: { id: '_lang', exists: true } } }).k, 'any')
+    const langPlain = allCandidateIds(db, plan({ where: { prop: { id: '_lang', eq: 'plain' } } }), 4000)
+    assert.ok(langPlain.includes('CODE_PLAIN'), '缺 _lang 的代码块（缺省 plain）必须在候选里')
+    const langTs = allCandidateIds(db, plan({ where: { prop: { id: '_lang', eq: 'typescript' } } }), 4000)
+    assert.ok(langTs.includes('CODE1'), '别名 ts 归一后必须命中 typescript 的候选')
+  })
+})
+
+/** 收集条件树里点名的属性 id（覆盖闸用；不判断方向/组合的语义） */
+function collectPropIds(node: QuerySpec['where'], out: Set<string>): void {
+  if ('all' in node) {
+    for (const n of node.all) collectPropIds(n, out)
+    return
+  }
+  if ('any' in node) {
+    for (const n of node.any) collectPropIds(n, out)
+    return
+  }
+  if ('not' in node) return collectPropIds(node.not, out)
+  if ('up' in node) return collectPropIds(node.up, out)
+  if ('down' in node) return collectPropIds(node.down, out)
+  if ('near' in node) return collectPropIds(node.near, out)
+  if ('prop' in node) out.add(node.prop.id)
+}
+
+/**
+ * **加一个可查系统槽，必须补一条候选用例**。
+ *
+ * 候选的正确性靠「候选 ⊇ 命中」的等式，而等式只跑 `CASES` 里有的形状——
+ * 新字段没有用例时，桌面分页路径漏行不会红（`_type`/`_callout` 就这样漏过一次）。
+ * 这条把「白名单加了、覆盖没加」变成红。
+ */
+test('每个可查系统槽都至少有一条候选用例', () => {
+  const ids = new Set<string>()
+  for (const c of CASES) collectPropIds(c.spec.where, ids)
+  for (const id of QUERYABLE_SYSTEM_PROPS) {
+    assert.ok(ids.has(id), `系统槽 ${id} 没有候选用例（加字段必须补一条，否则漏行不报红）`)
+  }
+})
+
+test('候选计划能过 IPC 验形（builder 与 isCandidatePlan 同源）', () => {
+  withDb((db) => {
+    const { forest } = baseline(db)
+    for (const c of CASES) {
+      const host = c.opts?.selfId ? forest.find((b) => b.id === c.opts!.selfId) : undefined
+      const build = candidateBuildOf(c.spec, host, forest, { ...(c.opts ?? {}) })
+      assert.ok(
+        isCandidatePlan(build.plan),
+        `「${c.name}」的计划过不了 IPC 验形：${JSON.stringify(build.plan)}（桌面会报 bad-args）`,
+      )
     }
   })
 })

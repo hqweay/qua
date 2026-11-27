@@ -16,7 +16,9 @@ import { Layers, type Row } from '../../ui/overlay/layers.ts'
 import {
   blockLabel,
   CALLOUT_PROP,
+  LANG_PROP,
   calloutGroupChoices,
+  codeLangChoices,
   calloutTypesOf,
   canonicalNode,
   cardLayoutOf,
@@ -197,6 +199,8 @@ function openSpecPopover(opts: {
         if (propId === '_tags') return kb.tags().map((t) => ({ id: t.id, label: blockLabel(t, kbGet) }))
         // 引述类型是系统槽上的动态词汇（与 `_tags` 同一先例）：含墓碑，旧条件读得出名字
         if (propId === CALLOUT_PROP) return calloutGroupChoices(calloutTypesOf(kbGet))
+        // `_lang` 是静态语言表；未知语言由值控件按 `open` 照原文显示（不在这里造选项）
+        if (propId === LANG_PROP) return codeLangChoices()
         const def = kb.get(propId)
         if (!def || propKindOf(def) !== 'select') return []
         return choicesOf(def).map((c) => ({ id: c.id, label: c.label }))

@@ -28,11 +28,13 @@ import {
   type QueryNode,
   type QuerySpec,
   type QueryContext,
+  type PropOp,
   type RoleKind,
 } from '../query/query.ts'
 import { shiftISO } from '../identity/journal.ts'
 import { normMarks, type Marks } from '../model/runs.ts'
-import type { Block } from '../model/model.ts'
+import { CALLOUT_PROP, DEFAULT_BLOCK_TYPE, LANG_PROP, type Block } from '../model/model.ts'
+import { CODE_TYPE, QUOTE_TYPE } from '../model/types.ts'
 import type { CandidatePlan } from './library-reads.ts'
 
 const NONE: CandidatePlan = { k: 'none' }
@@ -112,14 +114,64 @@ function planMarks(m: Marks): Record<string, true | string> {
   return out
 }
 
-/** 系统槽的候选计划（`_date`／`_kind` 住在列上，不在属性行里） */
-function propPlan(id: string): CandidatePlan {
+/**
+ * **靠类型声明拥有这一栏的系统槽**：id → 拥有它的块类型。
+ *
+ * 这类槽的缺键＝缺省值（`readSystemField` 的读法），而缺省靠**类型**而不是属性行兑现
+ * ⇒ 候选必须并上拥有类型的全部块。`_callout`／`_lang` 都是这一类；下一个
+ * 「靠类型声明拥有、缺键走缺省」的槽也加在这里，不要另写分支。
+ */
+const DECLARED_BY_TYPE: Readonly<Record<string, string>> = {
+  [CALLOUT_PROP]: QUOTE_TYPE,
+  [LANG_PROP]: CODE_TYPE,
+}
+
+/**
+ * 系统槽的候选计划（`_date`／`_kind` 住在列上，不在属性行里）。
+ *
+ * ⚠️ **候选读存储布局，matcher 读模型投影**（`readField`：补缺省、读升列、按类型声明）。
+ * 「候选 ⊇ 命中」只在「存储读 ⊇ 模型读」时成立；下面几处正好打破它，必须在这里单独收窄：
+ *   · `_type` 是 `Block.type` 列，不在 `BlockProperty` —— 它在 `planOf` 里先走 `typePlan`；
+ *   · 靠类型声明拥有这一栏的槽（`_callout`）缺键＝缺省值，只查行会漏掉；
+ *   · `empty:true` 命中「没有这一栏」的块（`isEmptyValue(undefined)`），行存在性正好是反面。
+ */
+function propPlan(op: { id: string } & PropOp): CandidatePlan {
+  const id = op.id
+  const declaringType = DECLARED_BY_TYPE[id]
+  if (declaringType !== undefined) return declaredByTypePlan(op, declaringType)
   if (id === '_date') return { k: 'journal' }
   if (id === '_kind') return { k: 'kind' }
   if (id === '_aliases') return { k: 'aliased' }
   if (id === '_tags') return { k: 'tagged' }
   if (id.startsWith('core/')) return { k: 'visible' }
   return { k: 'prop', name: id }
+}
+
+/** `_type`：值在 `Block.type` 列上；缺键＝默认类型（`blockTypeOf` 的读法）。 */
+function typePlan(op: { id: string } & PropOp): CandidatePlan {
+  // 类型是必答槽（缺键＝默认），`exists:false` 不可能命中
+  if ('exists' in op) return op.exists ? { k: 'visible' } : NONE
+  // `empty` 会命中 `_type:''` 这类块（`isEmptyValue('')`），收窄不了
+  if ('empty' in op) return { k: 'visible' }
+  if ('eq' in op && typeof op.eq === 'string') {
+    return { k: 'type', type: op.eq, mode: 'eq', ...(op.eq === DEFAULT_BLOCK_TYPE ? { includeDefault: true } : {}) }
+  }
+  // `neq` 只有缺省类型能精确收窄：`type IS NULL` 也是「不等于别的类型」的真命中
+  if ('neq' in op && op.neq === DEFAULT_BLOCK_TYPE) return { k: 'type', type: op.neq, mode: 'neqDefault' }
+  return { k: 'visible' }
+}
+
+/**
+ * 靠类型声明拥有这一栏的槽：候选＝带属性行的块 ∪ **全部拥有类型的块**
+ * ——后者才是「缺键走缺省」的那一批。
+ */
+function declaredByTypePlan(op: { id: string } & PropOp, type: string): CandidatePlan {
+  if ('exists' in op && op.exists === false) return { k: 'visible' }
+  if ('empty' in op && op.empty === true) return { k: 'visible' }
+  return {
+    k: 'any',
+    plans: [{ k: 'prop', name: op.id }, { k: 'type', type, mode: 'eq' }],
+  }
 }
 
 function planOf(
@@ -204,9 +256,16 @@ function planOf(
   }
   if ('prop' in node) {
     const op = node.prop
+    // `_type` 先走自己的计划：它是必答槽，`exists:false` 能精确到空集（见 `typePlan`）
+    if (op.id === '_type') return typePlan(op)
     // 「没有这一栏」是补集，收窄不了（有值行/声明槽的反面没法用一张表答）
     if ('exists' in op && op.exists === false) return { k: 'visible' }
-    return propPlan(op.id)
+    /**
+     * `empty:true` 命中「值空」的块，**包括没有这一栏的块**（`readField` 给
+     * `undefined`）——`{k:'prop'}` 恰好是它们的补集。收窄不了，只能退全域。
+     */
+    if ('empty' in op && op.empty === true) return { k: 'visible' }
+    return propPlan(op)
   }
   // 不认识的形状：收窄不了 ⇒ 全部可见块（matcher 判）
   return { k: 'visible' }

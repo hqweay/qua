@@ -146,6 +146,19 @@ export function normalizeStoredLang(raw?: string): string | undefined {
   return ALIAS[key.toLowerCase()] ?? key
 }
 
+/**
+ * 条件树／分组面的选项域：语言表的 `{id,label}` 投影（`plain` 恒在首位）。
+ *
+ * 与 `codeLangLabel` 同一条语言表；未知语言不在这里（值域是开放的，由值控件按
+ * `open` 照原文显示，不假装「已删除」）。
+ *
+ * ⚠️ 条件值存**规范 id**（`typescript`，不是 `ts`）：与 `_callout` 存记录 id 同一条。
+ * 手写 JSON 用别名 `ts` 不保证命中——求值只归一**块上的值**，不改写条件。
+ */
+export function codeLangChoices(): { id: string; label: string }[] {
+  return CODE_LANG_DECLS.map((d) => ({ id: d.id, label: d.label }))
+}
+
 /** 代码岛的 DOM 标记：外层 dispatch 与内层焦点靠它分家 */
 export const CODE_ISLAND_ATTR = 'data-code-island'
 /** 高度上限住在 token 段（约 60vh），组件只引 token 不写长度字面量 */

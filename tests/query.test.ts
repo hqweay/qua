@@ -1421,6 +1421,22 @@ test('_type 读 blockTypeOf：eq 默认类型命中没写过 _type 的块；exis
   assert.deepEqual(ids({ prop: { id: '_type', exists: true } }), ['v', 'p'], '每块都有类型：exists 恒真')
 })
 
+test('_lang 读代码语言：缺键＝纯文本，别名归一，未知原文保留，只在代码块上声明', () => {
+  const ts = b('c-ts', '', { props: { _type: 'core/code', _lang: 'ts' } })
+  const plain = b('c-plain', '', { props: { _type: 'core/code' } })
+  const zig = b('c-zig', '', { props: { _type: 'core/code', _lang: 'zig' } })
+  const text = b('t1', '普通一行')
+  const blocks = [ts, plain, zig, text]
+  const ids = (where: QueryNode) => runQuery({ where }, { blocks }).map((h) => h.blockId)
+  assert.deepEqual(ids({ prop: { id: '_lang', eq: 'typescript' } }), ['c-ts'], '别名 ts 归一到 typescript')
+  assert.deepEqual(ids({ prop: { id: '_lang', eq: 'plain' } }), ['c-plain'], '缺键＝纯文本；未知 zig 不被算成 plain')
+  assert.deepEqual(ids({ prop: { id: '_lang', eq: 'zig' } }), ['c-zig'], '未知语言原文保留')
+  assert.deepEqual(ids({ prop: { id: '_lang', exists: true } }), ['c-ts', 'c-plain', 'c-zig'], '只有代码块声明这一栏')
+  assert.deepEqual(ids({ prop: { id: '_lang', exists: false } }), ['t1'])
+  assert.deepEqual(ids({ prop: { id: '_lang', empty: false } }), ['c-ts', 'c-plain', 'c-zig'])
+  assert.deepEqual(ids({ prop: { id: '_lang', empty: true } }), ['t1'], '非代码块没有这一栏 ⇒ 空')
+})
+
 /* ------------------------------------------------------------ 候选迭代求值 */
 
 /** 森林里所有**可见**块 id —— 候选超集的通用取法（与 walk 的可见性同一条） */

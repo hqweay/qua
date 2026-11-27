@@ -47,10 +47,13 @@ import { t, type MsgId } from '../../core/infra/msg.ts'
 import { roleText, typeValueLabel } from './query-builder.ts'
 import { markPicker } from './mark-picker.ts'
 
+/** 字段下拉的一项（与 `core/query/query-fields.ts` 的 `QueryFieldOption` 结构相同；`kind` 可缺省） */
+type FieldOption = { id: string; label: string; kind?: PropKind; count?: number; total?: number; open?: true }
+
 export interface QueryTreeDeps {
   /** 当前条件（现读：可能被命令／撤销改过） */
   spec: () => QuerySpec
-  fields: (batch: QuerySpec | undefined) => readonly { id: string; label: string; kind?: PropKind; count?: number; total?: number }[]
+  fields: (batch: QuerySpec | undefined) => readonly FieldOption[]
   /** `select` 属性的选项（值是选项块 id） */
   choices?: (propId: string) => readonly { id: string; label: string }[]
   /** 写条件（一次事务／一轮撤销） */
@@ -727,8 +730,12 @@ export class QueryTree {
     return input
   }
 
+  private fieldOption(id: string): FieldOption | undefined {
+    return this.deps.fields(this.batchSpec()).find((f) => f.id === id)
+  }
+
   private fieldKind(id: string): PropKind | undefined {
-    return this.deps.fields(this.batchSpec()).find((f) => f.id === id)?.kind
+    return this.fieldOption(id)?.kind
   }
 
   private propControls(leaf: TreeLeaf): HTMLElement[] {
@@ -872,12 +879,14 @@ export class QueryTree {
     if (kind === 'select') {
       const options = this.deps.choices?.(row.field) ?? []
       const current = row.value
+      const field = this.fieldOption(row.field)
       const sel = document.createElement('select')
       sel.className = 'qt-value'
       sel.dataset.qt = 'value'
       sel.appendChild(option('', t('ui.query.builder.noValue')))
       if (current !== '' && !options.some((c) => c.id === current)) {
-        sel.appendChild(option(current, t('ui.query.choiceDeleted')))
+        // 值域开放（`_lang`）：未知写法是合法数据，照原文显示；闭合值域才说「已删除」
+        sel.appendChild(option(current, field?.open === true ? current : t('ui.query.choiceDeleted')))
       }
       for (const c of options) sel.appendChild(option(c.id, c.label))
       sel.value = current

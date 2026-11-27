@@ -5,12 +5,14 @@
  * 「有哪些字段可以问」，而这三处各扫一遍 `propDefs` 就是三份判据。这里只答一次。
  *
  * ⚠️ **不是「所有能求值的 id」**：`{prop}` 的白名单（`core/props.ts` 的
- *    `QUERYABLE_SYSTEM_PROPS`）比这宽——`_kind`／`_type`／`_tags`／`core/created`／
+ *    `QUERYABLE_SYSTEM_PROPS`）比这宽——`_kind`／`_tags`／`core/created`／
  *    `core/modified` 语言层认，但**没有字段级的控件能把它们问清楚**：
- *      · `_kind`／`_type` 的值是内部 id，用户没有地方学到它；
+ *      · `_kind` 的值是内部 id，用户没有地方学到它；
  *      · `_tags` 的 `eq` 会与 `{tag}`（按名）造出同一件事的第二种写法；
  *      · `core/created`／`modified` 是毫秒，日期输入填进去对不上（它们走「时间」那一行）。
  *    它们仍可由 JSON 写成（条件树会如实显示），只是不进**字段**下拉。
+ *    （`_type` **在**字段里：值域是 `TYPE_DECLS`，值控件是类型下拉——内部 id 由
+ *    `typeValueLabel` 翻成人话，用户不需要自己拼。）
  *
  * 引擎属性（`core/created`／`core/modified`）**不进这里的下拉**：它们有自己的一行
  * （`kind:'stamp'` 的时间范围行，值控件是「字段 ＋ 问法 ＋ 日期」，条件里落成毫秒区间）。
@@ -19,7 +21,7 @@
 import { allPropDefs, propDisplayLabels, propKindOf, cardinalityOf, isEngineProp, systemQueryFieldLabel, QUERYABLE_SYSTEM_PROPS } from '../props/props.ts'
 import type { PropKind } from '../props/props.ts'
 import type { Cardinality } from '../props/props.ts'
-import { CALLOUT_PROP } from '../model/model.ts'
+import { CALLOUT_PROP, LANG_PROP } from '../model/model.ts'
 import type { Block } from '../model/model.ts'
 
 export interface QueryFieldOption {
@@ -27,6 +29,13 @@ export interface QueryFieldOption {
   label: string
   kind: PropKind
   cardinality?: Cardinality
+  /**
+   * **值域开放**：未知值照原文显示，不标「已删除」。
+   *
+   * `_lang` 的合法值可以来自插件/新版本（`zig`、`mermaid`），它不是「选项被删了」；
+   * 条件树的值控件据此回落原文（与 `_type` 的未知 id 同一条读法）。
+   */
+  open?: true
   /** 这批结果里多少块带着这一栏（只在给了覆盖率时出现；渲染端拼「（n／m）」标在选项上） */
   count?: number
   /** 覆盖率分母（与 `count` 成对出现） */
@@ -64,12 +73,27 @@ export function fieldCoverageOf(records: readonly { values: Readonly<Record<stri
  * 下拉里真正列出来的系统槽（每一项都有对应的值控件与清楚的问法）。
  *
  * 加一项的前提：**用户能不查文档就填出值**。`_date` 有日期控件、`_aliases` 是名字文本、
- * `_type` 的值域是封闭注册表（`TYPE_DECLS`，值控件是类型下拉）；
+ * `_type` 的值域是封闭注册表（`TYPE_DECLS`，值控件是类型下拉）、
+ * `_callout`／`_lang` 的值域是各自的词汇表（值控件是下拉）；
  * `core/created`／`core/modified` 走「时间」行（`kind:'stamp'`），不进这一列。
  * `_tags` **不进**：「有任意标签」由标签行空值承载（拼回 `_tags exists`），
  * 而 `eq` 要标签块 id，用户填不出——下拉不给「必然填错」的入口。
  */
-const QUERY_FIELD_SYSTEM_SLOTS = ['_date', '_aliases', '_type', CALLOUT_PROP] as const satisfies readonly (typeof QUERYABLE_SYSTEM_PROPS)[number][]
+const QUERY_FIELD_SYSTEM_SLOTS = ['_date', '_aliases', '_type', CALLOUT_PROP, LANG_PROP] as const satisfies readonly (typeof QUERYABLE_SYSTEM_PROPS)[number][]
+
+/**
+ * 系统槽的**值形**（字段表统一前的最小一份，别在 `queryFieldsOf` 里再写三元）。
+ *
+ * `open` 是值域开放：`_lang` 的未知语言是合法数据（插件/新版本），值控件照原文显示；
+ * `_callout` 不开放——未知 id 是「类型被删了」，显示「已删除」更诚实。
+ */
+const SYSTEM_SLOT_META: Record<string, { kind: PropKind; open?: true }> = {
+  _date: { kind: 'date' },
+  _aliases: { kind: 'text' },
+  _type: { kind: 'select' },
+  [CALLOUT_PROP]: { kind: 'select' },
+  [LANG_PROP]: { kind: 'select', open: true },
+}
 
 /** 条件树字段下拉：属性定义（先序）＋ 系统槽；顺序＝前者按库、后者固定 */
 export function queryFieldsOf(forest: readonly Block[], coverage?: FieldCoverage): QueryFieldOption[] {
@@ -87,14 +111,9 @@ export function queryFieldsOf(forest: readonly Block[], coverage?: FieldCoverage
   }
   for (const id of QUERY_FIELD_SYSTEM_SLOTS) {
     const label = systemQueryFieldLabel(id)
-    if (label === undefined) continue
-    /**
-     * `_callout` 的值域是一张记录表（类型 id），与 `select` 的选项同形：
-     * 报 `select`，值控件就走现成的下拉（含「已删除」的显示），`choices('_callout')`
-     * 由读门面提供同一份记录。报 `text` 会给一个必然填错的自由输入框。
-     */
-    const kind = id === '_date' ? 'date' : id === CALLOUT_PROP ? 'select' : 'text'
-    defs.push({ id, label, kind })
+    const meta = SYSTEM_SLOT_META[id]
+    if (label === undefined || meta === undefined) continue
+    defs.push({ id, label, kind: meta.kind, ...(meta.open ? { open: meta.open } : {}) })
   }
   if (!coverage || coverage.total === 0) return defs
   /**

@@ -29,7 +29,7 @@ import {
   writeCalloutTypesInTx,
 } from '../src/core/kb/ensure-callout-types.ts'
 import { systemPropViolation } from '../src/core/props/system-props.ts'
-import { CALLOUT_PROP, QUOTE_TYPE, blockLabel, childrenRecords, mkBlock, walkForest, type Block } from '../src/core/index.ts'
+import { CALLOUT_PROP, QUOTE_TYPE, CODE_TYPE, blockLabel, childrenRecords, mkBlock, walkForest, type Block } from '../src/core/index.ts'
 import { blankWorkspace } from '../src/core/fixtures/states.ts'
 import { BlockStore } from '../src/core/model/store.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
@@ -218,4 +218,17 @@ test('记录投影补上缺省类型：默认引述分到「引述」，不落�
   // 盘上仍没有这一格（投影不是数据）：写入路径保持一致
   assert.equal(quote.props?._callout, undefined)
   assert.equal(record!.values._callout, DEFAULT_CALLOUT)
+})
+
+test('记录投影补代码语言：缺键＝纯文本，别名归一；盘上原值不动', () => {
+  const page = mkBlock('', { props: { _lists: ['page'], _aliases: ['页'] } })
+  const ts = mkBlock('', { props: { _type: CODE_TYPE, _lang: 'ts' } })
+  const plain = mkBlock('', { props: { _type: CODE_TYPE } })
+  page.children.push(ts, plain)
+  const kb = new MemoryKb(new BlockStore([page]))
+  const records = childrenRecords(page.id, kb)
+  const valueOf = (id: string) => records.find((r) => r.block.id === id)?.values._lang
+  assert.equal(valueOf(ts.id), 'typescript', '分组键与选项 id 同源：别名要归一')
+  assert.equal(valueOf(plain.id), 'plain', '缺键＝纯文本，不落「未设置」')
+  assert.equal(ts.props?._lang, 'ts', '投影不改盘')
 })

@@ -799,6 +799,7 @@ export const MSG = {
   'ui.query.sysField.date': '日记日期',
   'ui.query.sysField.kind': '定义种类',
   'ui.query.sysField.type': '块类型',
+  'ui.query.sysField.lang': '代码语言',
   'ui.query.sysField.aliases': '别名',
   'ui.query.sysField.tags': '标签',
   'ui.query.sysField.belongsTo': '归属上级',
