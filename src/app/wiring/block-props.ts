@@ -396,6 +396,27 @@ const propsLineModeOf = (blockId: string): { effective: 'summary' | 'list'; cove
 }
 
 /**
+ * **主体行下管理档的「+N 项待填」展开**（只在这一次会话里活着，不落盘）。
+ *
+ * 为什么不复用 `propsLineMode`：那一条是「这一块怎么排」的**读者偏好**，还决定
+ * 非主体行的排法（默认档跟着它走）。管理档的展开是**一次临时的手上动作**——
+ * 展开它不等于把这一块（以及将来的默认）改成「一栏一行」，两者混在一格会互相污染
+ * （用户展开一次待填，别的屏上的行也跟着变一栏一行）。
+ *
+ * 不落盘的理由同「视图状态外挂、不入 KB」：它回答的是「此刻要不要看见那几栏」，
+ * 不是这一块的内容。重开回到「有值全显 ＋ 一行待填」的默认形态。
+ */
+const managePendingOpen = new Set<string>()
+
+/** 这一块的管理档待填展开着没有（会话态） */
+const managePendingOpenOf = (blockId: string): boolean => managePendingOpen.has(blockId)
+
+/** 展开 ⇄ 收起（调用方负责重画那一行：估高也跟着变） */
+const toggleManagePending = (blockId: string): void => {
+  if (!managePendingOpen.delete(blockId)) managePendingOpen.add(blockId)
+}
+
+/**
  * **「这一块怎么排」的三态菜单**（行尾 `⋯` 的落点；将来右键同一份）。
  *
  * 三态而不是两态切换：覆盖必须**可清除**（回到跟随默认），否则用户在某块上试过
@@ -438,6 +459,8 @@ const openPropsLineMenu = (blockId: string, anchor: DOMRect): void => {
     convertToQuote,
     refLabelOf,
     propsLineModeOf,
+    managePendingOpenOf,
+    toggleManagePending,
     openPropsLineMenu,
   }
 }

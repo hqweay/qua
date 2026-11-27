@@ -46,8 +46,11 @@ export interface FieldsSectionDeps extends FieldRowDeps {
   /**
    * 添加入口（宿主提供：检视卡/抽屉各一颗）。段负责把它放在段尾追加位——
    * 行清单的追加位就是新行落点，入口跟着落点走。
+   *
+   * **不给＝不画**：主体行下管理档只回答「已有的这些字段，值是什么」，
+   * 加属性是 schema 变更，入口归抽屉（同样地，草稿行一并不画——没有入口能打开它）。
    */
-  add: HTMLButtonElement
+  add?: HTMLButtonElement
   /** own 草稿行的开合状态（宿主持有：与声明段的草稿行共用一个槽位，互斥是宿主的布局决定） */
   draft: PropsDraftState
   /** own 草稿行的能力包（复用下拉的候选与本块的现状） */
@@ -98,8 +101,10 @@ export class FieldsSection {
       fields.appendChild(makeFieldRow(row, target, this.deps, { labelCount, labels }))
     }
     // 草稿行在行清单末尾（新行落点）与追加入口之间；收起时入口独占段尾
-    if (this.deps.draft.formOpen === 'own') fields.appendChild(this.buildForm(target, labels))
-    fields.appendChild(this.deps.add)
+    if (this.deps.add) {
+      if (this.deps.draft.formOpen === 'own') fields.appendChild(this.buildForm(target, labels))
+      fields.appendChild(this.deps.add)
+    }
     return fields
   }
 

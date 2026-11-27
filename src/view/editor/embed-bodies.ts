@@ -71,6 +71,19 @@ export class EmbedBodies {
     if (dispose) this.disposers.set(b.id, dispose)
   }
 
+  /**
+   * makeBlockEl 的 `manageProps` 钩子（主体行下的管理档）。
+   *
+   * 它不是「身体」，但生命周期与身体同型：实例属于块、DOM 随行换、行重画要保住
+   * 而不重建（里面有一份草稿/展开态与正在编辑的控件）。回收走同一张表，
+   * `disposeRow`／`disposeAll` 的时机就已经是对的——另开一张表只会多一处要记得调。
+   */
+  attachManageProps(b: Block, into: HTMLElement): void {
+    if (b.id === this.pinned) return
+    const dispose = this.ed.events.manageProps?.(b, into)
+    if (dispose) this.disposers.set(b.id, dispose)
+  }
+
   /** 摘掉某一行的身体（换 DOM 之前做） */
   disposeRow(id: string): void {
     const d = this.disposers.get(id)

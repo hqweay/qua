@@ -127,6 +127,19 @@ export const VIEW_BODY_INSET = 4
 export const PROP_LINE_H = 20
 
 /**
+ * **主体行下管理档每行**额外占的高度（近似值，只给虚拟化的占位滚动条用）。
+ *
+ * 与 `PROP_LINE_H` 是两档不是一回事：那一档是**一行小字**（读值投影），
+ * 这一档是**一行字段编辑器**（`.prop-row`：名字 ＋ 值控件，值控件 ~26 高、
+ * 行内 padding 两个 `--ui-gap-2`）。段头（`min-height: 24` ＋ padding）按一行算，
+ * 报告的行数由装配层给（`manageRows`：段头 ＋ 行 ＋ `+N` 行）。
+ *
+ * ⚠️ 同 `PROP_LINE_H` 的纪律：视觉走 token，虚拟化走这个数；改那里的行高要两边一起改。
+ *    量到过的行用实测高（见 `height-cache.ts`），所以它只影响窗口外那一档的估算。
+ */
+export const MANAGE_ROW_H = 36
+
+/**
  * 行下身体**内联在本行**的那三种：自动化块的三段式定义体／定义块与标签的属性投影／
  * 查询或 children 源的视图。
  *
@@ -205,11 +218,27 @@ const BODY_MOUNT = {
  *    这里只读**静止档的封顶值**：身体多数时候比它矮（内容高），占位因此是**上限估计**
  *    （宁可高估留白，也别低估让滚动条偏小）；聚焦档只发生在窗口里的那一行上，
  *    而占位算的是窗口**之外**的行。
+ *
+ * `manageRows` 是**主体行下的管理档**占的行数（`MANAGE_ROW_H` 一档）：
+ * 与 `propRows` 分开两档，因为一行小字投影与一行字段编辑器不是同一个高度。
+ * 两者互斥（根行那一档取代块下行），由装配层按「这一行在屏里的角色」派生。
  */
-export function visibleRowHeight(b: Block, extraHeads = 0, viewBody = false, propRows = 0): number {
+export function visibleRowHeight(
+  b: Block,
+  extraHeads = 0,
+  viewBody = false,
+  propRows = 0,
+  manageRows = 0,
+): number {
   const aliasHead = aliasesOf(b).length > 0 && prop<string>(b, DISPLAY_PROP) !== 'text' ? 1 : 0
   const extra = viewBody ? VIEW_BODY_H + VIEW_BODY_GAP + VIEW_BODY_INSET : 0
-  return LINE_H + extra + (aliasHead + extraHeads) * ALIAS_HEAD_H + propRows * PROP_LINE_H
+  return (
+    LINE_H +
+    extra +
+    (aliasHead + extraHeads) * ALIAS_HEAD_H +
+    propRows * PROP_LINE_H +
+    manageRows * MANAGE_ROW_H
+  )
 }
 
 /**
@@ -530,6 +559,7 @@ export const ALLOWED_ROW_CHILDREN: ReadonlySet<string> = new Set([
   'blk-code-host',
   'blk-code-lang',
   'blk-props-line',
+  'blk-props-manage',
   'blk-acts',
 ])
 
@@ -796,6 +826,17 @@ export function makeBlockEl(
      */
     below?: BelowFields
     propsLine?: (b: Block, data: BelowFields, into: HTMLElement) => void
+    /**
+     * **主体行下的管理档**：单主体屏的根行下面那一段（值段 ＋ 声明段，可编辑）。
+     *
+     * `view` 只交代「这一行有这一格」；画什么、写什么全在装配层。与 `propsLine`
+     * **互斥**（同一格的两个角色：根行是管理档，其余行是读值投影），由装配层决定
+     * 给哪一个——`view` 只按「给了哪个就画哪个」。
+     *
+     * 不接 ⇒ 不画：里层编辑器（镜像／查询结果／挂载区／单元格）构造上就没有这个回调，
+     * 所以「深度 1 截断」不靠运行时判 visited（同 `viewBody` 一条纪律）。
+     */
+    manageProps?: (b: Block, into: HTMLElement) => void
   },
 ): HTMLElement {
   const b = r.block
@@ -1611,6 +1652,28 @@ export function makeBlockEl(
   }
 
   /**
+   * **主体行下的管理档**（单主体屏的根行）：值全显 ＋ 声明段，可编辑。
+   *
+   * 位置与块下属性行同一格（正文行之下、查询体之前），但**两者互斥**：
+   * 根行是「管这一块」（管理档），其余行是「读这一块」（一行投影）。装配层按
+   * 这一行在屏里的角色只给其中一个回调，所以这里不需要再判一次角色。
+   *
+   * ⚠️ 它是编辑岛（里面是表单控件）：不标的话 `ownFocus()` 会把「焦点在输入框上」
+   *    判成「本视图在编辑」，`restoreSel()` 把光标抢回正文（与块下属性行同一个坑）。
+   * ⚠️ 必须登记进 `ALLOWED_ROW_CHILDREN`：漏了它，第一次收光标就会当游离节点删掉。
+   */
+  if (opts.manageProps) {
+    el.dataset.propsManage = '1'
+    const host = document.createElement('div')
+    host.className = 'blk-props-manage'
+    host.contentEditable = 'false'
+    host.setAttribute(EDIT_ISLAND_ATTR, '1')
+    host.dataset.propsManageFor = b.id
+    el.appendChild(host)
+    opts.manageProps(b, host)
+  }
+
+  /**
    * **块下属性行**：有值、且没画在块标后的属性（`select`/`checkbox` 有图标就不重复）。
    *
    * 位置在正文行之下、查询体之前（属性说的是这一块自己，结果说的是它的下一层）。
@@ -1622,7 +1685,7 @@ export function makeBlockEl(
    *    （与挂载区抬头那颗按钮同一个坑）。标了岛，外层连事件都不接，点击归按钮自己。
    * ⚠️ 必须登记进 `ALLOWED_ROW_CHILDREN`：漏了它，第一次收光标就会当游离节点删掉。
    */
-  if (opts.below && opts.below.rows.length > 0 && opts.propsLine) {
+  if (!opts.manageProps && opts.below && opts.below.rows.length > 0 && opts.propsLine) {
     el.dataset.propsLine = '1'
     const line = document.createElement('div')
     line.className = 'blk-props-line'

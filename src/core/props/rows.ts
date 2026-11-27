@@ -303,6 +303,14 @@ export interface BelowFieldsScope {
    * 卡片没有块标与 gutter，块下行是这些属性**唯一**的露面。
    */
   includeGutter?: boolean
+  /**
+   * **只剩待填也产出一格**（旁路「没有有值属性就不出这一格」那条准入）。
+   *
+   * 缺省 `false` 是块下行的判据：块下空间是「有东西可看」才占的。
+   * 主体行下的管理档要它——那一档回答「这一块的字段在哪」，全空的块也得看得见
+   * 「N 项待填」，否则「去把这一栏填上」没有入口（只能去抽屉里翻）。
+   */
+  keepPending?: boolean
 }
 
 /** 块下属性行：批级派生（整屏一次扫库，行级只查表） */
@@ -363,8 +371,8 @@ export function belowFieldsFor(
       if (row.filled) visible.push(row)
       else waiting.push(row)
     }
-    // 没有任何有值属性就不出这一格；只有**显式要的栏**留下待填的痕迹
-    if (visible.length > 0 || (scope.wanted !== undefined && waiting.length > 0)) {
+    // 没有任何有值属性就不出这一格；只有**显式要的栏**或「只剩待填也要」留下痕迹
+    if (visible.length > 0 || (waiting.length > 0 && (scope.wanted !== undefined || scope.keepPending === true))) {
       out.set(block.id, { rows: visible, pending: waiting.length, pendingRows: waiting })
     }
   }
@@ -394,11 +402,77 @@ export function constrainBelowFields(
   return out
 }
 
-/** 这条行会不会被画成块标后的图标（判据与 `block-dom` 的 gutter 分支同一份） */
-function isGutterRow(row: FieldRow): boolean {
+/**
+ * 这条行会不会被画成块标后的图标（判据与 `block-dom` 的 gutter 分支同一份）。
+ *
+ * 导出给「行脸管理档」与它的估高用：那一档**不画** gutter 字段（块标旁已有那一格），
+ * 判据必须与渲染的那一份逐字同源——两处各写一遍，`uiPosition` 的边界一变
+ * 就会出现「行下多一个控件、上面还留着一个」。
+ */
+export function isGutterRow(row: FieldRow): boolean {
   if (!row.def) return false
   if (uiPositionOf(row.def) !== 'block-left') return false
   return row.kind === 'select' || row.kind === 'checkbox'
+}
+
+/**
+ * **主体行下管理档的行集**：值段的行去掉 gutter 字段，再分出有值／待填。
+ *
+ * 判据只有 `isGutterRow` 一份：整组声明都是 gutter 字段的标签，在这里自然一条都不剩
+ * （那一组的内容全在块标旁，行下再出现就是同一个值 30px 内两个可编辑控件）。
+ *
+ * 与 `belowFieldsFor` 的差别只有「只剩待填也留下」——管理档要看见「N 项待填」，
+ * 块下行不要。两份都吃同一份 `FieldRow` 派生。
+ */
+export function manageFieldsOf(rows: readonly FieldRow[]): Pick<BelowFields, 'rows' | 'pending' | 'pendingRows'> {
+  const visible: FieldRow[] = []
+  const waiting: FieldRow[] = []
+  for (const row of rows) {
+    if (isGutterRow(row)) continue
+    if (row.filled) visible.push(row)
+    else waiting.push(row)
+  }
+  return { rows: visible, pending: waiting.length, pendingRows: waiting }
+}
+
+/** 主体行下管理档这一档画什么（渲染与估高共用的那份判据；`planManageFields` 的产物） */
+export interface ManagePlan {
+  /** 值段要画的行：有值全显；「待填」展开时就地并进来 */
+  rows: FieldRow[]
+  /** 这一块一共几项待填（`+N` 的 n；展开后仍要它来画「收起」） */
+  pendingTotal: number
+  /** 待填此刻是不是展开着 */
+  open: boolean
+  /** 有没有标签声明段（标签块才有） */
+  declared: boolean
+  /**
+   * 占几行（估高用）：段头 ＋ 行 ＋ `+N` 行，声明段算「一行头 ＋ 一行 chips」。
+   * 只数**行**，像素换算归渲染层。
+   */
+  slots: number
+}
+
+/**
+ * **这一块的管理档内容**（纯判据：没有 DOM、不写模型）。
+ *
+ * `null` ＝ 这一档不出现：没有值、没有待填、也没有声明——一屏单块的开头不该多一条空带。
+ *
+ * ⚠️ 渲染与虚拟化估高（`visibleRowHeight` 的 `manageRows`）都吃**这一份**：
+ *    两处各算一遍，滚动条就会系统性偏小/偏大——那种偏差不报错，只在滚到底部时露出来。
+ */
+export function planManageFields(
+  all: readonly FieldRow[],
+  pendingOpen: boolean,
+  declared: boolean,
+): ManagePlan | null {
+  const fields = manageFieldsOf(all)
+  const pendingTotal = fields.pendingRows.length
+  if (fields.rows.length === 0 && pendingTotal === 0 && !declared) return null
+  const open = pendingOpen && pendingTotal > 0
+  const rows = open ? [...fields.rows, ...fields.pendingRows] : [...fields.rows]
+  // 段头只在值段真画行时占位；全空的块只剩那条 `+N` 行（不再套一个空段头）
+  const slots = (rows.length > 0 ? 1 + rows.length : 0) + (pendingTotal > 0 ? 1 : 0) + (declared ? 2 : 0)
+  return { rows, pendingTotal, open, declared, slots }
 }
 
 /** 属性 id 集合（模型口径的 `fieldsOf`：标签属性 ∪ 块属性） */

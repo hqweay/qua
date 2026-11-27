@@ -22,6 +22,7 @@ import {
   fieldRows,
   fieldRowsWithParent,
   mkPropDef,
+  planManageFields,
   type FieldRow,
 } from '../src/core/index.ts'
 import { textRuns } from '../src/core/model/runs.ts'
@@ -130,6 +131,57 @@ test('块下属性行：批级派生与单块 fieldRows 过滤逐行一致', () 
       return r.kind !== 'select' && r.kind !== 'checkbox'
     }).length,
   )
+})
+
+/* ------------------------------------------------------------ 主体行下的管理档 */
+
+/**
+ * 管理档与块下行吃同一份行派生，只差两件事：**不画 gutter 字段**（块标旁那一格
+ * 已经在了，30px 内不要两个可编辑控件）、**只剩待填也留下**（「N 项待填」是入口）。
+ * `planManageFields` 同时供渲染与虚拟化估高，所以两边不会再各算一遍。
+ */
+test('管理档：值全显、gutter 字段不重复（整组都是 gutter 的标签一条不剩）', () => {
+  const { forest, block } = fixture()
+  const plan = planManageFields(fieldRows(block, forest), false, false)!
+  assert.ok(plan)
+  assert.deepEqual(labels(plan.rows), ['作者', '钉住'], '状态归块标（gutter）⇒ 行下不重复；备注没值')
+  assert.equal(plan.pendingTotal, 1, '备注的待填要数出来（渲染成一行 `+1 项待填`）')
+  assert.equal(plan.open, false)
+  assert.equal(plan.slots, 4, '段头 ＋ 两行有值 ＋ 一行待填')
+
+  // 只有 gutter 字段的标签：管理档整格不出现（不是被筛成空壳）
+  const defStatus = mkPropDef('状态', 'select', { _uiPosition: 'block-left' }, 'def-status')
+  const t = tag('tag-status', '状态组', [defStatus.id])
+  const b = blk('b2', '一条任务', { _tags: [t.id], 'def-status': 'choice-1' })
+  assert.equal(planManageFields(fieldRows(b, [t, defStatus, b]), false, false), null)
+})
+
+test('管理档：全空的块也留下「N 项待填」；展开后逐行并进来（再点收起）', () => {
+  const defAuthor = mkPropDef('作者', 'text', {}, 'def-author')
+  const t = tag('tag-book', '书', [defAuthor.id])
+  const b = blk('b1', '一本书', { _tags: [t.id] })
+  const rows = fieldRows(b, [t, defAuthor, b])
+  const shut = planManageFields(rows, false, false)!
+  assert.deepEqual(shut.rows, [], '一条值都没有 ⇒ 不铺空行')
+  assert.equal(shut.pendingTotal, 1)
+  assert.equal(shut.slots, 1, '只剩那一行 `+N`（不套空段头）')
+
+  const open = planManageFields(rows, true, false)!
+  assert.deepEqual(labels(open.rows), ['作者'], '展开＝待填就地变成可编辑的行')
+  assert.equal(open.pendingTotal, 1, '展开后总数仍要它来画「收起」')
+  assert.equal(open.slots, 3, '段头 ＋ 一行待填 ＋ 一行「收起待填」')
+
+  assert.equal(planManageFields([], false, false), null, '没有值、没有声明、没有待填 ⇒ 整格不出现')
+})
+
+test('管理档：声明段（标签块）算进估高，与它渲染的准入同一条判据', () => {
+  const defAuthor = mkPropDef('作者', 'text', {}, 'def-author')
+  const t = tag('tag-book', '书', [defAuthor.id])
+  const b = blk('b1', '一本书', { _tags: [t.id], 'def-author': '张三' })
+  const plain = planManageFields(fieldRows(b, [t, defAuthor, b]), false, false)!
+  const withDeclared = planManageFields(fieldRows(b, [t, defAuthor, b]), false, true)!
+  assert.equal(withDeclared.slots - plain.slots, 2, '声明段＝一段头 ＋ 一行 chips')
+  assert.equal(withDeclared.declared, true)
 })
 
 /* ------------------------------------------------------------ _childProps 与引擎属性 */

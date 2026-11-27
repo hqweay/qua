@@ -570,6 +570,23 @@ export interface ViewEvents {
    */
   propsRows?: (id: string, data: BelowFields) => number
   /**
+   * **主体行下的管理档**（单主体屏的根行）：值段 ＋ 声明段，可编辑。
+   *
+   * 与 `propsLine` 同一格的两个角色：根行管这一块（管理档），其余行读这一块
+   * （一行投影）。**只给「块的真实位置」**（正文／侧槽窗口）：镜像、查询结果、
+   * 挂载区、单元格在构造上就没有这个回调——所以「深度 1 截断」不靠运行时判 visited
+   * （与 `viewBody` 同一条纪律）。
+   */
+  manageProps?: (block: Block, into: HTMLElement) => (() => void) | void
+  /**
+   * **主体根行的管理档占几行**（`0` ＝ 这一行不画管理档）。
+   *
+   * 与 `propsRows` 同一条契约：估高与渲染必须吃同一份判据。行数由装配层给
+   * （有值行 ＋ `+N`／展开后的待填行 ＋ 段头），像素换算归 `view`
+   * （`MANAGE_ROW_H`——它与一行小字投影不是同一档高度）。
+   */
+  manageRows?: (id: string) => number
+  /**
    * **资产此刻的样子**（`view/asset-views.ts` 的 `assetViewOf`）。
    *
    * 为什么经事件表注入而不是让 `view` 直接拿资产库：`view` 不该知道字节存在哪

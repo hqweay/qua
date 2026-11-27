@@ -31298,7 +31298,9 @@ await check('T310 块下属性行的 ref 值可点跳转；点名字仍开属性
   assert(!opened.drawer, `点值不该同时开属性抽屉（两个命中区不许都响应）：${JSON.stringify(opened)}`)
 
   // ③ 回到 host，点名字 ⇒ 开面板，且不跳走
-  await page.evaluate((host) => window.__qua.invoke('core.block/focus-block', { blockId: host }), ids.host)
+  //    （重新打开这一页：它作为页里的普通一行才画块下属性行——单主体屏的根行
+  //     画的是管理档，那一档的名字格是「打开定义块」，没有这条读值入口）
+  await openFirstPage(page)
   await page.waitForTimeout(320)
   await page.click(`.blk[data-block-id="${ids.host}"] .blk-prop-name`)
   await page.waitForSelector('.props-drawer', { timeout: 4000 })
@@ -31326,6 +31328,10 @@ await check('T310 块下属性行的 ref 值可点跳转；点名字仍开属性
  *
  * ⚠️ 估高不在这里验（默认虚拟化关着，占位不参与）：由
  *    `tests/props-line-density.test.ts` 的 `visibleRowHeight` 断言钉住。
+ *
+ * ⚠️ **目标块故意不 zoom**：这一档（摘要／一栏一行、`+N`、`⋯` 三态）是**非主体行**
+ *    的读值投影；单主体屏的根行画的是主体行下的管理档（值全显，没有密度档），
+ *    所以把这一块 zoom 成唯一根就没有这段可验了。它作为页里的普通一行时，判据不变。
  */
 await check('T311 块下属性：+N 就地展开／菜单三态覆盖；改默认档不动已覆盖的块', async () => {
   const { ctx, page } = await freshPage(browser, base)
@@ -31341,7 +31347,6 @@ await check('T311 块下属性：+N 就地展开／菜单三态覆盖；改默�
     }
     // 再声明一条**没填**的：读全档必须把它也画出来（摘要档只把它算进 +N）
     window.__qua.invoke('core.props/create-def', { blockId: b.id, label: '备注', kind: 'text', target: 'own' })
-    window.__qua.invoke('core.block/focus-block', { blockId: b.id })
     return b.id
   })
   await page.waitForTimeout(500)
@@ -31427,8 +31432,7 @@ await check('T311 块下属性：+N 就地展开／菜单三态覆盖；改默�
   await page.evaluate(() => window.__qua.invoke('core.settings/open'))
   await page.waitForSelector('[data-props-density="list"]', { timeout: 5000 })
   await page.click('[data-props-density="list"]')
-  await page.waitForTimeout(300)
-  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), host)
+  // 改默认档＝改行高 ⇒ `refreshLayout()` 重排这一屏（不重排就只是「可见区对了、滚动条不对」）
   await page.waitForTimeout(420)
   const kept = await read()
   assert(kept.density === 'summary', '默认档改了，已覆盖成摘要的块不该跟着变：' + JSON.stringify(kept))
@@ -31442,8 +31446,6 @@ await check('T311 块下属性：+N 就地展开／菜单三态覆盖；改默�
   await page.evaluate(() => window.__qua.invoke('core.settings/open'))
   await page.waitForSelector('[data-props-density="summary"]', { timeout: 5000 })
   await page.click('[data-props-density="summary"]')
-  await page.waitForTimeout(300)
-  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), host)
   await page.waitForTimeout(420)
   const again = await read()
   assert(again.density === 'summary' && again.pairs === 3 && again.more.includes('2'), '跟随默认的块应随默认档回到摘要：' + JSON.stringify(again))
@@ -31767,7 +31769,8 @@ await check(
     )
 
     // 块下行：多值画 chips（一行、不换行），引用项可点
-    await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.host)
+    // ⚠️ 不 zoom：块下行是**非主体行**的读值投影；把这一块 zoom 成唯一根就换成
+    //    管理档（可编辑的行），`blk-prop-chip` 那一层不再出现
     await page.waitForFunction(
       (id) => document.querySelectorAll(`.blk[data-block-id="${id}"] .blk-prop-chip`).length === 1,
       setup.host,
@@ -32131,7 +32134,7 @@ await check('T318 检视卡段序：类型专属段紧跟属性值，块配置�
   return `定义块 ${defOrder.join(' → ')}；标签 ${tagOrder.join(' → ')}`
 })
 
-await check('T319 检视卡里选本地图：块下属性行当场换成新图（不等下一次交互）', async () => {
+await check('T319 检视卡里选本地图：行脸当场换成新图（不等下一次交互）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   const b64 =
     'iVBORw0KGgoAAAANSUhEUgAAACgAAAAoCAIAAAADnC86AAAAMElEQVR4nO3NQQkAAAgEsItjHGMbyxKCn8H+y3S9iFgsFovFYrFYLBaLxWKxWHxnAY8m0GozORegAAAAAElFTkSuQmCC'
@@ -32163,27 +32166,30 @@ await check('T319 检视卡里选本地图：块下属性行当场换成新图�
 
   /**
    * 判据：**写值那条路径自己负责重画那一行**，不等用户下一次点别处。
-   * 块下行是投影面，不是缓存；检视卡改了值，它必须当场跟上。
+   * 行脸是投影面，不是缓存；检视卡改了值，它必须当场跟上。
+   *
+   * ⚠️ 这一块是 zoom 进来的（检视卡的主体就是它）⇒ 它的行脸是**主体行下的管理档**，
+   *    不是块下属性行。判据不变，宿主换了。
    */
   await page.waitForFunction(
     ({ host, hash }) => {
-      const line = document.querySelector(`.blk[data-block-id="${host}"] > .blk-props-line`)
-      const img = line?.querySelector(`[data-asset-ref="${hash}"] img`)
+      const face = document.querySelector(`.blk[data-block-id="${host}"] > .blk-props-manage`)
+      const img = face?.querySelector(`[data-asset-ref="${hash}"] img`)
       return Boolean(img && img.naturalWidth > 0)
     },
     { host: ids.host, hash },
     { timeout: 5000 },
   )
   const line = await page.evaluate((host) => {
-    const el = document.querySelector(`.blk[data-block-id="${host}"] > .blk-props-line`)
+    const el = document.querySelector(`.blk[data-block-id="${host}"] > .blk-props-manage`)
     const img = el?.querySelector('img')
     return {
       ref: el?.querySelector('[data-asset-ref]')?.getAttribute('data-asset-ref') ?? '',
       img: Boolean(img && img.naturalWidth > 0),
     }
   }, ids.host)
-  assert(line.ref.length === 64, `块下行应换成新资产的 hash：${JSON.stringify(line)}`)
-  assert(line.img, `块下行应画真图（不是停在旧链接/占位）：${JSON.stringify(line)}`)
+  assert(line.ref.length === 64, `行脸应换成新资产的 hash：${JSON.stringify(line)}`)
+  assert(line.img, `行脸应画真图（不是停在旧链接/占位）：${JSON.stringify(line)}`)
 
   // 预览是值的舞台：点图＝默认动作（内态图开 lightbox）
   await page.click(`#inspect-card .prop-row[data-prop-id="${ids.propId}"] .prop-asset-thumb`)
@@ -32199,7 +32205,7 @@ await check('T319 检视卡里选本地图：块下属性行当场换成新图�
   await page.waitForSelector('.lightbox', { state: 'detached', timeout: 3000 })
 
   await ctx.close()
-  return `检视卡选图后块下行当场换成 ${line.ref.slice(0, 8)}… 并画真图；点预览开 lightbox`
+  return `检视卡选图后行脸当场换成 ${line.ref.slice(0, 8)}… 并画真图；点预览开 lightbox`
 })
 
 await check('T320 asset 多值：计数徽标＋溢出渐隐＋可聚焦横向滚', async () => {
@@ -35110,6 +35116,103 @@ await check('T368 引述空行上的「在上下新建块」真的多一块：�
 
   await ctx.close()
   return '引述空行的上下建块：菜单两向与 ⌘⇧↵ 各多一块，原行与归属不变'
+})
+
+/**
+ * T369｜**主体行下管理档**（单主体屏的根行）：值全显 ＋ 一行待填；块标字段不重复。
+ *
+ * 钉的是「行脸 vs 管理面」的边界（这一步只立行脸那一档，检视卡还在）：
+ *   · 单主体屏（zoom 进一块）⇒ 根行下面就是管理档，有值的字段**全显**、可直接改；
+ *   · 归块标的字段（`_uiPosition: block-left` 的 checkbox）**不在**行下再出一格
+ *     ——同一行同一 `propId` 的可编辑控件 ≤ 1（同一个值 30px 内两个控件，
+ *     正是这一档要消掉的重复）；
+ *   · 声明了没填的收成一行 `+N 项待填`，点开就地展开、再点收起；
+ *   · 根行**不再**画块下属性行：同一格的两个角色互斥（两份都算，估高就偏）。
+ */
+await check('T369 主体行下管理档：值全显、块标字段不重复、待填补一行（点开就地展开）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  try {
+    await page.evaluate(() => window.__qua.quiet(true))
+    await openFirstPage(page)
+
+    const fx = await page.evaluate(() => {
+      const inv = (name, args = {}) => window.__qua.invoke(name, args)
+      const rows = window.__qua.__editor.rows().map((r) => r.block)
+      const spot = rows.find((b) => b.children.length === 0 && !b.props?._tags?.length)
+      if (!spot) throw new Error('前置：这一页没有可落的块')
+      inv('core.tags/add', { blockId: spot.id, name: '管理档探针' })
+      const all = () => window.__qua.allBlocks()
+      const tag = all().find((b) => b.lists?.includes('tag') && b.aliases?.includes('管理档探针'))
+      if (!tag) throw new Error('前置：标签块没建出来')
+      inv('core.props/create-def', { blockId: tag.id, label: '作者', kind: 'text', target: 'declared' })
+      inv('core.props/create-def', { blockId: tag.id, label: '完成', kind: 'checkbox', target: 'declared' })
+      // 第三条声明留空：`+N 项待填` 那一行要一枚「声明了但没填」的栏
+      inv('core.props/create-def', { blockId: tag.id, label: '备注', kind: 'text', target: 'declared' })
+      const def = (label) => {
+        const d = all().find((b) => b.text === label && b.props?._kind)
+        if (!d) throw new Error(`前置：定义块没建出来 ${label}`)
+        return d.id
+      }
+      const author = def('作者')
+      const done = def('完成')
+      const note = def('备注')
+      // 完成归块标（gutter）：行下就不该再出这一格
+      inv('core.props/set-ui-position', { defId: done, position: 'block-left' })
+      inv('core.props/set-value', { blockId: spot.id, propId: author, value: '张三' })
+      inv('core.props/set-value', { blockId: spot.id, propId: done, value: true })
+      return { host: spot.id, tagId: tag.id, author, done, note }
+    })
+    await page.waitForTimeout(400)
+
+    // 单主体屏：zoom 进这一块 ⇒ 它就是这一屏唯一的根（打开页／zoom 同一装载形状）
+    await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), fx.host)
+    await page.waitForTimeout(450)
+
+    const read = () =>
+      page.evaluate(({ host, author, done, note }) => {
+        const row = document.querySelector(`.blk[data-block-id="${host}"]`)
+        const manage = row?.querySelector(':scope > .blk-props-manage .blk-manage') ?? null
+        const authorRow = manage?.querySelector(`.prop-row[data-prop-id="${author}"]`) ?? null
+        const input = authorRow?.querySelector('input')
+        return {
+          manageFlag: row?.dataset.propsManage ?? '',
+          line: Boolean(row?.querySelector(':scope > .blk-props-line')),
+          manage: Boolean(manage),
+          authorValue: input ? input.value : (authorRow?.textContent ?? ''),
+          authorCount: row?.querySelectorAll(`.prop-row[data-prop-id="${author}"]`).length ?? 0,
+          doneRows: row?.querySelectorAll(`.prop-row[data-prop-id="${done}"]`).length ?? 0,
+          pending: manage?.querySelector('.blk-manage-pending')?.textContent ?? '',
+          pendingOpen: manage?.querySelector('.blk-manage-pending')?.getAttribute('data-open') ?? '',
+          noteShown: Boolean(manage?.querySelector(`.prop-row[data-prop-id="${note}"]`)),
+        }
+      }, fx)
+
+    const shut = await read()
+    assert(shut.manageFlag === '1' && shut.manage, `单主体屏的根行下面要有管理档：${JSON.stringify(shut)}`)
+    assert(!shut.line, `同一条行上不叠块下属性行（两个角色互斥）：${JSON.stringify(shut)}`)
+    assert(shut.authorValue.includes('张三'), `有值的字段要全显（读到的就是值本身）：${JSON.stringify(shut)}`)
+    assert(shut.authorCount === 1, `同一 propId 在这一行只有一个可编辑控件：${JSON.stringify(shut)}`)
+    assert(shut.doneRows === 0, `归块标的字段不在行下再出一格：${JSON.stringify(shut)}`)
+    assert(shut.pending.includes('1') && shut.pendingOpen === '0', `待填收成一行：${JSON.stringify(shut)}`)
+    assert(!shut.noteShown, `待填默认收着：${JSON.stringify(shut)}`)
+
+    // 点开就地展开（再点收起）：待填的栏变成可编辑的行
+    await page.locator(`.blk[data-block-id="${fx.host}"] .blk-manage-pending`).click()
+    await page.waitForTimeout(320)
+    const open = await read()
+    assert(open.noteShown && open.pendingOpen === '1', `点开展开待填：${JSON.stringify(open)}`)
+
+    await page.locator(`.blk[data-block-id="${fx.host}"] .blk-manage-pending`).click()
+    await page.waitForTimeout(320)
+    const back = await read()
+    assert(!back.noteShown && back.pendingOpen === '0', `再点收起：${JSON.stringify(back)}`)
+
+    await ctx.close()
+    return '根行管理档：值全显；块标字段不重复；待填一行可展开/收起'
+  } catch (e) {
+    await ctx.close()
+    throw e
+  }
 })
 
 const known = results.filter((r) => !r.ok && r.known)

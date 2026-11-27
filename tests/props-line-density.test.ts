@@ -9,7 +9,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { belowFieldsRows, type BelowFields } from '../src/core/index.ts'
 import { mkBlock } from '../src/core/model/model.ts'
-import { PROP_LINE_H, visibleRowHeight } from '../src/view/editor/block-dom.ts'
+import { PROP_LINE_H, MANAGE_ROW_H, visibleRowHeight } from '../src/view/editor/block-dom.ts'
 
 const fields = (n: number, pending = 0): Pick<BelowFields, 'rows' | 'pendingRows'> => ({
   rows: Array.from({ length: n }, () => ({}) as never),
@@ -54,4 +54,12 @@ test('行数直接进估高：多一行就多一份 PROP_LINE_H（虚拟化占�
   const four = visibleRowHeight(b, 0, false, 4)
   assert.equal(four - one, 3 * PROP_LINE_H, '差 3 行就该正好差 3 个行高；不能是「有属性区」的布尔')
   assert.equal(visibleRowHeight(b, 0, false, 0), one - PROP_LINE_H, '0 行＝没有这一格')
+})
+
+test('管理档是另一档高度：一行编辑控件 ≠ 一行小字投影', () => {
+  const b = mkBlock('一块')
+  const one = visibleRowHeight(b, 0, false, 0, 1)
+  assert.equal(one - visibleRowHeight(b, 0, false, 0), MANAGE_ROW_H, '管理档一行按自己的常数算')
+  assert.notEqual(MANAGE_ROW_H, PROP_LINE_H, '两档数值不许并成一份：并了就必然有一边偏')
+  assert.equal(visibleRowHeight(b, 0, false, 0, 0), visibleRowHeight(b, 0, false, 0), '0 行不占高')
 })

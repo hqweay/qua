@@ -77,6 +77,13 @@ export interface DeclaredFieldsSectionDeps {
 export class DeclaredFieldsSection {
   private readonly deps: DeclaredFieldsSectionDeps
   /**
+   * **只读露面档**（主体行下的管理档）：不画添加入口与草稿行。
+   *
+   * 判据与 `FieldsSection` 的 `add` 缺省同一条：加声明是 schema 变更，归抽屉；
+   * 行脸那一档只回答「这一块声明了哪些格子」（chip 自己的动作照旧在）。
+   */
+  private readonly bare: boolean
+  /**
    * 选项编辑器的标签视角实例（记住「哪个作用域面板展开着」）。
    *
    * 状态必须在实例里而不是组件 DOM 里：勾一个标签会写一次模型，
@@ -86,8 +93,9 @@ export class DeclaredFieldsSection {
   /** 标签视角打开的是哪条属性的选项（chip 上的「选项」按钮切换它） */
   private tagChoices: { def: Block; owner: Block } | null = null
 
-  constructor(deps: DeclaredFieldsSectionDeps) {
+  constructor(deps: DeclaredFieldsSectionDeps, opts: { bare?: boolean } = {}) {
     this.deps = deps
+    this.bare = opts.bare === true
     this.choicesTag = new ChoicesEditor({
       def: () => this.tagChoices?.def,
       tagById: deps.blockById,
@@ -196,8 +204,10 @@ export class DeclaredFieldsSection {
     }
 
     // 草稿行贴着清单（新声明的落点），追加入口收段尾
-    if (this.deps.draft.formOpen === 'declared') section.appendChild(this.buildDeclareForm(target, labels))
-    section.appendChild(add)
+    if (!this.bare) {
+      if (this.deps.draft.formOpen === 'declared') section.appendChild(this.buildDeclareForm(target, labels))
+      section.appendChild(add)
+    }
     return section
   }
 

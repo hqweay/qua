@@ -1482,6 +1482,9 @@ export {
   fieldRowsWithParent,
   gutterFieldsFor,
   gutterFieldsOf,
+  isGutterRow,
+  manageFieldsOf,
+  planManageFields,
   rowDeriveOf,
 } from './rows.ts'
 export type {
@@ -1489,6 +1492,7 @@ export type {
   BelowFieldsScope,
   FieldRow,
   GutterField,
+  ManagePlan,
   PropsLineDensity,
   RowDerive,
 } from './rows.ts'

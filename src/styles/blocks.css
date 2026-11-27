@@ -2239,6 +2239,64 @@
 .blk-props-line .blk-prop-more {
   color: var(--ui-text-secondary);
 }
+/* ---------------------------------------------------------- 主体行下的管理档
+
+   单主体屏（打开页／zoom／单日日记）的**根行**下面那一格：值段全显 ＋ 字段声明段。
+   与块下属性行是**同一格的两个角色**（互斥）：那一行读这一块（一行投影），
+   这一格管这一块（可编辑）。所以几何完全照 `.blk-props-line` 抄——同一起笔列、
+   同一个 marker 让位——「谁在这儿」只靠内容区分，不靠位置变来变去。
+
+   字号的来源是**面板**不是行：`.blk` 根行是 lg、正文是 md，而这里的控件与抽屉里
+   那些是同一批——不压回 `--ui-fs-sm`，同一个字段编辑器在两处会长成两种大小。 */
+.blk[data-props-manage='1'] {
+  flex-wrap: wrap;
+  row-gap: var(--ui-gap-1);
+}
+.blk-props-manage {
+  flex: 0 0 auto;
+  width: calc(100% - var(--ui-marker-slot) - var(--ui-gap-4));
+  margin-inline-start: calc(var(--ui-marker-slot) + var(--ui-gap-4));
+  min-width: 0;
+}
+/* 内容被清空的那一拍：宿主先藏自己（行重画随后把这一格整块摘掉） */
+.blk-manage-body[hidden] {
+  display: none;
+}
+.blk-manage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-2);
+  padding-block: var(--ui-gap-1);
+  font-size: var(--ui-fs-sm);
+  line-height: var(--ui-lh-normal);
+}
+/* 段头的分隔线是「卡内分段」的语言（上面还有别的段）；行下这一格只有它自己的一段 */
+.blk-manage > .props-section:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+/* 收在 `+N` 里的待填：一行小字，读起来是「还差几栏」而不是一颗按钮 */
+.blk-manage-pending {
+  align-self: flex-start;
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: var(--ui-fs-xs);
+  line-height: var(--ui-lh-tight);
+  color: var(--ui-text-tertiary);
+  cursor: pointer;
+  text-align: start;
+}
+.blk-manage-pending:hover,
+.blk-manage-pending:focus-visible {
+  color: var(--ui-text-secondary);
+}
+.blk-manage-pending[data-open='1'] {
+  color: var(--ui-text-secondary);
+}
 .blk[data-view-body='1'] {
   flex-wrap: wrap;
   /* 与 `VIEW_BODY_GAP` 同源：body 与上一行之间的缝 */

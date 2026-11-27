@@ -26,12 +26,14 @@ import {
   canonicalLang,
   codeLangLabel,
   embedBodyOf,
+  hasList,
   iconOf,
   isDeleted,
   isFolded,
   isPropDef,
   LANG_PROP,
   openAxisOf,
+  planManageFields,
   prop,
   readEmbed,
   removableBySplice,
@@ -51,6 +53,7 @@ import { createAutomationBody } from '../../ui/automation/automation-body.ts'
 import { DefConfigSection } from '../../ui/block-ui/def-config-section.ts'
 import { DeclaredFieldsSection } from '../../ui/block-ui/declared-fields-section.ts'
 import { PropsDraftState } from '../../ui/block-ui/props-add-form.ts'
+import { ManageFieldsSection } from '../../ui/block-ui/manage-fields.ts'
 import { runTargetRows } from '../../app/retrieval/run-target-rows.ts'
 import { readAutomation } from '../../core/automation/automation.ts'
 import { type Registry, type MenuRequest } from '../../core/commands/index.ts'
@@ -76,6 +79,10 @@ export interface EditorEventsDeps {
   triggers: { get(ch: TriggerChar): { source(query: string): Row[]; title: string; emptyText: string } | undefined }
   openPropsLineMenu: (blockId: string, anchor: DOMRect) => void
   propsLineModeOf: (blockId: string) => { effective: 'summary' | 'list'; covered: boolean }
+  /** 主体行下管理档的「待填」展开了没有（会话态；与 `propsLineModeOf` 是两条轴） */
+  managePendingOpenOf: (blockId: string) => boolean
+  /** 展开 ⇄ 收起主体行下管理档的待填栏（调用方负责重画那一行） */
+  toggleManagePending: (blockId: string) => void
   refLabelOf: (targetId: string) => string
   repaintBlock: (blockId: string) => void
   viewMenus: {
@@ -96,7 +103,7 @@ export interface EditorEventsDeps {
 }
 
 export function createEditorEvents(deps: EditorEventsDeps) {
-  const { getRegistry, layers, blocks, run, getPanels, getApp, focusSourceInMain, kb, kbGet, assets, clipboard, showMenu, triggerState, openPropsLineMenu, propsLineModeOf, refLabelOf, repaintBlock, viewMenus, getPopovers, refPeek, shortId, prefs, setEd, openTrigger, refreshSelectionBar, triggers, isFocusRoot } = deps
+  const { getRegistry, layers, blocks, run, getPanels, getApp, focusSourceInMain, kb, kbGet, assets, clipboard, showMenu, triggerState, openPropsLineMenu, propsLineModeOf, managePendingOpenOf, toggleManagePending, refLabelOf, repaintBlock, viewMenus, getPopovers, refPeek, shortId, prefs, setEd, openTrigger, refreshSelectionBar, triggers, isFocusRoot } = deps
 
 /**
  * **一台视图编辑器的完整事件表**：正文、挂载区、查询结果**共用这一份**。
@@ -389,6 +396,71 @@ function viewEvents(
     (b) => `${b.id}\u0000${isPropDef(b) ? 'def' : 'declared'}`,
   )
   /**
+   * **主体行下管理档**（单主体屏的根行下面那一档：值段 ＋ 声明段）。
+   *
+   * 实例缓存与上面几个身体同一条判据：段内部有**只在该实例里活着**的东西
+   * （声明 chip 展开的选项编辑器、草稿态），行重画重建一次就丢一次；
+   * 而任何写入都会让行重建。所以实例属于块、DOM 随行搬。
+   *
+   * 内容是**投影不是缓存**：搬家时按此刻的真相重画一次（`refresh`）——旧块下属性行
+   * 每次行重画都现画，这一档不能比它更旧。不这么做的症状：资产地址就绪只重画行、
+   * 不推进块修订号（`asset-views.ts` 的 `onAssetChange`）⇒ 行脸永远停在「图片不可用」。
+   */
+  const manageBodies = createRowBodyCache((block, into) => {
+    const holder = document.createElement('div')
+    holder.className = 'blk-manage-body'
+    into.appendChild(holder)
+    /**
+     * 能力包与抽屉/检视卡同源（`panels.propDeps`）：写路径、行的派生、显示名只有一份。
+     * 主体取「此刻库里那一块」而不是闭包里的旧引用——撤销/换库之后旧对象已不在森林里。
+     */
+    const caps = getPanels().propDeps(() => kb.get(block.id))
+    const section = new ManageFieldsSection(caps, {
+      target: () => kb.get(block.id),
+      pendingOpen: () => managePendingOpenOf(block.id),
+      onTogglePending: () => {
+        toggleManagePending(block.id)
+        // 估高跟着变：这一行要按新的行数重画（缓存会把实例搬回去，不重建）
+        repaintBlock(block.id)
+      },
+      repaint: () => render(),
+    })
+    const render = (): void => {
+      const b = kb.get(block.id)
+      const el = b ? section.render(b) : null
+      holder.replaceChildren()
+      if (el) holder.appendChild(el)
+      // 字段被清空/撤掉的那一拍：宿主先藏自己（行重画随后把这一格整块摘掉）
+      holder.hidden = el === null
+    }
+    render()
+    return { root: holder, dispose: () => {}, refresh: render }
+  })
+  /**
+   * **主体根行的管理档占几行**（虚拟化估高用）。
+   *
+   * 判据与挂载那一份是**同一个函数**（`planManageFields`，输入同一份 `fieldsOf`）：
+   * 两处各算一遍，滚动条就会系统性偏小/偏大——那种偏差不报错，只在滚到底部时露出来。
+   *
+   * 只答「这一块」；「它是不是主体根」由 `view` 判（`focusRootOf` 已经在那一层）——
+   * 这里再判一次就是第二份主体判据。内层编辑器拿不到这个回调（构造上不挂），
+   * 所以「每个单根岛都长出一块面板」不会发生。
+   *
+   * ⚠️ 记忆一格：`applyWindow` 会为每一行问一次估高，根行几乎总在窗口里 ⇒
+   *    没有记忆时每次滚动都要整库扫一遍定义块与标签块。键取「修订号 ＋ 块 ＋ 展开态」，
+   *    三者任一变了就重算（内容改了 revision 一定变）。
+   */
+  let manageSlotsMemo: { rev: number; id: string; open: boolean; slots: number } | null = null
+  const manageRowsOf = (id: string): number => {
+    const open = managePendingOpenOf(id)
+    const m = manageSlotsMemo
+    if (m && m.rev === blocks.revision && m.id === id && m.open === open) return m.slots
+    const b = kb.get(id)
+    const slots = b ? (planManageFields(kb.fieldsOf(id), open, hasList(b, 'tag'))?.slots ?? 0) : 0
+    manageSlotsMemo = { rev: blocks.revision, id, open, slots }
+    return slots
+  }
+  /**
    * **露面身体的实例缓存**（与查询体同一条判据）：镜像的岛编辑器里住着这份装载
    * **自己的折叠表**（视图实例态），投影的 ViewHost 有订阅与冻结结果——
    * 行重画时重建一次就丢一次。缓存键是**「此刻该挂什么身体」的指纹**
@@ -582,6 +654,17 @@ function viewEvents(
           automationBody: (block: Block, into: HTMLElement) => automationBodies(block, into),
           /** **定义块／标签的正文投影**：与查询体同一扇门、同一缓存纪律（见上面 `defBodies`） */
           defBody: (block: Block, into: HTMLElement) => defBodies(block, into),
+          /**
+           * **主体行下的管理档**：与上面三支**同一扇门**——只有「块的真实位置」挂它，
+           * 镜像／查询结果／挂载区／单元格在构造上就没有这条回调（不是运行时判 visited）。
+           * 「哪一行画」由 `view` 按 `focusRootOf` 判：单主体屏的根行。
+           */
+          manageProps: (block: Block, into: HTMLElement) => manageBodies(block, into),
+          /**
+           * 管理档的行数（估高）：与挂载那一份同一个 `planManageFields`。
+           * 同一扇门给：内层编辑器没有管理档，就不该按它有来估高。
+           */
+          manageRows: (id: string) => manageRowsOf(id),
         }
       : {}),
     /**

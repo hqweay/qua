@@ -421,6 +421,10 @@ export const MSG = {
   'ui.props.lineHint': '点击在属性面板里改这一项',
   'ui.props.lineMore': '还有 {n} 项',
   'ui.props.lineMoreHint': '就地展开成「一栏一行」；再点「收起」回去',
+  /* 主体行下管理档：有值的栏全显，还差的那几栏收成一行（点开就地填） */
+  'ui.props.managePending': '+{n} 项待填',
+  'ui.props.managePendingClose': '收起待填',
+  'ui.props.managePendingHint': '点一下就地展开这几栏，再点收起',
   /* 一条多值里**没画出来**的项：徽章写总项数，不是剩余项数——宽度只改变画几枚，不改变这个数字 */
   'ui.props.valueCount': '{n} 项',
   'ui.props.valueAllTip': '共 {n} 项：{list}。点开在属性面板里看全部',

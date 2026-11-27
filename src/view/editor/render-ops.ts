@@ -17,6 +17,7 @@ import {
   constrainBelowFields,
   depthOf,
   displayRowPropIds,
+  focusRootOf,
   foldStateOf,
   gutterFieldsFor,
   hasAnyFieldOf,
@@ -550,6 +551,10 @@ export class RenderOps {
       if (codeHost && codeHost.dataset.folded !== '1' && this.ed.events.codeBody) {
         this.ed.embeds.attachCodeBody(block, codeHost)
       }
+      // 管理档同理（主体根行的属性不是身体，回收却同一张表）：漏接的话它会在
+      // 保留行重画后的下一拍被真拆掉——行还在，值段与声明段整片消失
+      const manageHost = el.querySelector<HTMLElement>(':scope > .blk-props-manage')
+      if (manageHost && this.ed.events.manageProps) this.ed.embeds.attachManageProps(block, manageHost)
     }
     this.mounted = new Set([...kept.keys()].filter((id) => Boolean(this.ed.blockEl(id))))
     this.markCaret()
@@ -1283,6 +1288,14 @@ export class RenderOps {
               propsLine: (b: Block, data: BelowFields, into: HTMLElement) => this.ed.events.propsLine!(b, data, into),
             }
           : {}),
+        /**
+         * **主体行下的管理档**：只给单主体屏的根行，且只在这台宿主真画得了的时候
+         * （`manageProps` 由「块的真实位置」那一档事件表提供）。行数与渲染同一份判据：
+         * `manageSlotsOf` 在 `rowHeight` 里算过，这里只问「大于 0 吗」。
+         */
+        ...(this.ed.events.manageProps && this.manageSlotsOf(r.block.id) > 0
+          ? { manageProps: (b: Block, into: HTMLElement) => this.ed.embeds.attachManageProps(b, into) }
+          : {}),
       },
     )
     if (trackMounted) this.mounted.add(r.block.id)
@@ -1434,6 +1447,28 @@ export class RenderOps {
   private winTo = 0
 
   /**
+   * **这一行是不是单主体屏的根行**（`focusRootOf` 是唯一判据：装载形状只有一个根）。
+   *
+   * 判「角色」只在这里做一次：根行＝管理档（管这一块），其余行＝读值投影。
+   * 不抄第二份 `subject()`——那个是检视卡的主体判据，与它同源但不能各写一遍。
+   */
+  private subjectRootRow(id: string): boolean {
+    return id === focusRootOf(this.ed.doc.roots)
+  }
+
+  /**
+   * **这一行的管理档占几行**（`0` ＝ 不画）。
+   *
+   * `manageRows` 由装配层算（有值行 ＋ `+N`／展开后的待填 ＋ 段头），与它挂载时
+   * 用的那份 `planManageFields` 是同一个函数——这里只把「谁是主体根」叠上去。
+   */
+  private manageSlotsOf(id: string): number {
+    const fn = this.ed.events.manageRows
+    if (!fn || !this.subjectRootRow(id)) return 0
+    return fn(id)
+  }
+
+  /**
    * **一行占多高**（窗口占位与视口定位共用这一份）。
    *
    * 两处必须同源：占位高度用哪套估法，按滚动位置反查行号就得用同一套——否则
@@ -1445,6 +1480,12 @@ export class RenderOps {
       if (!this.ed.events.propsLine || !this.ed.events.propsRows || !data) return 0
       return this.ed.events.propsRows(id, data)
     }
+    /**
+     * **同一格的两个角色互斥**：主体根行画管理档（装配层给的 `manageRows`），其余行
+     * 画块下行投影（`propsRows`）。两者都算就会把那一格的高度算两遍——滚动条偏大
+     * 是这一格最容易犯的错（不报错，只在滚到底部露出来）。
+     */
+    const manage = this.manageSlotsOf(r.block.id)
     /**
      * **量到过就用实测**（见 `height-cache.ts`）：折行正文让估高系统性偏小，
      * 而这一行挂载过就说明它的真实高已知——没有理由再猜。
@@ -1465,7 +1506,9 @@ export class RenderOps {
           rowHasEmbedViewBody(r.block, (id) => this.ed.store.find(id)) &&
           bodyVisible(this.ed.doc, r.block.id)),
       // 行数由装配层给（密度档 ＋ 单块展开）；没有这一格 ⇒ 不画属性区
-      propsRows(r.block.id, below?.get(r.block.id)),
+      manage > 0 ? 0 : propsRows(r.block.id, below?.get(r.block.id)),
+      // 主体根行的那一档取代块下行（同一格的两个角色，装配层只给一个）
+      manage,
       ),
     )
   }

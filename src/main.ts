@@ -1191,6 +1191,8 @@ const {
   applyBlockType,
   refLabelOf,
   propsLineModeOf,
+  managePendingOpenOf,
+  toggleManagePending,
   openPropsLineMenu,
 } = setupBlockProps({
   ws,
@@ -1546,6 +1548,8 @@ const { viewEvents, wireViewEditor } = createEditorEvents({
   triggerState,
   openPropsLineMenu,
   propsLineModeOf,
+  managePendingOpenOf,
+  toggleManagePending,
   refLabelOf,
   repaintBlock,
   viewMenus,

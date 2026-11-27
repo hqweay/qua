@@ -4,6 +4,16 @@ import type { Block } from '../../core/index.ts'
 export interface RowBody {
   root: HTMLElement
   dispose(): void
+  /**
+   * **搬家之后按外面那一刻的真相重画内容**（可选）。
+   *
+   * 什么时候需要它：内容里有「不经过 store 修订号、但会变」的投影。典型是资产地址——
+   * 它在库的索引就绪时才出现，而那一刻只重画行、不推进块修订号。实例搬家时内容还在
+   * 旧答案上，行脸就停在「图片不可用」，等用户下一次交互才变真图。
+   * ⇒ 判据：**内容是投影还是缓存**。投影（行脸那一档）给 `refresh`，缓存（查询结果／
+   * 镜像那颗子树）不给——它们的值就该跨重画活下来。
+   */
+  refresh?(): void
 }
 
 /**
@@ -47,6 +57,8 @@ export function createRowBodyCache(
       e.pending = false
       // 整棵搬（连同滚动位置／冻结结果／焦点子树），不重建
       into.appendChild(e.body.root)
+      // 投影型内容在搬家后按此刻的真相重画一次（见 `RowBody.refresh`）
+      e.body.refresh?.()
     }
     const entry = e
     return () => {
