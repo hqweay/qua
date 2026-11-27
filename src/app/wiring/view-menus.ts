@@ -15,6 +15,9 @@ import { openTagChoice } from '../../app/retrieval/name-choice.ts'
 import { Layers, type Row } from '../../ui/overlay/layers.ts'
 import {
   blockLabel,
+  CALLOUT_PROP,
+  calloutGroupChoices,
+  calloutTypesOf,
   canonicalNode,
   cardLayoutOf,
   childDisplayProps,
@@ -192,6 +195,8 @@ function openSpecPopover(opts: {
        */
       choices: (propId) => {
         if (propId === '_tags') return kb.tags().map((t) => ({ id: t.id, label: blockLabel(t, kbGet) }))
+        // 引述类型是系统槽上的动态词汇（与 `_tags` 同一先例）：含墓碑，旧条件读得出名字
+        if (propId === CALLOUT_PROP) return calloutGroupChoices(calloutTypesOf(kbGet))
         const def = kb.get(propId)
         if (!def || propKindOf(def) !== 'select') return []
         return choicesOf(def).map((c) => ({ id: c.id, label: c.label }))

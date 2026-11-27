@@ -30,6 +30,9 @@ import {
   isHexColor,
   ICON_PROP,
   COLOR_PROP,
+  CALLOUT_PROP,
+  calloutGroupChoices,
+  calloutTypesOf,
   prop,
   isJournal,
   isViewRoot,
@@ -1257,6 +1260,12 @@ export function setupPanels(deps: PanelsDeps) {
        * 其余属性没有固定值域 ⇒ 空表，列按「第一次出现」排。
        */
       choices: (propId) => {
+        /**
+         * `_callout` 不是属性定义：它的值域是引述类型表（含墓碑——旧值/旧条件
+         * 仍要读得出名字；条件存 id，改名不断旧查询）。与 `_tags` 同一条「系统槽 ＋
+         * 动态词汇」的先例。
+         */
+        if (propId === CALLOUT_PROP) return calloutGroupChoices(calloutTypesOf((id) => kb.get(id)))
         const def = kb.get(propId)
         if (!def) return []
         const records = allChoicesOf(def)

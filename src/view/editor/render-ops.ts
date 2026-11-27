@@ -1072,12 +1072,12 @@ export class RenderOps {
        * 否则「先发生一次结构/装载变化、紧接着打字」时，旧行会带着上一拍的深度，
        * 表现为「输入文本时块错位」（反链面板里正在输入的那一行缩进跳掉）。
        */
-      for (const prop of ['--depth', '--quote-depth']) {
+      for (const prop of ['--depth', '--quote-depth', '--callout-c']) {
         const v = nextEl.style.getPropertyValue(prop)
         if (v) el.style.setProperty(prop, v)
         else el.style.removeProperty(prop)
       }
-      for (const k of ['data-depth', 'data-quote', 'data-quote-line', 'data-quote-head']) {
+      for (const k of ['data-depth', 'data-quote', 'data-callout', 'data-quote-line', 'data-quote-head']) {
         const v = nextEl.getAttribute(k)
         if (v === null) el.removeAttribute(k)
         else el.setAttribute(k, v)

@@ -664,6 +664,102 @@
   flex: 1 0 100%;
 }
 
+/* ------------------------------------------------ 引述类型管理（一张表）
+ *
+ * 宿主是 `.popover`，它的通用按钮规则（`:not(.ui-btn)` 的边框与内边距）会从侧面
+ * 漏进这一组——所以整组按前缀收窄，并把「只有图标」的按钮复位成无框小件。
+ */
+.callout-types-title {
+  margin: 0 0 var(--ui-gap-3);
+  font-size: var(--ui-fs-md);
+  font-weight: var(--ui-fw-medium);
+  color: var(--ui-text);
+}
+.callout-types-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap-1);
+}
+.callout-type-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap-2);
+}
+.callout-type-row[data-deleted='1'] {
+  opacity: var(--ui-soft);
+}
+.popover .callout-types .callout-type-face,
+.popover .callout-types .callout-type-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  padding: 0;
+  background: none;
+  color: var(--ui-text-secondary);
+  border-radius: var(--ui-radius-sm);
+  cursor: pointer;
+}
+.popover .callout-types .callout-type-face {
+  width: 24px;
+  height: 24px;
+}
+.popover .callout-types .callout-type-btn {
+  width: 20px;
+  height: 20px;
+}
+.popover .callout-types .callout-type-btn:hover,
+.popover .callout-types .callout-type-face:hover {
+  background: var(--ui-bg-hover);
+  color: var(--ui-text);
+}
+.popover .callout-types .callout-type-btn:disabled,
+.popover .callout-types .callout-type-face:disabled {
+  opacity: var(--ui-soft);
+  cursor: default;
+  background: none;
+}
+.callout-type-ico {
+  color: var(--callout-c, var(--ui-text-secondary));
+}
+.callout-type-name {
+  flex: 1;
+  min-width: 0;
+}
+.callout-type-name-static {
+  /* 单行省略的几何由 `.ui-ellipsis` 原语给（本组只加语义：墓碑的样子） */
+  color: var(--ui-text-tertiary);
+  text-decoration: line-through;
+}
+.callout-type-face-panel {
+  padding: var(--ui-gap-3) var(--ui-gap-2);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-sm);
+}
+.callout-types-new {
+  display: flex;
+  gap: var(--ui-gap-2);
+  margin-top: var(--ui-gap-3);
+}
+.callout-types-new .callout-type-name {
+  flex: 1;
+  min-width: 0;
+}
+.callout-types-add {
+  margin-top: var(--ui-gap-3);
+}
+.callout-types-note {
+  margin: var(--ui-gap-3) 0 0;
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+}
+.callout-types-section {
+  margin-top: var(--ui-gap-4);
+  color: var(--ui-text-tertiary);
+  font-size: var(--ui-fs-xs);
+}
+
 /* ------------------------------------------------ 字段声明（抽屉） */
 
 .fields-section {

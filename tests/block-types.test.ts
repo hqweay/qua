@@ -60,10 +60,11 @@ test('转回别的骨架会清掉语言，撤销仍是一步', () => {
   assert.equal(setBlockType(code, CODE_TYPE), true)
   assert.equal(prop<string>(code, LANG_PROP), 'js', '进代码块时保留调用方给的语言')
 
-  // 引述变体同理：转回正文后它只是一份没人读的旧解释
-  const quote = mkBlock('', { props: { _type: QUOTE_TYPE, _callout: 'warning' } })
+  // 引述类型同理：转回正文后它只是一份没人读的旧解释。
+  // 值域开放之后同样成立：自定义类型的 id 也随骨架一起离开
+  const quote = mkBlock('', { props: { _type: QUOTE_TYPE, _callout: 'custom-type-id' } })
   assert.equal(setBlockType(quote, 'outline'), true)
-  assert.equal(prop<string>(quote, '_callout'), undefined, '正文不解释引述变体')
+  assert.equal(prop<string>(quote, '_callout'), undefined, '正文不解释引述类型')
 })
 
 test('换骨架准入：身份与只读正文不给转换', () => {

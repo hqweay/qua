@@ -88,7 +88,13 @@ export function queryFieldsOf(forest: readonly Block[], coverage?: FieldCoverage
   for (const id of QUERY_FIELD_SYSTEM_SLOTS) {
     const label = systemQueryFieldLabel(id)
     if (label === undefined) continue
-    defs.push({ id, label, kind: id === '_date' ? 'date' : 'text' })
+    /**
+     * `_callout` 的值域是一张记录表（类型 id），与 `select` 的选项同形：
+     * 报 `select`，值控件就走现成的下拉（含「已删除」的显示），`choices('_callout')`
+     * 由读门面提供同一份记录。报 `text` 会给一个必然填错的自由输入框。
+     */
+    const kind = id === '_date' ? 'date' : id === CALLOUT_PROP ? 'select' : 'text'
+    defs.push({ id, label, kind })
   }
   if (!coverage || coverage.total === 0) return defs
   /**

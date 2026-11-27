@@ -13,9 +13,10 @@ import { mountEmbedBody } from '../../ui/block-ui/embed-body.ts'
 import type { BlockEditor, ViewEvents } from '../../view/editor/editor.ts'
 import { assetViewOf } from '../../view/asset-views.ts'
 import {
-  CALLOUT_VARIANTS,
   CALLOUT_PROP,
-  canonicalCallout,
+  calloutTypeOf,
+  calloutTypesOf,
+  liveCalloutTypes,
   belowFieldsRows,
   blockLabel,
   cardinalityOf,
@@ -44,6 +45,7 @@ import {
 import { t } from '../../core/infra/msg.ts'
 import { takenWhere } from '../../app/commands-impl.ts'
 import { openChoicePicker } from '../../app/choice-picker.ts'
+import { openCalloutTypeCreator, openCalloutTypesManager } from '../../ui/overlay/callout-types.ts'
 import { renderPropsLine } from '../../ui/block-ui/props-line.ts'
 import { createAutomationBody } from '../../ui/automation/automation-body.ts'
 import { DefConfigSection } from '../../ui/block-ui/def-config-section.ts'
@@ -712,30 +714,61 @@ function viewEvents(
       })
     },
     /**
-     * **引述块的变体徽章**：点开一张七选一的类型单，选中即写 `_callout`。
+     * **引述块的类型徽章**：点开类型单，选中即写 `_callout`；末尾两行是
+     * 「新建类型…」（建好并应用到**这一块**，一笔撤销）与「管理类型…」。
      *
-     * 行由 `core/infra/callout.ts` 那张表生成（与徽章同源），当前变体打勾；
-     * 菜单标题就是参考图里的「类型」，宽度收窄到七行刚好一屏。
+     * 行由类型表现读（与徽章同源）：用户自定义的类型与内置的排在同一个单子里。
+     * 类型多到一屏放不下时给搜索框（判据是「这一层有多少行」）。
      */
     calloutMenu: (blockId, anchor, trigger) => {
       const b = kb.get(blockId)
-      const current = canonicalCallout(b ? prop<string>(b, CALLOUT_PROP) : undefined)
+      const types = calloutTypesOf((id) => kb.get(id))
+      const live = liveCalloutTypes(types)
+      const current = calloutTypeOf(b ? prop<string>(b, CALLOUT_PROP) : undefined, types)
       layers.openMenu({
-        rows: CALLOUT_VARIANTS.map((v) => ({
-          id: `callout/${v.id}`,
-          label: v.label,
-          icon: `lucide:${v.icon}`,
-          // 勾只出现在一行上：未选中行给空串，不留一列 `·` 噪声
-          hint: v.id === current ? '✓' : '',
-          group: 'callout/1',
-        })),
+        rows: [
+          ...live.map((v) => ({
+            id: `callout/t/${v.id}`,
+            label: v.label,
+            icon: v.icon,
+            // 勾只出现在一行上：未选中行给空串，不留一列 `·` 噪声
+            hint: v.id === current.id ? '✓' : '',
+            group: 'callout/1',
+          })),
+          { id: 'callout/new', label: t('ui.callout.newType'), icon: 'lucide:plus', group: 'callout/2' },
+          { id: 'callout/manage', label: t('ui.callout.manageTypes'), icon: 'lucide:settings-2', group: 'callout/2' },
+        ],
         anchor,
         trigger,
         title: t('ui.callout.typeTitle'),
-        width: 240,
-        searchable: false,
+        width: 260,
+        // 十几个类型按名字找比滚动快；短单子不因此多一个输入框
+        searchable: live.length > 12,
         onPick: (row) => {
-          const variant = row.id.slice('callout/'.length)
+          if (row.id === 'callout/new') {
+            openCalloutTypeCreator({
+              layers,
+              anchor,
+              title: t('ui.callout.newTypeTitle'),
+              submitText: t('ui.callout.create'),
+              onSubmit: (label) => {
+                void getRegistry().invoke('core.callout/create-and-apply', { blockId, label }, via)
+                // 提交即走：命令失败会 toast，输入框留着只会让人再点一次
+                layers.closePopover()
+              },
+            })
+            return
+          }
+          if (row.id === 'callout/manage') {
+            openCalloutTypesManager({
+              layers,
+              anchor,
+              types: () => calloutTypesOf((id) => kb.get(id)),
+              dispatch: (command, args) => void getRegistry().invoke(command, args ?? {}, via),
+            })
+            return
+          }
+          const variant = row.id.slice('callout/t/'.length)
           void getRegistry().invoke('core.block/set-callout', { blockId, variant }, via)
         },
       })

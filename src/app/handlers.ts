@@ -14,6 +14,7 @@
  */
 import type { Handler } from '../core/infra/ports.ts'
 import { AUTOMATION_HANDLERS } from './handlers/automation.ts'
+import { CALLOUT_HANDLERS } from './handlers/callout.ts'
 import { EMBED_HANDLERS } from './handlers/embed.ts'
 import { STRUCT_HANDLERS } from './handlers/block.ts'
 import { DEV_HANDLERS } from './handlers/dev.ts'
@@ -44,6 +45,7 @@ export const HANDLERS: Record<string, Handler> = {
   ...MOUNT_HANDLERS,
   ...EMBED_HANDLERS,
   ...TAGS_HANDLERS,
+  ...CALLOUT_HANDLERS,
   ...PAGE_HANDLERS,
   ...JOURNAL_HANDLERS,
   ...VIEW_HANDLERS,

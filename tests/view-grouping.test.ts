@@ -9,6 +9,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkBlock, mkPageBlock, PAGE_COLUMN, type Block, type ViewRecord } from '../src/core/index.ts'
+import { builtinCalloutTypes, calloutGroupChoices } from '../src/core/infra/callout.ts'
 import { bucketize, bucketLabel, orderBuckets, GROUP_UNSET } from '../src/ui/views/grouping.ts'
 
 const rec = (id: string, values: Record<string, unknown> = {}): ViewRecord => ({
@@ -131,6 +132,18 @@ test('bucketLabel：ref 的值是块 id，走 valueLabel 翻译；非 ref 字段
   }
   assert.equal(bucketLabel(buckets[0]!, 'g', o), '目标块', 'ref 值翻译成名字，不露裸 id')
   assert.equal(bucketLabel(buckets[1]!, 'g', o), '一段普通文本', '解析不了的原样回落（text 组不被误翻）')
+})
+
+test('按引述类型分组：墓碑类型的段头读得出旧名（不露裸 id）', () => {
+  // 类型表含一条已删的「旧提示」：旧引述还在，段头不能变成它的 32 位 id
+  const types = [...builtinCalloutTypes(), { id: 'gone', label: '旧提示', icon: 'lucide:flag', deleted: true as const }]
+  const choices = calloutGroupChoices(types)
+  const { buckets } = bucketize([rec('a', { _callout: 'gone' }), rec('b', { _callout: 'info' })], '_callout', {
+    choices: () => choices,
+  })
+  const o = { choices: () => choices }
+  assert.equal(bucketLabel(buckets[0]!, '_callout', o), '旧提示')
+  assert.equal(bucketLabel(buckets[1]!, '_callout', o), '信息')
 })
 
 test('bucketize：所在页（派生键）——按最近的页分桶，无页祖先落根身份', () => {

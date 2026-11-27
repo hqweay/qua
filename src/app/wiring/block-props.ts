@@ -11,12 +11,10 @@
  */
 import {
   CALLOUT_PROP,
-  canonicalCallout,
   mkBlock,
   descendants,
   DEFAULT_CALLOUT,
   QUOTE_TYPE,
-  type CalloutVariant,
   blockLabel,
   blockTypeOf,
   canConvertBlockType,
@@ -226,13 +224,15 @@ function setBlockIcon(blockId: string, icon: string | null): boolean {
 }
 
 /**
- * 设引述变体（`_callout`）：缺省变体＝摘键，盘上不留「引述」这个说了等于没说的值。
- * 与设脸同一条写路径（属性写＋重画这一行），徽章当场跟着变；脏值由系统键判据挡在发看点。
+ * 设引述类型（`_callout`）：缺省类型＝摘键，盘上不留「引述」这个说了等于没说的值。
+ * 值域是类型表的记录 id（开放）；「存在且未删」的闸在命令层，这里只写。
+ * 与设脸同一条写路径（属性写＋重画这一行），徽章当场跟着变。
  */
-function setCalloutVariant(blockId: string, variant: CalloutVariant): boolean {
+function setCalloutVariant(blockId: string, variant: string): boolean {
   const b = findInForest(ws.blocks, blockId)
   if (!b || blockTypeOf(b) !== QUOTE_TYPE) return false
-  const current = canonicalCallout(prop<string>(b, CALLOUT_PROP))
+  // 与盘上的值比（不做规范化）：未知 id 也该能被换掉，而不是被当成缺省而静默早退
+  const current = prop<string>(b, CALLOUT_PROP) || DEFAULT_CALLOUT
   if (current === variant) return false
   writeProps(blockId, () => {
     const props = { ...(b.props ?? {}) }

@@ -11,7 +11,9 @@ import { collatorLocale } from '../infra/locale.ts'
  * 与 `view.ts` 的两条类型引用（`Source`／调用方拿 `ViewRecord`）编译期擦除，
  * 运行时依赖单向（records → view 的列词汇，再 → 各读路径模块）。
  */
-import { hasList, isDeleted, liveChildren, type Block, type BlockProps } from '../model/model.ts'
+import { hasList, isDeleted, liveChildren, blockTypeOf, CALLOUT_PROP, type Block, type BlockProps } from '../model/model.ts'
+import { QUOTE_TYPE } from '../model/types.ts'
+import { DEFAULT_CALLOUT } from '../infra/callout.ts'
 import { displayNameOf } from '../identity/alias.ts'
 import { journalDateInChain } from '../identity/journal.ts'
 import { tagIdsOf } from '../identity/tags.ts'
@@ -85,8 +87,23 @@ function recordOf(block: Block, path: readonly Block[], kb: KbClient): ViewRecor
     path,
     title: plainText(block.content),
     tags: rowTagsOf(block, kb),
-    values: block.props ?? {},
+    values: valuesOf(block),
   }
+}
+
+/**
+ * 记录上的「值」投影：属性袋原样，**只补一个缺省**——引述块的 `_callout`。
+ *
+ * 缺键在模型里的读法就是缺省类型（与 `_lang` 缺键＝纯文本同一条）。分组与覆盖率
+ * 只看属性袋的话，默认类型的引述会落进「未设置」——它的类型明明就是「引述」。
+ * 补的是**投影**不是数据：盘上仍没有这一格，写入仍按「缺省＝摘键」。
+ */
+function valuesOf(block: Block): BlockProps {
+  const props = block.props ?? {}
+  if (blockTypeOf(block) !== QUOTE_TYPE) return props
+  const raw = props[CALLOUT_PROP]
+  if (typeof raw === 'string' && raw !== '') return props
+  return { ...props, [CALLOUT_PROP]: DEFAULT_CALLOUT }
 }
 
 /**

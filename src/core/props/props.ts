@@ -40,7 +40,7 @@ import { derivedId, pad, uuidv7Hex } from '../model/ids.ts'
 import { journalDate, todayISO } from '../identity/journal.ts'
 import { allTags, resolveTagIds, TAGS_PROP, tagIdsOf, tagsById } from '../identity/tags.ts'
 import { t } from '../infra/msg.ts'
-import { canonicalCallout } from '../infra/callout.ts'
+import { DEFAULT_CALLOUT } from '../infra/callout.ts'
 import { QUOTE_TYPE } from '../model/types.ts'
 import { checkExternalUrl } from '../relations/link.ts'
 import { CLOSURE_USE, isUseId, useIsUnique, type UseId } from './uses.ts'
@@ -1216,9 +1216,12 @@ function readSystemField(block: Block, propId: string, table: FieldTable): Field
     return { declared: true, value: blockTypeOf(block) }
   }
   if (propId === CALLOUT_PROP) {
-    // 只有引述块有这一栏（其余块答「没声明」）；缺键＝引述，与视图上的缺省同一份读法。
+    // 只有引述块有这一栏（其余块答「没声明」）；缺键＝缺省类型，与视图上的读法同一条。
+    // 值**原样读出**（值域开放：自定义类型的 id 是数据）；「未知 id 显示成哪个名字」
+    // 是显示层的事，查询不该把旧值改判成别的类型。
     if (blockTypeOf(block) !== QUOTE_TYPE) return { declared: false, value: undefined }
-    return { declared: true, value: canonicalCallout(prop<string>(block, CALLOUT_PROP)) }
+    const raw = prop<string>(block, CALLOUT_PROP)
+    return { declared: true, value: typeof raw === 'string' && raw !== '' ? raw : DEFAULT_CALLOUT }
   }
   if (propId === ALIASES_PROP) {
     const names = aliasesOf(block)

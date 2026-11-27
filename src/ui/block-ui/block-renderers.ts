@@ -18,7 +18,7 @@
  * ⚠️ 这不是「视图类型系统」（29 那套要独立布局状态才升格）。它只是**最小的渲染分派**，
  * 目的是让「槽里是块、块由渲染器画」这个形状现在就在，而不是等视图系统落地才做。
  */
-import { blockTypeOf, CALLOUT_PROP, calloutDecl, calloutLabel, CODE_TYPE, DEFAULT_BLOCK_TYPE, DIVIDER_TYPE, QUOTE_TYPE, plainText, blockLabel, isJournal, journalDate, journalDateLabel, openActionOf, prop, type Block, type FindBlock, type OpenAction } from '../../core/index.ts'
+import { blockTypeOf, CALLOUT_PROP, calloutTypeOf, calloutTypesOf, CODE_TYPE, DEFAULT_BLOCK_TYPE, DIVIDER_TYPE, QUOTE_TYPE, plainText, blockLabel, isJournal, journalDate, journalDateLabel, openActionOf, prop, type Block, type FindBlock, type OpenAction } from '../../core/index.ts'
 import { renderIcon, type IconName } from '../../view/icons.ts'
 
 /** 渲染一个块时能拿到的东西（后续会加：上下文键、命令执行、订阅） */
@@ -173,10 +173,13 @@ const quoteRenderer: BlockRenderer = {
     if (ctx.isActive(b.id)) row.dataset.active = '1'
     const ico = document.createElement('span')
     ico.className = 'p-ico'
-    renderIcon(ico, calloutDecl(prop<string>(b, CALLOUT_PROP)).icon as IconName, 'quote')
+    // 图标值是 `lucide:*` 或字面：直接交给 `renderIcon`（曾把裸名传进来，
+    // 静态面渲染成一行字而不是图标）。类型表来自同一个查找器，与编辑器徽章同源。
+    const type = calloutTypeOf(prop<string>(b, CALLOUT_PROP), calloutTypesOf(ctx.find))
+    renderIcon(ico, type.icon, 'quote')
     const title = document.createElement('span')
     title.className = 'p-title ui-ellipsis ui-ellipsis-grow'
-    title.textContent = calloutLabel(prop<string>(b, CALLOUT_PROP))
+    title.textContent = type.label
     row.append(ico, title)
     bindRowClick(row, b, ctx)
     return row

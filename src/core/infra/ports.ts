@@ -16,7 +16,6 @@
  */
 import type { BlockEditor } from '../../view/editor/editor.ts'
 import type { ColorAxis, CtxKeys } from '../index.ts'
-import type { CalloutVariant } from '../infra/callout.ts'
 import type { UndoKind } from '../model/undo.ts'
 import type { QueryNode, QuerySpec, SortKey } from '../query/query.ts'
 import type { AutomationDef } from '../automation/automation.ts'
@@ -623,10 +622,35 @@ export interface App {
    */
   setBlockType(blockId: string, typeId: string, lang?: string): boolean
   /**
-   * 写引述块的变体（`_callout`）：封闭七值，脏值不写；缺省变体＝摘键。
+   * 写引述块的类型（`_callout`）：值域是**类型表的记录 id**（开放），
+   * 拼错由命令层「存在且未删」的闸挡；缺省类型＝摘键。
    * 与 `setBlockType` 同一条「属性写＋重画这一行」的路径，改完徽章当场变色。
    */
-  setCalloutVariant(blockId: string, variant: CalloutVariant): boolean
+  setCalloutVariant(blockId: string, variant: string): boolean
+  /**
+   * **引述类型表**（记录数组，住在隐藏单例块上）的编辑面。
+   *
+   * 名字是容器的显示名（面包屑/引用 chip 读它），所以空名与重名在命令层拒绝；
+   * 删除是墓碑（旧引述仍读得出名字），缺省类型不可删。
+   * 每次编辑都要做一次**词汇级重画**——类型改名/换色不产生引述块的 op，
+   * 块级订阅看不见（屏幕会停在旧名字，见各实现）。
+   * @returns 新类型的 id；失败返回 `''`
+   */
+  addCalloutType(label: string, icon?: string, color?: string): string
+  renameCalloutType(typeId: string, label: string): boolean
+  setCalloutTypeIcon(typeId: string, icon: string): boolean
+  /** `color` 空串＝摘色（中性是合法态）；色板外/坏 hex 不写 */
+  setCalloutTypeColor(typeId: string, color: string): boolean
+  /** 把 `typeId` 挪到 `beforeId` 之前（空串＝末尾） */
+  moveCalloutType(typeId: string, beforeId: string): boolean
+  /** 删＝立墓碑（旧引述仍显示原名）；缺省类型拒绝 */
+  deleteCalloutType(typeId: string): boolean
+  restoreCalloutType(typeId: string): boolean
+  /**
+   * **新建并应用**：建一个类型，同一笔事务把它写到这一块引述上（一步撤销）。
+   * @returns 新类型的 id；失败返回 `''`
+   */
+  createCalloutTypeAndApply(blockId: string, label: string): string
   /** 把一块转成引述容器：原正文搬进首个子块（每行一块可引用），抬头只画徽章 */
   convertToQuote(blockId: string, variant?: string): boolean
   /**

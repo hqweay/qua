@@ -323,6 +323,29 @@ export interface PropsDeps {
   toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
 }
 
+/** 引述类型表的宿主能力：记录住在隐藏单例块上，每次编辑都要一次**词汇级**重画 */
+export interface CalloutTypeDeps {
+  kb: KbClient
+  /** 一笔事务（首建那张表也要走它：零 op 的编辑不该记撤销步） */
+  run: TxRun
+  toast: (text: string, kind?: 'ok' | 'warn' | 'info') => void
+  /**
+   * 类型改名/换色之后重画用到它的屏幕。
+   *
+   * 为什么必须单独一格：这些编辑**不产生引述块的 op**，块级订阅看不见——
+   * 只写记录的话，徽章、面包屑、引用 chip、卡片会一起停在旧名字/旧颜色。
+   */
+  vocabularyChanged: () => void
+  /**
+   * 把类型表那块**钉在工作集里**（缺省实现可不给）。
+   *
+   * 为什么需要：工作集按预算淘汰未钉的块。这张表一旦被淘汰，读路径会静默回退内置七种
+   * （用户的自定义类型看起来「没了」），而下一次编辑会以为「表不存在」再插一份同 id。
+   * 启动时装载的身份块原本就被钉住；运行中**新建**的那一份要在这里补钉。
+   */
+  pin?: (id: string) => void
+}
+
 /** 提及转引用的宿主能力（判据在 relations 的 mention 一份；这里只读门面 ＋ 落一笔事务） */
 export interface MentionDeps {
   kb: KbClient

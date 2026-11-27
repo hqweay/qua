@@ -33,7 +33,7 @@ test('字段候选：属性定义在前（带 kind／基数），系统槽在后
   assert.deepEqual(fields[2], { id: '_date', label: '日记日期', kind: 'date' })
   assert.deepEqual(fields[3], { id: '_aliases', label: '别名', kind: 'text' })
   assert.deepEqual(fields[4], { id: '_type', label: '块类型', kind: 'text' })
-  assert.deepEqual(fields[5], { id: '_callout', label: '引述类型', kind: 'text' })
+  assert.deepEqual(fields[5], { id: '_callout', label: '引述类型', kind: 'select' })
 })
 
 test('引擎属性不进下拉：值是毫秒，日期控件填进去对不上', () => {

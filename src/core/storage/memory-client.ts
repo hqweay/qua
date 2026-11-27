@@ -186,8 +186,9 @@ export function createMemoryLibraryClient(deps: MemoryLibraryDeps): LibraryClien
 
     async identity(): Promise<LibraryReadResult<Rows>> {
       /**
-       * 全局身份块：被软删的、字段定义、有 page/tag 露面的、自动化——与桌面同一份判据
-       * （`catalogIdentity` 的四段 union，逐段对得上；自动化靠 `_automation` 属性在场认）。
+       * 全局身份块：被软删的、字段定义、有 page/tag 露面的、自动化、引述类型表——
+       * 与桌面同一份判据（`catalogIdentity` 的五段 union，逐段对得上；
+       * 自动化与类型表都靠「那个属性在场」认）。
        */
       const ids: string[] = []
       walkForest(
@@ -197,6 +198,7 @@ export function createMemoryLibraryClient(deps: MemoryLibraryDeps): LibraryClien
             isDeleted(b) ||
             b.props?.['_kind'] !== undefined ||
             b.props?.['_automation'] !== undefined ||
+            b.props?.['_calloutTypes'] !== undefined ||
             hasList(b, 'page') ||
             hasList(b, 'tag')
           ) {

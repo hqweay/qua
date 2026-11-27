@@ -729,31 +729,22 @@
   opacity: var(--ui-soft);
 }
 /*
- * **引述块 ＝ 变体徽章 ＋ 正文**。变体是 `_callout` 的一个封闭值（不是一个块类型），
+ * **引述块 ＝ 类型徽章 ＋ 正文**。类型是 `_callout` 的一个值（不是一个块类型），
  * 徽章住在正文槽之外：落进 `.tx` 就会被 `readRuns` 读回正文、光标也会落到它后面打字。
  * 竖线画在徽章左缘，贴着「信息/警告…」那枚脸，读成一段被引出的文字；
  * 只动横向几何，不碰 padding-block/margin，行高与虚拟化估高不变。
  *
- * 取色写在这里而不是 TS：换主题时 token 自动跟，组件不碰颜色字面量。
+ * 强调色**不在这里按类型 id 写死**：类型可自定义（名字/图标/颜色），
+ * 颜色由渲染层按类型记录 inline 写 `--callout-c`（记录是取色的唯一来源）。
+ * 这里的缺省值只是「这一格没人写」时的中性档。
  */
 .blk-callout-ico,
 .blk[data-quote-head],
 .blk[data-quote-line] {
   --callout-rule: 3px;
   --callout-icon-slot: 32px;
+  --callout-c: var(--ui-text-secondary);
 }
-.blk-callout-ico[data-callout='info'],
-.blk-callout-label[data-callout='info'] { --callout-c: var(--ui-ink-blue); }
-.blk-callout-ico[data-callout='warning'],
-.blk-callout-label[data-callout='warning'] { --callout-c: var(--ui-ink-yellow); }
-.blk-callout-ico[data-callout='error'],
-.blk-callout-label[data-callout='error'] { --callout-c: var(--ui-ink-red); }
-.blk-callout-ico[data-callout='tip'],
-.blk-callout-label[data-callout='tip'] { --callout-c: var(--ui-ink-green); }
-.blk-callout-ico[data-callout='important'],
-.blk-callout-label[data-callout='important'] { --callout-c: var(--ui-ink-violet); }
-.blk-callout-ico[data-callout='note'],
-.blk-callout-label[data-callout='note'] { --callout-c: var(--ui-ink-gray); }
 /* 变体图标＝gutter 的属性图标格：与 `.identity` 同一条 margin，落在同一列 */
 .blk-callout-ico {
   flex: 0 0 auto;
@@ -800,14 +791,9 @@
  */
 .blk[data-quote],
 .blk[data-quote-line] {
-  --callout-c: var(--ui-identity-cyan);
+  /* 类型记录没给颜色（中性）或这一格没人写时的缺省强调色 */
+  --callout-c: var(--ui-text-secondary);
 }
-.blk[data-quote='info'] { --callout-c: var(--ui-ink-blue); }
-.blk[data-quote='warning'] { --callout-c: var(--ui-ink-yellow); }
-.blk[data-quote='error'] { --callout-c: var(--ui-ink-red); }
-.blk[data-quote='tip'] { --callout-c: var(--ui-ink-green); }
-.blk[data-quote='important'] { --callout-c: var(--ui-ink-violet); }
-.blk[data-quote='note'] { --callout-c: var(--ui-ink-gray); }
 /* 这一列 = 容器深度的正文左缘（gutter + depth*indent），与徽章的竖线同一 x */
 .blk[data-quote]::before {
   content: '';

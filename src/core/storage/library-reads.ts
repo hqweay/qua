@@ -154,6 +154,10 @@ export const LIBRARY_READS = {
    *    （`deleted`／`kind` 的 partial index、`BlockList.list`、`BlockProperty(name,value)`），
    *    退化成全表扫描＋逐行相关子查询；拆成并集后每段各吃自己的索引。
    *    `union`（不是 `union all`）顺带去掉一块既是页又是标签、或已删的自动化这类重复行。
+   *
+   * ⚠️ **引述类型表的块必须在这一段里**：它物化在顶层、没有页/标签露面、也不是字段定义，
+   *    doc 与闭包装载永远碰不到它。漏了它，类型表就只在「恰好被打开过」时才读得到，
+   *    其余时候读路径静默回退内置七种——用户改过的名字/颜色看起来没保存。
    */
   catalogIdentity: `select ${BLOCK_COLUMNS} from ${B} b where b.deleted is not null
     union
@@ -161,7 +165,9 @@ export const LIBRARY_READS = {
     union
     select ${BLOCK_COLUMNS} from ${B} b join ${L} l on l.block = b.id where l.list in ('page','tag')
     union
-    select ${BLOCK_COLUMNS} from ${B} b join ${P} p on p.block = b.id where p.name = '_automation'`,
+    select ${BLOCK_COLUMNS} from ${B} b join ${P} p on p.block = b.id where p.name = '_automation'
+    union
+    select ${BLOCK_COLUMNS} from ${B} b join ${P} p on p.block = b.id where p.name = '_calloutTypes'`,
 
   /**
    * **依赖方查询**（改名／清除的低频路径）：谁引用了这一块——正文引用、标签成员、

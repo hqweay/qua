@@ -41,7 +41,7 @@ import { mountDockSlot } from './ui/dock/dock.ts'
 import { createIcon } from './view/icons.ts'
 import { mountNotePopover, type NotePopoverHandle } from './ui/block-ui/note-popover.ts'
 import { type ObjFieldDeps } from './ui/overlay/panels.ts'
-import { deleteCommands, devCommands, journalCommands, mentionCommands, mountCommands, moveCommands, pageCommands, propsCommands, rootsFor, rootsForMany, belongsToCommands, viewCommands, viewConfigCommands, buildFreshView, zoomCommands } from './app/commands-impl.ts'
+import { deleteCommands, devCommands, journalCommands, mentionCommands, mountCommands, moveCommands, pageCommands, propsCommands, calloutTypeCommands, rootsFor, rootsForMany, belongsToCommands, viewCommands, viewConfigCommands, buildFreshView, zoomCommands } from './app/commands-impl.ts'
 import { automationCommands } from './app/commands/automation.ts'
 import { createAutomationEngine } from './core/automation/engine.ts'
 import type { TxRun } from './app/commands/types.ts'
@@ -1724,6 +1724,23 @@ const app: App = {
     },
     run: runTx,
     toast: (text, kind) => app.toast(text, kind),
+  }),
+  ...calloutTypeCommands({
+    kb,
+    run: runTx,
+    toast: (text, kind) => app.toast(text, kind),
+    /**
+     * 类型改名/换色是**词汇级失效**：不产生任何引述块的 op，块级订阅看不到。
+     * 重画所有画着引述的面：中心编辑器（含引用 chip）、另一台活动编辑器、侧槽卡片。
+     */
+    vocabularyChanged: () => {
+      mainEd.renderAll()
+      if (ed !== mainEd) ed.renderAll()
+      panels?.scheduleProperties()
+      renderDocks()
+    },
+    // 运行中新建的类型表不在启动的钉住集合里：补钉，别让预算淘汰把自定义类型吞掉
+    pin: (id) => workset?.pin([id]),
   }),
   ...mentionCommands({
     kb,

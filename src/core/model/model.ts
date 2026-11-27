@@ -137,10 +137,20 @@ export const DELETED_AT_PROP = '_deletedAt' as const
 export const LANG_PROP = '_lang'
 
 /**
- * 引述块的变体（`_callout`）：引述/信息/警告/错误/提示/重要/注意。
- * 缺键＝引述（与 `_lang` 缺键＝纯文本同款读法）；值域与图标/取色在 `core/infra/callout.ts`。
+ * 引述块的类型（`_callout`）：值是**类型记录的 id**，不是封闭的七个字面量。
+ * 缺键＝缺省类型（`quote`，与 `_lang` 缺键＝纯文本同款读法）。
+ * 表（名字／图标／颜色／顺序／墓碑）住在 `core/infra/callout.ts`。
  */
 export const CALLOUT_PROP = '_callout'
+
+/**
+ * **引述类型表**（记录数组）：挂在固定 id 的隐藏单例块上，记录**不进森林**。
+ *
+ * 为什么不是七种块类型、也不是字段定义：类型只是**一个分类值**（不写正文、不长子树、
+ * 不被单独提及、不成页），值与记录的形状与 `select` 的选项一模一样——
+ * 于是旧值、旧查询、旧种子零迁移，加一种类型零代码。
+ */
+export const CALLOUT_TYPES_PROP = '_calloutTypes'
 
 /**
  * **代码正文**（`_code`）：`core/code` 块的文档。
@@ -278,6 +288,8 @@ export type SystemPropId =
   | '_type'
   | typeof LANG_PROP
   | typeof CALLOUT_PROP
+  // 引述类型表（隐藏单例块上的记录域；读路径回退内置表）
+  | typeof CALLOUT_TYPES_PROP
   | typeof CODE_TEXT_PROP
   | typeof ICON_PROP
   | typeof COLOR_PROP

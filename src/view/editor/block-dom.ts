@@ -17,7 +17,9 @@ import {
   CODE_TYPE,
   CLOSURE_USE,
   CALLOUT_PROP,
-  calloutDecl,
+  calloutTypeOf,
+  calloutTypesOf,
+  identityColorCss,
   QUOTE_TYPE,
   DEFAULT_BLOCK_TYPE,
   DIVIDER_TYPE,
@@ -603,20 +605,24 @@ function makeCodeLangChip(b: Block, onOpen: (blockId: string, anchor: DOMRect, t
 function makeCalloutChip(
   b: Block,
   onOpen: (blockId: string, anchor: DOMRect, trigger: HTMLElement) => void,
+  find?: FindBlock,
 ): { icon: HTMLElement; label: HTMLElement } {
-  const v = calloutDecl(prop<string>(b, CALLOUT_PROP))
+  const v = calloutTypeOf(prop<string>(b, CALLOUT_PROP), calloutTypesOf(find))
   const ico = document.createElement('span')
   ico.className = 'blk-callout-ico'
   ico.contentEditable = 'false'
+  // 记录 id 进 DOM：主题/插件按它扩展（颜色由行上的 `--callout-c` 给，不按 id 写死）
   ico.dataset.callout = v.id
   ico.setAttribute('role', 'button')
-  renderIcon(ico, `lucide:${v.icon}`, 'quote', 'md')
+  renderIcon(ico, v.icon, 'quote', 'md')
+  if (v.color) ico.style.setProperty('--callout-c', identityColorCss(v.color))
   const label = document.createElement('span')
   label.className = 'blk-callout-label'
   label.contentEditable = 'false'
   label.dataset.callout = v.id
   label.setAttribute('role', 'button')
   label.textContent = v.label
+  if (v.color) label.style.setProperty('--callout-c', identityColorCss(v.color))
   const tip = t('ui.callout.chipTip', { label: v.label })
   for (const el of [ico, label]) {
     el.dataset.tip = tip
@@ -856,16 +862,24 @@ export function makeBlockEl(
   if (bodyFolded && !folded) el.dataset.bodyCollapsed = '1'
   if (closure) el.dataset.closure = closure
   if (r.hasChildren) el.dataset.hasChildren = '1'
-  if (opts.quoteCtx) {
-    // 竖线贯穿整组：所有后代都带变体与容器深度（CSS 用它把竖线画在同一列）
-    el.dataset.quote = opts.quoteCtx.variant
-    el.style.setProperty('--quote-depth', String(opts.quoteCtx.depth))
+  if (opts.quoteCtx || blockTypeOf(b) === QUOTE_TYPE) {
+    /**
+     * 引述组的视觉身份**只有一个来源**：类型记录里的颜色。
+     * 行内写 `--callout-c`（记录色 → `identityColorCss`），按 id 的 CSS 规则一个不留——
+     * 否则「表是取色唯一来源」只在记录改之前成立，改完之后屏幕与表各说一套。
+     *
+     * `data-quote` 仍是**类型 id**（既有契约：主题/插件按它选中整组）；
+     * 追加的 `data-callout` 是同一个值得扩展面，名字直白。
+     */
+    const raw = opts.quoteCtx ? opts.quoteCtx.variant : prop<string>(b, CALLOUT_PROP)
+    const type = calloutTypeOf(raw, calloutTypesOf(opts.find))
+    el.dataset.quote = type.id
+    el.dataset.callout = type.id
+    const depth = opts.quoteCtx ? opts.quoteCtx.depth : r.depth
+    el.style.setProperty('--quote-depth', String(depth))
+    if (type.color) el.style.setProperty('--callout-c', identityColorCss(type.color))
     // 只有直接子块是「引述的一行」：平铺、无块标；孙块按普通块展示
-    if (opts.quoteCtx.direct) el.dataset.quoteLine = '1'
-  } else if (blockTypeOf(b) === QUOTE_TYPE) {
-    // 抬头本身：变体与深度同源（CSS 用它把竖线画在正文行同一列）
-    el.dataset.quote = prop<string>(b, CALLOUT_PROP) ?? 'quote'
-    el.style.setProperty('--quote-depth', String(r.depth))
+    if (opts.quoteCtx?.direct) el.dataset.quoteLine = '1'
   }
   // 角色进 DOM：页 / 日记作为**正文第一行**时靠它取样式。
   // 兼位块把**全部角色**写进同一个属性（空格分隔，选择器用 `~=`）——
@@ -1400,7 +1414,7 @@ export function makeBlockEl(
     tx.dataset.quoteHead = '1'
     tx.setAttribute('aria-hidden', 'true')
     if (opts.calloutMenu) {
-      const chip = makeCalloutChip(b, opts.calloutMenu)
+      const chip = makeCalloutChip(b, opts.calloutMenu, opts.find)
       calloutIcon = chip.icon
       calloutLabel = chip.label
     }
