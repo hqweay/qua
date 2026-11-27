@@ -28,7 +28,7 @@ import {
   type FoldState,
   type Located,
 } from './model.ts'
-import { canWriteText, typeDeclOf } from './types.ts'
+import { canWriteText, QUOTE_TYPE, typeDeclOf } from './types.ts'
 import { isEmptyContent, joinRuns, plainLen, sliceRuns, splitRuns, cloneRunsNewIds, textRuns, type Run } from './runs.ts'
 import { shiftAnnos, splitAnnos } from './annos.ts'
 import { walkForest } from './walk.ts'
@@ -170,6 +170,42 @@ export function ancestorsByBlockId(rows: readonly VisibleRow[]): Map<string, str
     out.set(r.block.id, stack.slice())
     stack[r.depth] = r.block.id
   }
+  return out
+}
+
+/**
+ * **引述组的组尾行**（id 集合）。
+ *
+ * 引述竖线按行画段、行间无缝，组内才连成一条（扁平 DOM 没有子树容器）。
+ * 代价是**相邻两组**——两个引述块贴在一起，或反链结果里两条结果上下相邻——
+ * 两段正好首尾相接，读成一条贯穿整屏的线。⇒ 组尾那一行单独标记，
+ * 样式层在那里把线缩短一小段，组与组之间才断得开。
+ *
+ * 组身份＝**最近的引述祖先（含自己）**；组尾＝「下一行不属于同一组」的那一行。
+ * 与 `ancestorsByBlockId` 同一条深度栈、同一份**全量可见行**（虚拟化只切窗口，
+ * 组尾的判定不许跟着窗口变）。
+ */
+export function quoteTailIds(rows: readonly VisibleRow[]): Set<string> {
+  const out = new Set<string>()
+  const stack: Block[] = []
+  let group: string | null = null
+  let last: string | null = null
+  for (const r of rows) {
+    stack.length = r.depth
+    stack[r.depth] = r.block
+    let g: string | null = null
+    for (let k = r.depth; k >= 0; k--) {
+      const b = stack[k]!
+      if (blockTypeOf(b) === QUOTE_TYPE) {
+        g = b.id
+        break
+      }
+    }
+    if (group !== null && g !== group && last !== null) out.add(last)
+    group = g
+    last = r.block.id
+  }
+  if (group !== null && last !== null) out.add(last)
   return out
 }
 

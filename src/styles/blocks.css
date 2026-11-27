@@ -788,6 +788,11 @@
  * 正文行不画块标（参考虎鲸：行内没有圆点，只有最左那颗抓手），也不画灰导轨
  * （那个灰线是「折叠祖先」的暗示，在引述里由竖线本身承担，两条线会读成两套）。
  * 竖线用 `::before` 画满整行高，行间无 vertical padding ⇒ 相邻行拼成连续一条。
+ *
+ * ⚠️ **行首头（面包屑／别名）不算引述体**：反链结果里带「日期」面包屑的那一行，
+ *    面包屑和正文同住一个 `.blk`。线从 `top: 0` 起画会盖过面包屑，而且正好接上
+ *    **上一条结果**的最后一行 ⇒ 整屏读成一条线。头的高度与 `.rail-self` 同一个出处
+ *    （`--head-rows`），两处不许各算一套。
  */
 .blk[data-quote],
 .blk[data-quote-line] {
@@ -798,12 +803,22 @@
 .blk[data-quote]::before {
   content: '';
   position: absolute;
-  top: 0;
+  /* 让开行首头：面包屑/别名不是引述体（见上一条注释） */
+  top: calc(var(--head-rows, 0) * (var(--ui-head-h) + var(--ui-gap-1)));
   bottom: 0;
   left: calc(var(--ui-blk-gutter) + var(--quote-depth, var(--depth)) * var(--ui-indent) + var(--ui-marker-slot) + var(--ui-gap-4));
   width: var(--callout-rule, 3px);
   background: var(--callout-c);
   pointer-events: none;
+}
+/*
+ * **组尾留一小段缺口**：组内的行上下无缝（线才连成一条），代价是相邻两组——
+ * 两个引述块贴在一起，或反链结果里两条结果上下相邻——两段线正好首尾相接，
+ * 读成一条贯穿整屏的线。组尾这一行（渲染层标记 `data-quote-tail`）把线缩短
+ * 一小段：组内仍连续，组与组之间断得开。
+ */
+.blk[data-quote-tail='1']::before {
+  bottom: calc(var(--ui-gap-2) + var(--ui-gap-1));
 }
 .blk[data-quote-head] > .tx {
   display: none;

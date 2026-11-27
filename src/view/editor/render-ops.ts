@@ -26,6 +26,7 @@ import {
   journalDateLabel,
   locate,
   noteSourceCellsOf,
+  quoteTailIds,
   refSourcesOf,
   rowDeriveOf,
   walkForest,
@@ -67,6 +68,13 @@ export class RenderOps {
    *    `renderAll` / `applyWindow` / `renderBlock` 入口重建，渲染单行时查表。
    */
   private ancestors = new Map<string, string[]>()
+
+  /**
+   * **引述组的组尾行**：与祖先表同一次全量行计算（同一份行数组就是同一代）。
+   * 样式层靠 `data-quote-tail` 在组尾把竖线缩短一小段——不然相邻两组的线首尾相接，
+   * 组边界的信号（面包屑、日期）会被一条贯穿线抹掉。
+   */
+  private quoteTails = new Set<string>()
 
   /** 这一屏已挂载的块 id（宿主 getter 转发给装配层的诊断与徽标） */
   mounted = new Set<string>()
@@ -796,6 +804,7 @@ export class RenderOps {
      */
     if (this.ancestorsRows === rows) return
     this.ancestors = ancestorsByBlockId(rows)
+    this.quoteTails = quoteTailIds(rows)
     this.ancestorsRows = rows
   }
 
@@ -1277,6 +1286,11 @@ export class RenderOps {
       },
     )
     if (trackMounted) this.mounted.add(r.block.id)
+    /**
+     * 引述组尾：同一组里只有最后一行带它（表由 `quoteTailIds` 对全量可见行算）。
+     * 样式层靠这一格在竖线底部让出缺口——没有它，相邻两组的线首尾相接、读成一条。
+     */
+    if (this.quoteTails.has(r.block.id)) el.dataset.quoteTail = '1'
     // 行的派生物都是构造期写死的：盖章记下「画这行时的模型修订号」，保留行快路
     // （`holdRows`）据此判断「这行画下之后模型动过没有」——动过就整体退回全量重建。
     el.dataset.rev = String(this.ed.store.revision)

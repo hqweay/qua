@@ -18,8 +18,11 @@ import {
   mkBlock,
   mkPropDef,
   mkTagBlock,
+  quoteTailIds,
   rowDeriveOf,
   setValue,
+  visibleRows,
+  QUOTE_TYPE,
   type Block,
   type Doc,
 } from '../src/core/index.ts'
@@ -80,4 +83,22 @@ test('② RowDerive 共用扫库结果，派生值与逐次现算逐字相同', 
     belowFieldsFor([b], forest),
     '块下属性行：带 derive 与不带 derive 必须相同',
   )
+})
+
+test('③ 引述组尾：只标「下一行不属于同一组」的那一行', () => {
+  const quote = (id: string, children: Block[] = []): Block => mk(id, children, { _type: QUOTE_TYPE })
+  const tails = (roots: Block[]): string[] =>
+    [...quoteTailIds(visibleRows(doc(roots)))].sort()
+
+  // 一个引述组后面接普通块：组尾＝组里最后一行
+  assert.deepEqual(tails([quote('q', [mk('a'), mk('b')]), mk('n')]), ['b'])
+
+  // 两个引述块相邻：两组各自收尾——第一组的最后一行不能被第二组的抬头「续上」
+  assert.deepEqual(tails([quote('q1', [mk('a')]), quote('q2', [mk('b')])]), ['a', 'b'])
+
+  // 嵌套引述：内层自成一组，外层在「内层抬头」之前先收尾
+  assert.deepEqual(tails([quote('outer', [mk('c'), quote('inner', [mk('d')])])]), ['c', 'd'])
+
+  // 没有引述就没有组尾（普通块相邻不需要缺口）
+  assert.deepEqual(tails([mk('x'), mk('y')]), [])
 })
