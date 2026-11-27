@@ -35255,8 +35255,38 @@ await check('T369 主体行下管理档：值全显、块标字段不重复、�
     assert(tagFace.inManage === 0, `管理档不重复声明段（正文身体那一格已经有了）：${JSON.stringify(tagFace)}`)
     assert(tagFace.inBody && tagFace.inRow === 1, `声明段恰好一处、且是定义身体：${JSON.stringify(tagFace)}`)
 
+    /**
+     * **零声明的标签 zoom 后行下什么都不出**（这是判据，不是巧合）。
+     *
+     * 「没配置」是空集不是状态：块下行（没有值不出那一行）、定义身体（声明非空才画）、
+     * 页（声明段整段退场）三处都是同一条节律。这条断言钉住它——将来谁想在空态加一句
+     * 「还没有字段属性 · 添加」，先得改掉这条并说明理由。
+     */
+    const bareTagId = await page.evaluate(() => {
+      const b = window.__qua.allBlocks().find((x) => !x.lists?.includes('tag') && !x.roles?.includes('journal'))
+      if (!b) throw new Error('前置：库里没有可挂标签的块')
+      window.__qua.invoke('core.tags/add', { blockId: b.id, name: '空标签探针' })
+      const tag = window.__qua.allBlocks().find((x) => x.lists?.includes('tag') && x.aliases?.includes('空标签探针'))
+      if (!tag) throw new Error('前置：空标签没建出来')
+      window.__qua.invoke('core.block/focus-block', { blockId: tag.id })
+      return tag.id
+    })
+    await page.waitForTimeout(450)
+    const bare = await page.evaluate((id) => {
+      const row = document.querySelector(`.blk[data-block-id="${id}"]`)
+      return {
+        row: Boolean(row),
+        manage: Boolean(row?.querySelector(':scope > .blk-props-manage')),
+        body: Boolean(row?.querySelector(':scope > .blk-view-body')),
+        mount: Boolean(document.querySelector('#editor .mount')),
+      }
+    }, bareTagId)
+    assert(bare.row, `前置：空标签的根行要在屏上：${JSON.stringify(bare)}`)
+    assert(!bare.manage && !bare.body, `零声明 ⇒ 行下不出空格子（管理档与定义身体都不该在）：${JSON.stringify(bare)}`)
+    assert(bare.mount, `空标签的屏不是死的：成员/引用挂载区还在：${JSON.stringify(bare)}`)
+
     await ctx.close()
-    return '根行管理档：值全显；块标字段不重复；待填一行可展开/收起；标签块声明段只出现一次'
+    return '根行管理档：值全显；块标字段不重复；待填一行可展开/收起；标签块声明段只出现一次；零声明不出空格'
   } catch (e) {
     await ctx.close()
     throw e
