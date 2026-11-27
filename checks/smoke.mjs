@@ -35381,7 +35381,7 @@ await check('T371 镜像岛里 ⇧↑ 越界选中宿主：复制引用落源 id
   return '镜像岛 ⇧↑ 选中宿主，复制引用落源 id，文本标明是露面引用'
 })
 
-await check('T372 文本边界 ↑/↓ 选中相邻块：从 222 一次 ↑ 选中查询屏根，块选区态可上下移动', async () => {
+await check('T372 文本边界 ↑ 选中查询屏根，↓ 回到正文恢复光标，再 ↑ 仍可选中', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const fx = await page.evaluate(() => {
@@ -35402,12 +35402,15 @@ await check('T372 文本边界 ↑/↓ 选中相邻块：从 222 一次 ↑ 选�
 
   await page.keyboard.press('ArrowDown')
   await page.waitForTimeout(150)
-  const down = await selection()
-  assert(down.length === 1 && down[0] === fx.pid, `块选区态 ↓ 应移到下一行：${JSON.stringify(down)}`)
+  const down = await page.evaluate(() => ({
+    caret: window.__qua.__editor.sel?.aBlock ?? '',
+    ids: [...(window.__qua.__editor.bsel.blockSel?.ids ?? [])],
+  }))
+  assert(down.ids.length === 0 && down.caret === fx.pid, `↓ 到纯正文行应退出选区并落光标：${JSON.stringify(down)}`)
   await page.keyboard.press('ArrowUp')
   await page.waitForTimeout(150)
   const up = await selection()
-  assert(up.length === 1 && up[0] === fx.qid, `块选区态 ↑ 应移回上一行：${JSON.stringify(up)}`)
+  assert(up.includes(fx.qid), `回到正文后再 ↑ 仍可选中查询块：${JSON.stringify(up)}`)
 
   await page.keyboard.press('Escape')
   await page.evaluate((id) => window.__qua.focusBlock(id, 1), fx.pid)
@@ -35416,7 +35419,7 @@ await check('T372 文本边界 ↑/↓ 选中相邻块：从 222 一次 ↑ 选�
   assert((await selection()).length === 0, '文本内部 ↑ 不进块选区，交原生光标')
 
   await ctx.close()
-  return '文本块首 ↑ 选中上一整块；块选区态 ↑/↓ 逐行移动；文本内部 ↑ 仍归原生'
+  return '文本块首 ↑ 选中查询屏根；↓ 回正文恢复光标；再 ↑ 仍可选中；文本内部 ↑ 仍归原生'
 })
 
 await check('T373 镜像岛纯 ↑ 越界也选中宿主（不只 ⇧↑）', async () => {
@@ -35527,6 +35530,55 @@ await check('T375 普通块紧邻查询块：从普通块 ↑ 仍选中查询块
 
   await ctx.close()
   return '普通块紧邻查询块时，↑ 仍选中查询块而非只移光标'
+})
+
+await check('T376 穿过查询块到纯正文行：退出块选区并落光标，不粘在选中态', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const fx = await page.evaluate(() => {
+    const q = window.__qua
+    q.invoke('core.page/create')
+    const ed = q.__editor
+    const root = ed.doc.roots[0]
+    const parent = ed.insert.insertBlockAfter(root.id, '容器')
+    const a = ed.insert.insertChild(parent, '甲块')
+    q.invoke('core.query/create', { name: '查询条件XYZ', spec: { where: { any: [] } }, parentId: parent })
+    const b = (ed.store.find(parent)?.children ?? [])
+      .map((k) => (typeof k === 'string' ? k : k.id))
+      .find((id) => Boolean(ed.store.find(id)?.props?._query)) ?? ''
+    q.focusBlock(b, 0)
+    q.invoke('core.editor/insert-block', { text: '丙块' })
+    return { a, b, c: ed.sel?.aBlock ?? '' }
+  })
+  assert(fx.a && fx.b && fx.c, `前置：甲／查询／丙三行：${JSON.stringify(fx)}`)
+
+  const state = () =>
+    page.evaluate(() => ({
+      caret: window.__qua.__editor.sel?.aBlock ?? '',
+      off: window.__qua.__editor.sel?.aOff ?? -1,
+      ids: [...(window.__qua.__editor.bsel.blockSel?.ids ?? [])],
+    }))
+
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), fx.c)
+  await page.keyboard.press('ArrowUp')
+  await page.waitForTimeout(150)
+  const selected = await state()
+  assert(selected.ids.includes(fx.b), `↑ 先选中查询块：${JSON.stringify(selected)}`)
+  await page.keyboard.press('ArrowUp')
+  await page.waitForTimeout(150)
+  const back = await state()
+  assert(back.ids.length === 0 && back.caret === fx.a, `再 ↑ 到纯正文行应退出选区：${JSON.stringify(back)}`)
+
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), fx.c)
+  await page.keyboard.press('ArrowUp')
+  await page.waitForTimeout(150)
+  await page.keyboard.press('ArrowDown')
+  await page.waitForTimeout(150)
+  const down = await state()
+  assert(down.ids.length === 0 && down.caret === fx.c && down.off === 0, `↓ 回到纯正文行应落光标块首：${JSON.stringify(down)}`)
+
+  await ctx.close()
+  return '穿过查询块到纯正文行：退出选中态、光标落回正文，不粘在块选区'
 })
 
 const known = results.filter((r) => !r.ok && r.known)

@@ -198,10 +198,13 @@ export class BlockSelection {
   }
 
   /**
-   * 方向键越过文本边界：只有相邻块不可落光标时才选中相邻可见行。
-   * 普通正文之间仍走原生光标移动，不打断「往下继续打字」；已有单块选区时 ↑/↓ 逐行移动。
+   * 方向键在对象与正文之间穿行：
+   * - 文本边界遇到不可落光标的块 ⇒ 选中它；
+   * - 已选中一个块、下一行是纯正文 ⇒ 退出选区并把光标落在靠近方向的端点；
+   * - 对象之间继续穿行仍是选中态；普通正文之间动作用原生光标，不在这里接管。
    */
   moveAdjacentBlock(dir: -1 | 1): boolean {
+    const wasSelected = this.blockSel !== null
     if (this.blockSel && this.blockSel.ids.length !== 1) return false
     if (!this.blockSel) {
       const s = this.ed.sel
@@ -216,7 +219,16 @@ export class BlockSelection {
     const currentId = this.blockSel?.ids[0] ?? this.ed.sel!.aBlock
     const next = ids[ids.indexOf(currentId) + dir]
     if (!next) return false
-    if (!this.blockSel && this.caretReachable(next)) return false
+    const reachable = this.caretReachable(next)
+    if (!wasSelected && reachable) return false
+    if (wasSelected && reachable) {
+      const loc = locate(this.ed.doc, next)
+      this.blockSel = null
+      this.paintBlockSel()
+      this.ed.events.selChange?.()
+      this.ed.placeCaret(next, dir > 0 ? 0 : (loc ? plainLen(loc.block.content) : 0))
+      return true
+    }
     this.blockSel = { ids: [next], anchor: next }
     this.ed.sel = null
     document.getSelection()?.removeAllRanges()
