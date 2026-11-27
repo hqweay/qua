@@ -35461,6 +35461,42 @@ await check('T373 镜像岛纯 ↑ 越界也选中宿主（不只 ⇧↑）', as
   return '镜像岛源行按纯 ↑ 越界，外层宿主被整块选中'
 })
 
+await check('T374 普通正文块之间 ↑/↓ 仍是光标移动，不变成块选区', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const fx = await page.evaluate(() => {
+    const q = window.__qua
+    q.invoke('core.page/create')
+    const ed = q.__editor
+    const root = ed.doc.roots[0]
+    const a = ed.insert.insertBlockAfter(root.id, '甲块')
+    const b = ed.insert.insertBlockAfter(a, '乙块')
+    return { a, b }
+  })
+  assert(fx.a && fx.b, `前置：两个同级正文块：${JSON.stringify(fx)}`)
+
+  const state = () =>
+    page.evaluate(() => ({
+      caret: window.__qua.__editor.sel?.aBlock ?? '',
+      blockSel: [...(window.__qua.__editor.bsel.blockSel?.ids ?? [])],
+    }))
+
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), fx.b)
+  await page.keyboard.press('ArrowUp')
+  await page.waitForTimeout(150)
+  const up = await state()
+  assert(up.caret === fx.a && up.blockSel.length === 0, `块首 ↑ 应把光标移到上一正文块：${JSON.stringify(up)}`)
+
+  await page.evaluate((id) => window.__qua.focusBlock(id, 9999), fx.a)
+  await page.keyboard.press('ArrowDown')
+  await page.waitForTimeout(150)
+  const down = await state()
+  assert(down.caret === fx.b && down.blockSel.length === 0, `块尾 ↓ 应把光标移到下一正文块：${JSON.stringify(down)}`)
+
+  await ctx.close()
+  return '普通正文块之间 ↑/↓ 仍是原生光标移动，未进块选区'
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

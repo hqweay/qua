@@ -189,9 +189,17 @@ export class BlockSelection {
     return true
   }
 
+  /** 相邻行自己有可写正文槽、且不是这一屏的装载根 ⇒ 浏览器能把光标落进去，方向键仍归原生 */
+  private caretReachable(id: string): boolean {
+    const loc = locate(this.ed.doc, id)
+    if (!loc || loc.parent === null) return false
+    const tx = this.ed.blockEl(id)?.querySelector<HTMLElement>(':scope > .tx')
+    return Boolean(tx && tx.isContentEditable && getComputedStyle(tx).display !== 'none')
+  }
+
   /**
-   * 方向键越过文本边界：选中相邻可见行，而不是停在原地。
-   * 已有单块选区时同样按可见行移动；多块选区交给 `Shift+↑/↓` 扩展，这里不抢。
+   * 方向键越过文本边界：只有相邻块不可落光标时才选中相邻可见行。
+   * 普通正文之间仍走原生光标移动，不打断「往下继续打字」；已有单块选区时 ↑/↓ 逐行移动。
    */
   moveAdjacentBlock(dir: -1 | 1): boolean {
     if (this.blockSel && this.blockSel.ids.length !== 1) return false
@@ -208,6 +216,7 @@ export class BlockSelection {
     const currentId = this.blockSel?.ids[0] ?? this.ed.sel!.aBlock
     const next = ids[ids.indexOf(currentId) + dir]
     if (!next) return false
+    if (!this.blockSel && this.caretReachable(next)) return false
     this.blockSel = { ids: [next], anchor: next }
     this.ed.sel = null
     document.getSelection()?.removeAllRanges()
