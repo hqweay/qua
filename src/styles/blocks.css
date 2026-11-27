@@ -197,13 +197,17 @@
 /* 抓取确认：⌘X 本身不改文档（移动发生在粘贴那一刻），屏幕上什么都没变，
    抖一下是「这几块已经抓进剪贴板」；不另配文字提示——画面上的反应就是答复。
    抖**这一行说的话**不抖整行：轨线、块标与引述竖线是结构 chrome，跟着抖读成没对齐。
-   引述抬头的正文槽是 display:none，它说的话是变体徽章 ⇒ 徽章就是这一行的正文投影。 */
-.blk[data-pulse='1'] :is(.tx, .blk-callout-label, .blk-callout-ico) {
+   引述抬头的正文槽是 display:none，它说的话是变体徽章 ⇒ 徽章就是这一行的正文投影。
+   露面行的正文槽也是 display:none，可见的是整个身体（编辑岛）⇒ 只抖身体这一格。
+   选择器一律收**直接子代**：后代写法会抖到岛里每一条源行，读成源树在动、不是这一行被抓。 */
+.blk[data-pulse='1'] > :is(.tx, .blk-callout-label, .blk-embed-body),
+.blk[data-pulse='1'] > .left > .blk-callout-ico {
   animation: blk-pulse calc(var(--ui-dur-2) * 2) ease-in-out;
 }
 /* 减少动态下不抖：可达性反馈由门面退回那句提示，不在这里硬造一个静态标记 */
 @media (prefers-reduced-motion: reduce) {
-  .blk[data-pulse='1'] :is(.tx, .blk-callout-label, .blk-callout-ico) {
+  .blk[data-pulse='1'] > :is(.tx, .blk-callout-label, .blk-embed-body),
+  .blk[data-pulse='1'] > .left > .blk-callout-ico {
     animation: none;
   }
 }
