@@ -4,8 +4,8 @@
   display: flex;
   align-items: flex-start;
   gap: var(--ui-gap-4);
-  /* 字号阶梯：有身份的根（页/日记/标签/查询/定义/自动化）lg，其余 md；行高统一 relaxed。
-     普通内容块被聚焦成这一屏第一行时不再放大——聚焦是导航，不是内容升级。 */
+  /* 字号阶梯：只有日记日期行（这一屏的日期头）lg，其余一律 md；行高统一 relaxed。
+     页名靠 600 字重区分，不靠字号；普通块聚焦不再放大。 */
   font-size: var(--ui-fs-md);
   line-height: var(--ui-lh-relaxed);
   /*
@@ -33,9 +33,9 @@
   padding-left: calc(var(--ui-blk-gutter) + var(--depth) * var(--ui-indent));
   position: relative;
 }
-.blk[data-depth='0'][data-role] {
+.blk[data-depth='0'][data-role~='journal'] {
   font-size: var(--ui-fs-lg);
-  /* 与上一行的字号同源：只有身份根用大字，行盒跟着大 */
+  /* 与上一行的字号同源：只有日记日期行用大字，行盒跟着大 */
   --blk-lh: calc(var(--ui-fs-lg) * var(--ui-lh-relaxed));
 }
 /*
@@ -858,9 +858,10 @@
   opacity: var(--ui-soft);
 }
 /*
- 页 / 日记 / 其他身份块作为**正文第一行**时更大一档（它是这一屏的「身份」，但不叫标题）。
- 普通内容块被聚焦（zoom）时不是身份，字号仍按子块 md（见 `.blk[data-depth='0'][data-role]`）。
- ⚠️ 这里**不写 font-size**：字号已经是「深度 0 ＋ 有身份 ⇒ `--ui-fs-lg`」一条规则给出的。
+ 日记日期行作为**正文第一行**时更大一档（它是这一屏的日期头）。
+ 页 / 标签 / 查询 / 定义 / 自动化等根不再放大；页名靠 600 字重区分，不靠字号。
+ 普通内容块被聚焦（zoom）时也保持正文 md。
+ ⚠️ 这里**不写 font-size**：字号已经是「深度 0 ＋ 日记 ⇒ `--ui-fs-lg`」一条规则给出的。
     在这个 `.tx` 上再写一遍，就会让 `.tx` 的字号与 `.left`（gutter）的字号分家，
     而 gutter 的高度（`1lh`）是按 `.blk` 的字号算的 —— 两份字号一旦不一致，
     块标就会与正文首行错位，且**只在部分行**错位，看起来像随机漂移。

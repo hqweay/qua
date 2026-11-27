@@ -6571,9 +6571,25 @@ await check('T18 跨页锚点不被误删：在当前容器里删块，只回收
   return `删 ${target.slice(-6)}：库级 marks ${mid.marks}→${after.marks}、atoms ${mid.atoms}→${after.atoms}；回到第一页仍有 ${back.marks} 条锚点（起始 ${before.marks}）`
 })
 
-await check('T19 zoom in：进子树、面包屑可退回、顶层时面包屑隐藏、锚点不走丢、普通块字号不变', async () => {
+await check('T19 zoom in：进子树、面包屑可退回、顶层时面包屑隐藏、锚点不走丢、字号档只留日记', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
+
+  /**
+   * 冷启动是日记流：**唯一保留大字的是日记日期行**，子块仍是 md。
+   * 页 / 标签 / 查询等根不再放大；页名靠 600 字重区分。
+   */
+  const journalFonts = await page.evaluate(() => {
+    const fs = (sel) => {
+      const el = document.querySelector(sel)
+      return el ? parseFloat(getComputedStyle(el).fontSize) : 0
+    }
+    return {
+      head: fs('#editor .blk[data-depth="0"][data-role~="journal"] > .tx'),
+      child: fs('#editor .blk[data-depth="1"] > .tx'),
+    }
+  })
+  assert(journalFonts.head > journalFonts.child, `日记日期行应比子块大一档：${JSON.stringify(journalFonts)}`)
 
   const st = () =>
     page.evaluate(() => ({
@@ -6609,7 +6625,7 @@ await check('T19 zoom in：进子树、面包屑可退回、顶层时面包屑�
   assert(target, '假数据里应有带子块的非顶层块')
   /**
    * **字号不跟「当没当根」走**：普通内容块在页面里是 md，聚焦成这一屏第一行后仍是 md。
-   * 页/日记这类身份根才用 lg——它们在页面里本来就是 lg，不是聚焦给的。
+   * 页根也回到 md（页名靠 600 字重）；唯一 lg 是上面验过的日记日期行。
    */
   const fontsBefore = await page.evaluate((id) => {
     const fs = (el) => (el ? parseFloat(getComputedStyle(el).fontSize) : 0)
@@ -6617,7 +6633,7 @@ await check('T19 zoom in：进子树、面包屑可退回、顶层时面包屑�
     const pageRoot = document.querySelector('#editor .blk[data-depth="0"] > .tx')
     return { target: fs(target), page: fs(pageRoot) }
   }, target.id)
-  assert(fontsBefore.page > fontsBefore.target, `页根应比子块大一档：${JSON.stringify(fontsBefore)}`)
+  assert(fontsBefore.page === fontsBefore.target, `页根应与子块同字号（页名靠字重）：${JSON.stringify(fontsBefore)}`)
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), target.id)
   await new Promise((r) => setTimeout(r, 250))
   const zoomed = await st()
@@ -6668,7 +6684,7 @@ await check('T19 zoom in：进子树、面包屑可退回、顶层时面包屑�
   }
 
   await ctx.close()
-  return `顶层 ${top.here} 块 → zoom ${zoomed.here} 块（面包屑「${zoomed.trail.join(' › ')}」）→ 退回 ${back.here} 块${leafView ? ` → 叶子 zoom ${leafView.here} 块` : ''}；普通块字号 ${fontsBefore.target}→${fontsAfter.fs}，锚点恒 ${top.marks}/${top.atoms}`
+  return `顶层 ${top.here} 块 → zoom ${zoomed.here} 块（面包屑「${zoomed.trail.join(' › ')}」）→ 退回 ${back.here} 块${leafView ? ` → 叶子 zoom ${leafView.here} 块` : ''}；页根/子块 ${fontsBefore.page}/${fontsBefore.target}，普通块 zoom 后 ${fontsAfter.fs}，日记 ${journalFonts.head}/${journalFonts.child}，锚点恒 ${top.marks}/${top.atoms}`
 })
 
 await check('T25 块标左键 = 聚焦/zoom：点一下进子树，右键才开菜单', async () => {

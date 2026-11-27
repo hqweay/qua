@@ -750,11 +750,9 @@ await check('A16 每一行的块标与正文首行共中线（含子块；跨字
   const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
   await page.evaluate(() => window.__qua.quiet(true))
   /**
-   * ⚠️ 冷启动是**日记流**：段头那行字在 `::before`（`_date` 的只读投影）里，
-   *    不是文本节点 ⇒ 取不到字形盒。要测「深度 0 的大字号行」得先打开一页
-   *    （页块作为正文第一行时用 `--ui-fs-lg`，正文是可编辑的描述）。
+   * 冷启动是**日记流**：日期行的大字在 `::before`（`_date` 的只读投影）里，不是文本节点。
+   * 但 A16 量的是**行盒**，不是字形盒 ⇒ 日期行照样可测；它也是当前唯一保留大字的根。
    */
-  await openFirstPage(page)
   await page.waitForTimeout(150)
 
   /**
@@ -763,7 +761,7 @@ await check('A16 每一行的块标与正文首行共中线（含子块；跨字
    * 为什么不能拿 `--ui-line-h` 当基准：它是**行高下限**（28px），而正文首行的行盒是
    * `字号 × --ui-lh-relaxed`（子块 13.5 × 1.85 ≈ 25px，深度 0 ≈ 28.7px）。
    * 两者不是同一个数 ⇒ 用固定高度给 gutter 定高时，**只有字号恰好撑满 28px 的行**看起来齐
-   * （页/日记的根行正好如此，于是「只有它对齐」）。gutter 必须按 `1lh` 跟这一行自己的字号走。
+   * （日记的日期行正好如此，于是「只有它对齐」）。gutter 必须按 `1lh` 跟这一行自己的字号走。
    *
    * ⚠️ 量的是**行盒**（`.tx` 顶部 ＋ 一个 `line-height`），不是字形盒（Range 的 client rects）：
    *    字形盒是字体的 em 框，同一段文字在 14.5px 与 15.5px 下各有自己的舍入，
@@ -788,6 +786,7 @@ await check('A16 每一行的块标与正文首行共中线（含子块；跨字
         const lineCenter = rule ? ref(rule.getBoundingClientRect()) : t.top + lh / 2
         out.push({
           depth: Number(el.dataset.depth),
+          role: el.dataset.role ?? '',
           fs: parseFloat(cs.fontSize),
           kind: rule ? 'divider' : (tx.textContent ?? '').trim() ? 'text' : 'empty',
           delta: Math.round((m.top + m.height / 2 - lineCenter) * 100) / 100,
@@ -799,7 +798,8 @@ await check('A16 每一行的块标与正文首行共中线（含子块；跨字
 
   const rows = await measure()
   assert(rows.length >= 5, `应有足够多的行可测：${rows.length}`)
-  const textRows = rows.filter((r) => r.kind === 'text')
+  // 日记日期行没有 textContent（日期在 ::before 里），但它是唯一的大字根 ⇒ 按 role 收进来
+  const textRows = rows.filter((r) => r.kind === 'text' || r.role.includes('journal'))
   const fontSizes = [...new Set(textRows.map((r) => r.fs))]
   assert(fontSizes.length >= 2, `样本必须跨字号（否则这条断言看不出问题）：${JSON.stringify(fontSizes)}`)
   const bad = rows.filter((r) => Math.abs(r.delta) > 0.6)
