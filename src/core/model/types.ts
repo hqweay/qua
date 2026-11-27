@@ -13,7 +13,6 @@
  * ⚠️ 依赖方向：本模块 → `model.ts`，单向。`model.ts` 是零依赖叶子，
  *    反过来 import 会成环（`blockTypeOf` 与 `DEFAULT_BLOCK_TYPE` 留在那里）。
  */
-import { EMBED_TYPE } from '../views/embed.ts'
 import {
   CALLOUT_PROP,
   DEFAULT_BLOCK_TYPE,
@@ -64,6 +63,14 @@ export interface TypeDecl {
 
 /** 分割线的类型 id：出现在声明表、插入入口与渲染绑定三处，只写一份 */
 export const DIVIDER_TYPE = 'core/divider'
+
+/**
+ * 露面块的类型 id（`TYPE_DECLS` 里一行）。
+ *
+ * 与其它类型 id 一起住这里、不住 `views/embed.ts`：类型词汇表只有这一处定义，
+ * 而字段声明要按 id 给人话名字——id 留在 views 会让 model 反过来 import views。
+ */
+export const EMBED_TYPE = 'core/view-embed'
 
 /** 引文与代码块的类型 id：声明、插入入口与静态投影共用同一份 id */
 export const QUOTE_TYPE = 'core/quote'

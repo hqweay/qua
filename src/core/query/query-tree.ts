@@ -19,7 +19,7 @@ import { normMarks, type Marks } from '../model/runs.ts'
 import { isRoleKind, SELF, isEmptyWhere, type QueryNode, type QuerySpec, type RoleKind, type SortKey } from './query.ts'
 import type { RefKind } from '../relations/relations.ts'
 import { canonicalSpec } from './query-view.ts'
-import { ENGINE_CREATED, ENGINE_MODIFIED } from '../props/props.ts'
+import { ENGINE_CREATED, ENGINE_MODIFIED } from '../props/fields.ts'
 import { TAGS_PROP } from '../identity/tags.ts'
 import { dateOfMs, dayStartMs, isJournalDate, shiftISO } from '../identity/journal.ts'
 

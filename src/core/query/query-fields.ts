@@ -18,7 +18,8 @@
  * （`kind:'stamp'` 的时间范围行，值控件是「字段 ＋ 问法 ＋ 日期」，条件里落成毫秒区间）。
  * 混进字段下拉会得到一个「日期填进毫秒」的框——对不上，还不报错。
  */
-import { allPropDefs, propDisplayLabels, propKindOf, cardinalityOf, isEngineProp, systemQueryFieldLabel, QUERYABLE_SYSTEM_PROPS } from '../props/props.ts'
+import { allPropDefs, propDisplayLabels, propKindOf, cardinalityOf } from '../props/props.ts'
+import { isEngineProp, QUERYABLE_SYSTEM_PROPS, systemQueryFieldLabel } from '../props/fields.ts'
 import type { PropKind } from '../props/props.ts'
 import type { Cardinality } from '../props/props.ts'
 import { CALLOUT_PROP, LANG_PROP } from '../model/model.ts'

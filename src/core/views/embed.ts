@@ -21,9 +21,6 @@
  */
 import type { Block } from '../model/model.ts'
 
-/** 类型 id（`TYPE_DECLS` 里一行；`core/*` 保留给系统类型） */
-export const EMBED_TYPE = 'core/view-embed'
-
 /** 指针所在的系统属性：`{ block: <源块 id>, view: <'' | 'outline' | 视图 id> }` */
 export const EMBED_PROP = '_embed'
 

@@ -21,7 +21,8 @@ import { tagIdsOf } from '../identity/tags.ts'
 import { plainText } from '../model/runs.ts'
 import { t } from '../infra/msg.ts'
 import type { KbClient } from '../kb/types.ts'
-import { declaredFieldIds, ENGINE_CREATED, ENGINE_MODIFIED, ownFieldIds } from '../props/props.ts'
+import { ENGINE_CREATED, ENGINE_MODIFIED } from '../props/fields.ts'
+import { declaredFieldIds, ownFieldIds } from '../props/props.ts'
 import { randomRankOf, type QuerySpec, type SortKey } from '../query/query.ts'
 import {
   CHILDREN_COLUMN,

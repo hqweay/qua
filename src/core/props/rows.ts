@@ -21,10 +21,8 @@ import {
   childDisplayPropsResolved,
   childPropsLookupOf,
   declaredFieldIds,
-  enginePropValue,
   formatOf,
   hasValue,
-  isEngineProp,
   ownFieldIds,
   propKindOf,
   propLabel,
@@ -40,6 +38,7 @@ import {
   type PropKind,
   type PropUse,
 } from './props.ts'
+import { enginePropValue, isEngineProp } from './fields.ts'
 
 /**
  * **一批行派生共用的扫库结果**（定义块、标签块、父块声明查找、select 选项表）。

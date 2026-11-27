@@ -18,34 +18,26 @@
  * ⚠️ 本文件零 DOM：属性面板只消费这里的派生结果，写入通过命令。
  */
 import {
-  ALIASES_PROP,
   COLOR_PROP,
   ICON_PROP,
-  LANG_PROP,
-  aliasesOf,
-  blockTypeOf,
   isDeleted,
   hasList,
   isPropDefBlock,
-  CALLOUT_PROP,
   prop,
   type Block,
   type BlockProps,
   type ClosureState,
 } from '../model/model.ts'
-import { BELONGS_TO_PROP, isBelongsToRefs } from '../relations/hierarchy.ts'
 import { displayNameOf } from '../identity/alias.ts'
 import { plainText, textRuns, type RefRun } from '../model/runs.ts'
 import { walkForest } from '../model/walk.ts'
 import { derivedId, pad, uuidv7Hex } from '../model/ids.ts'
-import { journalDate, todayISO } from '../identity/journal.ts'
-import { allTags, resolveTagIds, TAGS_PROP, tagIdsOf, tagsById } from '../identity/tags.ts'
+import { todayISO } from '../identity/journal.ts'
+import { allTags, resolveTagIds, tagIdsOf, tagsById } from '../identity/tags.ts'
 import { t } from '../infra/msg.ts'
-import { DEFAULT_CALLOUT } from '../infra/callout.ts'
-import { normalizeStoredLang } from '../infra/code-lang.ts'
-import { CODE_TYPE, QUOTE_TYPE } from '../model/types.ts'
 import { checkExternalUrl } from '../relations/link.ts'
 import { CLOSURE_USE, isUseId, useIsUnique, type UseId } from './uses.ts'
+import { isEngineProp, isQueryableSystemProp, readSystemField, ENGINE_CREATED, ENGINE_MODIFIED, type FieldRead } from './fields.ts'
 
 /**
  * 选项记录域：类型、形状判据、墓碑、作用域住 `./choices.ts`；
@@ -277,10 +269,6 @@ export function fieldDeclared(block: Block, propId: string, table: FieldTable): 
 }
 
 /** 读一格字段的结果：`declared` 说有没有这一栏，`value` 说值是什么 */
-export interface FieldRead {
-  declared: boolean
-  value: unknown
-}
 
 /**
  * 读一格字段。两类「没填过」在**读侧**归一：
@@ -1082,22 +1070,11 @@ export function choiceCells(
 /* ------------------------------------------------------------ 引擎属性（core/*） */
 
 /**
- * **引擎属性**：值住在块的**顶层字段**（`created`/`modified`，引擎记账的必填字段），
- * 不是 `props` 袋里的一格；但以属性定义的面目进所有显示面（属性行/面板/清单）。
+ * 引擎属性的**合成定义**：id／显示名／读法／候选落点住在 `./fields.ts` 的声明里
+ * （与其余系统槽同一份表）；这里只造「属性定义」形状的合成对象，供面板/清单按定义画一行。
  *
- * · **id 即词汇**（跨库稳定，与 `derivedId` 的核心词汇同一档）；定义是**合成对象**，
- *   不在森林里——它们没有定义页可编辑，只提供 label/kind 给行构造；
- * · **只读**：`setValue` 拒绝（值由引擎记账，写入没有语义）；
- * · 消费面（`fieldRowText`／面板）**先按 engine 分支**，再走各自的 kind 分支——
- *   合成定义的 kind 只是兜底，漏了分支的画法会把毫秒数当普通值画出来。
+ * ⚠️ 合成定义的 kind 只是兜底：消费面要**先按 engine 分支**，漏了会把毫秒数当普通值画。
  */
-export const ENGINE_CREATED = 'core/created'
-export const ENGINE_MODIFIED = 'core/modified'
-
-export function isEngineProp(propId: string): boolean {
-  return propId === ENGINE_CREATED || propId === ENGINE_MODIFIED
-}
-
 let engineDefs: Block[] | null = null
 /** 引擎属性的合成定义（模块级缓存；id 稳定 ⇒ 三处消费共享同一批对象） */
 export function enginePropDefs(): Block[] {
@@ -1108,44 +1085,7 @@ export function enginePropDefs(): Block[] {
   return engineDefs
 }
 
-/** 引擎属性的值（块顶层字段）；不是引擎属性 ⇒ `undefined` */
-export function enginePropValue(block: Block, propId: string): unknown {
-  if (propId === ENGINE_CREATED) return block.created
-  if (propId === ENGINE_MODIFIED) return block.modified
-  return undefined
-}
-
 /* ------------------------------------------------------------ `{prop}` 能问什么 */
-
-/**
- * `{prop:{id}}` 可以问到的**系统槽白名单**。
- *
- * 为什么不是「只许属性定义块」：`_date`／`_kind`／`_type` 是「哪一天／哪些定义是日期／
- * 哪种块类型」的唯一问法，砍掉就是能力退化（`query.ts` 的 `walk` 注释：定义块自己仍然可查）。
- * 为什么又必须有边界：不设白名单时任何 `_xxx` 都能写进条件，而判定读的是
- * **`props` 里有没有这个键**——比模型判据宽，于是出现「屏幕说不是日记、查询说是日记」
- * （`_date: ''` 的块就是这一例）。
- *
- * ⚠️ 白名单里的每一项都由 `readSystemField` 逐项问**模型里的唯一判据**，
- *    不许退回去读 `props` 裸键。加一项时两处一起加。
- */
-export const QUERYABLE_SYSTEM_PROPS = [
-  '_date',
-  '_kind',
-  '_type',
-  CALLOUT_PROP,
-  LANG_PROP,
-  ALIASES_PROP,
-  TAGS_PROP,
-  BELONGS_TO_PROP,
-  ENGINE_CREATED,
-  ENGINE_MODIFIED,
-] as const
-
-export function isQueryableSystemProp(propId: string): boolean {
-  // `as readonly string[]`：常量收窄成字面量元组后，`includes` 的参数也得是那几个字面量
-  return (QUERYABLE_SYSTEM_PROPS as readonly string[]).includes(propId)
-}
 
 /**
  * `{prop}` 的 id 认不认：**属性定义块 id ∪ 系统槽白名单**。
@@ -1158,106 +1098,6 @@ export function isQueryableSystemProp(propId: string): boolean {
  */
 export function isQueryableField(propId: string, table: FieldTable): boolean {
   return isQueryableSystemProp(propId) || table.kinds.has(propId)
-}
-
-/**
- * 系统槽在**条件树里的显示名**（`undefined` ＝ 不是系统槽）。
- *
- * 条件树的下拉只列属性定义块（用户新增条件时不该看到 `_date` 这类内部 id），
- * 但条件可以由 JSON 写成、或由预设展开而来 —— 那种行要能**如实显示**它问的是什么。
- * 没有这一份，白名单里的 id 会在树上被标成「属性已删除」：求值算它、界面说不存在。
- */
-export function systemQueryFieldLabel(propId: string): string | undefined {
-  if (propId === '_date') return t('ui.query.sysField.date')
-  if (propId === '_kind') return t('ui.query.sysField.kind')
-  if (propId === '_type') return t('ui.query.sysField.type')
-  if (propId === CALLOUT_PROP) return t('ui.query.sysField.callout')
-  if (propId === LANG_PROP) return t('ui.query.sysField.lang')
-  if (propId === ALIASES_PROP) return t('ui.query.sysField.aliases')
-  if (propId === TAGS_PROP) return t('ui.query.sysField.tags')
-  if (propId === BELONGS_TO_PROP) return t('ui.query.sysField.belongsTo')
-  if (propId === ENGINE_CREATED) return t('ui.props.createdAt')
-  if (propId === ENGINE_MODIFIED) return t('ui.props.modifiedAt')
-  return undefined
-}
-
-/**
- * 系统槽的读法：**逐项问模型里的唯一判据**，不读 `props` 裸键。
- *
- * 为什么放在字段读法这一层：`exists`／`eq`／`empty` 三组算子都从 `readField` 拿
- * `{declared, value}`，两条求值路径（纯函数／索引）也共用它。系统槽若各走一条旁路，
- * 「有没有这一栏」就会有两份答案——那一族病（屏幕认、查询不认）已经修过一次。
- *
- * | 槽 | 判据 | 值 |
- * |---|---|---|
- * | `_date` | `journalDate(b) !== ''`（`isJournalBlock` 同一份） | 日期串 |
- * | `_kind` | `isPropDefBlock(b)` | `text`／`date`… |
- * | `_type` | 恒在（`blockTypeOf`：没键＝默认类型） | 类型 id（未知 id 合法，读侧降级） |
- * | `_callout` | `blockTypeOf === QUOTE_TYPE` | 类型记录 id（缺键＝`quote`） |
- * | `_lang` | `blockTypeOf === CODE_TYPE` | 规范语言 id（缺键＝`plain`；未知原文保留） |
- * | `_aliases` | `aliasesOf(b)` 非空 | 地址数组（`eq` 按任一元素判） |
- * | `_tags` | 归属边里**有活着的标签**（屏幕画得出来的那些） | 标签块 id 数组 |
- * | `_belongsTo` | 边数组**非空**（悬空上级也算——归属面板把悬空画成待清理的 chip） | 上级 id 数组 |
- * | `core/created`／`core/modified` | 必填字段，恒在 | 墙钟毫秒 |
- */
-function readSystemField(block: Block, propId: string, table: FieldTable): FieldRead | undefined {
-  if (propId === '_date') {
-    const date = journalDate(block)
-    return typeof date === 'string' && date !== ''
-      ? { declared: true, value: date }
-      : { declared: false, value: undefined }
-  }
-  if (propId === '_kind') {
-    return isPropDefBlock(block)
-      ? { declared: true, value: block.props?._kind }
-      : { declared: false, value: undefined }
-  }
-  if (propId === '_type') {
-    /**
-     * 问模型判据（`blockTypeOf`）：**没有 `_type` 键就是默认类型**——「缺省＝大纲」
-     * 本来就是模型的读法，查询跟着读。⇒ `eq` 默认类型能命中没写过类型的块
-     * （裸键读法会让它命中空集，条件看起来坏了）；`exists` 恒真（类型是必答槽，
-     * 与 `core/created` 同档）；「非默认类型」用 `neq`。
-     */
-    return { declared: true, value: blockTypeOf(block) }
-  }
-  if (propId === CALLOUT_PROP) {
-    // 只有引述块有这一栏（其余块答「没声明」）；缺键＝缺省类型，与视图上的读法同一条。
-    // 值**原样读出**（值域开放：自定义类型的 id 是数据）；「未知 id 显示成哪个名字」
-    // 是显示层的事，查询不该把旧值改判成别的类型。
-    if (blockTypeOf(block) !== QUOTE_TYPE) return { declared: false, value: undefined }
-    const raw = prop<string>(block, CALLOUT_PROP)
-    return { declared: true, value: typeof raw === 'string' && raw !== '' ? raw : DEFAULT_CALLOUT }
-  }
-  if (propId === LANG_PROP) {
-    /**
-     * 只有代码块有这一栏；缺键＝纯文本（与徽章/语言表的读法同一条）。
-     *
-     * ⚠️ 值走 **`normalizeStoredLang`**（认识的收成规范名、不认识的原文保留），
-     * 不是 `canonicalLang`——后者是**渲染口径**，把 `zig` 收成 `plain`（不高亮）。
-     * 用错它，`eq:'plain'` 会命中 `_lang:'zig'`：屏幕写 zig、查询说纯文本。
-     */
-    if (blockTypeOf(block) !== CODE_TYPE) return { declared: false, value: undefined }
-    const raw = prop<string>(block, LANG_PROP)
-    return { declared: true, value: normalizeStoredLang(typeof raw === 'string' ? raw : undefined) ?? 'plain' }
-  }
-  if (propId === ALIASES_PROP) {
-    const names = aliasesOf(block)
-    return names.length > 0 ? { declared: true, value: names } : { declared: false, value: undefined }
-  }
-  if (propId === TAGS_PROP) {
-    const ids = tagIdsOf(block).filter((id) => table.liveTags.has(id))
-    return ids.length > 0 ? { declared: true, value: ids } : { declared: false, value: undefined }
-  }
-  if (propId === BELONGS_TO_PROP) {
-    // 与 _tags 相反的理由：悬空上级在归属面板上是看得见的（待清理 chip），
-    // 过滤成「只有活的」反而让 exists 比屏幕宽。contains 按任一元素判，
-    // 成员反查只问「数组里有没有宿主 id」，别的上级悬不悬不影响答案。
-    const ids = isBelongsToRefs(block.props?.[BELONGS_TO_PROP]) ? (block.props![BELONGS_TO_PROP] as string[]) : []
-    return ids.length > 0 ? { declared: true, value: ids } : { declared: false, value: undefined }
-  }
-  if (isEngineProp(propId)) return { declared: true, value: enginePropValue(block, propId) }
-  return undefined
 }
 
 /**
