@@ -160,6 +160,42 @@ export function rowHasInlineViewBody(r: VisibleRow): boolean {
 }
 
 /**
+ * **身体宿主的形状**：壳的类名与「这一格是谁的身体」那个数据键。
+ *
+ * 三种内联身体共用一个壳（`.blk-view-body`）；露面与代码各有自己的宿主，因为它们的
+ * 几何不同（顶替 `.tx`／独占一整行）。把壳收在一处，是为了加一种身体时只加一行——
+ * 而不是在构造函数里再分一次支。类名**暂不动**：三个壳各有自己的几何，改一处类名
+ * 要连带改几十条 CSS 与按类名选行的断言，那是另一件事。
+ */
+const BODY_HOST: Record<BodyKind, { className: string; forKey: 'viewBodyFor' | 'embedBodyFor' | 'codeBodyFor' }> = {
+  view: { className: 'blk-view-body', forKey: 'viewBodyFor' },
+  automation: { className: 'blk-view-body', forKey: 'viewBodyFor' },
+  def: { className: 'blk-view-body', forKey: 'viewBodyFor' },
+  embed: { className: 'blk-embed-body', forKey: 'embedBodyFor' },
+  code: { className: 'blk-code-host', forKey: 'codeBodyFor' },
+}
+
+/** 造一个身体宿主：类名与归属键查 `BODY_HOST`，岛标记对五种身体一样 */
+function makeBodyHost(kind: BodyKind, blockId: string): HTMLElement {
+  const { className, forKey } = BODY_HOST[kind]
+  const host = document.createElement('div')
+  host.className = className
+  host.contentEditable = 'false'
+  host.setAttribute(EDIT_ISLAND_ATTR, '1')
+  host.dataset[forKey] = blockId
+  return host
+}
+
+/** 身体种类 → 画它的那个回调在选项里的键（表面接没接由调用方看返回值） */
+const BODY_MOUNT = {
+  view: 'viewBody',
+  automation: 'automationBody',
+  def: 'defBody',
+  embed: 'embedBody',
+  code: 'codeBody',
+} as const satisfies Record<BodyKind, string>
+
+/**
  * 这一行在虚拟化里占多高：有别名头（且不是显示文本）或面包屑就是两行以上。
  *
  * ⚠️ **定义身体（查询体／露面体／自动化体／定义值配置／字段声明）要算进来**：
@@ -1321,11 +1357,7 @@ export function makeBlockEl(
      */
     el.dataset.embed = '1'
     el.dataset.embedState = embedRes!.status
-    const body = document.createElement('div')
-    body.className = 'blk-embed-body'
-    body.contentEditable = 'false'
-    body.setAttribute(EDIT_ISLAND_ATTR, '1')
-    body.dataset.embedBodyFor = b.id
+    const body = makeBodyHost('embed', b.id)
     /**
      * 身体是**投影**（源的结果视图）⇒ 可折（折/展都走这一行的折叠表）；
      * 镜像（那棵子树）是内容高，但岛首行要**顶到 gutter 列**
@@ -1362,7 +1394,8 @@ export function makeBlockEl(
     tx.dataset.embedSlot = '1'
     tx.setAttribute('aria-hidden', 'true')
     embedBodyEl = body
-    embedMount = () => opts.embedBody?.(b, body)
+    const mount = opts[BODY_MOUNT.embed]
+    embedMount = mount ? () => mount(b, body) : null
   } else if (blockTypeOf(b) === CODE_TYPE) {
     /**
      * **行＝标题，身体＝代码文档**（`_code`）：与查询块「行＝名字，身体＝结果」同一条规则。
@@ -1372,11 +1405,7 @@ export function makeBlockEl(
     const firstLine = codeTextOf(b).split('\n')[0]?.trim() ?? ''
     if (isEmptyContent(b.content)) tx.dataset.ph = firstLine || t('ui.block.captionAdd')
     fill(tx)
-    const body = document.createElement('div')
-    body.className = 'blk-code-host'
-    body.contentEditable = 'false'
-    body.setAttribute(EDIT_ISLAND_ATTR, '1')
-    body.dataset.codeBodyFor = b.id
+    const body = makeBodyHost('code', b.id)
     /**
      * 收起态**不挂 CM6**：折叠是阅读态，长代码不该为一行标题付一台编辑器。
      * 展开由 `toggleBodyCollapse`／`toggleCollapse` 重画这一行（`renderBlock`），
@@ -1387,7 +1416,8 @@ export function makeBlockEl(
      */
     if (bodyHidden) body.dataset.folded = '1'
     embedBodyEl = body
-    embedMount = bodyHidden ? null : () => opts.codeBody?.(b, body)
+    const mount = opts[BODY_MOUNT.code]
+    embedMount = bodyHidden || !mount ? null : () => mount(b, body)
     // 语言徽章：**收起态也画**（那时标题行就是整块的脸，更需要知道它是什么语言）
     if (opts.codeLangMenu) codeLangChip = makeCodeLangChip(b, opts.codeLangMenu)
   } else if (blockTypeOf(b) === DIVIDER_TYPE) {
@@ -1605,11 +1635,9 @@ export function makeBlockEl(
    */
   if (inlineBody) {
     el.dataset.viewBody = '1'
-    const body = document.createElement('div')
-    body.className = 'blk-view-body'
-    body.contentEditable = 'false'
-    body.setAttribute(EDIT_ISLAND_ATTR, '1')
-    body.dataset.viewBodyFor = b.id
+    // 三种内联身体共用一个壳（`BODY_HOST`），壳的归属键不随子种类变
+    const kind = inlineBodyKind(b)
+    const body = makeBodyHost(kind ?? 'view', b.id)
     /**
      * 折叠时**只藏身体、不卸载**：ViewHost 的冻结结果与滚动位置还在，
      * 展开是瞬间的；卸载会在每次折一下的时候重查一遍。
@@ -1618,12 +1646,8 @@ export function makeBlockEl(
      */
     if (bodyHidden) body.dataset.folded = '1'
     el.appendChild(body)
-    // 按源分派（`inlineBodyKind`：与保留行接回共用一份答案）：自动化块画三段式定义体；
-    // 定义块/标签画属性定义投影；其余（查询／children 源）画视图宿主
-    const bodyKind = inlineBodyKind(b)
-    if (bodyKind === 'automation') opts.automationBody?.(b, body)
-    else if (bodyKind === 'def') opts.defBody?.(b, body)
-    else if (bodyKind === 'view') opts.viewBody?.(b, body)
+    // 按种类查表（`BODY_MOUNT`；与保留行接回共用 `inlineBodyKind` 这一份答案）
+    if (kind) opts[BODY_MOUNT[kind]]?.(b, body)
   }
   return el
 }
