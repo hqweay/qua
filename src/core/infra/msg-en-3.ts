@@ -15,6 +15,7 @@ export const EN3 = {
   'ui.embed.viewMenuRow': 'View for this embed...',
   'ui.embed.remove': 'Remove this embed',
   'ui.embed.removeHint': 'Deletes only this embed; the source block and other embeds are untouched',
+  'ui.embed.copyRef': 'Embed reference: {name}',
   'ui.embed.insert': 'Insert embed...',
   'ui.embed.pick': 'Which block to embed?',
   'ui.embed.pickEmpty': 'No blocks available to embed',

@@ -5,9 +5,17 @@
  * 其余一律经 `ed`（doc／模型选区／渲染／事务）——它没有自己的不变量，
  * 「只选可见行」「删只删最上层根」都是编辑器口径的投影，不另立第二份。
  */
-import { flatten, locate, plainLen, plainText, walkForest, type Block, type Located } from '../../core/index.ts'
-import { isReadonlyBlock } from './block-dom.ts'
+import { flatten, isJournalBlock, isPropDefBlock, locate, plainLen, walkForest, type Block, type Located } from '../../core/index.ts'
 import type { BlockEditor } from './editor.ts'
+import { copyTextOfBlock } from './copy-text.ts'
+
+/**
+ * 一行能不能成为整块操作的对象，与它能不能落光标是两件事。
+ * 只读抬头、带身体的块、当前屏的根都可选；只有日期投影和字段定义的名字是不可操作的显示面。
+ */
+function selectable(b: Block): boolean {
+  return !isJournalBlock(b) && !isPropDefBlock(b)
+}
 
 export interface BlockSel {
   ids: string[]
@@ -44,11 +52,11 @@ export class BlockSelection {
     return Boolean(this.blockSel?.ids.includes(id))
   }
 
-  /** 当前视图的**可见内容行**（排除 section 根；折叠子树不出现） */
+  /** 这一屏里可以整块操作的可见行（折叠子树不出现；根与只读抬头照常可选） */
   private visibleIds(): string[] {
     return this.ed
       .rows()
-      .filter((r) => r.depth > 0)
+      .filter((r) => selectable(r.block))
       .map((r) => r.block.id)
   }
 
@@ -62,11 +70,11 @@ export class BlockSelection {
     return ids.slice(lo, hi + 1)
   }
 
-  /** 全选块：只选**非根、可编辑**的可见块（section 根/日记日期不选） */
+  /** 全选块：与键盘、拖选共用同一份对象判据，只有不可操作投影不参与 */
   selectAllBlocks(): boolean {
     const ids = this.ed
       .rows()
-      .filter((r) => r.depth > 0 && !isReadonlyBlock(r.block))
+      .filter((r) => selectable(r.block))
       .map((r) => r.block.id)
     if (ids.length === 0) return false
     this.blockSel = { ids, anchor: ids[0]! }
@@ -79,17 +87,15 @@ export class BlockSelection {
   }
 
   /**
-   * `Esc`：把光标所在块整块选中（块选区的**键盘入口**；已有块选区时由清空那条先接）。
+   * `Esc`：把光标所在块整块选中（块选区的键盘入口；已有块选区时由清空那条先接）。
    *
-   * 与「全选块」同一份可选择性判据：section 根（页名／日记日期）与只读块不选。
+   * 与「全选块」同一份可选择性判据：只有不可操作投影排除，当前屏的根与只读抬头照常可选。
    * 不在可见行里的块也不选——块选区是「这一屏的可见行」的区间，选中看不见的行画不出来。
    */
   selectCurrentBlock(): boolean {
     if (this.blockSel) return false
     const id = this.ed.sel?.aBlock
     if (!id || !this.visibleIds().includes(id)) return false
-    const loc = locate(this.ed.doc, id)
-    if (!loc || loc.parent === null || isReadonlyBlock(loc.block)) return false
     this.blockSel = { ids: [id], anchor: id }
     this.ed.sel = null
     document.getSelection()?.removeAllRanges()
@@ -104,6 +110,21 @@ export class BlockSelection {
     this.blockSel = null
     this.paintBlockSel()
     this.ed.events.selChange?.()
+  }
+
+  /** 由显式 id 建块选区：岛界交回外层时用，判据与键盘/拖选同一份可见行集合 */
+  selectIds(ids: readonly string[], anchor?: string): boolean {
+    const visible = new Set(this.visibleIds())
+    const valid = ids.filter((id) => visible.has(id))
+    if (valid.length === 0) return false
+    const a = anchor && valid.includes(anchor) ? anchor : valid[0]!
+    this.blockSel = { ids: valid, anchor: a }
+    this.ed.sel = null
+    document.getSelection()?.removeAllRanges()
+    this.ed.markCaret()
+    this.paintBlockSel()
+    this.ed.events.selChange?.()
+    return true
   }
 
   /** Enter：清块选区，光标落到**首个选中块**的 0 位，不建块 */
@@ -156,7 +177,7 @@ export class BlockSelection {
     const s = this.ed.sel
     if (!s || s.aBlock !== s.hBlock || s.aOff !== s.hOff) return false
     const loc = locate(this.ed.doc, s.aBlock)
-    if (!loc || loc.parent === null) return false
+    if (!loc || !selectable(loc.block)) return false
     const len = plainLen(loc.block.content)
     const off = Math.max(0, Math.min(s.aOff, len))
     if (dir > 0 ? off !== len : off !== 0) return false
@@ -175,8 +196,7 @@ export class BlockSelection {
    */
   beginMouseSelect(id: string, _x: number, _y: number, shiftKey: boolean): void {
     const loc = locate(this.ed.doc, id)
-    // section 根不参与块拖选（页名/天日期/zoom 根）：留给原生文本选择
-    if (!loc || loc.parent === null) return
+    if (!loc || !selectable(loc.block)) return
     this.clearBlockSelection()
     // 旧的原生文本选区必须先清掉：否则从选区里按下会触发浏览器的“拖拽选中文本”，
     // 后续 mousemove 变成 DnD、块选区永远起不来（本机探针复现）。
@@ -285,13 +305,13 @@ export class BlockSelection {
     return ok
   }
 
-  /** 选中的块 → 大纲文本（缩进 2 空格；子树随块走） */
+  /** 选中的块 → 大纲文本（缩进 2 空格；代码块带身体，露面只给引用；子树随块走） */
   selectedBlocksText(): string {
     const roots = this.blockSelRoots()
     if (roots.length === 0) return ''
     const lines: string[] = []
     walkForest(roots, (b, ctx) => {
-      lines.push(`${'  '.repeat(ctx.path.length - 1)}${plainText(b.content)}`)
+      lines.push(`${'  '.repeat(ctx.path.length - 1)}${copyTextOfBlock(b, (id) => this.ed.store.find(id))}`)
     })
     return lines.join('\n')
   }

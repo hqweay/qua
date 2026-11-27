@@ -9,9 +9,7 @@
 import {
   bareExternalUrl,
   blankRowKind,
-  blockTypeOf,
   canWriteText,
-  codeTextOf,
   DEFAULT_BLOCK_TYPE,
   DIVIDER_TYPE,
   CODE_TYPE,
@@ -55,6 +53,7 @@ import {
 } from '../../core/model/runs.ts'
 import type { ClipboardRefs } from './clipboard-flavor.ts'
 import { linkRunOf } from './insert-ops.ts'
+import { copySourceIdOf, copyTextOfBlock } from './copy-text.ts'
 import type { BlockEditor } from './editor.ts'
 
 export class ClipboardOps {
@@ -279,12 +278,14 @@ export class ClipboardOps {
 
   /**
    * 复制快照：块选区＝最上层根（按序），否则光标所在块。
-   * `text` 是随剪贴板走的**正文味**（外部应用贴出的就是它），`ids` 是引用味。
-   * 只取当前块不含子树：外部拿到的与屏幕上看到的一致；子树由引用/露面的呈现语义管。
+   * `text` 是随剪贴板走的正文味，`ids` 是引用味——露面块都把引用改指源。
    */
   copySnapshot(): { ids: string[]; text: string } | null {
     if (this.ed.bsel.hasBlockSelection()) {
-      const ids = this.ed.bsel.selectedRootIds()
+      const ids = this.ed.bsel
+        .selectedRootIds()
+        .map((id) => copySourceIdOf(this.ed.store.find(id)))
+        .filter(Boolean)
       if (ids.length === 0) return null
       return { ids, text: this.ed.bsel.selectedBlocksText() }
     }
@@ -292,7 +293,7 @@ export class ClipboardOps {
     if (!id) return null
     const b = locate(this.ed.doc, id)?.block
     if (!b) return null
-    return { ids: [id], text: plainText(b.content) }
+    return { ids: [copySourceIdOf(b)], text: copyTextOfBlock(b, (rid) => this.ed.store.find(rid)) }
   }
 
   /** 划选快照（⌘⇧C 的锚文本）：`selectionSpot` 已把「单块纯文本」的判据收在一处 */
@@ -304,9 +305,7 @@ export class ClipboardOps {
   /** 单块的正文味（复制块链接用：软外拿到的是块文本，不是 `((id))` 记号） */
   plainTextOf(id: string): string {
     const b = locate(this.ed.doc, id)?.block ?? this.ed.store.find(id)
-    if (!b) return ''
-    // 「块正文」对代码块＝代码文档（身体），不是标题：复制出来的应该是代码
-    return blockTypeOf(b) === CODE_TYPE ? codeTextOf(b) : plainText(b.content)
+    return copyTextOfBlock(b, (rid) => this.ed.store.find(rid))
   }
 
   /** 造一枚指向 `rid` 的行内引用原子；目标不在（已删/别库）⇒ dangling，照实显示 */

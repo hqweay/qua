@@ -226,6 +226,8 @@ export interface App {
    *    要原子性请在 `fn` 里用一笔 `tx`。
    */
   runGroup<T>(fn: () => T, kind?: UndoKind): T
+  /** 焦点在露面岛里向上越界时，把活动编辑器交回外层并整块选中这次露面的宿主 */
+  selectEmbedHost(hostId: string): boolean
   /* 页面 */
   listPages(): { id: string; title: string; icon: string; blocks: number }[]
   activePageId(): string

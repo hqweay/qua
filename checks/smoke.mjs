@@ -35306,7 +35306,7 @@ await check('T371 镜像岛里 ⇧↑ 越界选中宿主：复制引用落源 id
     q.focusBlock(anchor, 0)
     q.invoke('core.editor/insert-block', { text: '源二' })
     const src = q.__editor.sel?.aBlock ?? ''
-    q.invoke('core.embed/insert', { blockId: src, targetId: anchor, view: 'mirror' })
+    q.invoke('core.embed/insert', { blockId: anchor, targetId: src, view: 'mirror' })
     return { src, host: '' }
   })
   await page.waitForTimeout(450)

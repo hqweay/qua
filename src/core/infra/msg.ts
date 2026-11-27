@@ -997,6 +997,7 @@ export const MSG = {
   'ui.embed.viewMenuRow': '这一次露面的看法…',
   'ui.embed.remove': '移除这次露面',
   'ui.embed.removeHint': '只删这一次露面，源块与其它露面都不动',
+  'ui.embed.copyRef': '露面引用：{name}',
   'ui.embed.insert': '插入露面…',
   'ui.embed.pick': '选哪一块来露面？',
   'ui.embed.pickEmpty': '没有可插入的块',

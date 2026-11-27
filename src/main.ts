@@ -1577,6 +1577,17 @@ const app: App = {
   get ed() {
     return ed
   },
+  selectEmbedHost: (hostId) => {
+    if (!mainEd.rowOf(hostId)) return false
+    ed = mainEd
+    const ok = mainEd.bsel.selectIds([hostId], hostId)
+    if (ok) {
+      mainEd.sel = null
+      document.getSelection()?.removeAllRanges()
+      mainEd.blockEl(hostId)?.scrollIntoView({ block: 'nearest' })
+    }
+    return ok
+  },
   showSelectionRefPicker,
   toggleColorAxis,
 

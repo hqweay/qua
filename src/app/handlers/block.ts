@@ -10,6 +10,7 @@ import { CODE_TYPE } from '../../core/index.ts'
 import { MISSING_ASSET_HASH, SEED_ASSET_HASH } from '../../core/fixtures/assets.ts'
 import type { App, Handler } from '../../core/infra/ports.ts'
 import { buildCopyHtml } from '../../view/editor/clipboard-flavor.ts'
+import { copySourceIdOf } from '../../view/editor/copy-text.ts'
 import { curBlock, S, targetBlock } from './shared.ts'
 
 /**
@@ -19,9 +20,10 @@ import { curBlock, S, targetBlock } from './shared.ts'
  * 「抓的是这一块」一族共用这条通道，写入失败的警告照弹。
  */
 const copyRefs = (app: App, ids: readonly string[], text?: string): void => {
-  const body = text ?? ids.map((id) => app.ed.clip.plainTextOf(id)).filter(Boolean).join('\n')
-  app.copyFlavors({ text: body, html: buildCopyHtml(body, { ids: [...ids] }), clip: { ids: [...ids] } }, null)
-  app.confirmGrab(ids, t('ui.toast.blockRefCopied'))
+  const refs = ids.map((id) => copySourceIdOf(app.ed.store.find(id))).filter((id) => id !== '')
+  const body = text ?? refs.map((id) => app.ed.clip.plainTextOf(id)).filter(Boolean).join('\n')
+  app.copyFlavors({ text: body, html: buildCopyHtml(body, { ids: refs }), clip: { ids: refs } }, null)
+  app.confirmGrab([...ids], t('ui.toast.blockRefCopied'))
 }
 
 export const STRUCT_HANDLERS: Record<string, Handler> = {
@@ -394,7 +396,16 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
   'core.selection/select-all-blocks': (_a, app) => app.ed.bsel.selectAllBlocks(),
   'core.selection/select-block': (_a, app) => app.ed.bsel.selectCurrentBlock(),
   'core.selection/focus-first': (_a, app) => app.ed.bsel.focusFirstSelected(),
-  'core.selection/extend-up': (a, app) => app.ed.bsel.extendBlockSelection(Number(a.dir) === 1 ? 1 : -1),
+  'core.selection/extend-up': (a, app) => {
+    const dir = Number(a.dir) === 1 ? 1 : -1
+    const host = app.ed.embedHostId
+    const s = app.ed.sel
+    // 岛首行的源块是岛自己的根，没有上一行可扩；越界的对象是这次露面本身
+    if (host && dir < 0 && s && s.aBlock === s.hBlock && s.aOff === s.hOff && s.aOff === 0) {
+      return app.selectEmbedHost(host)
+    }
+    return app.ed.bsel.extendBlockSelection(dir)
+  },
   'core.selection/extend-down': (a, app) => app.ed.bsel.extendBlockSelection(Number(a.dir) === -1 ? -1 : 1),
 
   /* ---- 行内原子 ---- */
