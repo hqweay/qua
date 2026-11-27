@@ -239,6 +239,19 @@ test('childrenRecords：行＝直接子块，顺序＝children 顺序，容器�
   assert.equal(rows[0]!.title, '一', '标题是正文的纯文本投影')
 })
 
+test('记录的值投影：靠类型声明拥有的槽补缺省并归一（补投影，不改盘）', () => {
+  const quote = mk('q1', '引述', [], { _type: 'core/quote' })
+  const code = mk('c1', '代码', [], { _type: 'core/code', _lang: 'ts' })
+  const plain = mk('p1', '普通')
+  const root = mk('root', '', [quote, code, plain])
+  const { kb } = kbOf([root])
+  const rows = childrenRecords('root', kb)
+  assert.equal(rows[0]!.values._callout, 'quote', '缺键＝缺省类型（分组不落「未设置」）')
+  assert.equal(rows[1]!.values._lang, 'typescript', '别名归一：分组键与选项 id 同源')
+  assert.deepEqual(Object.keys(rows[2]!.values), [], '普通块不凭空多出系统槽')
+  assert.equal(quote.props?._callout, undefined, '补的是投影不是数据：盘上仍没有这一格')
+})
+
 test('childrenRecords：软删的子块不出行（不是显示一片空行）', () => {
   const { root } = pageWith5()
   root.children[2] = { ...root.children[2]!, props: { _deletedAt: 5 } }

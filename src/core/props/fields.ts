@@ -151,8 +151,9 @@ const NOT_DECLARED: FieldRead = { declared: false, value: undefined }
  * **类型拥有**的槽的读法：不是那种块 ⇒ 没这一栏；是 ⇒ 缺键读 `default`，再归一。
  *
  * `_callout`／`_lang` 共用这一条；下一个「靠类型声明拥有、缺键走缺省」的槽只加声明。
+ * 记录投影（分组/覆盖率）也读它：分组键必须与条件值同一份投影，否则组头读不出名字。
  */
-function readTypeOwned(block: Block, decl: SystemFieldDecl): FieldRead {
+export function readTypeOwnedField(block: Block, decl: SystemFieldDecl): FieldRead {
   if (decl.ownerType === undefined || blockTypeOf(block) !== decl.ownerType) return NOT_DECLARED
   const raw = prop<unknown>(block, decl.id)
   const base = typeof raw === 'string' && raw !== '' ? raw : decl.default
@@ -386,5 +387,5 @@ export function readSystemField(
 ): FieldRead | undefined {
   const decl = systemFieldOf(propId)
   if (decl === undefined) return undefined
-  return decl.read !== undefined ? decl.read(block, ctx) : readTypeOwned(block, decl)
+  return decl.read !== undefined ? decl.read(block, ctx) : readTypeOwnedField(block, decl)
 }

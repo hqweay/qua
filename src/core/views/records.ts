@@ -11,17 +11,14 @@ import { collatorLocale } from '../infra/locale.ts'
  * 与 `view.ts` 的两条类型引用（`Source`／调用方拿 `ViewRecord`）编译期擦除，
  * 运行时依赖单向（records → view 的列词汇，再 → 各读路径模块）。
  */
-import { hasList, isDeleted, liveChildren, blockTypeOf, CALLOUT_PROP, LANG_PROP, type Block, type BlockProps } from '../model/model.ts'
-import { CODE_TYPE, QUOTE_TYPE } from '../model/types.ts'
-import { DEFAULT_CALLOUT } from '../infra/callout.ts'
-import { normalizeStoredLang } from '../infra/code-lang.ts'
+import { hasList, isDeleted, liveChildren, blockTypeOf, type Block, type BlockProps } from '../model/model.ts'
 import { displayNameOf } from '../identity/alias.ts'
 import { journalDateInChain } from '../identity/journal.ts'
 import { tagIdsOf } from '../identity/tags.ts'
 import { plainText } from '../model/runs.ts'
 import { t } from '../infra/msg.ts'
 import type { KbClient } from '../kb/types.ts'
-import { ENGINE_CREATED, ENGINE_MODIFIED } from '../props/fields.ts'
+import { ENGINE_CREATED, ENGINE_MODIFIED, SYSTEM_FIELDS, readTypeOwnedField } from '../props/fields.ts'
 import { declaredFieldIds, ownFieldIds } from '../props/props.ts'
 import { randomRankOf, type QuerySpec, type SortKey } from '../query/query.ts'
 import {
@@ -94,31 +91,30 @@ function recordOf(block: Block, path: readonly Block[], kb: KbClient): ViewRecor
 }
 
 /**
- * 记录上的「值」投影：属性袋原样，**只改两个由类型声明拥有的系统槽**——
- * `_callout` 补缺省类型、`_lang` 补纯文本并归一别名。
+ * 记录上的「值」投影：属性袋原样，**再补上由类型声明拥有的槽**——
+ * 引述类型补缺省、代码语言补纯文本并归一别名。
  *
  * 缺键在模型里的读法就是缺省值（`readField` 同一条）；分组与覆盖率只看属性袋的话，
  * 默认类型的引述／没写语言的代码块会落进「未设置」——它们的值明明就是「引述」「纯文本」。
  * 补的是**投影**不是数据：盘上仍没有这一格，写入仍按「缺省＝摘键」。
  *
- * `_lang` 还多一步**归一**（`ts` → `typescript`）：分组键与选项 id 同源，
- * 否则组头读不出语言名；未知语言原文保留（与查询的值投影同一份 `normalizeStoredLang`）。
+ * 哪些槽要补**不在这里列**：字段声明说它靠哪个类型拥有（`ownerType`），这里只按
+ * 那一格投影。语言别名归一（`ts` → `typescript`）也在声明上（`normalize`）——
+ * 分组键与选项 id 同源，否则组头读不出语言名。
  */
 function valuesOf(block: Block): BlockProps {
   const props = block.props ?? {}
   const type = blockTypeOf(block)
-  if (type === QUOTE_TYPE) {
-    const raw = props[CALLOUT_PROP]
-    if (typeof raw === 'string' && raw !== '') return props
-    return { ...props, [CALLOUT_PROP]: DEFAULT_CALLOUT }
+  let out = props
+  for (const decl of SYSTEM_FIELDS) {
+    if (decl.ownerType === undefined || decl.ownerType !== type) continue
+    const value = readTypeOwnedField(block, decl).value
+    // 读出来的值与袋里已经一致（写过的、或本来就是规范写法）⇒ 保持原对象，不做无谓拷贝
+    if (value === undefined || Object.is(value, props[decl.id])) continue
+    out = out === props ? { ...props } : out
+    out[decl.id] = value
   }
-  if (type === CODE_TYPE) {
-    const raw = props[LANG_PROP]
-    const lang = normalizeStoredLang(typeof raw === 'string' ? raw : undefined) ?? 'plain'
-    if (raw === lang) return props
-    return { ...props, [LANG_PROP]: lang }
-  }
-  return props
+  return out
 }
 
 /**
