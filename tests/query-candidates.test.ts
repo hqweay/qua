@@ -28,7 +28,7 @@ import { BlockStore } from '../src/core/model/store.ts'
 import { Workset } from '../src/core/storage/workset.ts'
 import { MemoryKb } from '../src/core/kb/memory.ts'
 import { ROLE_KINDS, type RoleKind } from '../src/core/index.ts'
-import { QUERYABLE_SYSTEM_PROPS } from '../src/core/props/props.ts'
+import { SYSTEM_FIELDS } from '../src/core/index.ts'
 import type { QuerySpec, QueryContext, Block } from '../src/core/index.ts'
 
 const TODAY = '2026-11-19'
@@ -511,8 +511,10 @@ function collectPropIds(node: QuerySpec['where'], out: Set<string>): void {
 test('每个可查系统槽都至少有一条候选用例', () => {
   const ids = new Set<string>()
   for (const c of CASES) collectPropIds(c.spec.where, ids)
-  for (const id of QUERYABLE_SYSTEM_PROPS) {
-    assert.ok(ids.has(id), `系统槽 ${id} 没有候选用例（加字段必须补一条，否则漏行不报红）`)
+  // 遍历**声明**而不是另抄的白名单：加一行 `queryable` 就得补一条用例，漏了当场红
+  for (const decl of SYSTEM_FIELDS) {
+    if (decl.queryable !== true) continue
+    assert.ok(ids.has(decl.id), `系统槽 ${decl.id} 没有候选用例（加字段必须补一条，否则漏行不报红）`)
   }
 })
 
