@@ -35047,6 +35047,71 @@ await check(
   },
 )
 
+await check('T368 引述空行上的「在上下新建块」真的多一块：菜单两向＋⌘⇧↵，仍是引述内的兄弟', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  // 在空块上插引述 ⇒ 抬头＋一条空首行（不是把种子正文搬进去）
+  const fx = await page.evaluate(() => {
+    const q = window.__qua
+    q.invoke('core.editor/insert-block', { text: '' })
+    const blank = q.__editor.sel?.aBlock ?? ''
+    q.focusBlock(blank, 0)
+    q.invoke('core.editor/insert-block', { type: 'quote' })
+    const all = q.__editor.doc.roots.flatMap((r) => [
+      r,
+      ...(r.children ?? []),
+      ...(r.children ?? []).flatMap((c) => c.children ?? []),
+    ])
+    const quote = all.find((b) => String(b.props?._type ?? '').includes('quote'))
+    return { quote: quote?.id ?? '', line: quote?.children?.[0]?.id ?? '' }
+  })
+  assert(fx.quote && fx.line, `前置：引述与空首行：${JSON.stringify(fx)}`)
+
+  const children = () =>
+    page.evaluate((qid) => window.__qua.__editor.store.find(qid)?.children?.length ?? 0, fx.quote)
+  const menuInsert = async (label) => {
+    await page.evaluate((id) => {
+      const el = [...document.querySelectorAll(`.blk[data-block-id="${id}"] > .tx`)][0]
+      el?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+    }, fx.line)
+    await page.waitForTimeout(150)
+    await page.evaluate((want) => {
+      const row = [...document.querySelectorAll('.layer-item')].find(
+        (n) =>
+          (n.dataset.id ?? '').startsWith('core.editor/insert-block') &&
+          n.querySelector('.layer-label')?.textContent?.includes(want),
+      )
+      row?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }))
+    }, label)
+    await page.waitForTimeout(250)
+  }
+
+  assert((await children()) === 1, '前置：引述首行只有一条')
+  await menuInsert('下方')
+  assert((await children()) === 2, '空行上「在下方新建块」要真多一块（不能只把光标放回原处）')
+  await menuInsert('上方')
+  assert((await children()) === 3, '空行上「在上方新建块」同样要真多一块')
+
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), fx.line)
+  await page.waitForTimeout(120)
+  await page.keyboard.press(kbd('mod+Shift+Enter'))
+  await page.waitForTimeout(250)
+  assert((await children()) === 4, '⌘⇧↵ 在空行上也建一块（与菜单同口径）')
+
+  const shape = await page.evaluate(
+    ({ qid, line }) => {
+      const kids = window.__qua.__editor.store.find(qid)?.children ?? []
+      const ids = kids.map((k) => (typeof k === 'string' ? k : k.id))
+      return { count: ids.length, lineStill: ids.includes(line) }
+    },
+    { qid: fx.quote, line: fx.line },
+  )
+  assert(shape.count === 4 && shape.lineStill, `新块都留在引述里、原行还在：${JSON.stringify(shape)}`)
+
+  await ctx.close()
+  return '引述空行的上下建块：菜单两向与 ⌘⇧↵ 各多一块，原行与归属不变'
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

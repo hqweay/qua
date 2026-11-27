@@ -157,7 +157,7 @@ export const BINDINGS: Binding[] = [
   // ⌘↵ 切换待办、⇧⌘↵ 上方插入；⇧ 系都是结构插入，方向由剩余修饰键区分。原占用者档位轴进档退到命令面板
   // （键位只是加速器，面板照常可达）；退档不受影响（Esc 的绑定在键位段末尾——
   // 它要让位给块选区清空（选区在场先清选区）；浮层在场时派发层不派发，浮层自己收，浮层天然优先）。
-  { command: 'core.editor/insert-block-before', kind: 'keymap', key: 'mod+shift+enter', when: 'editorTextFocus', layer: 'core' },
+  { command: 'core.editor/insert-block-before', kind: 'keymap', key: 'mod+shift+enter', args: { reuseBlank: false }, when: 'editorTextFocus', layer: 'core' },
   // 回今日：`⌘T`（新开 tab 撤了键——两者落同一处，差别只在多不多一张 tab）
   { command: 'core.journal/today', kind: 'keymap', key: 'mod+t', when: '', layer: 'core' },
   // 前后翻日：**仅在 journal 视图且编辑器失焦时**生效的原文口径）
@@ -229,8 +229,8 @@ export const BINDINGS: Binding[] = [
   // 「新建子块」与缩进相邻：两者是「让这块有子块」仅有的两条路径，菜单里也放一起
   { command: 'core.editor/insert-child', kind: 'menu', when: 'blockMenuTarget && blockCanTakeChildren', group: 'block/2-structure', order: 45, layer: 'core' },
   { command: 'core.editor/insert-parent-sibling', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 47, layer: 'core' },
-  { command: 'core.editor/insert-block', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 48, args: { type: 'paragraph' }, layer: 'core', label: t('menu.label.insertBelow') },
-  { command: 'core.editor/insert-block-before', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 49, layer: 'core', label: t('menu.label.insertAbove') },
+  { command: 'core.editor/insert-block', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 48, args: { type: 'paragraph', reuseBlank: false }, layer: 'core', label: t('menu.label.insertBelow') },
+  { command: 'core.editor/insert-block-before', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 49, args: { reuseBlank: false }, layer: 'core', label: t('menu.label.insertAbove') },
   { submenu: 'blockKind/', kind: 'menu', when: 'blockMenuTarget && blockCanConvertType', group: 'block/2-structure', order: 13, layer: 'core', label: t('menu.label.turnInto'), actsOn: 'block' },
   { command: 'core.editor/indent-block', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 50, layer: 'core' },
   { command: 'core.editor/outdent-block', kind: 'menu', when: 'blockMenuTarget', group: 'block/2-structure', order: 60, layer: 'core' },

@@ -171,6 +171,8 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
     if (!id) return false
     const text = S(a.text, '')
     const type = S(a.type, 'paragraph')
+    // 显式「在下方新建块」要真的多一块；斜杠在空行上仍是原地换骨架
+    const opts = a.reuseBlank === false ? { reuseBlank: false as const } : {}
     // 分割线没有正文可落光标：插入动作自己负责在它下面留一个落点
     if (type === 'divider') return app.ed.insert.insertDividerAfter(id)
     // 引文是行容器：抬头＋首行两块一笔；代码块仍是单块正文
@@ -188,7 +190,7 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
      */
     if (type !== 'paragraph' && type !== 'closure') return false
     const closure = type === 'closure' ? ('open' as const) : undefined
-    app.ed.insert.insertBlockAfter(id, text, closure)
+    app.ed.insert.insertBlockAfter(id, text, closure, opts)
     return true
   },
   // 缺省目标取光标所在块（curBlock），不是「当前打开的那一屏」——
@@ -196,7 +198,8 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
   'core.editor/insert-block-before': (a, app) => {
     const id = targetBlock(a, app)
     if (!id) return false
-    return app.ed.insert.insertBlockBefore(id) !== null
+    const opts = a.reuseBlank === false ? { reuseBlank: false as const } : {}
+    return app.ed.insert.insertBlockBefore(id, opts) !== null
   },
   'core.editor/insert-child': (a, app) => {
     const id = targetBlock(a, app)

@@ -44,10 +44,10 @@ export const COMMANDS: CommandDecl[] = [
    *    调用方（handler）据此给一句解释，而不是静默。
    */
   { name: 'core.editor/clear-closure', title: t('cmd.editor.clear-closure'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['todo', 'untodo', t('menu.kw.untodo')], actsOn: 'block' },
-  { name: 'core.editor/insert-block', title: t('cmd.editor.insert-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { type: { type: 'string', enum: ['paragraph', 'closure', 'divider', 'quote', 'code'] }, text: { type: 'string' }, lang: { type: 'string' }, variant: { type: 'string' } }, keywords: ['insert', 'new block'] },
-  // 只建空正文块、不接类型变体：上方插入目前只有键盘一条入口，斜杠菜单走的是下方语义；
-  // 等出现第二个入口（斜杠/菜单项）再决定变体怎么共享
-  { name: 'core.editor/insert-block-before', title: t('cmd.editor.insert-block-before'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['insert', 'above', 'before', 'new block'] },
+  { name: 'core.editor/insert-block', title: t('cmd.editor.insert-block'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { type: { type: 'string', enum: ['paragraph', 'closure', 'divider', 'quote', 'code'] }, text: { type: 'string' }, lang: { type: 'string' }, variant: { type: 'string' }, reuseBlank: { type: 'boolean' } }, keywords: ['insert', 'new block'] },
+  // 空行按「这一行已经是空块」复用，是斜杠入口的口径；显式「在上下新建块」传 reuseBlank:false，
+  // 否则引述里的空首行按一下菜单只会把光标放回原处（用户读到的是按钮坏了）
+  { name: 'core.editor/insert-block-before', title: t('cmd.editor.insert-block-before'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), args: { reuseBlank: { type: 'boolean' } }, keywords: ['insert', 'above', 'before', 'new block'] },
   // 「新建子块」＝出生在目标块的首个子位（与块尾 Enter 的 child 支同形）；
   // 自动化的「新建子块」触发器只认出生 ⇒ 这是规则能接住第一个子块的唯一编辑入口
   { name: 'core.editor/insert-child', title: t('cmd.editor.insert-child'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.editor'), keywords: ['insert', 'child', 'sub', 'new block'] },

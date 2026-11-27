@@ -922,8 +922,8 @@ function viewEvents(
             const opener = editor()
             const target = owner ?? (opener.rowOf(appearanceHost) ? opener : getApp().ed)
             if (!target.rowOf(appearanceHost)) return
-            if (row.id === 'appearance-insert-above') target.insert.insertBlockBefore(appearanceHost)
-            else target.insert.insertBlockAfter(appearanceHost, '')
+            if (row.id === 'appearance-insert-above') target.insert.insertBlockBefore(appearanceHost, { reuseBlank: false })
+            else target.insert.insertBlockAfter(appearanceHost, '', undefined, { reuseBlank: false })
             return
           }
           if (!row.command) return
