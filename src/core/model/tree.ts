@@ -18,7 +18,7 @@ import {
   isDeleted,
   liveChildren,
   isAutomationBlock,
-  isQueryBlock,
+  isPropDefBlock,
   blockTypeOf,
   mkBlock,
   writeBlockContent,
@@ -34,9 +34,9 @@ import { shiftAnnos, splitAnnos } from './annos.ts'
 import { walkForest } from './walk.ts'
 import { cloneMountEntries, MOUNTS_PROP } from '../views/mount.ts'
 import { isEmbedBlock } from '../views/embed.ts'
-import { hasChildrenViewBody } from '../views/view.ts'
+import { hasChildrenViewBody, hasQueryBody } from '../views/view.ts'
 import { CODE_TYPE } from './types.ts'
-import { splitPropsForEnter } from '../props/props.ts'
+import { hasDeclaredFields, splitPropsForEnter } from '../props/props.ts'
 
 /**
  * **树读路径的计数器**（诊断探针用，不是产品状态）。
@@ -665,20 +665,54 @@ export type InsertSite =
   | { kind: 'before'; parentId: string; index: number }
 
 /**
+ * **行下身体的种类**：这一块身体归谁画。
+ *
+ * 这是「有没有身体」「能不能折身体」「身体挂到哪」三条读路径的**唯一一份清单**——
+ * 从前它抄在四处（模型的 `hasBody`／渲染层的 `inlineBodyKind`／编辑器的 `bodyFoldable`
+ * 各列一遍），加一种身体要改六处，漏一处就是「按钮画了却按不动」。
+ *
+ * ⚠️ 表只回答**种类**。三件事不在这里，各归各处：
+ *   · **表面接线**（这一屏接没接画它的回调）：结果列表里的命中行也是查询块，
+ *     但那一层画的是结果行，给它折叠入口就是死控件；
+ *   · 视图身体的冻结／stale／刷新（渲染器自己的生命周期）；
+ *   · `folded` 与 `bodyFolded` 两位折叠态（视图实例态，不进库内容）。
+ */
+export const BODY_KINDS = ['view', 'automation', 'def', 'embed', 'code'] as const
+export type BodyKind = (typeof BODY_KINDS)[number]
+
+/**
+ * **这一块的行下身体归谁画**（顺序是分派顺序，不是随手排的）。
+ *
+ *   · 露面在行里自带宿主，先认它；
+ *   · 代码块的行是标题、身体是代码文档；
+ *   · 自动化块的三段式定义体；
+ *   · **激活的 children 看法优先于属性投影**：看法已经让正文的子块行让位，
+ *     身体若改画属性投影，子块与看法两样都落空；
+ *   · 定义块（`_kind`）与声明了字段的标签画属性投影；
+ *   · 查询块的结果视图。
+ */
+export function bodyKindOf(b: Block): BodyKind | null {
+  if (isEmbedBlock(b)) return 'embed'
+  if (blockTypeOf(b) === CODE_TYPE) return 'code'
+  if (isAutomationBlock(b)) return 'automation'
+  if (hasChildrenViewBody(b)) return 'view'
+  if (isPropDefBlock(b) || hasDeclaredFields(b)) return 'def'
+  if (hasQueryBody(b)) return 'view'
+  return null
+}
+
+/**
  * **这一块有没有「身体」**（正文之外的那一格）：查询条件、代码文档、自动化定义、
- * 露面目标、激活的看法。它们都由别的槽画在行下面，与这一行的字无关。
+ * 露面目标、激活的看法、定义块与标签的属性投影。它们都由别的槽画在行下面，
+ * 与这一行的字无关。
+ *
+ * 判据是 `bodyKindOf` 的派生：清单只有一份，别在这里再列一遍块类型。
  *
  * 判据要收在这里（而不是「行里有没有字」）：有身体的块即使行是空的，也不是
  * 「这一行可以放别的东西」——占它的行会把身体一起丢掉。
  */
 export function hasBody(b: Block): boolean {
-  return (
-    isQueryBlock(b) ||
-    isAutomationBlock(b) ||
-    isEmbedBlock(b) ||
-    blockTypeOf(b) === CODE_TYPE ||
-    hasChildrenViewBody(b)
-  )
+  return bodyKindOf(b) !== null
 }
 
 /**
@@ -1426,8 +1460,8 @@ export function focusRootOf(roots: readonly Block[]): string | undefined {
  */
 export function hasFoldable(b: Block | undefined): boolean {
   // 折叠的意义是「把这一行下面的东西藏起来」：子块与身体都算。
-  // 身体判据走 `hasBody`（查询/自动化/代码/露面/激活看法）——与渲染层
-  // `bodyFoldable` 同一份清单，否则会出现「视图说有身体、模型说不许折」。
+  // 身体判据走 `hasBody`（它的清单在 `bodyKindOf`）——与渲染层 `bodyFoldable`
+  // 同一份清单，否则会出现「视图说有身体、模型说不许折」。
   return Boolean(b && (hasLiveChildren(b) || hasBody(b)))
 }
 

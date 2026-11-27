@@ -27,16 +27,13 @@ import {
   LANG_PROP,
   aliasesOf,
   blockTypeOf,
+  bodyKindOf,
   canonicalLang,
   codeLangLabel,
   displayNameOf,
   codeTextOf,
   embedBodyOf,
-  hasChildrenViewBody,
-  hasDeclaredFields,
-  hasQueryBody,
   identityTags,
-  isAutomationBlock,
   isJournal,
   isEmbedBlock,
   isPropDefBlock,
@@ -51,6 +48,7 @@ import {
   typeDeclOf,
   type Block,
   type BelowFields,
+  type BodyKind,
   type FindBlock,
   type FoldState,
   type GutterField,
@@ -128,38 +126,27 @@ export const VIEW_BODY_INSET = 4
 export const PROP_LINE_H = 20
 
 /**
- * 行下身体由谁画：自动化块的三段式定义体／定义块与标签的属性投影／查询或 children 源的视图。
+ * 行下身体**内联在本行**的那三种：自动化块的三段式定义体／定义块与标签的属性投影／
+ * 查询或 children 源的视图。
  *
  * 三种身体**共用一个壳**（`.blk-view-body`），所以「这一格归谁」必须由一份判据回答，
  * 新画的行与保留行接回都吃它——按壳判（看见 `.blk-view-body` 就挂视图）会让同一格
  * 叠两张卡：属性投影上面再冒一台只属于看法视图的「N 项 · 大纲 · 新建一行」抬头。
  */
-export type InlineBodyKind = 'automation' | 'def' | 'view'
+export type InlineBodyKind = Extract<BodyKind, 'automation' | 'def' | 'view'>
 
 /**
- * **这一块的行下身体归谁画**（唯一一份源清单 ＋ 分派顺序）。
+ * **这一块的行下身体归谁画**（内联三支；种类与分派顺序的唯一一份在 `bodyKindOf`）。
  *
- * **按源分派**：查询块有结果身体（`hasQueryBody`）；children 源的激活视图
- * （`hasChildrenViewBody`——身体替换子块行）也算；自动化块画三段式定义体；
- * 属性定义块画值配置、标签画字段声明（非空才画——定义拿掉只剩名字的块，
- * 名字下面就画定义）。段根也不例外 —— 聚焦后它是这一屏唯一的根，身体仍贴着
- * 它自己那一行，与它在正文里子行时是同一种画法。
+ * 露面与代码的身体**不在这一支**：它们的宿主顶替 `.tx` 的位置、构造成另一步，
+ * 所以这里只收「贴在本行下面那一格」的三种。
  *
  * 递归的**构造性截断**不在这条判据上：结果里的查询块由**里层编辑器**画，
  * 而那一层（挂载区／镜像／查询结果／单元格）在构造上没有身体回调。
  */
 export function inlineBodyKind(b: Block): InlineBodyKind | null {
-  if (isAutomationBlock(b)) return 'automation'
-  /**
-   * **children 源的激活视图优先于属性投影**：激活看法时正文的子块行会**让位**
-   * （`Doc.viewRootId` 只认 `activeView`），身体若仍画属性投影，两样都落空——
-   * 子块行没了、看法也没画（实测：给带「标签属性」的标签建一张表格看法，
-   * 子块当场消失且表格不出现）。反过来不成立：没有激活看法时属性投影照画。
-   */
-  if (hasChildrenViewBody(b)) return 'view'
-  if (isPropDefBlock(b) || hasDeclaredFields(b)) return 'def'
-  if (hasQueryBody(b)) return 'view'
-  return null
+  const kind = bodyKindOf(b)
+  return kind === 'automation' || kind === 'def' || kind === 'view' ? kind : null
 }
 
 /** 这一块在行下有没有身体（来源见 `inlineBodyKind`；「有」与「归谁画」同一份答案） */

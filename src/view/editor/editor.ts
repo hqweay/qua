@@ -18,7 +18,6 @@ import {
   UndoStack,
   activeView,
   blockMenuCtxOf,
-  blockTypeOf,
   ensurePageInTx,
   flatten,
   locate,
@@ -26,6 +25,7 @@ import {
   blockSpanPlan,
   hasTag,
   hasBody,
+  bodyKindOf,
   hasLiveChildren,
   liveChildren,
   mkBlock,
@@ -59,11 +59,11 @@ import {
   setValue,
   clearValue,
   closureOf,
-  CODE_TYPE,
   TASK_STATUS_PROP_ID,
   canWriteText,
   isOwnEdit,
   type Block,
+  type BodyKind,
   type ClosurePlan,
   type CtxKeys,
   type Doc,
@@ -137,7 +137,7 @@ import { AliasClaimError } from '../../core/kb/unsupported.ts'
 import { ensureTaskStatusInTx } from '../../core/kb/ensure-task.ts'
 // 用户可见文案一律走 t
 import { t } from '../../core/infra/msg.ts'
-import { ALLOWED_ROW_CHILDREN, EDIT_ISLAND_ATTR, inTitleGap, inlineBodyKind, isReadonlyBlock, rowHasEmbedViewBody, type BlockAction } from './block-dom.ts'
+import { ALLOWED_ROW_CHILDREN, EDIT_ISLAND_ATTR, inTitleGap, isReadonlyBlock, rowHasEmbedViewBody, type BlockAction } from './block-dom.ts'
 import { ReloadPolicy } from './reload-policy.ts'
 import { spanAt, type PlainSpan } from './hit-paint.ts'
 import { AnnoHover, type AnnoHitSpan } from './anno-hover.ts'
@@ -2851,18 +2851,42 @@ export class BlockEditor {
   }
 
   /**
+   * **这一台编辑器的表面接了哪些身体的挂载**（种类 → 这一屏画不画它）。
+   *
+   * 种类与分派顺序只有一份（`bodyKindOf`）；这张表只回答**接线**——查询结果列表里的
+   * 命中行也是查询块，但那一层画的是结果行，没有画身体的回调。
+   *
+   * ⚠️ 每次现读：`events` 是构造之后由装配层赋值的，而且还有入口会往上补字段；
+   *    缓存成一张表，某个表面换了接线就会读到过期的准入。
+   */
+  private get surfaceMounts(): Record<BodyKind, boolean> {
+    const e = this.events
+    return {
+      view: e.viewBody !== undefined,
+      automation: e.automationBody !== undefined,
+      def: e.defBody !== undefined,
+      embed: e.embedBody !== undefined,
+      code: e.codeBody !== undefined,
+    }
+  }
+
+  /**
    * **这个表面会不会把这一块的身体画出来**（查询内联体，或露面的投影）。
    *
    * 折/展身体的所有入口（三角、导轨、菜单）都认这一份判据——查询结果列表里的
    * 命中行也是查询块，但那一层画的是结果行，给它折一下没有任何可见效果。
-   * 「有身体」与「身体归谁画」同一份答案（`inlineBodyKind`），别再抄一遍源清单。
+   * 「有身体」与「身体归谁画」同一份答案（`bodyKindOf`），别再抄一遍源清单。
    */
   private bodyFoldable(b: Block): boolean {
-    return (
-      (Boolean(this.events.viewBody || this.events.automationBody || this.events.defBody) && inlineBodyKind(b) !== null) ||
-      (Boolean(this.events.embedBody) && rowHasEmbedViewBody(b, (id) => this.store.find(id))) ||
-      (Boolean(this.events.codeBody) && blockTypeOf(b) === CODE_TYPE)
-    )
+    const kind = bodyKindOf(b)
+    if (kind === null || !this.surfaceMounts[kind]) return false
+    /**
+     * 露面的两种身体共用一台宿主回调，但只有**投影**是一块可折的面板：镜像的身体
+     * 是源那棵子树（折它在岛内源行，折源就是折它）。给镜像再开一个折叠位，
+     * 屏幕上没有可藏的下一层——那正是「画了控件按不动」的形状。
+     */
+    if (kind === 'embed') return rowHasEmbedViewBody(b, (id) => this.store.find(id))
+    return true
   }
 
   /**
