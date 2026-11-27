@@ -153,6 +153,20 @@ const openFirstPage = (page) =>
   page.evaluate(() => window.__qua.invoke('core.page/open', { pageId: window.__qua.pages()[0].id }))
 
 /**
+ * 打开**属性抽屉**并钉在指定块上（幂等：同一个目标再开一次是收起，先看一眼再决定）。
+ *
+ * 判据：单主体屏的根行下只有**值段**（行下管理档），身份／露面／分类／脸那些段住在抽屉里
+ * ——所以「属性区」的断言先在抽屉里打开，再读 `.props-drawer` 之下的行。
+ */
+const openPropsDrawer = async (page, blockId) => {
+  const current = await page.evaluate(() => document.querySelector('.props-drawer')?.dataset.targetBlockId ?? '')
+  if (current !== blockId) {
+    await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), blockId)
+  }
+  await page.waitForSelector('.props-drawer')
+}
+
+/**
  * 切到挂载区的「引用」栏再读行：页也挂成员栏之后，规范序是「成员 → 引用 → …」，
  * 打开页面默认亮的是成员栏——凡是要看「谁引用了这一页」的断言，先切栏再读，
  * 别按「第一栏恒为引用」的旧形状挑第一栏。
@@ -5455,17 +5469,17 @@ await check('T58b 属性面板挂/摘块标签：只写归属，正文不动', a
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
 
-  // 属性区的 target 是**聚焦块**（光标所在块）⇒ 用命令把光标落到一个内容块上
+  // 属性区的 target 是**这一块**（抽屉钉在打开时那一块上）⇒ 直接用目标块的 id 开抽屉
   const pageId = await page.evaluate(() => {
     const b = window.__qua.blocks().find((x) => x.roles.length === 0 && x.children === 0 && x.text.length > 2)
-    window.__qua.invoke('core.block/focus-block', { blockId: b.id })
     return b.id
   })
-  await page.waitForTimeout(150)
-  await page.waitForSelector('.props-tag-add', { timeout: 4000 })
+  // 块级归属（标签段）住在**属性抽屉**里：行下管理档只画值段
+  await openPropsDrawer(page, pageId)
+  await page.waitForSelector('.props-drawer .props-tag-add', { timeout: 4000 })
 
   // 挂标签走**候选浮层**（与查询条件值位同一个手势）：点「＋」→ 搜「项目」→ 新建行
-  await page.click('.props-tag-add')
+  await page.click('.props-drawer .props-tag-add')
   await page.waitForSelector('.layer .layer-input', { timeout: 4000 })
   await page.fill('.layer .layer-input', '项目')
   await page.waitForTimeout(200)
@@ -5490,7 +5504,7 @@ await check('T58b 属性面板挂/摘块标签：只写归属，正文不动', a
       text: b?.text ?? '',
       tags: b?.tags ?? [],
       chips: [...document.querySelectorAll(`.blk[data-block-id="${id}"] .blk-tags .tag-chip`)].map((e) => e.textContent),
-      panel: [...document.querySelectorAll('.props-tag')].map((e) => e.textContent),
+      panel: [...document.querySelectorAll('.props-drawer .prop-tags .props-tag')].map((e) => e.textContent),
     }
   }, pageId)
   assert(added.tags.length === 1, '面板挂标签应写进块上的归属：' + JSON.stringify(added))
@@ -5498,14 +5512,14 @@ await check('T58b 属性面板挂/摘块标签：只写归属，正文不动', a
   assert(added.panel.some((s) => s.includes('#项目')), '面板这一行应显示刚挂上的标签：' + JSON.stringify(added.panel))
   assert(!added.text.includes('项目'), '属性面板入口**不碰正文**：' + JSON.stringify(added.text))
 
-  await page.click('.props-tag .props-tag-x')
+  await page.click('.props-drawer .prop-tags .props-tag-x')
   await page.waitForTimeout(250)
   const removed = await page.evaluate((id) => {
     const b = window.__qua.blocks().find((x) => x.id === id)
     return {
       tags: b?.tags ?? [],
       chips: document.querySelectorAll(`.blk[data-block-id="${id}"] .blk-tags .tag-chip`).length,
-      panel: document.querySelectorAll('.props-tag').length,
+      panel: document.querySelectorAll('.props-drawer .prop-tags .props-tag').length,
     }
   }, pageId)
   assert(removed.tags.length === 0, '摘标签应清掉归属：' + JSON.stringify(removed))
@@ -5541,6 +5555,14 @@ await check('T59 `ref` 类型的值走选择器：显示目标**名字**、能�
   }, setup.host)
   assert(defId, '前置：应建出「负责人」字段定义')
   await page.waitForTimeout(260)
+
+  /**
+   * 值段画在**行下管理档**（单主体屏的根行下面）：新字段还没有值 ⇒ 它收在
+   * 「＋N 项待填」那一行里，先点开再看控件（没填值的栏是收着的，这是这一档的默认）。
+   */
+  await page.waitForSelector('.blk-manage-pending', { timeout: 4000 })
+  await page.click('.blk-manage-pending')
+  await page.waitForTimeout(200)
 
   // ① 值是选择器按钮（.prop-ref），不是裸 input
   const cell = await page.evaluate((pid) => {
@@ -13905,27 +13927,31 @@ await check('T126 行尾 chip / 属性区标签名点名字 ⇒ 打开标签块�
   // 属性区的主体＝**当前对象**（单根），所以这里要真的 zoom 过去，不是只放光标
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), hostId)
   await page.waitForTimeout(250)
+  // 分类段（行尾标签的块级归属）住在**属性抽屉**里：行下管理档只画值段
+  await openPropsDrawer(page, hostId)
   const panelChip = await page.evaluate((tagId) => {
-    const name = document.querySelector(`[data-panel-tag-id="${tagId}"] .props-tag-name`)
+    const name = document.querySelector(`.props-drawer [data-panel-tag-id="${tagId}"] .props-tag-name`)
     return { found: Boolean(name), refTo: name?.dataset.refTo ?? '', title: name?.dataset.tip ?? '' }
   }, tagId)
   assert(panelChip.found, `属性区的标签名要带 props-tag-name（点名字的命中区）：${JSON.stringify(panelChip)}`)
   assert(panelChip.refTo === tagId, `属性区标签名要用同一条导航契约：${JSON.stringify(panelChip)}`)
   assert(panelChip.title.includes(tagName), `属性区标签名也要说去哪：${JSON.stringify(panelChip)}`)
 
-  await page.locator(`[data-panel-tag-id="${tagId}"] .props-tag-name`).click()
+  await page.locator(`.props-drawer [data-panel-tag-id="${tagId}"] .props-tag-name`).click()
   await page.waitForTimeout(200)
   const afterPanel = await page.evaluate(() => window.__qua.snapshot().activeId)
   assert(afterPanel === tagId, `点属性区的标签名也应打开标签块：${afterPanel} ≠ ${tagId}`)
 
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), hostId)
   await page.waitForTimeout(250)
+  // 导航到标签块之后抽屉已收起（离开上下文）⇒ 重新钉回宿主
+  await openPropsDrawer(page, hostId)
   const tagsBeforeX = await page.evaluate((id) => {
     const b = window.__qua.__editor.store.find(id)
     return Array.isArray(b?.props?._tags) ? b.props._tags.length : 0
   }, hostId)
   const centerBeforeX = await page.evaluate(() => window.__qua.snapshot().activeId)
-  await page.locator(`[data-panel-tag-id="${tagId}"] .props-tag-x`).click()
+  await page.locator(`.props-drawer [data-panel-tag-id="${tagId}"] .props-tag-x`).click()
   await page.waitForTimeout(250)
   const afterX = await page.evaluate(
     ({ id }) => {
@@ -26762,10 +26788,12 @@ await check('T264 ⌘+点属性区标签名 ⇒ 新页签；块菜单有「在�
     // 属性区画的是**当前对象**：真的 zoom 过去，不是只放光标
     await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), hostId)
     await page.waitForTimeout(300)
+    // 分类段住在**属性抽屉**里（行下管理档只画值段）
+    await openPropsDrawer(page, hostId)
 
     // ① ⌘+点属性区标签名 ⇒ 新页签（这条入口曾经只认 Shift）
     const beforeMeta = await tabs()
-    await page.locator(`[data-panel-tag-id="${tagId}"] .props-tag-name`).click({ modifiers: ['Meta'] })
+    await page.locator(`.props-drawer [data-panel-tag-id="${tagId}"] .props-tag-name`).click({ modifiers: ['Meta'] })
     await page.waitForTimeout(400)
     const afterMeta = await tabs()
     assert(
@@ -30585,11 +30613,13 @@ await check('T304 图标选择器：选项入口网格化；块配置弹窗（�
   const pageId = await page.evaluate(() => window.__qua.pages()[0].id)
   await page.evaluate((id) => window.__qua.invoke('core.page/open', { pageId: id }), pageId)
   await page.waitForTimeout(200)
-  await page.waitForSelector('.prop-face-btn', { timeout: 3000 })
+  // 身份段（脸／名字／露面）住在**属性抽屉**里
+  await openPropsDrawer(page, pageId)
+  await page.waitForSelector('.props-drawer .prop-face-btn', { timeout: 3000 })
   // 面板与弹窗同体：名字／露面段也在面板里（一套段、两个宿主）
-  assert(await page.locator('.prop-names .alias-input').count() > 0, '面板里应有名字段（添加别名输入框）')
-  assert(await page.locator('.prop-lists .alias-check').count() === 2, '面板里应有露面段（页/标签两个列表位）')
-  await page.click('.prop-face-btn')
+  assert(await page.locator('.props-drawer .prop-names .alias-input').count() > 0, '面板里应有名字段（添加别名输入框）')
+  assert(await page.locator('.props-drawer .prop-lists .alias-check').count() === 2, '面板里应有露面段（页/标签两个列表位）')
+  await page.click('.props-drawer .prop-face-btn')
   await page.waitForSelector('.icon-picker-colors', { timeout: 3000 })
   await page.click('.icon-picker-colors .icon-picker-swatch:nth-child(3)')
   await page.waitForTimeout(200)
@@ -30897,8 +30927,10 @@ await check('T306 自定义色：色盘选 hex 写入并进最近色；chip soft
   await openFirstPage(page)
 
   const pageId = await page.evaluate(() => window.__qua.pages()[0].id)
-  await page.waitForSelector('.prop-face-btn', { timeout: 5000 })
-  await page.click('.prop-face-btn')
+  // 脸行住在**属性抽屉**里（行下管理档只画值段）
+  await openPropsDrawer(page, pageId)
+  await page.waitForSelector('.props-drawer .prop-face-btn', { timeout: 5000 })
+  await page.click('.props-drawer .prop-face-btn')
   await page.waitForSelector('.icon-picker .icon-picker-colors', { timeout: 3000 })
 
   // 原生色盘无法在无头浏览器里真点，但它的值就是那条 input 的 value＋input 事件——
@@ -30921,7 +30953,7 @@ await check('T306 自定义色：色盘选 hex 写入并进最近色；chip soft
   await page.waitForTimeout(150)
 
   // 重开：最近自定义那段还在，且当前色就是它
-  await page.click('.prop-face-btn')
+  await page.click('.props-drawer .prop-face-btn')
   await page.waitForSelector('.icon-picker .icon-picker-colors', { timeout: 3000 })
   const again = await page.evaluate(() => {
     const dots = [...document.querySelectorAll('.icon-picker-colors .icon-picker-swatch')]
