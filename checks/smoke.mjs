@@ -35196,6 +35196,27 @@ await check('T369 主体行下管理档：值全显、块标字段不重复、�
     assert(shut.pending.includes('1') && shut.pendingOpen === '0', `待填收成一行：${JSON.stringify(shut)}`)
     assert(!shut.noteShown, `待填默认收着：${JSON.stringify(shut)}`)
 
+    /**
+     * **在值输入框里按回车不拆块**：`↵`/`⇧↵`/`⌥↵` 都挂在「编辑器有文本焦点」上，
+     * 而焦点在表单控件里也算有文本焦点 ⇒ 不拦的话，改个字段名就当场把块拆了。
+     * 判据落在结果上：块数不变、这一块没多出子块。
+     */
+    const before = await page.evaluate((host) => ({
+      total: window.__qua.allBlocks().length,
+      children: window.__qua.__editor.store.find(host)?.children?.length ?? -1,
+    }), fx.host)
+    await page.locator(`.blk[data-block-id="${fx.host}"] .blk-manage .prop-row[data-prop-id="${fx.author}"] input`).click()
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(250)
+    const afterEnter = await page.evaluate((host) => ({
+      total: window.__qua.allBlocks().length,
+      children: window.__qua.__editor.store.find(host)?.children?.length ?? -1,
+    }), fx.host)
+    assert(
+      afterEnter.total === before.total && afterEnter.children === before.children,
+      `输入框里按回车不该命中拆块／建子块：${JSON.stringify({ before, afterEnter })}`,
+    )
+
     // 点开就地展开（再点收起）：待填的栏变成可编辑的行
     await page.locator(`.blk[data-block-id="${fx.host}"] .blk-manage-pending`).click()
     await page.waitForTimeout(320)

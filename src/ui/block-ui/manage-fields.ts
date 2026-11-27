@@ -109,6 +109,21 @@ export class ManageFieldsSection {
     const root = document.createElement('div')
     root.className = 'blk-manage'
     root.dataset.manageBlock = target.id
+    /**
+     * **Enter 家族的键在表单控件上归控件自己，不往上传**。
+     *
+     * 这一档住在块编辑器里：整片编辑区是一个 contenteditable 容器，而 `↵`/`⇧↵`/`⌥↵`/
+     * `⌘⇧↵` 都挂在「编辑器有文本焦点」上——不拦的话，在一个输入框里按回车会当场
+     * 拆块／建子块（`editorTextFocus` 只看焦点在不在容器里，不看是不是表单控件）。
+     * 行内小输入框早有一条同样的拦法（`onCommitKeys` 的 `stop`），这里是它的宿主级兜底：
+     * 控件自己的行为（提交、选集、按钮激活）照常，外层收不到这一下。
+     */
+    root.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return
+      const t = e.target as HTMLElement | null
+      if (!t?.closest('input, textarea, select, button')) return
+      e.stopPropagation()
+    })
     if (plan.rows.length > 0) {
       root.appendChild(this.fields.render(target, plan.rows, this.deps.propLabels()))
     }
