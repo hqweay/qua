@@ -18000,7 +18000,7 @@ await check(
       const host = window.__qua
         .blocks()
         .find((b) => b.roles.length === 0 && b.closure === null && b.text.trim().length > 1)
-      if (!host) return { defId: '', hostId: '' }
+      if (!host) return { defId: '', hostId: '', choiceId: '' }
       window.__qua.invoke('core.props/create-def', {
         blockId: host.id,
         label: '冒烟图标',
@@ -18011,8 +18011,11 @@ await check(
       window.__qua.invoke('core.props/add-choice', { defId, label: '甲' })
       window.__qua.invoke('core.props/add-choice', { defId, label: '乙' })
       window.__qua.invoke('core.props/add-choice', { defId, label: '丙' })
+      const choiceId = window.__qua.fields(host.id).find((f) => f.propId === defId)?.choices[0]?.id ?? ''
+      window.__qua.invoke('core.props/set-ui-position', { defId, position: 'block-left' })
+      window.__qua.invoke('core.props/set-value', { blockId: host.id, propId: defId, value: choiceId })
       window.__qua.invoke('core.block/focus-block', { blockId: defId })
-      return { defId, hostId: host.id }
+      return { defId, hostId: host.id, choiceId }
     })
     assert(setup.defId !== '', '前置：定义块应建出来并聚焦')
     await page.waitForSelector('.choices-editor')
@@ -18040,8 +18043,16 @@ await check(
           ?.style.getPropertyValue('--value-c')
           .includes("--ui-identity-red") === true,
     )
+    // 同一笔颜色写入必须让已显示该值的 gutter 图标当场跟上（不等刷新、不等关浮层）
+    const gutterNow = await page.evaluate(
+      (defId) =>
+        [...document.querySelectorAll(`.prop-mark[data-prop-id="${defId}"]`)].some((m) =>
+          m.style.getPropertyValue('--value-c').includes('--ui-identity-red'),
+        ),
+      setup.defId,
+    )
+    assert(gutterNow, '颜色写入后 gutter 图标应立刻带上身份色，不等下一次重画')
     await page.keyboard.press('Escape')
-
     // 勾选框映射：勾上「显示为勾选框」→ 出现 on/off 两个下拉（默认前两个选项）
     await page.locator('#properties-body [data-choice-check]').check()
     await page.waitForSelector('[data-choice-check-which="on"]')

@@ -252,6 +252,25 @@ export function propsCommands(
     d.repaintBlocks([sourceId, ...affected])
   }
 
+  /**
+   * 选项记录的脸/名字变了：显示变在**所有正选着这一条的块**上，写回调只重画定义页。
+   * 值存的是记录 id，扫一遍森林按值找消费者即可；这是低频配置写，O(N) 可以接受。
+   * 定义块自己也进表，兼容不从属性面板发起的写口。
+   */
+  const repaintChoiceConsumers = (choiceId: string): void => {
+    const consumers: string[] = []
+    walkForest(d.kb.roots(), (b) => {
+      for (const value of Object.values(b.props ?? {})) {
+        if (valueListOf(value).includes(choiceId)) {
+          consumers.push(b.id)
+          break
+        }
+      }
+    })
+    const def = defOfChoice(choiceId)
+    d.repaintBlocks([...(def ? [def.id] : []), ...new Set(consumers)])
+  }
+
   return {
     /**
      * 写一格值：**按定义声明的 kind／format 校验**，不合就不写。
@@ -400,6 +419,7 @@ export function propsCommands(
       d.run((tx) =>
         tx.patch(def.id, (b) => setChoices(b, patchChoice(allChoicesOf(b), choiceId, (c) => ({ ...c, label: name })))),
       )
+      repaintChoiceConsumers(choiceId)
     },
 
     /**
@@ -421,6 +441,7 @@ export function propsCommands(
       const index = before < 0 ? rest.length : before
       const next = [...rest.slice(0, index), moved, ...rest.slice(index)]
       d.run((tx) => tx.patch(defId, (b) => setChoices(b, next)))
+      repaintChoiceConsumers(choiceId)
     },
 
     /** 写选项的可见范围（三态；形状不认识就不写，别落一格读不回来的值） */
@@ -465,6 +486,7 @@ export function propsCommands(
           ),
         ),
       )
+      repaintChoiceConsumers(choiceId)
     },
 
     /** 写选项颜色：空串＝摘色（渲染中性）；坏值不写，避免把非法色值落进库 */
@@ -487,6 +509,7 @@ export function propsCommands(
           ),
         ),
       )
+      repaintChoiceConsumers(choiceId)
     },
 
     /**
@@ -712,6 +735,7 @@ export function propsCommands(
           setChoices(b, patchChoice(allChoicesOf(b), choiceId, (c) => ({ ...c, deleted: true as const }))),
         ),
       )
+      repaintChoiceConsumers(choiceId)
     },
 
     /** 撤墓碑：记录回到候选，所有还指着它的块当场解析回旧名（值一个字节不动） */
@@ -729,6 +753,7 @@ export function propsCommands(
           ),
         ),
       )
+      repaintChoiceConsumers(choiceId)
     },
   }
 }

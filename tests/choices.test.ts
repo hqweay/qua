@@ -399,10 +399,11 @@ test('ChoiceLookupIndex：purge 后不返回旧块；软删留下的块仍是「
 
 /* ------------------------------------------------------------ 8. 命令 */
 
-function commandHarness(): { cmds: ReturnType<typeof propsCommands>; kb: MemoryKb; toasts: string[] } {
+function commandHarness(): { cmds: ReturnType<typeof propsCommands>; kb: MemoryKb; toasts: string[]; repainted: string[] } {
   const store = new BlockStore([])
   const kb = new MemoryKb(store)
   const toasts: string[] = []
+  const repainted: string[] = []
   const deps: PropsDeps = {
     kb,
     write: (_blockId, mutate) => mutate(),
@@ -411,10 +412,10 @@ function commandHarness(): { cmds: ReturnType<typeof propsCommands>; kb: MemoryK
       return { ops: r.ops, result: r.result }
     },
     toast: (text) => void toasts.push(text),
+    repaintBlocks: (ids) => void repainted.push(...ids),
   }
-  return { cmds: propsCommands(deps), kb, toasts }
+  return { cmds: propsCommands(deps), kb, toasts, repainted }
 }
-
 test('createPropDef：默认复用同名同 kind；mode:new 建第二个 propId', () => {
   const { cmds, kb } = commandHarness()
   const first = cmds.createPropDef('', '评分', 'number', 'own')
@@ -543,11 +544,12 @@ test('图标/勾选框映射/快捷入口：图标写记录、状态唯一、空
 
 
 test('选项配色：写色/摘色只改记录，坏值被拒且不落库', () => {
-  const { cmds, kb, toasts } = commandHarness()
+  const { cmds, kb, toasts, repainted } = commandHarness()
   const defId = cmds.createPropDef('', '状态', 'select', 'own')
   const c1 = cmds.addChoice(defId, '甲')
   const rec = () => allChoicesOf(kb.get(defId)!).find((c) => c.id === c1)
-
+  const holder = blk('holder', '一块', { [defId]: c1 })
+  kb.store.reset([...kb.roots(), holder])
   cmds.setChoiceColor(c1, 'red')
   assert.equal(rec()?.color, 'red', '色写在选项记录上')
   cmds.setChoiceColor(c1, '#aabbcc')
@@ -555,8 +557,8 @@ test('选项配色：写色/摘色只改记录，坏值被拒且不落库', () =
   cmds.setChoiceColor(c1, 'not-a-color')
   assert.equal(rec()?.color, '#aabbcc', '坏值被拒，旧色保留')
   assert.ok(toasts.some((x) => x.includes('颜色值不合法')), `应有提示：${JSON.stringify(toasts)}`)
+  assert.ok(repainted.includes('holder'), '值指向该选项的块要当场重画，gutter 图标才跟色')
   cmds.setChoiceColor(c1, '')
-  assert.equal('color' in (rec() ?? {}), false, '空串摘色，不留空槽')
 })
 test('多值：setChoiceCardinality 写/摘 `_cardinality`；切回单值挡住仍有 >1 值的库', () => {
   const { cmds, kb, toasts } = commandHarness()

@@ -234,6 +234,15 @@ export function refreshRefBadges(): void {
   for (const ed of liveEditors) ed.refreshRefBadges()
 }
 
+/**
+ * 一行可能在多台编辑器里同时露面（主屏、侧槽、查询面板）。
+ * 只重画当前／主那两台会漏掉其余实例——属性脸变了，别的实例停在旧样子，
+ * 要等下一次交互才跟上。这里让每台活编辑器各画各的那一行。
+ */
+export function repaintBlockInLiveEditors(id: string): void {
+  for (const ed of liveEditors) ed.renderBlock(id)
+}
+
 /** 并发的几台编辑器共用一次在飞的批查；没查到（未 ready）不写空缓存 */
 async function loadRefBadges(ids: readonly string[]): Promise<void> {
   const source = refBadgeSource

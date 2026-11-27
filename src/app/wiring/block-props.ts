@@ -47,12 +47,12 @@ import { t } from '../../core/infra/msg.ts'
 import type { App } from '../../core/infra/ports.ts'
 import { Layers, type Row } from '../../ui/overlay/layers.ts'
 import type { BlockStore } from '../../core/model/store.ts'
+import { repaintBlockInLiveEditors } from '../../view/editor/editor.ts'
 import type { BlockEditor } from '../../view/editor/editor.ts'
 import type { MemoryKb } from '../../core/kb/memory.ts'
 import type { Prefs, Workspace } from '../../core/infra/workspace.ts'
 import type { Tx as KbTx, Op, Change } from '../../core/kb/types.ts'
 import type { UndoCapture } from '../../core/kb/scoped.ts'
-
 export interface BlockPropsDeps {
   ws: Workspace
   blocks: BlockStore
@@ -119,11 +119,10 @@ function writeProps(blockId: string, mutate: () => void): void {
  * 调用方：`writeProps`（每次写属性之后）与命令层的事务收尾（`PageDeps.run`／`PropsDeps.run`）。
  */
 function repaintBlock(blockId: string): void {
-  getMainEd().renderBlock(blockId)
+  repaintBlockInLiveEditors(blockId)
   // 名字/显示模式变了 ⇒ 本视图里引用它的 chip（在**别的块**的 `.tx` 里）也要换字
   getMainEd().renderRefSources(blockId)
   if (getEd() !== getMainEd()) {
-    getEd().renderBlock(blockId)
     getEd().renderRefSources(blockId)
   }
 }
