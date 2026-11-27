@@ -11,8 +11,9 @@
  *  1. **不画 gutter 字段**：`_uiPosition: block-left` 的 `select`/`checkbox` 在块标旁
  *     已经有那一格，行下再画一次就是 30px 内两个可编辑控件（判据 `isGutterRow`）。
  *     整组声明都是 gutter 字段的标签因此在这里一条都不剩——它不出，不是被筛掉。
- *  2. **不放添加入口**：加属性／加声明是 schema 变更，归抽屉；行脸只回答「已有的这些，
- *     值是什么」。所以两段都以 `bare` 挂（`bare` = 不画 `＋` 与草稿行）。
+ *  2. **只管值段**：加属性是 schema 变更，归抽屉；字段声明也**不在这一档**——
+ *     标签块的声明由正文里的定义身体（`.blk-def-body`）画，那一格本来就在、可折、
+ *     带添加入口。两处都画就是同一段在一行下出现两次（真机当场见到过）。
  *  3. **只有「块的真实位置」挂它**：镜像／查询结果／挂载区／单元格在构造上就不接
  *     这个宿主（与「正文里的结果体」同一条纪律），否则每个单根岛都会长出一块面板。
  *
@@ -21,18 +22,15 @@
  *    偏小——那种偏差不报错，只在滚到底部时露出来（与 `belowFieldsRows` 同一条纪律）。
  */
 import type { Block, ManagePlan } from '../../core/index.ts'
-import { hasList, planManageFields } from '../../core/index.ts'
+import { planManageFields } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import { FieldsSection } from './fields-section.ts'
-import { DeclaredFieldsSection } from './declared-fields-section.ts'
 import { PropsDraftState } from './props-add-form.ts'
 import type { PropertiesDeps } from './properties.ts'
 
 export type { ManagePlan }
 
 export interface ManageFieldsOpts {
-  /** 这一档画在哪块上（活引用：撤销／换库之后旧引用可能已不在森林里） */
-  target: () => Block | undefined
   /** 「待填」此刻是不是展开着（会话态，归装配层） */
   pendingOpen: () => boolean
   /** 点 `+N` 行：展开 ⇄ 收起。宿主负责落状态并重画这一行（估高跟着变） */
@@ -45,7 +43,6 @@ export class ManageFieldsSection {
   private readonly deps: PropertiesDeps
   private readonly opts: ManageFieldsOpts
   private readonly fields: FieldsSection
-  private readonly declared: DeclaredFieldsSection
 
   constructor(deps: PropertiesDeps, opts: ManageFieldsOpts) {
     this.deps = deps
@@ -77,34 +74,11 @@ export class ManageFieldsSection {
       createOwnDef: deps.createOwnDef,
       repaint: opts.repaint,
     })
-    this.declared = new DeclaredFieldsSection(
-      {
-        owner: () => this.opts.target(),
-        repaint: opts.repaint,
-        declaredFields: deps.declaredFields,
-        undeclareField: deps.undeclareField,
-        openRef: deps.openRef,
-        // `bare` 下草稿行永远关着，这份状态只是签名要求（与真草稿互斥无关）
-        draft: new PropsDraftState(),
-        declareProp: deps.declareProp,
-        createDeclaredDef: deps.createDeclaredDef,
-        form,
-        choices: deps.choices,
-        blockById: deps.blockById,
-        tags: deps.allTags,
-        tagName: deps.tagName,
-        pickIcon: deps.pickIcon,
-        recentColors: deps.recentColors,
-      },
-      { bare: true },
-    )
   }
 
   /** 画这一块的这一档；`null` ＝ 这一块没有可画的东西（宿主不挂） */
   render(target: Block): HTMLElement | null {
-    // 声明段的准入与 `DeclaredFieldsSection.render` 同一条：带 `tag` 露面的块才有
-    const declared = hasList(target, 'tag')
-    const plan = planManageFields(this.deps.rows(target), this.opts.pendingOpen(), declared)
+    const plan = planManageFields(this.deps.rows(target), this.opts.pendingOpen())
     if (!plan) return null
     const root = document.createElement('div')
     root.className = 'blk-manage'
@@ -128,10 +102,6 @@ export class ManageFieldsSection {
       root.appendChild(this.fields.render(target, plan.rows, this.deps.propLabels()))
     }
     if (plan.pendingTotal > 0) root.appendChild(this.pendingLine(target.id, plan))
-    if (plan.declared) {
-      const declaredEl = this.declared.render(this.deps.propLabels())
-      if (declaredEl) root.appendChild(declaredEl)
-    }
     return root
   }
 

@@ -35228,12 +35228,127 @@ await check('T369 主体行下管理档：值全显、块标字段不重复、�
     const back = await read()
     assert(!back.noteShown && back.pendingOpen === '0', `再点收起：${JSON.stringify(back)}`)
 
+    /**
+     * **标签块自己当单主体屏 ⇒ 声明段只出现一次**（正文里的定义身体那一格）。
+     *
+     * 这一档只画值段：字段声明由 `.blk-def-body` 画（本来就在、可折、带添加入口）。
+     * 管理档再画一遍，就是同一段在一行下出现两次——真机上当场见到的正是这个
+     * （一行「标签属性」紧跟着又一个带「＋ 添加标签属性」的「标签属性」）。
+     */
+    const tagId = await page.evaluate(() => {
+      const b = window.__qua.allBlocks().find((x) => x.lists?.includes('tag') && x.aliases?.includes('管理档探针'))
+      if (!b) throw new Error('前置：标签块不在库里')
+      window.__qua.invoke('core.block/focus-block', { blockId: b.id })
+      return b.id
+    })
+    await page.waitForTimeout(450)
+    const tagFace = await page.evaluate((id) => {
+      const row = document.querySelector(`.blk[data-block-id="${id}"]`)
+      const manage = row?.querySelector(':scope > .blk-props-manage')
+      return {
+        manage: Boolean(manage),
+        inManage: manage?.querySelectorAll('.props-declared').length ?? 0,
+        inRow: row?.querySelectorAll('.props-declared').length ?? 0,
+        inBody: Boolean(row?.querySelector(':scope > .blk-view-body .props-declared')),
+      }
+    }, tagId)
+    assert(tagFace.inManage === 0, `管理档不重复声明段（正文身体那一格已经有了）：${JSON.stringify(tagFace)}`)
+    assert(tagFace.inBody && tagFace.inRow === 1, `声明段恰好一处、且是定义身体：${JSON.stringify(tagFace)}`)
+
     await ctx.close()
-    return '根行管理档：值全显；块标字段不重复；待填一行可展开/收起'
+    return '根行管理档：值全显；块标字段不重复；待填一行可展开/收起；标签块声明段只出现一次'
   } catch (e) {
     await ctx.close()
     throw e
   }
+})
+
+await check('T370 查询块作为屏根也能整块选中：Esc→⇧↑ 跨到查询块，复制引用落它的 id', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const fx = await page.evaluate(() => {
+    const q = window.__qua
+    q.invoke('core.query/create', { name: '查询条件XYZ', spec: { where: { any: [] } } })
+    const qid = q.__editor.doc.roots[0]?.id ?? ''
+    q.focusBlock(qid, 0)
+    q.invoke('core.editor/insert-block', { text: '222' })
+    return { qid, pid: q.__editor.sel?.aBlock ?? '' }
+  })
+  assert(fx.qid && fx.pid, `前置：查询根与子块：${JSON.stringify(fx)}`)
+
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), fx.pid)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(120)
+  await page.keyboard.down('Shift')
+  await page.keyboard.press('ArrowUp')
+  await page.keyboard.up('Shift')
+  await page.waitForTimeout(200)
+
+  const state = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    return { ids: [...(ed.bsel.blockSel?.ids ?? [])], refs: ed.clip.copySnapshot()?.ids ?? [] }
+  })
+  assert(state.ids.includes(fx.qid), `⇧↑ 要能选中作为屏根的查询块：${JSON.stringify(state)}`)
+  assert(state.refs.includes(fx.qid), `复制引用应落在查询块 id：${JSON.stringify(state)}`)
+
+  await ctx.close()
+  return '查询块作为屏根可被 Esc→⇧↑ 整块选中，复制引用落它的 id'
+})
+
+await check('T371 镜像岛里 ⇧↑ 越界选中宿主：复制引用落源 id，文本不冒充源正文', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const fx = await page.evaluate(() => {
+    const q = window.__qua
+    q.invoke('core.page/create')
+    const root = q.__editor.doc.roots[0]
+    const anchor = root.children?.[0]?.id ?? root.id
+    q.focusBlock(anchor, 0)
+    q.invoke('core.editor/insert-block', { text: '源二' })
+    const src = q.__editor.sel?.aBlock ?? ''
+    q.invoke('core.embed/insert', { blockId: src, targetId: anchor, view: 'mirror' })
+    return { src, host: '' }
+  })
+  await page.waitForTimeout(450)
+  fx.host = await page.evaluate(
+    () => [...document.querySelectorAll('.blk[data-embed="1"]')].map((el) => el.dataset.blockId ?? '').pop() ?? '',
+  )
+  assert(fx.src && fx.host, `前置：镜像宿主与源：${JSON.stringify(fx)}`)
+
+  const rect = await page.evaluate((id) => {
+    const el = [...document.querySelectorAll(`.blk-embed-body .blk[data-block-id="${id}"] > .tx`)][0]
+    if (!el) return null
+    const r = el.getBoundingClientRect()
+    return { x: r.left + Math.min(20, r.width / 2), y: r.top + r.height / 2 }
+  }, fx.src)
+  assert(rect, '前置：镜像岛里的源行可见')
+  await page.mouse.click(rect.x, rect.y)
+  await page.waitForTimeout(200)
+  const focused = await page.evaluate(() => window.__qua.snapshot().activeIsMain)
+  assert(focused === false, '前置：焦点在镜像岛里')
+  await page.evaluate((id) => window.__qua.activeEditor().placeCaret(id, 0), fx.src)
+
+  await page.keyboard.down('Shift')
+  await page.keyboard.press('ArrowUp')
+  await page.keyboard.up('Shift')
+  await page.waitForTimeout(200)
+
+  const state = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    return {
+      activeIsMain: window.__qua.snapshot().activeIsMain,
+      ids: [...(ed.bsel.blockSel?.ids ?? [])],
+      refs: ed.clip.copySnapshot()?.ids ?? [],
+      text: ed.bsel.selectedBlocksText(),
+    }
+  })
+  assert(state.activeIsMain, '岛界越权交回外层编辑器')
+  assert(state.ids.includes(fx.host), `⇧↑ 应选中这次露面的宿主：${JSON.stringify(state)}`)
+  assert(state.refs.includes(fx.src) && !state.refs.includes(fx.host), `复制引用应落源 id 而非宿主：${JSON.stringify(state)}`)
+  assert(state.text.includes('露面引用'), `文本味不该冒充源正文：${JSON.stringify(state)}`)
+
+  await ctx.close()
+  return '镜像岛 ⇧↑ 选中宿主，复制引用落源 id，文本标明是露面引用'
 })
 
 const known = results.filter((r) => !r.ok && r.known)

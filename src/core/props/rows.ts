@@ -443,11 +443,8 @@ export interface ManagePlan {
   pendingTotal: number
   /** 待填此刻是不是展开着 */
   open: boolean
-  /** 有没有标签声明段（标签块才有） */
-  declared: boolean
   /**
-   * 占几行（估高用）：段头 ＋ 行 ＋ `+N` 行，声明段算「一行头 ＋ 一行 chips」。
-   * 只数**行**，像素换算归渲染层。
+   * 占几行（估高用）：段头 ＋ 行 ＋ `+N` 行。只数**行**，像素换算归渲染层。
    */
   slots: number
 }
@@ -455,24 +452,24 @@ export interface ManagePlan {
 /**
  * **这一块的管理档内容**（纯判据：没有 DOM、不写模型）。
  *
- * `null` ＝ 这一档不出现：没有值、没有待填、也没有声明——一屏单块的开头不该多一条空带。
+ * `null` ＝ 这一档不出现：没有值、也没有待填——一屏单块的开头不该多一条空带。
+ *
+ * ⚠️ **只管值段**，不要把它扩成「属性面板的一段」：字段声明不在这里，标签块的
+ *    声明由正文里的定义身体（`.blk-def-body`）画——那一格本来就在、可折、带添加入口。
+ *    两处都画就是同一段在一行下出现两次（图里当场见到过）。
  *
  * ⚠️ 渲染与虚拟化估高（`visibleRowHeight` 的 `manageRows`）都吃**这一份**：
  *    两处各算一遍，滚动条就会系统性偏小/偏大——那种偏差不报错，只在滚到底部时露出来。
  */
-export function planManageFields(
-  all: readonly FieldRow[],
-  pendingOpen: boolean,
-  declared: boolean,
-): ManagePlan | null {
+export function planManageFields(all: readonly FieldRow[], pendingOpen: boolean): ManagePlan | null {
   const fields = manageFieldsOf(all)
   const pendingTotal = fields.pendingRows.length
-  if (fields.rows.length === 0 && pendingTotal === 0 && !declared) return null
+  if (fields.rows.length === 0 && pendingTotal === 0) return null
   const open = pendingOpen && pendingTotal > 0
   const rows = open ? [...fields.rows, ...fields.pendingRows] : [...fields.rows]
   // 段头只在值段真画行时占位；全空的块只剩那条 `+N` 行（不再套一个空段头）
-  const slots = (rows.length > 0 ? 1 + rows.length : 0) + (pendingTotal > 0 ? 1 : 0) + (declared ? 2 : 0)
-  return { rows, pendingTotal, open, declared, slots }
+  const slots = (rows.length > 0 ? 1 + rows.length : 0) + (pendingTotal > 0 ? 1 : 0)
+  return { rows, pendingTotal, open, slots }
 }
 
 /** 属性 id 集合（模型口径的 `fieldsOf`：标签属性 ∪ 块属性） */

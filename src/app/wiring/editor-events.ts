@@ -26,7 +26,6 @@ import {
   canonicalLang,
   codeLangLabel,
   embedBodyOf,
-  hasList,
   iconOf,
   isDeleted,
   isFolded,
@@ -416,7 +415,6 @@ function viewEvents(
      */
     const caps = getPanels().propDeps(() => kb.get(block.id))
     const section = new ManageFieldsSection(caps, {
-      target: () => kb.get(block.id),
       pendingOpen: () => managePendingOpenOf(block.id),
       onTogglePending: () => {
         toggleManagePending(block.id)
@@ -456,7 +454,7 @@ function viewEvents(
     const m = manageSlotsMemo
     if (m && m.rev === blocks.revision && m.id === id && m.open === open) return m.slots
     const b = kb.get(id)
-    const slots = b ? (planManageFields(kb.fieldsOf(id), open, hasList(b, 'tag'))?.slots ?? 0) : 0
+    const slots = b ? (planManageFields(kb.fieldsOf(id), open)?.slots ?? 0) : 0
     manageSlotsMemo = { rev: blocks.revision, id, open, slots }
     return slots
   }
