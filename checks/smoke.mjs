@@ -6571,7 +6571,7 @@ await check('T18 跨页锚点不被误删：在当前容器里删块，只回收
   return `删 ${target.slice(-6)}：库级 marks ${mid.marks}→${after.marks}、atoms ${mid.atoms}→${after.atoms}；回到第一页仍有 ${back.marks} 条锚点（起始 ${before.marks}）`
 })
 
-await check('T19 zoom in：进子树、面包屑可退回、顶层时面包屑隐藏、锚点不走丢', async () => {
+await check('T19 zoom in：进子树、面包屑可退回、顶层时面包屑隐藏、锚点不走丢、普通块字号不变', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
 
@@ -6602,13 +6602,36 @@ await check('T19 zoom in：进子树、面包屑可退回、顶层时面包屑�
   const target = await page.evaluate(() => {
     // ⚠️ 排除**首行**（= 顶层页块自己）：zoom 到顶层等于没 zoom，面包屑必然为空
     const ids = new Set([...document.querySelectorAll('#editor .blk[data-depth="0"]')].map((el) => el.dataset.blockId))
-    const b = window.__qua.blocks().find((x) => x.children > 0 && !ids.has(x.id))
+    // 普通内容块（无身份）才验「聚焦不放大」；页/日记/标签等身份根另有标题档
+    const b = window.__qua.blocks().find((x) => x.children > 0 && !ids.has(x.id) && x.roles.length === 0)
     return b ? { id: b.id, text: b.text } : null
   })
   assert(target, '假数据里应有带子块的非顶层块')
+  /**
+   * **字号不跟「当没当根」走**：普通内容块在页面里是 md，聚焦成这一屏第一行后仍是 md。
+   * 页/日记这类身份根才用 lg——它们在页面里本来就是 lg，不是聚焦给的。
+   */
+  const fontsBefore = await page.evaluate((id) => {
+    const fs = (el) => (el ? parseFloat(getComputedStyle(el).fontSize) : 0)
+    const target = document.querySelector(`#editor .blk[data-block-id="${id}"] > .tx`)
+    const pageRoot = document.querySelector('#editor .blk[data-depth="0"] > .tx')
+    return { target: fs(target), page: fs(pageRoot) }
+  }, target.id)
+  assert(fontsBefore.page > fontsBefore.target, `页根应比子块大一档：${JSON.stringify(fontsBefore)}`)
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), target.id)
   await new Promise((r) => setTimeout(r, 250))
   const zoomed = await st()
+  const fontsAfter = await page.evaluate((id) => {
+    const el = document.querySelector(`#editor .blk[data-block-id="${id}"][data-depth="0"]`)
+    const tx = el?.querySelector(':scope > .tx')
+    return tx ? { fs: parseFloat(getComputedStyle(tx).fontSize), role: el.dataset.role ?? '' } : null
+  }, target.id)
+  assert(fontsAfter, `聚焦后目标块应在第一行：${target.id}`)
+  assert(fontsAfter.role === '', `这条用例要用无身份普通块：${JSON.stringify(fontsAfter)}`)
+  assert(
+    fontsAfter.fs === fontsBefore.target,
+    `聚焦普通块不该改变字号：${fontsBefore.target} → ${fontsAfter.fs}`,
+  )
   assert(zoomed.trailShown, `zoom 后应出现面包屑：${JSON.stringify(zoomed)}`)
   assert(zoomed.trail.length === 1 && zoomed.trail[0] === '欢迎使用相', `面包屑应是祖先链（不含自己）：${JSON.stringify(zoomed.trail)}`)
   assert(zoomed.here < top.here, `zoom 后应只剩子树：${top.here} → ${zoomed.here}`)
@@ -6645,7 +6668,7 @@ await check('T19 zoom in：进子树、面包屑可退回、顶层时面包屑�
   }
 
   await ctx.close()
-  return `顶层 ${top.here} 块 → zoom ${zoomed.here} 块（面包屑「${zoomed.trail.join(' › ')}」）→ 退回 ${back.here} 块${leafView ? ` → 叶子 zoom ${leafView.here} 块` : ''}；锚点恒 ${top.marks}/${top.atoms}`
+  return `顶层 ${top.here} 块 → zoom ${zoomed.here} 块（面包屑「${zoomed.trail.join(' › ')}」）→ 退回 ${back.here} 块${leafView ? ` → 叶子 zoom ${leafView.here} 块` : ''}；普通块字号 ${fontsBefore.target}→${fontsAfter.fs}，锚点恒 ${top.marks}/${top.atoms}`
 })
 
 await check('T25 块标左键 = 聚焦/zoom：点一下进子树，右键才开菜单', async () => {
