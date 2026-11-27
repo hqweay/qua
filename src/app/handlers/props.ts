@@ -117,6 +117,12 @@ export const PROPS_HANDLERS: Record<string, Handler> = {
     app.setChoiceIcon(choiceId, S(a.icon))
     return true
   },
+  'core.props/set-choice-color': (a, app) => {
+    const choiceId = S(a.choiceId)
+    if (!choiceId) return false
+    app.setChoiceColor(choiceId, S(a.color))
+    return true
+  },
   'core.props/set-choice-check': (a, app) => {
     const defId = S(a.defId)
     if (!defId) return false

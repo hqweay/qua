@@ -541,6 +541,23 @@ test('图标/勾选框映射/快捷入口：图标写记录、状态唯一、空
   assert.equal('icon' in (rec(c1) ?? {}), false, '空图标摘格，不留空串')
 })
 
+
+test('选项配色：写色/摘色只改记录，坏值被拒且不落库', () => {
+  const { cmds, kb, toasts } = commandHarness()
+  const defId = cmds.createPropDef('', '状态', 'select', 'own')
+  const c1 = cmds.addChoice(defId, '甲')
+  const rec = () => allChoicesOf(kb.get(defId)!).find((c) => c.id === c1)
+
+  cmds.setChoiceColor(c1, 'red')
+  assert.equal(rec()?.color, 'red', '色写在选项记录上')
+  cmds.setChoiceColor(c1, '#aabbcc')
+  assert.equal(rec()?.color, '#aabbcc', 'hex 合法（渲染端的对比度代价另记）')
+  cmds.setChoiceColor(c1, 'not-a-color')
+  assert.equal(rec()?.color, '#aabbcc', '坏值被拒，旧色保留')
+  assert.ok(toasts.some((x) => x.includes('颜色值不合法')), `应有提示：${JSON.stringify(toasts)}`)
+  cmds.setChoiceColor(c1, '')
+  assert.equal('color' in (rec() ?? {}), false, '空串摘色，不留空槽')
+})
 test('多值：setChoiceCardinality 写/摘 `_cardinality`；切回单值挡住仍有 >1 值的库', () => {
   const { cmds, kb, toasts } = commandHarness()
   const defId = cmds.createPropDef('', '标签集', 'select', 'own')

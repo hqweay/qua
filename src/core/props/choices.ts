@@ -17,7 +17,8 @@
  *
  * ⚠️ 本文件零 DOM、零 store —— 记录就是属性袋里的一段纯数据，能直接单测。
  */
-import { prop, type Block, type BlockProps } from '../model/model.ts'
+import { isColorValue, prop, type Block, type BlockProps } from '../model/model.ts'
+import { identityColorCss } from '../identity/faces.ts'
 import { uuidv7Hex } from '../model/ids.ts'
 
 /** 定义块上装选项记录的槽（系统属性；空数组 ＝ 没有选项，不落盘留空壳） */
@@ -176,4 +177,16 @@ export function choiceVisible(choice: PropChoice, tagIds: ReadonlySet<string>): 
   if (scope.mode === 'all') return true
   const hit = scope.tags.some((id) => tagIds.has(id))
   return scope.mode === 'only' ? hit : !hit
+}
+
+/**
+ * 选项色 → CSS 值（只给图标描边用，不染文字与方框）。
+ *
+ * 坏值与空值都缺席：坏值不可能从写路径进来，但要防遗留库里的脏数据；
+ * 缺色是合法中性态，不该在这里补一个第二真相（借定义块的脸）。
+ */
+export function choiceColorCss(choice: PropChoice | undefined): string | undefined {
+  const color = choice?.color
+  if (color === undefined || !isColorValue(color)) return undefined
+  return identityColorCss(color)
 }

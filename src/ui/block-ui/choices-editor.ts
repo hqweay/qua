@@ -22,6 +22,7 @@ import {
   allChoicesOf,
   cardinalityOf,
   checkOf,
+  choiceColorCss,
   choiceScopeOf,
   choiceVisible,
   choicesOf,
@@ -45,6 +46,8 @@ export interface ChoiceActions {
   setScope: (choiceId: string, scope: ChoiceScope) => void
   /** 选项在块左侧的图标（空串＝无图标） */
   setIcon: (choiceId: string, icon: string) => void
+  /** 写选项颜色（空串＝摘色，渲染中性） */
+  setColor: (choiceId: string, color: string) => void
   /** 写/摘勾选框映射；`closure: true` 同时标为库级唯一的任务状态 */
   setCheck: (defId: string, spec: { on: string; off: string; closure: boolean } | null) => void
   /** 单值/多值（多选不能是勾选框/任务状态；切回单值有「仍有块选了多个值」的守卫） */
@@ -69,9 +72,16 @@ export interface ChoicesEditorDeps {
   /** 标签显示名（`#名`） */
   tagName: (id: string) => string
   /** 图标选择器（装配层开浮层；未接 ⇒ 图标只读） */
-  pickIcon?: (anchor: DOMRect, current: string, onPick: (icon: string) => void, trigger?: HTMLElement) => void
+  pickIcon?: (
+    anchor: DOMRect,
+    current: string,
+    onPick: (icon: string) => void,
+    trigger?: HTMLElement,
+    face?: { color: string; onColor: (color: string) => void; recentColors: () => readonly string[] },
+  ) => void
+  /** 最近自定义色（设备态），与块脸选择器共用同一份账本 */
+  recentColors?: () => readonly string[]
 }
-
 export class ChoicesEditor {
   readonly root: HTMLElement
   private readonly deps: ChoicesEditorDeps
@@ -454,14 +464,29 @@ export class ChoicesEditor {
     ico.className = 'choice-icon'
     ico.dataset.choiceIcon = '1'
     ico.dataset.tip = icon === '' ? t('ui.props.choice.pickIcon') : t('ui.props.choice.iconTitle')
+    const tint = choiceColorCss(choice)
+    if (tint) ico.style.setProperty('--value-c', tint)
     renderIcon(ico, icon, 'square-dashed', 'sm')
     if (editable && this.deps.pickIcon) {
       ico.addEventListener('click', (e) => {
         e.preventDefault()
-        this.deps.pickIcon?.(ico.getBoundingClientRect(), icon, (next) => {
-          this.deps.write.setIcon(choice.id, next)
-          this.render()
-        }, ico)
+        this.deps.pickIcon?.(
+          ico.getBoundingClientRect(),
+          icon,
+          (next) => {
+            this.deps.write.setIcon(choice.id, next)
+            this.render()
+          },
+          ico,
+          {
+            color: choice.color ?? '',
+            onColor: (color) => {
+              this.deps.write.setColor(choice.id, color)
+              this.render()
+            },
+            recentColors: () => this.deps.recentColors?.() ?? [],
+          },
+        )
       })
     } else {
       ico.disabled = true

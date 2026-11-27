@@ -595,9 +595,10 @@
 /* 普通 select 的 gutter 入口：点开取值菜单（不是翻转） */
 .blk .identity.prop-mark {
   cursor: pointer;
+  color: var(--value-c, var(--ui-text-tertiary));
 }
 .blk .identity.prop-mark:hover {
-  color: var(--ui-text-secondary);
+  color: var(--value-c, var(--ui-text-secondary));
 }
 /* 普通勾选框（`_check` 无 `_use`）：翻 on/off，不是任务 */
 .blk .identity.check-box {
@@ -614,6 +615,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  color: var(--value-c, inherit);
 }
 .blk .identity.prop-multi .prop-multi-more {
   font-size: var(--ui-fs-2xs);
@@ -1575,7 +1577,7 @@
 .prop-chip-ico {
   display: inline-flex;
   flex: none;
-  color: var(--ui-text-tertiary);
+  color: var(--value-c, var(--ui-text-tertiary));
 }
 .prop-chip-open {
   cursor: pointer;
@@ -3504,12 +3506,12 @@
   border: 1px solid transparent;
   border-radius: var(--ui-radius-sm);
   background: none;
-  color: var(--ui-text-secondary);
+  color: var(--value-c, var(--ui-text-secondary));
   cursor: pointer;
 }
 .choice-icon:hover:not(:disabled) {
   border-color: var(--ui-border);
-  color: var(--ui-text);
+  color: var(--value-c, var(--ui-text));
 }
 .choice-icon:disabled {
   cursor: default;
@@ -3607,7 +3609,7 @@
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  color: var(--ui-text-tertiary);
+  color: var(--value-c, var(--ui-text-tertiary));
 }
 .choice-scope-panel {
   display: flex;

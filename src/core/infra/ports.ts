@@ -463,6 +463,11 @@ export interface App {
   /** 写选项的图标（`lucide:<name>` 或字面文本；空串＝无图标） */
   setChoiceIcon(choiceId: string, icon: string): void
   /**
+   * 写选项颜色（`identityColorCss` 的值域：色板 key 或 hex；空串＝摘色、渲染中性）。
+   * 只染值图标，不染文字与块标方框；坏值不写。
+   */
+  setChoiceColor(choiceId: string, color: string): void
+  /**
    * 写/摘勾选框映射（`_check {on, off}`），可选标成任务状态（`_use: 'closure'`）。
    *
    * `null` ＝ 摘掉；`closure: true` 时库级唯一（已有另一条就拒绝）；

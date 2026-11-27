@@ -78,7 +78,15 @@ export interface DefConfigSectionDeps {
   /** 标签块的显示名（作用域徽标里的 `#名`） */
   tagName: (id: string) => string
   /** 给选项选一个图标（装配层开浮层；未接 ⇒ 图标只读） */
-  pickIcon?: (anchor: DOMRect, current: string, onPick: (icon: string) => void) => void
+  pickIcon?: (
+    anchor: DOMRect,
+    current: string,
+    onPick: (icon: string) => void,
+    trigger?: HTMLElement,
+    face?: { color: string; onColor: (color: string) => void; recentColors: () => readonly string[] },
+  ) => void
+  /** 最近自定义色（设备态），与块脸选择器共用 */
+  recentColors?: () => readonly string[]
 }
 
 export class DefConfigSection {
@@ -89,12 +97,14 @@ export class DefConfigSection {
   constructor(deps: DefConfigSectionDeps) {
     this.deps = deps
     this.choicesFull = new ChoicesEditor({
+      def: () => deps.def(),
       tagById: deps.blockById,
       tags: deps.tags,
       write: deps.choices,
       tagName: deps.tagName,
-      pickIcon: (anchor, current, onPick) => deps.pickIcon?.(anchor, current, onPick),
-      def: () => deps.def(),
+      pickIcon: (anchor, current, onPick, trigger, face) =>
+        deps.pickIcon?.(anchor, current, onPick, trigger, face),
+      recentColors: deps.recentColors,
       focusTag: () => '',
     })
   }

@@ -31,6 +31,8 @@ export interface Row {
   parts?: { text: string; mark?: boolean }[]
   hint?: string
   icon?: string
+  /** 图标描边的 CSS 值（值图标配色）；只染图标，不染标签文字 */
+  iconColor?: string
   group?: string
   command?: string
   /** 这一行开下一层菜单（分组前缀）；与 `command` 恰有一个 */
@@ -482,7 +484,10 @@ export class Layers {
       // 三档：有图标 → 画；**空串 → 空白但占位**（候选行的普通块——页/块的区分
       // 由有图标/无图标承载，塞个图形就把区分抹了）；缺省 → `·` 占位（命令行，
       // 不硬塞一个图标免得每行都长一样）
-      if (r.icon) renderIcon(ico, r.icon, 'circle-help')
+      if (r.icon) {
+        renderIcon(ico, r.icon, 'circle-help')
+        if (r.iconColor) ico.style.setProperty('--value-c', r.iconColor)
+      }
       else if (r.icon !== undefined) { /* 空白但占位 */ }
       else ico.textContent = '·'
       const label = document.createElement('span')

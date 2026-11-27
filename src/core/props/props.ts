@@ -46,6 +46,7 @@ import { isEngineProp, isQueryableSystemProp, readSystemField, ENGINE_CREATED, E
 export {
   CHOICES_PROP,
   CHOICE_SCOPE_PROP,
+  choiceColorCss,
   choiceScopeOf,
   choiceVisible,
   choicesOf,

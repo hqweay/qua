@@ -28,6 +28,7 @@ import {
   isAssetRef,
   isCurrentPropKind,
   isRefViewValue,
+  isColorValue,
   parseCheckSpec,
   passThroughRefTarget,
   useOf,
@@ -109,6 +110,7 @@ export function propsCommands(
   | 'setChoiceLabel'
   | 'moveChoice'
   | 'setChoiceScope'
+  | 'setChoiceColor'
   | 'setChoiceIcon'
   | 'setChoiceCheck'
   | 'setChoiceCardinality'
@@ -459,6 +461,28 @@ export function propsCommands(
             patchChoice(allChoicesOf(b), choiceId, (c) => {
               const { icon: _drop, ...rest } = c
               return value === '' ? rest : { ...rest, icon: value }
+            }),
+          ),
+        ),
+      )
+    },
+
+    /** 写选项颜色：空串＝摘色（渲染中性）；坏值不写，避免把非法色值落进库 */
+    setChoiceColor: (choiceId, color) => {
+      const def = defOfChoice(choiceId)
+      if (!def) return
+      const value = color.trim()
+      if (value !== '' && !isColorValue(value)) {
+        d.toast(t('ui.props.choice.colorInvalid'), 'warn')
+        return
+      }
+      d.run((tx) =>
+        tx.patch(def.id, (b) =>
+          setChoices(
+            b,
+            patchChoice(allChoicesOf(b), choiceId, (c) => {
+              const { color: _drop, ...rest } = c
+              return value === '' ? rest : { ...rest, color: value }
             }),
           ),
         ),

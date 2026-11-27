@@ -448,12 +448,28 @@ export function setupPanels(deps: PanelsDeps) {
    * 最近使用 ＋ 手动源。选中即记账（`recentIcons`，设备态不入 KB）——
    * 「再用一次」的名单跟着这台机器走。
    */
-  const pickIconValue = (anchor: DOMRect, current: string, onPick: (icon: string) => void, trigger?: HTMLElement): void => {
+  const pickIconValue = (
+    anchor: DOMRect,
+    current: string,
+    onPick: (icon: string) => void,
+    trigger?: HTMLElement,
+    face?: { color: string; onColor: (color: string) => void; recentColors: () => readonly string[] },
+  ): void => {
     openIconPicker({
       layers,
       anchor,
       ...(trigger ? { trigger } : {}),
       current,
+      ...(face
+        ? {
+            color: face.color,
+            onColor: (color: string) => {
+              face.onColor(color)
+              recordRecentColor(color)
+            },
+            recentColors: face.recentColors,
+          }
+        : {}),
       recent: deps.prefs().recentIcons,
       onPick: (value) => {
         onPick(value)
@@ -751,6 +767,7 @@ export function setupPanels(deps: PanelsDeps) {
       pickChoice: (b, propId, current, onPick, anchor, trigger) => pickChoiceValue(b, propId, current, onPick, anchor, trigger),
       /** 选项图标：同一份 catalog 现画成网格（可搜索、⊘、最近使用） */
       pickIcon: pickIconValue,
+      recentColors: () => deps.prefs().recentColors,
       /** 页的脸（图标＋颜色）：开同一个块配置弹窗，脸面板直接展开 */
       pickFace: (b, anchor) => pickFace(b, anchor),
       refLabel: refLabelOf,
@@ -799,6 +816,7 @@ export function setupPanels(deps: PanelsDeps) {
         move: (defId, choiceId, beforeId) => propWrite('core.props/move-choice', { defId, choiceId, beforeId }),
         setScope: (choiceId, scope) => propWrite('core.props/set-choice-scope', { choiceId, scope }),
         setIcon: (choiceId, icon) => propWrite('core.props/set-choice-icon', { choiceId, icon }),
+        setColor: (choiceId, color) => propWrite('core.props/set-choice-color', { choiceId, color }),
         setCheck: (defId, spec) =>
           propWrite('core.props/set-choice-check', {
             defId,

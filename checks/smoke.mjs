@@ -18029,6 +18029,19 @@ await check(
       () => document.querySelector('#properties-body .choices-editor .choice-icon')?.getAttribute('data-icon') === 'lucide:flag',
     )
 
+    // 脸选择器同一枚入口的颜色行：选红后选项图标的描边吃到身份色 token
+    await page.locator('#properties-body .choices-editor .choice-icon').first().click()
+    await page.waitForSelector('.icon-picker-colors .icon-picker-swatch', { timeout: 3000 })
+    await page.click('.icon-picker-colors .icon-picker-swatch[data-tip="身份色：red"]')
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector('#properties-body .choices-editor .choice-icon')
+          ?.style.getPropertyValue('--value-c')
+          .includes("--ui-identity-red") === true,
+    )
+    await page.keyboard.press('Escape')
+
     // 勾选框映射：勾上「显示为勾选框」→ 出现 on/off 两个下拉（默认前两个选项）
     await page.locator('#properties-body [data-choice-check]').check()
     await page.waitForSelector('[data-choice-check-which="on"]')

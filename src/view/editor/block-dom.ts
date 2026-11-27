@@ -19,6 +19,7 @@ import {
   CALLOUT_PROP,
   calloutTypeOf,
   calloutTypesOf,
+  choiceColorCss,
   identityColorCss,
   QUOTE_TYPE,
   DEFAULT_BLOCK_TYPE,
@@ -1253,6 +1254,8 @@ export function makeBlockEl(
         for (const c of picked.slice(0, cap)) {
           const ico = document.createElement('span')
           ico.className = 'prop-multi-ico'
+          const tint = choiceColorCss(c)
+          if (tint) ico.style.setProperty('--value-c', tint)
           renderIcon(ico, c.icon ?? prop<string>(field.def, '_icon'), 'square-dashed', 'md')
           mark.appendChild(ico)
         }
@@ -1305,6 +1308,8 @@ export function makeBlockEl(
       mark.className = 'identity prop-mark'
       mark.dataset.propId = field.propId
       mark.dataset.propFor = b.id
+      const tint = choiceColorCss(field.choice)
+      if (tint) mark.style.setProperty('--value-c', tint)
       renderIcon(mark, field.icon, 'square-dashed', 'md')
       const value = field.choice ? field.choice.label.trim() : ''
       mark.dataset.tip = t('ui.props.gutterTitle', {

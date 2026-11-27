@@ -142,7 +142,15 @@ export interface PropertiesDeps {
    * 与 `pickRef` 同一条理由：图标集是 `view/icons.ts` 的数据，属性区不该自己
    * 维护第二份清单；浮层也只有装配层能开。
    */
-  pickIcon: (anchor: DOMRect, current: string, onPick: (icon: string) => void) => void
+  pickIcon: (
+    anchor: DOMRect,
+    current: string,
+    onPick: (icon: string) => void,
+    trigger?: HTMLElement,
+    face?: { color: string; onColor: (color: string) => void; recentColors: () => readonly string[] },
+  ) => void
+  /** 最近自定义色（设备态），给选项编辑器的脸选择器共用 */
+  recentColors?: () => readonly string[]
   /**
    * **这一块的「图标＋颜色」**（装配层弹出选择器，写 `_icon`／`_color`）。
    *
@@ -272,8 +280,13 @@ export class PropertiesPanel {
       tags: () => this.deps.allTags(),
       write: this.deps.choices,
       tagName: (id: string) => this.deps.tagName(id),
-      pickIcon: (anchor: DOMRect, current: string, onPick: (icon: string) => void) =>
-        this.deps.pickIcon(anchor, current, onPick),
+      pickIcon: (
+        anchor: DOMRect,
+        current: string,
+        onPick: (icon: string) => void,
+        trigger?: HTMLElement,
+        face?: { color: string; onColor: (color: string) => void; recentColors: () => readonly string[] },
+      ) => this.deps.pickIcon(anchor, current, onPick, trigger, face),
     }
     this.formDeps = {
       defs: this.deps.defs,

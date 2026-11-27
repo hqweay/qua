@@ -119,7 +119,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--ui-text-tertiary);
+  color: var(--value-c, var(--ui-text-tertiary));
   font-family: var(--ui-font-mono);
   font-size: var(--ui-fs-sm);
 }

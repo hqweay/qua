@@ -15,14 +15,15 @@
 import {
   allowsMany,
   assetRefKindOf,
-  assetRefsOf,
   choiceDisplayLabel,
+  choiceColorCss,
   clickModsOf,
   ICON_PROP,
   prop,
   refViewOf,
   valueItemsOf,
   valueListOf,
+  assetRefsOf,
   type Block,
   type BlockStore,
   type FieldRow,
@@ -141,7 +142,7 @@ function mountRefValueIsland(deps: RefIslandDeps, area: HTMLElement, targetId: s
  * **绝不 `String(value)`**（那会把 `a,b` 写回去，List 就退化成单值了）。
  */
 function valueChips(
-  items: readonly { text: string; refId?: string; icon?: string }[],
+  items: readonly { text: string; refId?: string; icon?: string; color?: string }[],
   onRemove: (index: number) => void,
   opts: { onOpen?: (index: number, e: MouseEvent) => void } = {},
 ): HTMLElement {
@@ -158,6 +159,7 @@ function valueChips(
       const ico = document.createElement('span')
       ico.className = 'prop-chip-ico'
       ico.setAttribute('aria-hidden', 'true')
+      if (item.color) ico.style.setProperty('--value-c', item.color)
       renderIcon(ico, item.icon, 'circle', 'md')
       body.appendChild(ico)
     }
@@ -440,12 +442,13 @@ export function makeCellEditor(
     const ids = row.currentChoiceIds ?? valueListOf(row.value)
     const labels = row.currentChoiceLabels ?? []
     const iconOf = new Map((row.choices ?? []).map((c) => [c.id, c.icon]))
+    const colorOf = new Map((row.choices ?? []).map((c) => [c.id, choiceColorCss(c)]))
     const box = document.createElement('div')
     box.className = 'prop-multi-value'
     box.dataset.propMulti = '1'
     box.appendChild(
       valueChips(
-        ids.map((id, i) => ({ text: labels[i] ?? t('ui.props.choice.deleted'), icon: iconOf.get(id) })),
+        ids.map((id, i) => ({ text: labels[i] ?? t('ui.props.choice.deleted'), icon: iconOf.get(id), color: colorOf.get(id) })),
         (i) => {
           const next = ids.filter((_, j) => j !== i)
           send(next.length === 0 ? undefined : next)
@@ -513,7 +516,8 @@ export function makeCellEditor(
     wrap.className = 'prop-select'
     const ico = document.createElement('span')
     ico.className = 'prop-select-ico'
-    renderIcon(ico, icon, 'square-dashed', 'md')
+    const tint = choiceColorCss(currentChoice)
+    if (tint) ico.style.setProperty('--value-c', tint)
     wrap.append(ico, sel)
     return wrap
   }

@@ -332,6 +332,7 @@ function viewEvents(
             tags: () => [...kb.tags()],
             tagName: caps.tagName,
             pickIcon: caps.pickIcon,
+            recentColors: caps.recentColors,
           })
         : (() => {
             const declared = new DeclaredFieldsSection({
@@ -356,6 +357,7 @@ function viewEvents(
               tags: () => [...kb.tags()],
               tagName: caps.tagName,
               pickIcon: caps.pickIcon,
+              recentColors: caps.recentColors,
             })
             return { render: () => declared.render(caps.propLabels()) }
           })()

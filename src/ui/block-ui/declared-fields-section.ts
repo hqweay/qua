@@ -63,7 +63,15 @@ export interface DeclaredFieldsSectionDeps {
   /** 标签块的显示名（作用域徽标里的 `#名`） */
   tagName: (id: string) => string
   /** 给选项选一个图标（装配层开浮层；未接 ⇒ 图标只读） */
-  pickIcon?: (anchor: DOMRect, current: string, onPick: (icon: string) => void) => void
+  pickIcon?: (
+    anchor: DOMRect,
+    current: string,
+    onPick: (icon: string) => void,
+    trigger?: HTMLElement,
+    face?: { color: string; onColor: (color: string) => void; recentColors: () => readonly string[] },
+  ) => void
+  /** 最近自定义色（设备态），与块脸选择器共用 */
+  recentColors?: () => readonly string[]
 }
 
 export class DeclaredFieldsSection {
@@ -81,12 +89,14 @@ export class DeclaredFieldsSection {
   constructor(deps: DeclaredFieldsSectionDeps) {
     this.deps = deps
     this.choicesTag = new ChoicesEditor({
+      def: () => this.tagChoices?.def,
       tagById: deps.blockById,
       tags: deps.tags,
       write: deps.choices,
       tagName: deps.tagName,
-      pickIcon: (anchor, current, onPick) => deps.pickIcon?.(anchor, current, onPick),
-      def: () => this.tagChoices?.def,
+      pickIcon: (anchor, current, onPick, trigger, face) =>
+        deps.pickIcon?.(anchor, current, onPick, trigger, face),
+      recentColors: deps.recentColors,
       // 标签视角只该看「对本标签可见」的那几条；页的声明段没有「标签作用域」可言
       // （`_fieldDefs` 在页上还没有消费方）：走全量视角
       focusTag: () => {

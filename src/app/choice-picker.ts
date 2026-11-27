@@ -8,7 +8,7 @@
  * 单选/多选不是两个菜单：行、图标、空态都一样，差别只有「选中后关不关」与
  * 「写回 string 还是 string[]」。这个差别由定义的 `_cardinality` 决定，不由调用方猜。
  */
-import { ICON_PROP, cardinalityOf, choicesOf, prop, type Block, type PropChoice } from '../core/index.ts'
+import { choiceColorCss, ICON_PROP, cardinalityOf, choicesOf, prop, type Block, type PropChoice } from '../core/index.ts'
 import { t } from '../core/infra/msg.ts'
 import type { Layers, Row } from '../ui/overlay/layers.ts'
 
@@ -53,10 +53,12 @@ export function openChoicePicker(o: ChoicePickerOpts): void {
   const rows = (): Row[] =>
     o.choices.map((c) => {
       const icon = iconOf(c)
+      const tint = choiceColorCss(c)
       return {
         id: `choice/${c.id}`,
         label: labelOf(c),
         ...(icon ? { icon } : {}),
+        ...(tint ? { iconColor: tint } : {}),
         ...(selected.has(c.id)
           ? { keyHint: multi ? '✓' : t('ui.props.choice.current') }
           : {}),
