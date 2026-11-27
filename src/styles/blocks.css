@@ -194,15 +194,16 @@
     background: transparent;
   }
 }
-/* 剪切确认抖动：⌘X 本身不改文档（移动发生在粘贴那一刻），屏幕上什么都没变，
+/* 抓取确认：⌘X 本身不改文档（移动发生在粘贴那一刻），屏幕上什么都没变，
    抖一下是「这几块已经抓进剪贴板」；不另配文字提示——画面上的反应就是答复。
-   抖**正文**不抖整行：行前的轨线与块标是结构 chrome，跟着抖读成整行没对齐 */
-.blk[data-pulse='1'] .tx {
+   抖**这一行说的话**不抖整行：轨线、块标与引述竖线是结构 chrome，跟着抖读成没对齐。
+   引述抬头的正文槽是 display:none，它说的话是变体徽章 ⇒ 徽章就是这一行的正文投影。 */
+.blk[data-pulse='1'] :is(.tx, .blk-callout-label, .blk-callout-ico) {
   animation: blk-pulse calc(var(--ui-dur-2) * 2) ease-in-out;
 }
 /* 减少动态下不抖：可达性反馈由门面退回那句提示，不在这里硬造一个静态标记 */
 @media (prefers-reduced-motion: reduce) {
-  .blk[data-pulse='1'] .tx {
+  .blk[data-pulse='1'] :is(.tx, .blk-callout-label, .blk-callout-ico) {
     animation: none;
   }
 }
@@ -953,10 +954,10 @@
 #editor.drop-end {
   box-shadow: inset 0 -2px 0 0 var(--ui-accent);
 }
-/* ---------------------------------------------------------- 属性（检视卡）
+/* ---------------- 属性段
    一个平铺列表：同一 propId 只出现一次、来源并列；声明未填的显示「待填」。
-   它住在**右槽的检视卡**里（`.dock-card`），所以这里只管行本身；
-   分家、间距、边框都归卡片与槽，不在这里再造一套。 */
+   宿主是**抽屉**（`.props-drawer`）与行下管理档（`.blk-manage`），这里只管行本身；
+   分家、间距、边框归宿主，不在这里再造一套。 */
 .properties-body {
   display: flex;
   flex-direction: column;
@@ -1017,7 +1018,7 @@
   flex-wrap: wrap;
   gap: var(--ui-gap-1);
 }
-/* 来源徽章＝「来自 ●#名」（检视卡专用）：点染标签自己的显式身份色（行上的
+/* 来源徽章＝「来自 ●#名」（抽屉值行专用）：点染标签自己的显式身份色（行上的
    --identity-c 槽，与块标同一套信号），没配色的标签回落中性——「来自标签」
    是在场信号，色是标签之间的区分。块下属性行**不画**这枚点：那是读值的
    投影面，来源在那里没有动作可承接（判据见 props-line.ts 头部）。 */
@@ -4007,7 +4008,7 @@ button.blk-auto-chip {
    定义值配置／字段声明的就地投影：与自动化体同一张脸（纸面上的一块面板——
    底色抬一层、结构线收边），让「这一块的定义」与它的名字分成两层。
    ⚠️ 整组限定 `.blk-def-body` 前缀：段组件的样式（`.props-section` 族）长在
-   检视卡/抽屉的列布局里，投影宿主自己收紧段 chrome——首段的分隔线与上边距
+   抽屉的列布局里，投影宿主自己收紧段 chrome——首段的分隔线与上边距
    是「卡内分段」的语言，身体里只有一段，不吃那条线。 */
 .blk-def-body {
   padding: var(--ui-gap-2) var(--ui-gap-3);
