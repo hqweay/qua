@@ -11,6 +11,7 @@ release
 # 截图产物不入库；**README 引用的那几张例外**（它们必须随仓库走，否则 README 在 GitHub 上是破图）
 shots/*.png
 !shots/readme-hero.png
+!shots/readme-hero-en.png
 !shots/readme-page.png
 !shots/overlay-命令面板.png
 !shots/overlay-斜杠菜单.png

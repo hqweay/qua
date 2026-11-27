@@ -58,6 +58,30 @@ const openPage = (page, prefix) =>
     window.__qua.invoke('core.page/open', { pageId: hit.id })
   }, prefix)
 
+/**
+ * 英文头图：`README.en.md` 引的那一张。
+ *
+ * 不能在 `scene()` 里顺手拍——整轮都带 `?locale=en` 时 16 张会全变英文、文件名却不变，
+ * 中文 README 的图就被静默换掉了。所以英文图**单独开一页、单独存**，
+ * 只拍这一张（`?locale=en` 是装配层认的显式入口）。
+ */
+async function enScene(name, fn) {
+  const ctx = await browser.newContext({ viewport: VIEW, deviceScaleFactor: 2, locale: 'en-US' })
+  const page = await ctx.newPage()
+  try {
+    await page.goto(`${base}?locale=en`, { waitUntil: 'load' })
+    await page.waitForFunction(() => Boolean(window.__qua), undefined, { timeout: 15_000 })
+    await page.evaluate(() => window.__qua.quiet(true))
+    await page.evaluate(asProduct)
+    await fn(page)
+    await page.waitForTimeout(180)
+    await shot(page, `${SHOTS}${name}.png`)
+    written.push(`${name}.png`)
+  } finally {
+    await ctx.close()
+  }
+}
+
 const blockByText = (page, text) =>
   page.evaluate((s) => {
     const b = window.__qua.blocks().find((x) => x.text.startsWith(s))
@@ -79,6 +103,12 @@ await scene(
   },
   { theme: 'light' },
 )
+
+// 英文头图（`README.en.md` 用）。种子文案走英文整句表，所以按英文首句找那一块。
+await enScene('readme-hero-en', async (p) => {
+  const id = await blockByText(p, 'Welcome to Qua —')
+  await p.evaluate((bid) => window.__qua.focusBlock(bid, 2), id)
+})
 
 // 一张有内容的页：页头别名、行内引用、四种区间格式、待办、标签 chip、页底查询与引用栏。
 await scene(

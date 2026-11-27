@@ -696,7 +696,7 @@
   </div>
 
   <div class="card pad" style="margin-top:18px">
-    <div class="subh">默认布局 <span>左槽＝导航与时间，右槽＝当前块的检视与出处</span></div>
+    <div class="subh">默认布局 <span>左槽＝导航与时间，右槽＝窗口与回收站（反链/成员是页底挂载栏，属性贴在块上）</span></div>
     <div class="mock">
       <div class="slotbox">
         <div class="sh"><span>左槽 · cards</span><span>4 小卡 ＋ 2 卡</span></div>
@@ -714,14 +714,10 @@
         </div>
       </div>
       <div class="slotbox">
-        <div class="sh"><span>右槽 · cards</span><span>3 卡</span></div>
+        <div class="sh"><span>右槽 · cards</span><span>窗口卡 ＋ 1 卡</span></div>
         <div class="mcard solo">
-          <div class="h"><span>检视 · 当前块</span><span class="dots">⌄ ⤢ ✕</span></div>
+          <div class="h"><span>窗口 · 某一块</span><span class="dots">⌄ ⤢ ✕</span></div>
           <div class="b"><div class="l m"></div><div class="l"></div><div class="l s"></div><div class="l"></div></div>
-        </div>
-        <div class="mcard">
-          <div class="h"><span>反链</span><span class="dots">⌄ ⤢ ✕</span></div>
-          <div class="b"><div class="l"></div><div class="l m"></div></div>
         </div>
         <div class="mcard">
           <div class="h"><span>回收站</span><span class="dots">⌄ ⤢ ✕</span></div>
@@ -730,7 +726,7 @@
       </div>
     </div>
     <div class="note" style="margin-top:10px">
-      示意里三件事各示范一处：<b>小卡</b>是格子不是卡片；<b>归属树</b>是「收起」（<code>data-collapsed</code>，body 隐藏、编辑器还在）；<b>检视</b>是「单卡」（槽层 <code>data-solo</code>，其它卡让位但状态不变）。
+      示意里三件事各示范一处：<b>小卡</b>是格子不是卡片；<b>归属树</b>是「收起」（<code>data-collapsed</code>，body 隐藏、编辑器还在）；<b>窗口卡</b>是「单卡」（槽层 <code>data-solo</code>，其它卡让位但状态不变）。
       收起的卡与单卡的目标都<b>按 id 记在设备状态里</b>，所以拖到另一槽、刷新、重开都还在。
     </div>
   </div>
