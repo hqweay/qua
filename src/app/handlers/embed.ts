@@ -67,10 +67,15 @@ export const EMBED_HANDLERS: Record<string, Handler> = {
     const view = S(a.view, 'mirror') === 'table' ? 'table' : 'mirror'
     const targetId = S(a.targetId)
     if (targetId) return app.insertEmbed(at, targetId, view) !== null
+    /**
+     * **引用味先于正文味**：块的身份住在 `text/html` 的载荷注释与会话账里，正文只是兜底。
+     * 查询块／空块的正文可以是空的——只看文本会把「刚复制的块」读成「剪贴板里没有块」
+     * （复制的正文是空的，`((id))` 记号无从补起）。纯文本只保留外来的 `((id))` 记号这一档。
+     */
     void app
-      .readText()
-      .then((text) => {
-        const id = refTokensIn(text)[0]?.id
+      .readFlavors()
+      .then(({ refs, text }) => {
+        const id = refs?.ids[0] ?? refTokensIn(text)[0]?.id
         if (!id) {
           app.toast(t('ui.embed.noTarget'), 'warn')
           return

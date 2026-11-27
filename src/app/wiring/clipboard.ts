@@ -89,7 +89,12 @@ export function setupClipboard(deps: ClipboardDeps): Pick<
         got = false
       }
       if (!got) text = (await navigator.clipboard?.readText?.().catch(() => '')) ?? ''
-      if (!refs && copiedClip && copiedClip.text === text) refs = clipToRefs(copiedClip)
+      /**
+       * 空正文不参与对账：账里「复制过一块空正文的块」与「剪贴板是空的」在纯文本上
+       * 长得一样，对上去就会插错块。空正文的块靠 `text/html` 载荷认（复制端总会写），
+       * `read()` 不可用就照实报「没有这一库的块」——不猜。
+       */
+      if (!refs && copiedClip && text !== '' && copiedClip.text === text) refs = clipToRefs(copiedClip)
       return { refs, text }
     },
     /**
