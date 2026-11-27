@@ -81,6 +81,8 @@ export const COMMANDS: CommandDecl[] = [
   { name: 'core.selection/focus-first', title: t('cmd.selection.focus-first'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), hidden: true },
   { name: 'core.selection/extend-up', title: t('cmd.selection.extend-up'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), hidden: true },
   { name: 'core.selection/extend-down', title: t('cmd.selection.extend-down'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), hidden: true },
+  { name: 'core.selection/move-up', title: t('cmd.selection.move-up'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { dir: { type: 'number' } }, hidden: true },
+  { name: 'core.selection/move-down', title: t('cmd.selection.move-down'), capability: 'read', undoable: false, version: '1.0', category: t('menu.cat.view'), args: { dir: { type: 'number' } }, hidden: true },
 
   /* ---- 行内原子 ---- */
   { name: 'core.editor/insert-page-ref', title: t('cmd.editor.insert-page-ref'), capability: 'write', undoable: true, version: '1.0', category: t('menu.cat.inline'), args: { pageId: { type: 'string' } }, keywords: ['ref', 'link', t('menu.kw.ref'), 'chip'], expose: { http: { description: t('menu.expose.insertPageRef') } } },

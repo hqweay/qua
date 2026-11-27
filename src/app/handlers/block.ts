@@ -25,6 +25,11 @@ const copyRefs = (app: App, ids: readonly string[], text?: string): void => {
   app.copyFlavors({ text: body, html: buildCopyHtml(body, { ids: refs }), clip: { ids: refs } }, null)
   app.confirmGrab([...ids], t('ui.toast.blockRefCopied'))
 }
+/** 岛首行的源块是岛自己的根：向上越界的对象是这次露面，不是源树里不存在的上一行 */
+const atEmbedIslandTop = (app: App): boolean => {
+  const s = app.ed.sel
+  return Boolean(app.ed.embedHostId && s && s.aBlock === s.hBlock && s.aOff === s.hOff && s.aOff === 0)
+}
 
 export const STRUCT_HANDLERS: Record<string, Handler> = {
   /* ---- 结构 ---- */
@@ -408,6 +413,12 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
   },
   'core.selection/extend-down': (a, app) => app.ed.bsel.extendBlockSelection(Number(a.dir) === -1 ? -1 : 1),
 
+  'core.selection/move-up': (_a, app) => {
+    if (app.ed.bsel.hasBlockSelection()) return app.ed.bsel.moveAdjacentBlock(-1)
+    if (atEmbedIslandTop(app)) return app.selectEmbedHost(app.ed.embedHostId!)
+    return app.ed.bsel.moveAdjacentBlock(-1)
+  },
+  'core.selection/move-down': (_a, app) => app.ed.bsel.moveAdjacentBlock(1),
   /* ---- 行内原子 ---- */
   'core.editor/insert-page-ref': (a, app) => {
     const pageId = S(a.pageId)

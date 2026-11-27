@@ -190,6 +190,34 @@ export class BlockSelection {
   }
 
   /**
+   * 方向键越过文本边界：选中相邻可见行，而不是停在原地。
+   * 已有单块选区时同样按可见行移动；多块选区交给 `Shift+↑/↓` 扩展，这里不抢。
+   */
+  moveAdjacentBlock(dir: -1 | 1): boolean {
+    if (this.blockSel && this.blockSel.ids.length !== 1) return false
+    if (!this.blockSel) {
+      const s = this.ed.sel
+      if (!s || s.aBlock !== s.hBlock || s.aOff !== s.hOff) return false
+      const loc = locate(this.ed.doc, s.aBlock)
+      if (!loc || !selectable(loc.block)) return false
+      const len = plainLen(loc.block.content)
+      const off = Math.max(0, Math.min(s.aOff, len))
+      if (dir > 0 ? off !== len : off !== 0) return false
+    }
+    const ids = this.visibleIds()
+    const currentId = this.blockSel?.ids[0] ?? this.ed.sel!.aBlock
+    const next = ids[ids.indexOf(currentId) + dir]
+    if (!next) return false
+    this.blockSel = { ids: [next], anchor: next }
+    this.ed.sel = null
+    document.getSelection()?.removeAllRanges()
+    this.ed.markCaret()
+    this.paintBlockSel()
+    this.ed.events.selChange?.()
+    return true
+  }
+
+  /**
    * 鼠标拖选的起点：**在 `.tx` 内按下**时调用。
    * - Shift：清块选区，交给原生文本选择（**我们的增量**：纯文本编辑器的选区跨不了块）；
    * - 否则进入 pending：**只有拖过块边界**才切成块选区（单块内拖仍是文本）。

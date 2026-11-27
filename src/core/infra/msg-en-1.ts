@@ -51,6 +51,8 @@ export const EN1 = {
   'cmd.selection.focus-first': 'Clear block selection and jump to first selected block',
   'cmd.selection.extend-up': 'Extend block selection up',
   'cmd.selection.extend-down': 'Extend block selection down',
+  'cmd.selection.move-up': 'Select block above',
+  'cmd.selection.move-down': 'Select block below',
   'cmd.editor.insert-page-ref': 'Insert inline ref',
   'cmd.editor.insert-date-ref': 'Insert date ref',
   'cmd.editor.insert-image': 'Insert image',

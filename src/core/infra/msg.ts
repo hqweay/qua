@@ -69,6 +69,8 @@ export const MSG = {
   'cmd.selection.focus-first': '取消块选择并定位到首个选中块',
   'cmd.selection.extend-up': '向上扩展块选择',
   'cmd.selection.extend-down': '向下扩展块选择',
+  'cmd.selection.move-up': '向上选中相邻块',
+  'cmd.selection.move-down': '向下选中相邻块',
   'cmd.editor.insert-page-ref': '插入行内引用',
   'cmd.editor.insert-date-ref': '插入日期引用',
   'cmd.editor.insert-image': '插入图片',

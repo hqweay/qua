@@ -129,6 +129,11 @@ export const BINDINGS: Binding[] = [
   { command: 'core.selection/select-all-blocks', kind: 'keymap', key: 'mod+shift+a', when: 'editorTextFocus || blockSelection', layer: 'core' },
   { command: 'core.selection/extend-up', kind: 'keymap', key: 'shift+up', when: 'editorTextFocus || blockSelection', layer: 'core', args: { dir: -1 } },
   { command: 'core.selection/extend-down', kind: 'keymap', key: 'shift+down', when: 'editorTextFocus || blockSelection', layer: 'core', args: { dir: 1 } },
+  // 文本到边界的 ↑/↓ 与块选区态的 ↑/↓：同一命令，前者选中相邻块，后者在可见行间移动
+  { command: 'core.selection/move-up', kind: 'keymap', key: 'up', when: 'editorTextFocus && selectionEmpty && !blockSelection && !axisActive', layer: 'core', args: { dir: -1 } },
+  { command: 'core.selection/move-down', kind: 'keymap', key: 'down', when: 'editorTextFocus && selectionEmpty && !blockSelection && !axisActive', layer: 'core', args: { dir: 1 } },
+  { command: 'core.selection/move-up', kind: 'keymap', key: 'up', when: 'blockSelection', layer: 'core', args: { dir: -1 } },
+  { command: 'core.selection/move-down', kind: 'keymap', key: 'down', when: 'blockSelection', layer: 'core', args: { dir: 1 } },
   // Esc：光标折叠（没划选文字）⇒ 选中当前块（块选区的键盘入口；跨块拖拽、块尾 ⇧↑/⇧↓ 之外的第三条路）。
   // 划选文字时不接：那是「取消文本选区」的直觉，不能反手变成选中整块。
   // 块选区态由上面那条「清空」接。

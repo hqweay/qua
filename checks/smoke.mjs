@@ -35381,6 +35381,86 @@ await check('T371 镜像岛里 ⇧↑ 越界选中宿主：复制引用落源 id
   return '镜像岛 ⇧↑ 选中宿主，复制引用落源 id，文本标明是露面引用'
 })
 
+await check('T372 文本边界 ↑/↓ 选中相邻块：从 222 一次 ↑ 选中查询屏根，块选区态可上下移动', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const fx = await page.evaluate(() => {
+    const q = window.__qua
+    q.invoke('core.query/create', { name: '查询条件XYZ', spec: { where: { any: [] } } })
+    const qid = q.__editor.doc.roots[0]?.id ?? ''
+    q.focusBlock(qid, 0)
+    q.invoke('core.editor/insert-block', { text: '222' })
+    return { qid, pid: q.__editor.sel?.aBlock ?? '' }
+  })
+  assert(fx.qid && fx.pid, `前置：查询根与子块：${JSON.stringify(fx)}`)
+
+  const selection = () => page.evaluate(() => [...(window.__qua.__editor.bsel.blockSel?.ids ?? [])])
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), fx.pid)
+  await page.keyboard.press('ArrowUp')
+  await page.waitForTimeout(150)
+  assert((await selection()).includes(fx.qid), `块首 ↑ 应选中上一整块：${JSON.stringify(await selection())}`)
+
+  await page.keyboard.press('ArrowDown')
+  await page.waitForTimeout(150)
+  const down = await selection()
+  assert(down.length === 1 && down[0] === fx.pid, `块选区态 ↓ 应移到下一行：${JSON.stringify(down)}`)
+  await page.keyboard.press('ArrowUp')
+  await page.waitForTimeout(150)
+  const up = await selection()
+  assert(up.length === 1 && up[0] === fx.qid, `块选区态 ↑ 应移回上一行：${JSON.stringify(up)}`)
+
+  await page.keyboard.press('Escape')
+  await page.evaluate((id) => window.__qua.focusBlock(id, 1), fx.pid)
+  await page.keyboard.press('ArrowUp')
+  await page.waitForTimeout(150)
+  assert((await selection()).length === 0, '文本内部 ↑ 不进块选区，交原生光标')
+
+  await ctx.close()
+  return '文本块首 ↑ 选中上一整块；块选区态 ↑/↓ 逐行移动；文本内部 ↑ 仍归原生'
+})
+
+await check('T373 镜像岛纯 ↑ 越界也选中宿主（不只 ⇧↑）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const fx = await page.evaluate(() => {
+    const q = window.__qua
+    q.invoke('core.page/create')
+    const root = q.__editor.doc.roots[0]
+    const anchor = root.children?.[0]?.id ?? root.id
+    q.focusBlock(anchor, 0)
+    q.invoke('core.editor/insert-block', { text: '源二' })
+    const src = q.__editor.sel?.aBlock ?? ''
+    q.invoke('core.embed/insert', { blockId: anchor, targetId: src, view: 'mirror' })
+    return { src }
+  })
+  await page.waitForTimeout(450)
+  const host = await page.evaluate(
+    () => [...document.querySelectorAll('.blk[data-embed="1"]')].map((el) => el.dataset.blockId ?? '').pop() ?? '',
+  )
+  assert(fx.src && host, `前置：镜像源与宿主：${JSON.stringify({ src: fx.src, host })}`)
+  const rect = await page.evaluate((id) => {
+    const el = [...document.querySelectorAll(`.blk-embed-body .blk[data-block-id="${id}"] > .tx`)][0]
+    if (!el) return null
+    const r = el.getBoundingClientRect()
+    return { x: r.left + Math.min(20, r.width / 2), y: r.top + r.height / 2 }
+  }, fx.src)
+  assert(rect, '前置：镜像岛里的源行可见')
+  await page.mouse.click(rect.x, rect.y)
+  await page.waitForTimeout(200)
+  assert((await page.evaluate(() => window.__qua.snapshot().activeIsMain)) === false, '前置：焦点在镜像岛里')
+  await page.evaluate((id) => window.__qua.activeEditor().placeCaret(id, 0), fx.src)
+  await page.keyboard.press('ArrowUp')
+  await page.waitForTimeout(200)
+  const state = await page.evaluate(() => ({
+    activeIsMain: window.__qua.snapshot().activeIsMain,
+    ids: [...(window.__qua.__editor.bsel.blockSel?.ids ?? [])],
+  }))
+  assert(state.activeIsMain && state.ids.includes(host), `纯 ↑ 越界应交回外层选中宿主：${JSON.stringify(state)}`)
+
+  await ctx.close()
+  return '镜像岛源行按纯 ↑ 越界，外层宿主被整块选中'
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 
