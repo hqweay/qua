@@ -324,7 +324,7 @@ export function makeCellEditor(
       if (deps?.refIsland !== undefined && refViewOf(row.def) === 'inline') {
         // **inline 看法的多值**：每个值一台岛（目标正文就地编辑，写回各自源块）。
         // 值层不变——仍是整份 id 数组：摘除写回数组、追加走选择器，岛只是值的看法。
-        // 抽屉的一个属性就那么几个值，逐台岛的账付得起；表格/检视卡不传岛 deps，照旧 chips。
+        // 抽屉的一个属性就那么几个值，逐台岛的账付得起；表格不传岛 deps，照旧 chips。
         for (const id of ids) {
           const item = document.createElement('span')
           item.className = 'prop-ref-item'

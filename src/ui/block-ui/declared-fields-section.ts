@@ -17,7 +17,7 @@
  *    比没有入口更糟：用户会以为「声明了，成员就有这一格了」。继承是另一个设计
  *    （需要先定「页的子块」与「标签的成员」谁说了算），在定下来之前，这一格就不该可写。
  *
- * 段不认识宿主，可被多个壳挂载（检视卡／抽屉／将来的就地投影）：
+ * 段不认识宿主，可被多个壳挂载（抽屉／将来的就地投影）：
  * 写能力由 deps 注入（命令面），「写完谁重画」由 `repaint` 带；草稿行的开合状态
  * 由宿主注入（`PropsDraftState`）——own 表单与声明表单共用一个槽位，
  * 同时开着会让「点了哪个」不可知，这个互斥是宿主的布局决定，不是段的。
@@ -36,7 +36,7 @@ import { buildAddForm, toggleDraftForm, type PropsAddFormDeps, type PropsDraftSt
 export interface DeclaredFieldsSectionDeps {
   /** 主体块活引用（每次现取：撤销/换库后旧引用可能已经不在森林里） */
   owner: () => Block | undefined
-  /** 写完谁重画（ctx 带）：检视卡＝整卡重画；其他宿主接自己的重画 */
+  /** 写完谁重画（ctx 带）：宿主接自己的重画（抽屉＝整面板重画） */
   repaint: () => void
   /** 页/标签声明给成员的那些属性定义（`_fieldDefs` 的活块） */
   declaredFields: (b: Block) => Block[]

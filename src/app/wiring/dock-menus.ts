@@ -361,8 +361,7 @@ export function setupCardMenus(deps: DockMenusDeps) {
         return {
           id,
           label: t(d.label),
-          // 检视卡的主体是「这一屏唯一的那一块」：多根屏上加进来也看不见 —— 先说清为什么
-          hint: d.id === 'inspect' && deps.getEd().doc.roots.length !== 1 ? t('ui.dock.inspectNoSubject') : '',
+          hint: '',
           icon: d.icon,
           group: `palette/${t('menu.cat.widget')}`,
           keyHint: undefined,
@@ -394,12 +393,6 @@ export function setupCardMenus(deps: DockMenusDeps) {
         const derived = derivedRows.get(row.id)
         if (derived) {
           deps.addDerived(side, derived)
-          /**
-           * 检视卡在多根屏上是**按主体收起**的（这一屏没有「一个东西」可言）：加进来
-           * 也不会出现在槽里。不弹一句，用户看到的就是「点了添加，什么都没有」——
-           * 加卡这个动作本身必须是诚实的。
-           */
-          if (derived === 'inspect' && deps.getEd().doc.roots.length !== 1) deps.toast(t('ui.dock.inspectAdded'), 'info')
           return
         }
         if (row.command) deps.addTile(side, row.command)

@@ -898,8 +898,6 @@ const { renderDocks, openWindow, closeCard, addTile, addDerived, addUtility, add
   scheduleDeviceSave: () => scheduleDeviceSave(),
   scheduleBadge: () => scheduleBadge(),
   getSlots: () => ({ left: dockLeft, right: dockRight }),
-  // 检视卡在面板分片里创建并挂进右槽堆叠；这里只在重画时取它（它必须已经在文档里）
-  inspectCard: () => chrome.inspectCardEl,
   showCardMenu: (side, key, anchor, trigger) => menus.showCardMenu(side, key, anchor, trigger),
   showShortcutMenu: (side, blockId, anchor, trigger) => menus.showShortcutMenu(side, blockId, anchor, trigger),
   showTileMenu: (side, command, anchor, trigger) => menus.showTileMenu(side, command, anchor, trigger),
@@ -1206,7 +1204,7 @@ const {
   scheduleSave,
   scheduleBadge,
   // 面板与 App 门面都晚于本片装配：闭包现取，调用期才解引用
-  scheduleProperties: () => panels.scheduleProperties(),
+  scheduleDrawer: () => panels.scheduleDrawer(),
   getEd: () => ed,
   getMainEd: () => mainEd,
   toast: (text, kind) => app.toast(text, kind),
@@ -1219,7 +1217,7 @@ const assets = setupAssets({
   assetStore,
   getEd: () => ed,
   // 面板与角标都晚于本片装配：闭包现取（订阅回调只在运行期触发）
-  scheduleProperties: () => panels.scheduleProperties(),
+  scheduleDrawer: () => panels.scheduleDrawer(),
   scheduleBadge: () => scheduleBadge(),
   toast: (text, kind) => app.toast(text, kind),
   blocks,
@@ -1412,7 +1410,7 @@ const runTx: TxRun = (fn) => {
   const r = txRun(fn, mainEd)
   if (r.ops.length > 0) blocks.record(r.undo, sel, 'other', Date.now())
   for (const id of new Set(r.changes.filter((c) => c.kind === 'blocks').map((c) => c.id))) repaintBlock(id)
-  scheduleProperties()
+  scheduleDrawer()
   scheduleSave()
   scheduleBadge()
   return r
@@ -1507,7 +1505,7 @@ const owners = setupOwners({
   },
   onChange: () => {
     panels?.renderMounts()
-    panels?.renderProperties()
+    panels?.renderDrawer()
     scheduleSave()
     scheduleBadge()
   },
@@ -1756,7 +1754,7 @@ const app: App = {
     vocabularyChanged: () => {
       mainEd.renderAll()
       if (ed !== mainEd) ed.renderAll()
-      panels?.scheduleProperties()
+      panels?.scheduleDrawer()
       renderDocks()
     },
     // 运行中新建的类型表不在启动的钉住集合里：补钉，别让预算淘汰把自定义类型吞掉
@@ -2520,8 +2518,8 @@ let diag: ReturnType<typeof setupDiagnostics>
 const {
   renderMounts,
   createWindowMountArea,
-  renderProperties,
-  scheduleProperties,
+  renderDrawer,
+  scheduleDrawer,
   pickRefValue,
   pickChoiceValue,
   pickTagValue,
@@ -2583,8 +2581,8 @@ const {
 panels = {
   renderMounts,
   createWindowMountArea,
-  renderProperties,
-  scheduleProperties,
+  renderDrawer,
+  scheduleDrawer,
   pickRefValue,
   pickChoiceValue,
   pickTagValue,

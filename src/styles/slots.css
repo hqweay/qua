@@ -51,7 +51,7 @@
   width: var(--ui-row-h);
   height: var(--ui-row-h);
 }
-/* 带字的按钮（如检视卡的「＋ 属性」）：固定 24px 会把字逐字竖排 */
+/* 带字的按钮（如抽屉的「＋ 属性」）：固定 24px 会把字逐字竖排 */
 .dock-btn--text {
   width: auto;
   padding: 0 var(--ui-gap-2);

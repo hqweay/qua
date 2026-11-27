@@ -167,7 +167,9 @@ export interface DockPrefs {
   /**
    * 单卡（只看这一张）：每侧独立。`null` ＝ 不单卡。
    *
-   * 目标不可见时**不生效**（照常显示其它卡）；状态保留，目标回来时自动再生效。
+   * 目标此刻不是「可见的大卡」时**不生效**（照常显示其它卡）：收起状态由
+   * `isCardCollapsed` 在渲染上豁免，其余不可见形态由渲染层兜底（`renderDockStack`
+   * 只认可见的大卡当目标）——状态本身不在这里清，目标可用了自动再生效。
    *
    * ⚠️ 单卡**不改 `collapsedCards`**：收着的卡进单卡时「这一张此刻展开」是叠在
    *    渲染上的一层（与中心「聚焦即展开」同一条判据），退出单卡自动回到收着 ——
@@ -181,7 +183,8 @@ export interface DockPrefs {
  * 默认槽状态：**左右都开**。
  *
  * 判据（「不加空侧栏」的准确读法）：反对的是**空侧栏**，不是侧栏本身。
- * 左槽默认「四个快捷在上、日历与归属树在下」；右槽默认「检视卡在上、反链在下」。
+ * 左槽默认「四个快捷在上、日历与归属树在下」；右槽默认「反链在下」——
+ * 块属性不在槽里：它们贴在块上（主体行下管理档／抽屉），不再有旁槽镜像。
  * 宽度 `null` ⇒ 用 token 的默认值（`--ui-dock-w-left`／`--ui-dock-w-right`）。
  */
 export const DEFAULT_DOCK: DockPrefs = {
@@ -200,10 +203,7 @@ export const DEFAULT_DOCK: DockPrefs = {
   right: {
     open: true,
     width: null,
-    cards: [
-      { kind: 'derived', card: 'inspect' },
-      { kind: 'derived', card: 'trash' },
-    ],
+    cards: [{ kind: 'derived', card: 'trash' }],
   },
   collapsedCards: {},
   pinnedCards: {},

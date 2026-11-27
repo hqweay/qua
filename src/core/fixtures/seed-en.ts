@@ -40,8 +40,8 @@ export const SEED_EN: Record<string, string> = {
     'A page reference looks like [[Writing Samples]]: bold with double brackets; click to go there, and you can tell it points elsewhere without reading the text.',
   '正文里打 #功能 是一次提及：占正文一格，但**不会**替你打上标签。':
     'Typing #Feature in the text is a mention: it takes a slot in the line but **will not** tag the block for you.',
-  '行尾那枚 chip 才是归属：删掉正文里的提及，chip 还在；要摘标签得在检视卡里显式摘。':
-    'The chip at the end of the line is the real membership: delete the mention in the text and the chip stays; remove the tag explicitly in the inspector.',
+  '行尾那枚 chip 才是归属：删掉正文里的提及，chip 还在；要摘标签得在抽屉或块菜单里显式摘。':
+    'The chip at the end of the line is the real membership: delete the mention in the text and the chip stays; remove the tag explicitly in the drawer or the block menu.',
   '带字段的标签，chip 左侧有一枚三角——点开就地填值，不用绕去属性面板。':
     'A tag with fields has a little triangle on the left of its chip — open it to fill in values right there, no detour to the properties panel.',
   '还没写的页面也能先引用：[[以后再写的页面]]——它只是悬着，不是坏数据。':
@@ -63,8 +63,8 @@ export const SEED_EN: Record<string, string> = {
     'This whole screen is demo content, but **you can really edit it**: close and reopen, and your changes are still there.',
   '屏幕底部那条「今天的待办」是一条查询：自动收集今天还没做完的事。':
     'The "Today\'s To-dos" strip at the bottom is a query: it automatically collects what is still open today.',
-  '右槽是检视与反链：选中一块，就能看到谁在引用它、它身上有哪些属性。':
-    'The right panel is the inspector and backlinks: select a block to see who references it and which properties it carries.',
+  '右槽是反链：选中一块，就能看到谁在引用它；它身上的属性贴在块上——行下、块标旁与抽屉里。':
+    'The right panel is backlinks: select a block to see who references it; the properties it carries live on the block itself — under the row, beside the name, and in the drawer.',
   '左槽「常用」那格是一张收纳盘：小卡收进一张卡，卡头就是把手；拖出来就还原。':
     'The "Favorites" slot in the left panel is a tray: shortcuts grouped into one card, with the header as its handle; drag one out to restore it.',
   '左槽「目录」把页、标签、属性、自动化摊成四面：前两面拖块进去就是加一条归属，后两面只读。':

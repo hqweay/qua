@@ -3,7 +3,7 @@
  *
  * 这一层只做「按 `cards` 顺序取卡、把状态接到卡上、把用户的动作落成 prefs」：
  *   · 卡片内容由 `DockWindows`（窗口）与 `dock-content`
- *     （归属树／日历／反链／回收站／检视卡）提供；
+ *     （归属树／日历／反链／回收站）提供；
  *   · 卡壳、收起、单卡、关闭、拖拽由 `ui/dock` 提供；
  *   · 这里不认识块的内容，也不碰 DOM 的具体长相。
  *
@@ -41,7 +41,6 @@ import type { DockWindows } from '../../ui/dock/dock-windows.ts'
 import {
   buildDockCard,
   buildDockTile,
-  decorateDockCard,
   syncDockCard,
   syncDockTile,
   renderDockStack,
@@ -80,13 +79,6 @@ export type DocksDeps = {
   scheduleBadge: () => void
   /** 两个侧槽在启动段才挂载；重画时现取 */
   getSlots: () => { left: DockSlotEls; right: DockSlotEls }
-  /**
-   * 检视卡本身（右槽里的常驻节点）。
-   *
-   * 装配顺序决定的：面板分片晚于这一节，卡片在那边创建并挂进堆叠；
-   * 这里只在重画时取它、给它补卡壳（收起/单卡/拖拽）。
-   */
-  inspectCard: () => HTMLElement
   /** 右键卡头：卡片菜单（行与动作归装配入口——它有浮层与命令面；这里只给时机与锚） */
   showCardMenu: (side: 'left' | 'right', key: string, anchor: DOMRect, trigger?: HTMLElement) => void
   /** 右键快捷小卡：改目标／在侧槽展开等动作；与卡头菜单同样是装配层的浮层 */
@@ -536,7 +528,7 @@ export function setupDocks(deps: DocksDeps) {
     const liveTiles = new Set<string>()
     for (const side of ['left', 'right'] as const)
       for (const c of deps.prefs().dock[side].cards) {
-        if (c.kind === 'derived' && c.card !== 'inspect') live.add(`${side}:${c.card}`)
+        if (c.kind === 'derived') live.add(`${side}:${c.card}`)
         // 收纳盘同样是纯 chrome 的壳（header 只认身份与状态），body 每次现造
         else if (c.kind === 'tray') live.add(`${side}:${dockKey(c)}`)
         // 小卡不论在顶层还是在盘里，壳都按 key 复用；盘中成员也要算进「还在场」
@@ -955,11 +947,6 @@ export function setupDocks(deps: DocksDeps) {
     })
     // 穷举：`DERIVED_CARDS` 加一张、这里没接 ⇒ 编译期红（早先是三元链，漏了只是「点了没反应」）
     switch (card) {
-      case 'inspect': {
-        const el = deps.inspectCard()
-        decorateDockCard(el, { id: card, title: '', body: el, close, quietHead: true }, cardStateFor(side, card))
-        return { id: card, el }
-      }
       case 'belongs':
         return finish(belongsTree.card())
       case 'trash':

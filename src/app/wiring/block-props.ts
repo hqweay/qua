@@ -6,7 +6,7 @@
  * 为什么「写」与「重画」必须同住：属性里有一族是**外观的输入**（`_aliases`/`_lists`/`_type`/
  * gutter 标记），而 `tx` 的发起者收不到自己的通知——只写不重画，屏幕就停在旧样子。
  *
- * `scheduleProperties` 由装配层注入（面板晚于本片装配，闭包现取）；
+ * `scheduleDrawer` 由装配层注入（面板晚于本片装配，闭包现取）；
  * `getEd`/`getMainEd`/三个 app 委托同为闭包——运行期才会调。
  */
 import {
@@ -67,7 +67,7 @@ export interface BlockPropsDeps {
   scheduleSave: () => void
   scheduleBadge: () => void
   /** 属性面板的重画排队（面板晚于本片装配 ⇒ 装配层给闭包） */
-  scheduleProperties: () => void
+  scheduleDrawer: () => void
   openMenu: Layers['openMenu']
   prefs: () => Prefs
   getEd: () => BlockEditor
@@ -80,7 +80,7 @@ export interface BlockPropsDeps {
 }
 
 export function setupBlockProps(deps: BlockPropsDeps) {
-  const { ws, blocks, kb, kbGet, txRun, scheduleSave, scheduleBadge, scheduleProperties, openMenu, prefs, getEd, getMainEd, toast, openBlockConfig, setPropsLineMode, shortId } = deps
+  const { ws, blocks, kb, kbGet, txRun, scheduleSave, scheduleBadge, scheduleDrawer, openMenu, prefs, getEd, getMainEd, toast, openBlockConfig, setPropsLineMode, shortId } = deps
 
 /* ------------------------------------------------------------ 属性写入 / 摘标签提示 */
 
@@ -105,8 +105,8 @@ function writeProps(blockId: string, mutate: () => void): void {
   blocks.record(r.undo, sel, 'other', Date.now())
   // 行自己：别名头 / 身份图标 / 类型外观 / gutter 标记都在这一行的 DOM 里
   repaintBlock(blockId)
-  // 右槽的检视卡：属性行与「来源」都变了
-  scheduleProperties()
+  // 块下行与抽屉：属性行与「来源」都变了
+  scheduleDrawer()
   scheduleSave()
   scheduleBadge()
 }
@@ -370,7 +370,7 @@ function convertToQuote(blockId: string, variant?: string): boolean {
   }, getMainEd())
   blocks.record(r.undo, sel, 'other', Date.now())
   repaintBlock(blockId)
-  scheduleProperties()
+  scheduleDrawer()
   scheduleSave()
   scheduleBadge()
   return true

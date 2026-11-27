@@ -82,7 +82,7 @@ export function pruneEphemeralWindows(
 /**
  * 宿主现算的派生卡（闭集；画廊、渲染、旧字节解析共用这一份）。
  */
-export type DerivedCardId = 'inspect' | 'belongs' | 'trash' | 'calendar'
+export type DerivedCardId = 'belongs' | 'trash' | 'calendar'
 
 /**
  * `utility` ＝ **工具面住进槽**（如搜索卡）。身份就是工具面目录里的那一个 id：
@@ -209,7 +209,6 @@ export interface DerivedCardDecl {
 export const DERIVED_CARDS: readonly DerivedCardDecl[] = [
   { id: 'calendar', icon: 'lucide:calendar', label: 'ui.cal.title' },
   { id: 'belongs', icon: 'lucide:list-tree', label: 'ui.belongs.treeTitle' },
-  { id: 'inspect', icon: 'lucide:sliders-horizontal', label: 'ui.dock.inspect' },
   { id: 'trash', icon: 'lucide:trash-2', label: 'ui.dock.trash' },
 ]
 

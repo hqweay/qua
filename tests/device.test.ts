@@ -54,10 +54,8 @@ function assertDefaults(p: Prefs): void {
     right: {
       open: true,
       width: null,
-      cards: [
-        { kind: 'derived', card: 'inspect' },
-        { kind: 'derived', card: 'trash' },
-      ],
+      // 检视卡退场：块属性贴在块上（行下管理档／抽屉），右槽默认只剩反链
+      cards: [{ kind: 'derived', card: 'trash' }],
     },
     collapsedCards: {},
     pinnedCards: {},
@@ -117,8 +115,8 @@ test('device: 存了再读 ⇒ 主题／槽宽／钉住都原样回来', async (
           width: 312,
           cards: [{ kind: 'derived', card: 'belongs' }, { kind: 'block', block: 'b1' }, { kind: 'block', block: 'b2' }],
         },
-        right: { open: true, width: null, cards: [{ kind: 'derived', card: 'inspect' }] },
-        collapsedCards: { belongs: true },
+        right: { open: true, width: null, cards: [{ kind: 'derived', card: 'trash' }] },
+        collapsedCards: { trash: true },
         solo: { left: 'b1', right: null },
       },
     },
@@ -135,8 +133,8 @@ test('device: 存了再读 ⇒ 主题／槽宽／钉住都原样回来', async (
     width: 312,
     cards: [{ kind: 'derived', card: 'belongs' }, { kind: 'block', block: 'b1' }, { kind: 'block', block: 'b2' }],
   })
-  assert.deepEqual(loaded.prefs.dock.right, { open: true, width: null, cards: [{ kind: 'derived', card: 'inspect' }] })
-  assert.deepEqual(loaded.prefs.dock.collapsedCards, { belongs: true })
+  assert.deepEqual(loaded.prefs.dock.right, { open: true, width: null, cards: [{ kind: 'derived', card: 'trash' }] })
+  assert.deepEqual(loaded.prefs.dock.collapsedCards, { trash: true })
   assert.deepEqual(loaded.prefs.dock.solo, { left: 'b1', right: null })
   assert.deepEqual(loaded.folded, { b1: true, b2: true })
 })
@@ -255,7 +253,7 @@ test('device: 一个 id 不留在两个槽（左先到先得）；solo 指向不
       prefs: {
         dock: {
           left: { open: true, cards: ['belongs', 'a'] },
-          right: { open: true, cards: ['a', 'inspect'] },
+          right: { open: true, cards: ['a', 'trash'] },
           solo: { left: 'zzz', right: 'a' },
         },
       },
@@ -264,7 +262,7 @@ test('device: 一个 id 不留在两个槽（左先到先得）；solo 指向不
   })
   const dock = (await store(key).load()).prefs.dock
   assert.deepEqual(dock.left.cards, [{ kind: 'derived', card: 'belongs' }, { kind: 'block', block: 'a' }])
-  assert.deepEqual(dock.right.cards, [{ kind: 'derived', card: 'inspect' }], '同一个块/派生卡不同时留在两边')
+  assert.deepEqual(dock.right.cards, [{ kind: 'derived', card: 'trash' }], '同一个块/派生卡不同时留在两边')
   assert.deepEqual(dock.solo, { left: null, right: null }, 'solo 目标必须在自己槽的清单里')
 })
 
@@ -319,7 +317,7 @@ test('device: `cmd:` 不是块，同一个命令可以同时出现在两槽', as
       ...DEFAULT_PREFS,
       dock: {
         left: { open: true, width: null, cards: [{ kind: 'cmd', command: 'core.journal/today' }, { kind: 'derived', card: 'belongs' }] },
-        right: { open: true, width: null, cards: [{ kind: 'cmd', command: 'core.journal/today' }, { kind: 'derived', card: 'inspect' }] },
+        right: { open: true, width: null, cards: [{ kind: 'cmd', command: 'core.journal/today' }, { kind: 'derived', card: 'trash' }] },
         collapsedCards: {},
         solo: { left: null, right: null },
       },
@@ -333,7 +331,7 @@ test('device: `cmd:` 不是块，同一个命令可以同时出现在两槽', as
   ])
   assert.deepEqual(
     dock.right.cards,
-    [{ kind: 'cmd', command: 'core.journal/today' }, { kind: 'derived', card: 'inspect' }],
+    [{ kind: 'cmd', command: 'core.journal/today' }, { kind: 'derived', card: 'trash' }],
     'cmd 不是块，不参与「一个块最多一张窗口」的去重',
   )
 })

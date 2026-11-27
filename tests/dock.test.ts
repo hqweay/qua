@@ -21,15 +21,15 @@ import { tileGlyph } from '../src/ui/dock/dock.ts'
 
 test('dock: 三种条目的扁平 key 各自唯一（身份，不是种类）', () => {
   assert.equal(dockKey({ kind: 'block', block: 'b1' }), 'b1')
-  assert.equal(dockKey({ kind: 'derived', card: 'inspect' }), 'inspect')
+  assert.equal(dockKey({ kind: 'derived', card: 'belongs' }), 'belongs')
   assert.equal(dockKey({ kind: 'cmd', command: 'core.page/new' }), 'cmd:core.page/new')
 })
 
 test('dock: 旧字节（扁平字符串）读成显式条目；派生卡目录是闭集', () => {
-  assert.deepEqual(canonicalDockEntries(['cmd:core.page/new', 'inspect', 'belongs', 'b1']), [
+  assert.deepEqual(canonicalDockEntries(['cmd:core.page/new', 'belongs', 'trash', 'b1']), [
     { kind: 'cmd', command: 'core.page/new' },
-    { kind: 'derived', card: 'inspect' },
     { kind: 'derived', card: 'belongs' },
+    { kind: 'derived', card: 'trash' },
     { kind: 'block', block: 'b1' },
   ])
 })
@@ -44,7 +44,7 @@ test('dock: 旧字节里形状不对的 id 也当块留住（不按 hex 形状�
 test('dock: 新形状逐项校验；坏项丢掉，不连累整槽', () => {
   const raw = [
     { kind: 'block', block: 'b1' },
-    { kind: 'derived', card: 'inspect' },
+    { kind: 'derived', card: 'belongs' },
     { kind: 'cmd', command: 'core.page/new' },
     { kind: 'derived', card: 'nope' }, // 目录外的派生卡：没有渲染器
     { kind: 'derived', card: 'mount' }, // 退役的跟随卡：同未知 id 丢弃，不为它留兼容分支
@@ -56,7 +56,7 @@ test('dock: 新形状逐项校验；坏项丢掉，不连累整槽', () => {
   ]
   assert.deepEqual(canonicalDockEntries(raw), [
     { kind: 'block', block: 'b1' },
-    { kind: 'derived', card: 'inspect' },
+    { kind: 'derived', card: 'belongs' },
     { kind: 'cmd', command: 'core.page/new' },
   ])
 })
@@ -66,14 +66,14 @@ test('dock: 同一个 key 只留第一份（块/派生卡不能重复露面）',
     canonicalDockEntries([
       { kind: 'block', block: 'b1' },
       { kind: 'block', block: 'b1' },
-      { kind: 'derived', card: 'inspect' },
-      'inspect',
+      { kind: 'derived', card: 'belongs' },
+      'belongs',
       'cmd:x',
       { kind: 'cmd', command: 'x' },
     ]),
     [
       { kind: 'block', block: 'b1' },
-      { kind: 'derived', card: 'inspect' },
+      { kind: 'derived', card: 'belongs' },
       { kind: 'cmd', command: 'x' },
     ],
   )

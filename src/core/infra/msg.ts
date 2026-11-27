@@ -201,7 +201,6 @@ export const MSG = {
   'ui.dock.closeWindow': '关闭这个窗口（块本身不删）',
   'ui.dock.closeWidget': '关闭这张卡（内容不删）',
   'ui.dock.closeCard': '关闭这张卡；需要时在「添加卡片」里加回来',
-  'ui.dock.inspect': '检视卡',
   'ui.tabs.feed': '日记流',
   'ui.tabs.new': '新建页签',
   'ui.tabs.close': '关闭页签',
@@ -209,8 +208,6 @@ export const MSG = {
   'ui.tabs.group': '全部页签',
   'ui.tabs.search': '搜索页签',
   'ui.tabs.current': '当前',
-  'ui.dock.inspectNoSubject': '当前屏没有单一对象；打开一个页或块后显示',
-  'ui.dock.inspectAdded': '已加入槽里；当前屏没有单一对象，打开一个页或块后显示',
   'ui.dock.addTile': '添加卡片',
   'ui.dock.removeTile': '从槽里移出（命令本身不动）',
   'ui.dock.tileMissing': '这个命令已不可用',
@@ -263,7 +260,7 @@ export const MSG = {
   'ui.props.timeUnknown': '未知',
   /* 来源徽章（值行旁）：「来自」后跟逐个「色点＋#名」。色点与块标同一套身份色信号。 */
   'ui.props.sourceFrom': '来自',
-  /* 属性定义块检视卡的归组段头：格式／候选域／选项都是「这条属性的值」的配置 */
+  /* 属性定义块的归组段头（抽屉）：格式／候选域／选项都是「这条属性的值」的配置 */
   'ui.props.defValuesTitle': '这条属性的值',
   'ui.props.defValuesHint': '成员块的值由这里定义',
   'ui.props.pending': '待填',

@@ -2,7 +2,7 @@
  * **属性值段**（高频工作区）：一行一条属性（同一 `propId` 只一行，被多个标签声明时
  * **来源并列**），每行标来源、待填显占位；段尾是添加入口与 own 草稿行（写 `_ownProps`）。
  *
- * 段不认识宿主（检视卡／抽屉挂同一段）：行渲染器 `makeFieldRow` 与行内实例浮层共用
+ * 段不认识宿主（抽屉／行下管理档挂同一段）：行渲染器 `makeFieldRow` 与行内实例浮层共用
  * 一份（一处改了行布局，两处一起变）；写能力由 deps 注入，「写完谁重画」由 `repaint` 带。
  * 主体块、值行派生与显示名由宿主每次 render 传入——宿主要先算行（岛守卫用它），
  * 现成的派生直接喂给段，不重算第二遍。
@@ -44,7 +44,7 @@ export type FieldRowDeps = Pick<PropertiesDeps, 'shortId' | 'setValue' | 'clearV
 
 export interface FieldsSectionDeps extends FieldRowDeps {
   /**
-   * 添加入口（宿主提供：检视卡/抽屉各一颗）。段负责把它放在段尾追加位——
+   * 添加入口（宿主提供：宿主各一颗）。段负责把它放在段尾追加位——
    * 行清单的追加位就是新行落点，入口跟着落点走。
    *
    * **不给＝不画**：主体行下管理档只回答「已有的这些字段，值是什么」，
@@ -59,7 +59,7 @@ export interface FieldsSectionDeps extends FieldRowDeps {
   addOwnProp: (b: Block, propId: string) => void
   /** 新建一条定义并加进**这一块自己的值槽**（`mode: 'new'` ＝ 同名也新建；`format` ＝ text 格式轴） */
   createOwnDef: (b: Block, label: string, kind: PropKind, mode?: PropCreateMode, format?: string) => void
-  /** 写完谁重画（ctx 带）：检视卡＝整卡重画；其他宿主接自己的重画 */
+  /** 写完谁重画（ctx 带）：宿主接自己的重画（抽屉＝整面板重画） */
   repaint: () => void
 }
 

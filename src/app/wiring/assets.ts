@@ -22,7 +22,7 @@ export interface AssetsDeps {
   /** 活动编辑器（装配层单槽，运行期会换）：取光标落点与插 run 用 */
   getEd: () => BlockEditor
   /** 属性面板晚于本片装配：闭包现取（地址就绪时要单独排一次重画） */
-  scheduleProperties: () => void
+  scheduleDrawer: () => void
   /** 角标刷新（同上，晚于本片装配） */
   scheduleBadge: () => void
   /** 用户可见提示（App 门面的 toast） */
@@ -165,10 +165,10 @@ export function setupAssets(deps: AssetsDeps) {
     }
     for (const id of hit) deps.repaintBlock(id)
     /**
-     * 属性面板／抽屉／检视卡是「当前主体」的投影，不在块 DOM 里：地址就绪要单独排一次重画。
+     * 属性面板／抽屉是「当前主体」的投影，不在块 DOM 里：地址就绪要单独排一次重画。
      * 漏了这一行的症状：刚选完本地文件，那一格停在「图片不可用」，直到用户下一次交互才变真图。
      */
-    deps.scheduleProperties()
+    deps.scheduleDrawer()
     // 重画换了节点（文件占位 → 真图）⇒ 角标里的 DOM 读数是**派生量**，也要跟着排一次刷新
     deps.scheduleBadge()
   })

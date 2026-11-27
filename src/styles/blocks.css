@@ -3252,12 +3252,15 @@
   --blk-lh: inherit;
 }
 /*
- * **投影行的块标是一枚虚线徽章**（与镜像的 M 徽章同一档）：虚线圆说
- * 「这一行的身体不是一份独立内容」，环里的字说「露的是哪一块」——
- * 取**源自己的脸**（查询＝漏斗；源是页/日记时补 file/calendar，见 `marker.ts`）。
+ * **露面行的块标是同一枚虚线徽章**（镜像与投影共用）：虚线圆说「这场露面不是
+ * 一份独立内容」，环里的字说「露的是哪一块」——取**源自己的脸**（代码＝尖括号、
+ * 查询＝漏斗；源是页/日记时补 file/calendar，见 `marker.ts`）。源没有脸时就是
+ * 一枚空环（与普通空心点的「不是独立内容」同义，只是尺寸抬到 16px 才读得出身份）。
  *
- * 曾经的 7px 空心点与 16px 的 M 徽章并排时读作两种东西，而它们同属「露面」这一族；
- * 统一到徽章尺寸后，投影与镜像只差环里的字（投影＝源的脸，镜像＝M）。
+ * 镜像与投影的差别交给**身体**去说（镜像＝那一块本人；投影＝它的一张结果视图），
+ * 不塞进同一格里两种读法：曾经镜像环里是字母 M，于是同一个「粘贴为镜像」在
+ * 查询源（宿主行徽章）与 children 源（岛首行徽章）上给出两套图标。
+ *
  * 尺寸从 `--ui-bullet-size`（5px 点）抬到 16px：点太细，读不出「这是另一种身份」。
  */
 .blk[data-embed='1'] > .left .marker::before {
@@ -3274,42 +3277,27 @@
   opacity: 0;
 }
 /*
- * **镜像行的块标是一枚 M 徽章**（虚线圆 ＋ 字母）：同一颗空心点说不清两件事——
- * 「投影＝结果视图」与「镜像＝同一个块又出现了一次」。镜像要的是后者：
- * 这一行不是一块新内容，而是那一块的镜面，所以给它一枚自成形状的徽章，
- * 不和普通块标（5px 实心点）、投影块标（16px 虚线圆＋源的脸）挤在同一档里。
- *
- * 尺寸从 `--ui-bullet-size` 抬到 16px：普通点太细，读不出「这是另一种身份」；
- * 虚线圆在静止态就把「镜面／非实体」说出口，不靠颜色深浅。
- * 字母是**形状**不是文案（ASCII，不进 `msg.ts`，也不随语言切）——它和圆一起构成徽章本身。
- *
- * ⚠️ **徽章环里的字只有 M**：源自己若带脸（代码＝`<>`、显式 `_icon`、借标签的形），
- *    那一枚 `.marker-ico` 要让位——M 本身就是这一档的字，叠两颗字读成一团。
+ * 镜像：宿主行没有 gutter，岛首行的块标就是这一行的块标——同一枚徽章画在这颗上。
+ * 它在身体里（不是宿主行的直接子代），所以选择器另写一份；判据只有一条：
+ * 「露面行的块标＝虚线圆＋源的脸」。
  *
  * ⚠️ 悬停整颗让位给抓手——但**必须在这里重声明**（见下一条）：上面这条有 7 个选择器单元，
  *    它的 `opacity: 1` 会压掉基线的 `.blk .marker:hover::before { opacity: 0 }`（3 个单元）。
- *    不补那条，徽章在悬停时不让位，抓手直接叠在 M 上。
+ *    不补那条，徽章在悬停时不让位，抓手直接叠在环上。
  */
 .blk[data-embed='1'] .blk-embed-body .blk[data-depth='0'] > .left .marker::before {
-  content: 'M';
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  content: '';
   width: 16px;
   height: 16px;
   background: transparent;
   border: 1px dashed var(--ui-text-tertiary);
-  border-radius: var(--ui-radius-pill);
-  color: var(--ui-text-tertiary);
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 1;
   /* 普通点在静息态是半透明的待命件（--ui-quiet）；徽章是身份，读满强度 */
   opacity: 1;
 }
-/* 徽章环里的字就是 M：源的脸让位（否则 M 与 `<>`／借来的图标叠成一团） */
-.blk[data-embed='1'] .blk-embed-body .blk[data-depth='0'] > .left .marker .marker-ico {
-  display: none;
+/* 环里的脸降一档到 sm：15px 会顶到 16px 的环上（投影那份由 `marker.ts` 直接给 sm） */
+.blk[data-embed='1'] .blk-embed-body .blk[data-depth='0'] > .left .marker .marker-ico .ico {
+  inline-size: var(--ui-icon-sm);
+  block-size: var(--ui-icon-sm);
 }
 /* 悬停＝让位：与基线同一条口径，只是特异性要压过上面那条（否则徽章与抓手叠影） */
 .blk[data-embed='1'] .blk-embed-body .blk[data-depth='0'] > .left .marker:hover::before {

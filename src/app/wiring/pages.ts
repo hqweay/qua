@@ -74,7 +74,7 @@ export type PagesDeps = {
   /** 面板分片晚于本节装配：装载边界的重画经 getter 现取 */
   getPanels: () => {
     renderMounts: () => void
-    renderProperties: () => void
+    renderDrawer: () => void
   }
   getWs: () => Workspace
   getEd: () => BlockEditor
@@ -340,9 +340,9 @@ export function setupPages(deps: PagesDeps) {
     if (tab.shells.length > 0) mainEd.setShells(tab.shells)
     mainEd.restoreViewState(tab.state, { focus: true, fallbackCaret: true })
     tab.doc = mainEd.doc
-    const { renderMounts, renderProperties } = deps.getPanels()
+    const { renderMounts, renderDrawer } = deps.getPanels()
     renderMounts()
-    renderProperties()
+    renderDrawer()
     deps.getChrome().renderTitle(activeBlock(), activeTrail(), kbGet)
     deps.renderDocks()
     deps.scheduleSave()
@@ -562,7 +562,7 @@ export function setupPages(deps: PagesDeps) {
     // 装载边界：空 journal 天在这里补首子块（经事务、一条 op）——
     // 所有「打开」命令共用的唯一归一落点，`rootsFor`／命令层只选择、不写库
     materializeEditableRoots(roots)
-    const { renderMounts, renderProperties } = deps.getPanels()
+    const { renderMounts, renderDrawer } = deps.getPanels()
     deps.setEd(mainEd)
     const only = roots.length === 1 ? roots[0] : undefined
     const viewRootId = only && activeView(only) && !isEmbedBlock(only) ? only.id : ''
@@ -588,7 +588,7 @@ export function setupPages(deps: PagesDeps) {
     if (tab) tab.doc = mainEd.doc
     // 装载之后才建挂载区：它按**段根**建实例，而段是 `loadPage` 造出来的
     renderMounts()
-    renderProperties()
+    renderDrawer()
     /**
      * **返回类导航**在这里恢复位置：`pendingRestore` 由 `setActiveId`／`historyGo`
      * 在装载前放下，这里取走即清。恢复过就跳过调用方随后的 `focusFirstBlock`——

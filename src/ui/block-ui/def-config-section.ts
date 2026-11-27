@@ -6,7 +6,7 @@
  * 组头说明这组配置管的是**成员块的值**。select 的选项编辑器是既有组件
  * （`choices-editor.ts`），这里只是把它挂进组里——全量视角（`focusTag` 为空）。
  *
- * 段不认识宿主，可被多个壳挂载（检视卡／抽屉／将来的就地投影）：
+ * 段不认识宿主，可被多个壳挂载（抽屉／将来的就地投影）：
  * 写能力由 deps 注入（命令面），「写完谁重画」由 `repaint` 带；撤销粒度归宿主的写路径。
  * 主体把关在段内：`def()` 不是属性定义块 ⇒ 不画，宿主不必重复判。
  *
@@ -49,7 +49,7 @@ function formatLabelOf(format: string): string {
 export interface DefConfigSectionDeps {
   /** 主体块活引用（每次现取：撤销/换库后旧引用可能已经不在森林里） */
   def: () => Block | undefined
-  /** 写完谁重画（ctx 带）：检视卡＝整卡重画；其他宿主接自己的重画 */
+  /** 写完谁重画（ctx 带）：宿主接自己的重画（抽屉＝整面板重画） */
   repaint: () => void
   /** 基数与选项的写入口（命令面；撤销/落盘都在宿主那条路上） */
   choices: ChoiceActions

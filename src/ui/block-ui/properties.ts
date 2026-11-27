@@ -15,8 +15,9 @@
  *
  * ⚠️ 四段已全部抽成宿主无关段（`fields-section.ts`／`declared-fields-section.ts`／
  *    `def-config-section.ts`／`system-section.ts`；身份与归属的内容在 `config-sections.ts`）——
- *    检视卡/抽屉/正文投影挂的是同一段。本文件只剩**装配职责**：段序、岛守卫
- *    （正被编辑的行整行保留）、宿主 chrome（行包装 ＋ 抬头 ＋ 添加入口）。
+ *    抽屉/正文投影挂的是同一段。本文件只剩**装配职责**：段序、路由
+ *    （被检视块是聚焦根 ⇒ 行与声明不重复画）、岛守卫（正被编辑的行整行保留）、
+ *    宿主 chrome（行包装 ＋ 抬头 ＋ 添加入口）。
  *
  * ⚠️ 为什么块属性段内不分节：同一条属性出现在两节里会重复；只放一节又会让来源随标签顺序变化。
  *    平铺 ＋ 多来源标注两个问题都没有（顺序只影响行序）。
@@ -25,7 +26,7 @@
  * ⚠️ 组件不写模型：所有写入经注入的回调（由装配层转成命令）。
  */
 import type { Block, ClickMods } from '../../core/index.ts'
-import { identityColorCss } from '../../core/index.ts'
+import { hasDeclaredFields, identityColorCss } from '../../core/index.ts'
 import { inputSession } from '../../view/editor/input-session.ts'
 import { EDIT_ISLAND_ATTR } from '../../view/editor/block-dom.ts'
 import type { FieldRow, PropKind } from '../../core/index.ts'
@@ -55,12 +56,25 @@ import { labeledRow, sectionHead, stackedRow } from './props-chrome.ts'
 
 export interface PropertiesDeps {
   /**
-   * 属性区画在哪个块上 —— **这一屏唯一的主体**（中心槽的当前对象）。
+   * 属性区画在哪个块上 —— **被检视的那一块**（抽屉打开时钉住的块）。
    *
-   * 不是「光标所在的块」：见装配层 `subject()` 的注释（布局跳、位置与主体不符、
-   * 与 `activeId` 形成两套主体）。`null` ⇒ 没有单一主体（多根视图），整区收起。
+   * 抽屉不跟焦点：主体换人它不动；钉住的块被删 ⇒ 宿主整张关掉，不会走到 `null`。
+   * `null` ⇒ 没有可画的块，整区收起。
    */
   target: () => Block | null | undefined
+  /**
+   * **当前屏的聚焦根**（值段行与声明段此刻钉在谁的根行下）。
+   *
+   * 路由判据只有一份：宿主注入（装配层读 `focusRootOf`），面板不自己算。
+   * 被检视的块＝聚焦根 ⇒ 值段**行**与声明段不画（它们在屏幕上，就在那块根行下），
+   * 值段只剩段头、添加入口与草稿行——加属性是 schema 变更，抽屉是它唯一稳定的家。
+   * 声明段的细分判据在 render（定义身体在场才跳；零声明标签的空态添加留在抽屉）。
+   * 不注入（行下管理档等宿主）＝ 永远全画。
+   *
+   * ⚠️ 每次 render 现判：抽屉钉在打开时的块上，屏幕的聚焦根会换——导航不改抽屉，
+   *    但路由要跟着翻（聚焦走开 ⇒ 这块不再钉在行下 ⇒ 抽屉补全行）。
+   */
+  subjectRow?: () => string | undefined
   /** 派生行（core 算好：标签属性 ∪ 块属性，同一 propId 只一行） */
   rows: (b: Block) => FieldRow[]
   /**
@@ -253,7 +267,7 @@ export class PropertiesPanel {
      * **抽出的段**：属性值／定义值配置／字段声明（一套内容、多宿主可挂）。
      *
      * 段只长内容与交互、不认识宿主：写能力由 deps 注入，「写完谁重画」由段的
-     * `repaint` 带回这里的整卡重画。检视卡与抽屉两个壳都是本面板，
+     * `repaint` 带回这里的整卡重画。抽屉与行下投影都是本面板的宿主，
      * 所以挂的都是同一段；正文投影宿主挂同一段组件，不再抄第二份。
      * 面板本身只剩装配职责：段序（值 → 类型专属 → 块配置 → 系统信息）、
      * 岛守卫（正被编辑的行整行保留）与宿主 chrome（行包装 ＋ 抬头）。
@@ -368,21 +382,24 @@ export class PropertiesPanel {
       return
     }
     /**
-     * **全部属性行都在这一张卡里可编辑**，包括 `_uiPosition: 'block-left'` 的那些。
+     * **全部属性行都可在面板里编辑**，包括 `_uiPosition: 'block-left'` 的那些。
      *
      * 曾经的规则是「一个值不开两个编辑面」⇒ 归 gutter 的行从这里排除，只留一句
      * 「在块左侧编辑」。实际用起来那一句就是死路：任务状态是最高频的属性，而用户
-     * 在这个卡片里看到它、却改不了它，得先想起来「左侧还有个小方框」。
+     * 在面板里看到它、却改不了它，得先想起来「左侧还有个小方框」。
      *
      * 改成两面共存的前提是**两面读写同一份东西**：行的派生是同一个 `fieldRows`
      * （`gutterFieldsOf` 是它的一个视图）、写是同一类 `core.props/set-value`、
-     * 写完两边都重画（`writeProps` 会 `repaintBlock` ＋ `scheduleProperties`）。
+     * 写完两边都重画（`writeProps` 会 `repaintBlock` ＋ `scheduleDrawer`）。
      * ⇒ 「面板改了 gutter 没跟上」这个当初的理由不再成立，所以互斥可以撤。
      *
      * ⚠️ `_uiPosition` 仍然有意义：它决定**快捷入口画在哪**（高频二元开关要在行上够得着），
      *    不是「只有那一处能改」。
+     * ⚠️ **被检视的块是聚焦根 ⇒ 行不画**（`subjectRow` 路由）：那批行此刻钉在根行下的
+     *    管理档里，再画一份就是同屏两份值控件；`rows = []` 让值段只剩段头、添加入口
+     *    与草稿行——加属性仍是这里的事（它创造尚不存在的东西，不构成重复）。
      */
-    const rows = this.deps.rows(target)
+    const rows = this.deps.subjectRow?.() === target.id ? [] : this.deps.rows(target)
     /**
      * **有当前对象就显示**，不因为「没有行」而收起。
      *
@@ -420,10 +437,9 @@ export class PropertiesPanel {
      * 属性值（高频工作区）→ 类型专属（标签的声明／定义块的值配置）→ 块配置
      * （低频的「它是谁」）→ 系统信息。
      *
-     * 为什么不拆成两张卡：卡片的粒度是**一个主体**，不是一类信息。检视卡的主体
-     * 是「这一屏唯一的那一块」，拆开后两张卡共享同一个主体、同一份生命周期、
-     * 同一个标题，却各自要一套收起／关闭状态 —— 用户得先找「值在哪张卡里」。
-     * 职责在卡片内部分段即可，容器不该按字段类别复制。
+     * 为什么面板只有一个：面板的粒度是**一块**，不是一类信息。拆成多张面板
+     * 共享同一个被检视块、同一份生命周期、同一个标题，却各自要一套开合状态 ——
+     * 用户得先找「值在哪一张里」。职责在面板内部分段即可，容器不该按字段类别复制。
      */
     const labels = this.deps.propLabels()
     // hold 期间值段（含正被编辑的岛）原样保留：不重建、不搬移，其余段照常换新
@@ -434,8 +450,13 @@ export class PropertiesPanel {
      * （`declared-fields-section.ts`／`def-config-section.ts`）。
      * 判据（「只有标签有声明段」「只有定义块有值配置」）与挂载条件在段里——
      * 返回 null 宿主就不挂；这里只排段序：类型专属段跟在值段之后。
+     * 声明段跟值段同一条路由，但判据是**定义身体在不在场**（`hasDeclaredFields`，
+     * 与「声明非空才画身体」同一份）：身体在场 ⇒ 声明钉在行下，抽屉不重复画；
+     * 零声明的标签没有身体 ⇒ 这一段留着——它的空态添加入口是「给这个标签
+     * 加第一条声明」唯一的路，不能跟路由一起消失。
      */
-    const declared = this.declared.render(labels)
+    const declared =
+      this.deps.subjectRow?.() === target.id && hasDeclaredFields(target) ? null : this.declared.render(labels)
     if (declared) this.els.body.appendChild(declared)
 
     const defConfig = this.defConfig.render()

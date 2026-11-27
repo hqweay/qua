@@ -35,8 +35,8 @@ export function surfaceRefKey(ref: SurfaceRef): string {
 
 /**
  * 中心能直接接住的**派生卡**：身体是纯派生 DOM（每次现造、无槽绑定）。
- * 检视卡与反链卡的身体是绑在槽上的持久实例（表单/编辑器），把它们搬进中心
- * 要么搬走槽里的 DOM、要么造第二份——它们进中心等各自的中心身体立项。
+ * 反链卡的身体是绑在槽上的持久实例（表单/编辑器），把它搬进中心
+ * 要么搬走槽里的 DOM、要么造第二份——进中心等各自的中心身体立项。
  */
 export const CENTER_DERIVED_CARDS: readonly DerivedCardId[] = ['trash']
 

@@ -1450,7 +1450,7 @@ export class RenderOps {
    * **这一行是不是单主体屏的根行**（`focusRootOf` 是唯一判据：装载形状只有一个根）。
    *
    * 判「角色」只在这里做一次：根行＝管理档（管这一块），其余行＝读值投影。
-   * 不抄第二份 `subject()`——那个是检视卡的主体判据，与它同源但不能各写一遍。
+   * 抽屉的路由判据（`subjectRow`）也读这一个函数——经装配层注入，不在第二层各算一遍。
    */
   private subjectRootRow(id: string): boolean {
     return id === focusRootOf(this.ed.doc.roots)

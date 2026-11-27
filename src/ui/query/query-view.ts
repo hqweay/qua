@@ -2264,7 +2264,7 @@ export class ViewHost {
 
   /**
    * **分组头/列头的值名解析**：问 core 的唯一判据（`propValueText`）——`ref` 的值
-   * 是块 id，走 `refLabel`（目标没了兜「已删除」，那条链与检视卡同源）；其它 kind
+   * 是块 id，走 `refLabel`（目标没了兜「已删除」，那条链与抽屉同源）；其它 kind
    * 的值是字面量，翻不动原样回落。kind 按 kb 现读判（不依赖 `fields()` 的覆盖面）。
    */
   private groupValueLabel(propId: string, raw: unknown): string | undefined {

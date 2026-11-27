@@ -1818,7 +1818,7 @@ await check('A24 卡头右侧同构：每张卡都是「单卡／关闭」两格
   const { ctx, page } = await freshPage(browser, base, { viewport: { width: 1440, height: 900 } })
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
-  // 再开一张窗口卡：三种来源（派生／窗口／检视）同时在场才叫「跨卡」
+  // 再开一张窗口卡：两种来源（派生／窗口）同时在场才叫「跨卡」
   const id = await page.evaluate(
     () => window.__qua.blocks().find((x) => !(x.roles?.length) && !x.todo && x.text.length > 2)?.id ?? '',
   )
@@ -1858,7 +1858,7 @@ await check('A24 卡头右侧同构：每张卡都是「单卡／关闭」两格
     return out
   })
 
-  assert(m.length >= 4, `应至少量到 4 张卡（派生／窗口／检视）：${JSON.stringify(m.map((c) => c.id))}`)
+  assert(m.length >= 4, `应至少量到 4 张卡（派生＋窗口）：${JSON.stringify(m.map((c) => c.id))}`)
   assert(new Set(m.map((c) => c.kind)).size >= 2, `应同时量到两种来源的卡：${JSON.stringify(m.map((c) => c.kind))}`)
 
   // 卡头静置**只剩名字**（按钮淡出但永远占位）：几何不受淡显影响，

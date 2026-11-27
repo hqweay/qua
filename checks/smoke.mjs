@@ -610,8 +610,8 @@ await check('T1b 管理档跟「当前对象」走：聚焦换主体、光标移
   assert(inspected.target === b, `「看属性」应开属性抽屉并画在那一块上：${JSON.stringify(inspected)}`)
 
   /**
-   * 面板段序与主段 chrome（从检视卡搬来）：这一判据是**面板**自己的，
-   * 抽屉挂的是同一份 PropertiesPanel ⇒ 判据不变，宿主换成抽屉。
+   * 面板段序与主段 chrome：这一判据是**面板**自己的，宿主从检视卡换成了抽屉、
+   * 挂的仍是同一份 PropertiesPanel ⇒ 判据不变。
    * 段序：**属性值第一，块配置第二**——高频动作是填值；身份/露面/分类是低频的「它是谁」。
    */
   const order = await page.evaluate(() => {
@@ -643,7 +643,7 @@ await check('T1b 管理档跟「当前对象」走：聚焦换主体、光标移
   assert(chrome.icons >= 3, `每个段头都该有图标（属性/块配置/系统信息）：${JSON.stringify(chrome)}`)
   assert(chrome.headBg !== 'rgba(0, 0, 0, 0)', `主段段头应有一条可见的底色：${JSON.stringify(chrome)}`)
 
-  // 抽屉**钉在打开时那块**：焦点走了，内容不跟（跟焦点的是检视卡，不是抽屉）。
+  // 抽屉**钉在打开时那块**：焦点走了，内容不跟（抽屉不跟焦点）。
   // ⚠️ 换主体走导航命令：⑤ 已 zoom 到 B，a 不在 DOM 里，点不到它的块标。
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), a)
   await page.waitForTimeout(250)
@@ -667,7 +667,10 @@ await check('T1b 管理档跟「当前对象」走：聚焦换主体、光标移
 
   // **带栏的入口同样 toggle**：同一栏再点一次＝收起（入口就是开关）。用块 a：
   // T1b 给它建过「主体测试属性」，抽屉里才有带栏的行（b 没有声明属性，捞不到行）。
+  // ⚠️ 先回到页（聚焦根＝页）：a 若还是聚焦根，值段行钉在行下，抽屉里没有行可点。
   // 收尾必须关着——后面「外点关闭的分界」从关着的状态开始
+  await page.evaluate((pid) => window.__qua.invoke('core.page/open', { pageId: pid }), pageId)
+  await page.waitForTimeout(250)
   await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), a)
   await page.waitForSelector('.props-drawer')
   const propIds = await page.evaluate(() =>
@@ -7470,9 +7473,9 @@ await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 
   assert(schemaTop, '定义是森林顶层的 schema 块（不是标签的子块）')
 
   /**
-   * **声明段住抽屉**（管理面）：schema 变更（加属性／改声明）不在行下重复。
-   * 行脸只回答「已有的字段值是什么」——标签块自己当主体时，声明由正文里的
-   * 定义身体画（那一格可折、带添加入口）；抽屉挂的是同一份声明段。
+   * **声明的家是定义身体**：标签 zoom 后（它是当前屏的聚焦根），声明由正文里的
+   * 定义身体画（那一格可折、带添加入口）；抽屉不重复画它——同屏两份可编辑声明
+   * 就是删卡要消掉的那种重复。抽屉对聚焦根只留值段壳（段头＋添加入口）。
    *
    * 它曾经被撤掉过（理由：与独立的声明编辑面是同一份东西的两套实现，且这里只能解除）。
    * 撤掉之后在页/标签上点「添加属性」**没有任何可见结果** —— 那次点击写的是
@@ -7482,19 +7485,26 @@ await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 
    */
   await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), tag.tagId)
   await page.waitForSelector('.props-drawer')
-  const declared = await page.evaluate(() => ({
+  const declared = await page.evaluate((id) => ({
     target: document.querySelector('.props-drawer')?.dataset.targetBlockId ?? '',
     declaredRows: [...document.querySelectorAll('.props-drawer .prop-declared [data-declared-prop-id]')].map(
       (x) => x.dataset.declaredPropId,
     ),
     ownEntry: document.querySelectorAll('.props-drawer [data-declare-add]').length,
-  }))
+    bodyRows: [...document.querySelectorAll(`.blk[data-block-id="${id}"] .blk-def-body [data-declared-prop-id]`)].map(
+      (x) => x.dataset.declaredPropId,
+    ),
+    bodyAdd: document.querySelectorAll(`.blk[data-block-id="${id}"] .blk-def-body [data-declare-add]`).length,
+  }), tag.tagId)
   assert(declared.target === tag.tagId, `抽屉应画在标签块上：${JSON.stringify(declared)}`)
   assert(
-    declared.declaredRows.includes(own[0].id),
-    `抽屉的声明段应列出刚声明的「状态」：${JSON.stringify(declared)}`,
+    declared.declaredRows.length === 0 && declared.ownEntry === 0,
+    `聚焦根的标签：抽屉不重复画声明（定义身体在场 ⇒ 路由跳过）：${JSON.stringify(declared)}`,
   )
-  assert(declared.ownEntry === 1, `声明段要有自己的添加入口（写 _fieldDefs）：${JSON.stringify(declared)}`)
+  assert(
+    declared.bodyRows.includes(own[0].id) && declared.bodyAdd === 1,
+    `声明段在定义身体里列出「状态」并带自己的添加入口（写 _fieldDefs）：${JSON.stringify(declared)}`,
+  )
   // 行下这边：标签自己的 `_fieldDefs` 是**给成员的声明**，不是它自己的字段
   // ⇒ 标签自己零值字段 ⇒ 行下整格不出管理档（空集不出那一格；声明不铺进行脸）
   const tagManage = await page.evaluate((id) => {
@@ -7508,6 +7518,29 @@ await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 
   assert(
     tagManage.forId === '' && tagManage.rows === 0 && tagManage.declared === 0,
     `标签自己没有值字段 ⇒ 行下不出管理档（声明是给成员的，schema 的宿主是定义身体与抽屉）：${JSON.stringify(tagManage)}`,
+  )
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(200)
+
+  // ②' 非主体侧的路由：中心回到一个页（聚焦根＝页），抽屉 inspect 这个标签 ⇒
+  //    它不再钉在行下（zoom 没了，定义身体也不在这屏）⇒ 抽屉补全声明段。
+  await page.evaluate(() => {
+    const p = window.__qua.allBlocks().find((b) => b.lists.includes('page'))
+    if (p) window.__qua.invoke('core.page/open', { pageId: p.id })
+  })
+  await page.waitForTimeout(250)
+  await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), tag.tagId)
+  await page.waitForSelector('.props-drawer')
+  const declaredFull = await page.evaluate(() => ({
+    target: document.querySelector('.props-drawer')?.dataset.targetBlockId ?? '',
+    declaredRows: [...document.querySelectorAll('.props-drawer .prop-declared [data-declared-prop-id]')].map(
+      (x) => x.dataset.declaredPropId,
+    ),
+    ownEntry: document.querySelectorAll('.props-drawer [data-declare-add]').length,
+  }), tag.tagId)
+  assert(
+    declaredFull.target === tag.tagId && declaredFull.declaredRows.includes(own[0].id) && declaredFull.ownEntry === 1,
+    `非聚焦根的标签：抽屉补全声明段（列出「状态」＋添加入口）：${JSON.stringify(declaredFull)}`,
   )
   await page.keyboard.press('Escape')
   await page.waitForTimeout(200)
@@ -7917,8 +7950,17 @@ await check(
     assert(hostId !== '', '应能找到一个内容块当属性区的目标')
     await page.waitForTimeout(150)
 
+    // 检视卡退场后，添加属性的入口在**属性抽屉**（加属性是 schema 变更，抽屉是它唯一稳定的家）。
+    // 目标块是当前屏的聚焦根 ⇒ 值段行钉在根行下的管理档里，抽屉不重复画行；
+    // 段头与添加入口照画——草稿行从这里开，建出的行落进行下管理档。
+    // ⚠️ 同一块上 inspect 是 toggle：抽屉开着就不重复 invoke，只点添加。
     const open = async () => {
-      await page.click('#properties-add')
+      const isOpen = await page.evaluate(() => Boolean(document.querySelector('.props-drawer')))
+      if (!isOpen) {
+        await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), hostId)
+        await page.waitForSelector('.props-drawer')
+      }
+      await page.click('.props-drawer .props-add')
       await page.waitForSelector('.props-form--own')
       await page.waitForTimeout(100)
     }
@@ -7949,10 +7991,17 @@ await check(
     assert(draft.pickVisible === false, `次级收起时分组下拉不该露出来：${JSON.stringify(draft)}`)
     assert(draft.nameFocused, `打开后名字输入应自动聚焦（反馈可见）：${JSON.stringify(draft)}`)
 
-    // Esc 收起草稿行
+    // Esc 收**最上面的一层**：抽屉（草稿不是层，跟着抽屉走；捕获阶段的层处理器先于
+    // 草稿自己的 Esc，与「菜单里 Esc 收整个菜单」同一条语义）。退场有动画，
+    // 等 detachment 不是等固定毫秒。
     await page.keyboard.press('Escape')
-    await page.waitForTimeout(100)
-    assert(await page.evaluate(() => !document.querySelector('.props-form--own')), 'Esc 应收起草稿行')
+    await page
+      .waitForSelector('.props-form--own', { state: 'detached', timeout: 2000 })
+      .catch(() => {})
+    assert(
+      await page.evaluate(() => !document.querySelector('.props-form--own') && !document.querySelector('.drawer')),
+      'Esc 应收起抽屉（草稿随之消失）',
+    )
 
     // ② 次级「从已有属性选」展开分组 picker；复用「评分」⇒ 行出现、草稿行关闭
     await open()
@@ -7975,20 +8024,24 @@ await check(
     // 点按钮后焦点在面板里；把光标放回刚才那块，面板目标仍是它
     await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), hostId)
     await page.waitForTimeout(150)
+    // 复用出来的行还没填值 ⇒ 收在「+N 项待填」里：先展开（行脸只全显有值的行）
+    await page.evaluate(() => document.querySelector('.blk-props-manage .blk-manage-pending')?.click())
+    await page.waitForTimeout(150)
     const used = await page.evaluate((id) => ({
       form: Boolean(document.querySelector('.props-form--own')),
       row: Boolean(document.querySelector(`.prop-row[data-prop-id="${id}"]`)),
     }), defId)
     assert(!used.form, `点「用这个」后草稿行应关闭：${JSON.stringify(used)}`)
-    assert(used.row, `面板里应出现「评分」这一行：${JSON.stringify(used)}`)
+    assert(used.row, `展开待填后应有「评分」这一行：${JSON.stringify(used)}`)
 
     await ctx.close()
-    return `打开即聚焦名字＋类型目录 10 条；Esc 收起；「评分·数字」从次级 picker 复用后行出现`
+    return `打开即聚焦名字＋类型目录 10 条；Esc 收抽屉；「评分·数字」从次级 picker 复用后待填里出现该行`
+
   },
 )
 
 await check(
-  'T62 已在块上的属性留在 picker 里（灰掉而不是消失）；归 gutter 的属性在卡里**同样可编辑**，两面共写一份',
+  'T62 已在块上的属性留在 picker 里（灰掉而不是消失）；归 gutter 的属性不进行下（块标旁那一格是它的编辑面）',
   async () => {
     const { ctx, page } = await freshPage(browser, base)
 
@@ -8005,50 +8058,37 @@ await check(
     await page.waitForTimeout(150)
 
     /**
-     * **卡片与 gutter 是同一个值的两个编辑面，不是互斥的两处**。
+     * **gutter 字段的家是块标旁那一格**（`_uiPosition: block-left`）。
      *
-     * 曾经的规则是「一个值不开两个编辑面」⇒ 卡片只写一句「在块左侧编辑」。
-     * 那一句是死路：任务状态最高频，用户在卡里看到它却改不了，得先想起来「左侧还有个小方框」。
-     * 撤掉互斥的前提是两面**读同一份行派生、写同一条命令**（见 `ui/properties.ts` 的注释），
-     * 所以这里同时钉两件事：卡里有这一行可编辑、且改卡里那一格 ⇒ 左侧方框跟着变。
+     * 曾经「卡里与 gutter 两个面共写一份」；卡退场后这一个面收拢成一个：
+     * gutter 格子本身可编辑（点开选项菜单／翻转方框，判据见 T204），
+     * 行下管理档不重复画它（30px 内两个可编辑控件就是删卡要消掉的那种重复）。
      */
-    const panel = await page.evaluate((propId) => {
-      const row = document.querySelector(`.prop-row[data-prop-id="${propId}"]`)
-      return {
-        rows: [...document.querySelectorAll('.prop-row[data-prop-id]')].map((x) => x.dataset.propId),
-        hasSelect: Boolean(row?.querySelector('select.prop-input')),
-        note: [...document.querySelectorAll('.props-empty')].map((x) => x.textContent),
-      }
-    }, target.defId)
-    assert(panel.rows.includes(target.defId), `归 gutter 的属性也要在卡里出现（否则卡里改不了它）：${JSON.stringify(panel)}`)
-    assert(panel.hasSelect === true, `卡里那一行要有自己的选择控件（select）：${JSON.stringify(panel)}`)
-    assert(!panel.note.some((x) => x.includes('还没有块属性')), `已有属性时不能同时说「还没有块属性」：${JSON.stringify(panel)}`)
+    const markSel = `.blk[data-block-id="${target.blockId}"] .left [data-prop-id="${target.defId}"]`
+    await page.waitForSelector(markSel, { timeout: 4000 })
+    const face = await page.evaluate(({ sel, blockId, propId }) => ({
+      gutter: Boolean(document.querySelector(sel)),
+      inManage: Boolean(document.querySelector(`.blk-props-manage .prop-row[data-prop-id="${propId}"]`)),
+      activeIsBlock: window.__qua.snapshot().activeId === blockId,
+    }), { sel: markSel, ...target })
+    assert(face.activeIsBlock, `前置：块应已聚焦（它就是要看的那一块）：${JSON.stringify(face)}`)
+    assert(face.gutter, `归 gutter 的属性应在块标旁有那一格（它的编辑面）：${JSON.stringify(face)}`)
+    assert(!face.inManage, `gutter 字段不进行下管理档（同一个值不开两个编辑面）：${JSON.stringify(face)}`)
 
-    // 卡里把值选成「完成」⇒ 模型与左侧方框都要变（两个编辑面共写一份，不能一边改另一边不动）
-    const doneId = await page.evaluate((defId) => {
-      const def = window.__qua.__editor.store.find(defId)
-      return (def?.props?._choices ?? []).find((c) => String(c.label ?? '').includes('完成'))?.id ?? ''
-    }, target.defId)
-    assert(doneId !== '', '前置：任务状态定义应有「完成」选项')
-    await page.evaluate(({ propId, value }) => {
-      const sel = document.querySelector(`.prop-row[data-prop-id="${propId}"] select.prop-input`)
-      sel.value = value
-      sel.dispatchEvent(new Event('change', { bubbles: true }))
-    }, { propId: target.defId, value: doneId })
-    await page.waitForTimeout(250)
-    const afterTick = await page.evaluate(({ id, propId }) => {
-      const blk = document.querySelector(`.blk[data-block-id="${id}"]`)
-      const model = window.__qua.__editor.store.find(id)
-      return {
-        value: model?.props?.[propId],
-        closure: blk?.dataset.closure ?? null,
-        cardValue: document.querySelector(`.prop-row[data-prop-id="${propId}"] select.prop-input`)?.value ?? null,
-      }
-    }, { id: target.blockId, propId: target.defId })
-    assert(afterTick.value === doneId, `卡里选择要写进模型：${JSON.stringify(afterTick)}`)
-    assert(afterTick.closure === 'closed', `卡里选完「完成」，左侧方框也要跟着变成已完成：${JSON.stringify(afterTick)}`)
+    /**
+     * **已在块上的属性留在 picker 里**（灰掉而不是消失）：入口在属性抽屉的添加草稿行。
+     * 被检视的块是聚焦根 ⇒ 值段行钉在行下，抽屉只画段头与添加入口——草稿行从这里开。
+     */
+    await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), target.blockId)
+    await page.waitForSelector('.props-drawer')
+    const routing = await page.evaluate(() => ({
+      rows: [...document.querySelectorAll('.props-drawer .prop-row[data-prop-id]')].map((x) => x.dataset.propId),
+      add: Boolean(document.querySelector('.props-drawer .props-add')),
+    }), target.defId)
+    assert(routing.rows.length === 0, `聚焦根的抽屉不重复画值段行（它们在行下管理档）：${JSON.stringify(routing)}`)
+    assert(routing.add, `抽屉的添加入口在场（加属性是 schema 变更，抽屉是它唯一稳定的家）：${JSON.stringify(routing)}`)
 
-    await page.click('#properties-add')
+    await page.click('.props-drawer .props-add')
     await page.waitForSelector('.props-form--own')
     await page.evaluate(() => document.querySelector('.props-form--own .props-browse-toggle')?.click())
     const option = await page.evaluate((propId) => {
@@ -8060,7 +8100,7 @@ await check(
     assert(option.text.includes('已在块上'), `要写明为什么不可选：${JSON.stringify(option)}`)
 
     await ctx.close()
-    return `picker 保留「任务状态 · 选择（已在块上）」且 disabled；卡里同一行可选，左侧方框跟着变`
+    return `gutter 在块标旁那一格、不进行下；聚焦根的抽屉只留段头＋添加；picker 保留「任务状态 · 选择（已在块上）」且 disabled`
   },
 )
 
@@ -11924,15 +11964,18 @@ await check(
     })
     assert(id, '前置：应有一个可聚焦的内容块')
     await page.waitForTimeout(150)
-    await page.waitForSelector('.prop-system', { timeout: 4000 })
+    // 检视卡退场 ⇒ 面板宿主是属性抽屉（钉在这一块上）；被检视块是聚焦根，
+    // 值段行不重复画，但系统信息段照画（它答「这块是谁」，不与行下重复）。
+    await page.evaluate((bid) => window.__qua.invoke('core.block/inspect', { blockId: bid }), id)
+    await page.waitForSelector('.props-drawer .prop-system', { timeout: 4000 })
 
     /**
      * **可见但只读**：判据是这一段里**没有可编辑控件**（input/textarea/contenteditable），
      * 而不是「字段名不叫 text」。只读由通道提供 —— 这就是通道。
      */
     const sys = await page.evaluate((bid) => {
-      const box = document.querySelector('.prop-system')
-      const lines = [...document.querySelectorAll('.prop-system-line')].map((e) => ({
+      const box = document.querySelector('.props-drawer .prop-system')
+      const lines = [...document.querySelectorAll('.props-drawer .prop-system-line')].map((e) => ({
         field: e.dataset.systemField,
         text: e.textContent?.trim() ?? '',
       }))
@@ -11941,7 +11984,7 @@ await check(
         present: Boolean(box),
         lines,
         controls: box?.querySelectorAll('input, textarea, select, [contenteditable="true"]').length ?? -1,
-        inPanel: Boolean(box?.closest('#inspect-card')),
+        inPanel: Boolean(box?.closest('.props-drawer')),
         // 口径与模型同源：显示的是这一块自己的时刻，不是「现在」
         created: model?.created ?? -1,
         modified: model?.modified ?? -1,
@@ -12002,11 +12045,11 @@ await check(
      *    于是这条断言会变成「看机器心情」。等条件成立（有上限），不是等固定毫秒。
      */
     await page.evaluate((bid) => window.__qua.invoke('core.block/focus-block', { blockId: bid }), id)
-    await page.waitForSelector('.prop-system', { timeout: 4000 })
+    await page.waitForSelector('.props-drawer .prop-system', { timeout: 4000 })
     await page
       .waitForFunction(
         (was) => {
-          const line = document.querySelector('.prop-system-line[data-system-field="modified"]')
+          const line = document.querySelector('.props-drawer .prop-system-line[data-system-field="modified"]')
           return Boolean(line) && line.textContent?.trim() !== was
         },
         before,
@@ -12014,11 +12057,11 @@ await check(
       )
       .catch(() => {})
     const after = await page.evaluate((bid) => ({
-      lines: [...document.querySelectorAll('.prop-system-line')].map((e) => e.textContent?.trim() ?? ''),
+      lines: [...document.querySelectorAll('.props-drawer .prop-system-line')].map((e) => e.textContent?.trim() ?? ''),
       modified: window.__qua.__editor.store.find(bid)?.modified ?? -1,
       modelBefore: window.__probeBefore ?? -1,
-      // 面板画的是不是这一块（主体换过就说明我们看错了行）
-      target: document.getElementById('inspect-card')?.dataset.targetBlockId ?? '',
+      // 面板画的是不是这一块（抽屉钉错过块就说明我们看错了行）
+      target: document.querySelector('.props-drawer')?.dataset.targetBlockId ?? '',
     }), id)
     assert(after.target === id, `面板主体应回到被编辑的那一块：${JSON.stringify(after)}`)
     assert(after.modified > modelBefore, `这一块的时刻真的动过（前置）：${modelBefore} → ${JSON.stringify(after)}`)
@@ -13136,7 +13179,7 @@ await check('T118 卡片收起：只隐藏 body、不销毁窗口编辑器；刷
   return `归属卡收起后 body=none、窗口编辑器仍在；刷新后仍收起`
 })
 
-await check('T119 单卡：只留这一张；目标不可见时自动失效；打开新窗口退出单卡', async () => {
+await check('T119 单卡：只留这一张；右槽同样成立；打开新窗口退出单卡', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
@@ -13153,25 +13196,18 @@ await check('T119 单卡：只留这一张；目标不可见时自动失效；�
   assert(leftSolo.other === 'none', `单卡应隐藏其它卡：${JSON.stringify(leftSolo)}`)
   assert(leftSolo.pref === 'belongs', `单卡应落 prefs：${JSON.stringify(leftSolo)}`)
 
-  // 检视卡有一张；先单卡它，再切到「今日」让主体消失 ⇒ 单卡自动失效、其它卡照常显示
-  const inspectVisible = await page.evaluate(() => !document.getElementById('inspect-card').hidden)
-  assert(inspectVisible, '打开一页后检视卡应有主体')
-  await page.locator('#inspect-card [data-dock-action="solo"]').click()
+  // 右槽同一套：单卡反链卡；「目标不可见自动失效」的产出者是检视卡
+  // （按主体收起）——卡退场后没有会自己变看不见的卡，这条面随卡退役，
+  // `renderDockStack` 的可见目标守卫保留为结构性兜底。
+  await page.locator('#dock-right .dock-card[data-card-id="trash"] [data-dock-action="solo"]').click()
   await page.waitForTimeout(80)
-  const journalId = await page.evaluate(() => window.__qua.allBlocks().find((b) => b.roles?.includes('journal'))?.id ?? '')
-  assert(journalId, '应有今日 journal 块')
-  await page.evaluate((jid) => window.__qua.invoke('core.page/open', { pageId: jid }), journalId)
-  await page.waitForTimeout(160)
-  const fallback = await page.evaluate(() => ({
-    solo: window.__qua.snapshot().dock.solo.right,
-    hidden: document.getElementById('inspect-card')?.hidden === true,
+  const rightSolo = await page.evaluate(() => ({
     stack: document.querySelector('#dock-right .dock-stack')?.dataset.solo ?? '',
-    backrefs: getComputedStyle(document.querySelector('#dock-right .dock-card[data-card-id="trash"]')).display,
+    card: document.querySelector('#dock-right .dock-card[data-solo-card="1"]')?.dataset.cardId ?? '',
+    pref: window.__qua.snapshot().dock.solo.right,
   }))
-  assert(fallback.solo === 'inspect', `单卡状态应保留：${JSON.stringify(fallback)}`)
-  assert(fallback.hidden, `检视卡此时应不可见：${JSON.stringify(fallback)}`)
-  assert(fallback.stack === '', `目标不可见时不该留空槽：${JSON.stringify(fallback)}`)
-  assert(fallback.backrefs !== 'none', `其它卡应照常显示：${JSON.stringify(fallback)}`)
+  assert(rightSolo.stack === '1' && rightSolo.card === 'trash', `右槽单卡应只标反链：${JSON.stringify(rightSolo)}`)
+  assert(rightSolo.pref === 'trash', `右槽单卡应落 prefs：${JSON.stringify(rightSolo)}`)
 
   // 打开一张窗口 ⇒ 退出右槽单卡（单卡是「只看一张」，加一张与它矛盾）
   const id = await page.evaluate(() => window.__qua.blocks().find((x) => !(x.roles?.length) && !x.closure && x.text.length > 2)?.id ?? '')
@@ -13186,7 +13222,7 @@ await check('T119 单卡：只留这一张；目标不可见时自动失效；�
   assert(afterOpen.solo === null, `打开新窗口应退出单卡：${JSON.stringify(afterOpen)}`)
   assert(afterOpen.windows.includes(id), `新窗口应在右槽：${JSON.stringify(afterOpen)}`)
   await ctx.close()
-  return `单卡只留一张并落 prefs；检视卡失去主体后单卡自动失效；打开窗口退出单卡`
+  return `左右槽各单卡一张并落 prefs；打开窗口退出右槽单卡`
 })
 
 await check('T120 卡片拖拽：槽内排序、跨槽移动、一个块只留一个窗口；编辑器跟着走', async () => {
@@ -13242,21 +13278,21 @@ await check('T120 卡片拖拽：槽内排序、跨槽移动、一个块只留�
   assert(backLeft.cards.includes(ids.b), `拖回左槽应成功：${JSON.stringify(backLeft.cards)}`)
   assert(backLeft.text.length > 0, `拖回后窗口正文应可读：${JSON.stringify(backLeft)}`)
 
-  // 派生卡走同一个 moveCard：检视卡从右槽拖到左槽，再拖回去
-  const inspectLeft = await dragCard(page, { from: 'right', to: 'left', id: 'inspect', before: 'calendar' })
-  assert(inspectLeft, '派生卡拖拽应派发')
-  assert(inspectLeft.cards.left.cards.includes('inspect'), `检视卡应移入左槽：${JSON.stringify(inspectLeft.cards.left.cards)}`)
-  assert(!inspectLeft.cards.right.cards.includes('inspect'), `右槽不该还有检视卡：${JSON.stringify(inspectLeft.cards.right.cards)}`)
-  const inspectInLeft = await page.evaluate(() => ({
-    inLeft: Boolean(document.querySelector('#dock-left #inspect-card')),
-    visible: !document.getElementById('inspect-card').hidden,
+  // 派生卡走同一个 moveCard：反链卡从右槽拖到左槽，再拖回去
+  const trashLeft = await dragCard(page, { from: 'right', to: 'left', id: 'trash', before: 'calendar' })
+  assert(trashLeft, '派生卡拖拽应派发')
+  assert(trashLeft.cards.left.cards.includes('trash'), `反链卡应移入左槽：${JSON.stringify(trashLeft.cards.left.cards)}`)
+  assert(!trashLeft.cards.right.cards.includes('trash'), `右槽不该还有反链卡：${JSON.stringify(trashLeft.cards.right.cards)}`)
+  const trashInLeft = await page.evaluate(() => ({
+    inLeft: Boolean(document.querySelector('#dock-left .dock-card[data-card-id="trash"]')),
+    visible: !document.querySelector('#dock-left .dock-card[data-card-id="trash"]')?.hidden,
   }))
-  assert(inspectInLeft.inLeft && inspectInLeft.visible, `检视卡应显示在左槽：${JSON.stringify(inspectInLeft)}`)
-  const inspectBack = await dragCard(page, { from: 'left', to: 'right', id: 'inspect', before: 'mount' })
-  assert(inspectBack, '检视卡拖回右槽应派发')
-  assert(inspectBack.cards.right.cards.includes('inspect'), `检视卡应回右槽：${JSON.stringify(inspectBack.cards.right.cards)}`)
+  assert(trashInLeft.inLeft && trashInLeft.visible, `反链卡应显示在左槽：${JSON.stringify(trashInLeft)}`)
+  const trashBack = await dragCard(page, { from: 'left', to: 'right', id: 'trash', before: ids.a })
+  assert(trashBack, '反链卡拖回右槽应派发')
+  assert(trashBack.cards.right.cards.includes('trash'), `反链卡应回右槽：${JSON.stringify(trashBack.cards.right.cards)}`)
   await ctx.close()
-  return `槽内 b 到 a 前；跨槽 b→左（日历前）；Shift+点移回右且只有一张；再拖回左仍可读；检视卡右→左→右`
+  return `槽内 b 到 a 前；跨槽 b→左（日历前）；Shift+点移回右且只有一张；再拖回左仍可读；反链卡右→左→右`
 })
 
 await check('T121 块窗口 body 的挂载区引用栏与正文同一种东西：一列可编辑源块，带面包屑', async () => {
@@ -13453,7 +13489,7 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
 
-  /** 找一个普通内容块（无身份、无标签）当属性卡的主体 */
+  /** 找一个普通内容块（无身份、无标签）当属性抽屉的被检视块（聚焦根） */
   const hostId = await page.evaluate(() => {
     const b = window.__qua.allBlocks().find((x) => x.lists.length === 0 && x.roles.length === 0 && x.text.length > 2)
     if (b) window.__qua.invoke('core.block/focus-block', { blockId: b.id })
@@ -13462,8 +13498,13 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
   assert(hostId !== '', '应能找到一个内容块当属性卡的主体')
   await page.waitForTimeout(200)
 
+  // 检视卡退场：面板宿主是抽屉；被检视块是聚焦根 ⇒ 值段行钉在根行下（管理档），
+  // 抽屉只画段头与添加入口——草稿行从这里开，建出的行当场落进行下管理档。
+  await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), hostId)
+  await page.waitForSelector('.props-drawer')
+
   const before = await page.evaluate(() => window.__qua.propDefs().map((d) => d.label))
-  await page.click('#properties-add')
+  await page.click('.props-drawer .props-add')
   await page.waitForSelector('.props-form')
   // 草稿行常开「新建」形态：名字＋类型直接可填（不再经过「选已有 → 新建」的切换）
   await page.waitForTimeout(80)
@@ -13472,10 +13513,13 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
   await page.waitForTimeout(300)
 
   /**
-   * ⚠️ 这条断言钉的是一次**真踩过的空操作**：卡片调命令时把「名字」传成了 `propId`，
+   * ⚠️ 这条断言钉的是一次**真踩过的空操作**：面板调命令时把「名字」传成了 `propId`，
    *    而 `core.props/create-def` 读的是 `label` ⇒ 名字永远是空串 ⇒ handler 早退。
-   *    表现是「点了新建、什么都没发生」：库里没有定义、卡里也没有那一行。
+   *    表现是「点了新建、什么都没发生」：库里没有定义、行下也没有那一行。
+   * 新建的行没填值 ⇒ 收在「+N 项待填」里（行脸只全显有值的行）：先展开再读行。
    */
+  await page.evaluate(() => document.querySelector('.blk-props-manage .blk-manage-pending')?.click())
+  await page.waitForTimeout(150)
   const after = await page.evaluate(() => {
     const def = window.__qua.propDefs().find((d) => d.label === '冒烟新属性')
     return {
@@ -13483,12 +13527,11 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
       defId: def?.id ?? '',
       rows: [...document.querySelectorAll('.prop-row[data-prop-id]')].map((x) => x.dataset.propId),
       form: Boolean(document.querySelector('.props-form')),
-      cardText: document.querySelector('#properties-body')?.innerText ?? '',
     }
   })
   assert(after.defs.length === before.length + 1, `新建属性应真的在库里多一条定义：${JSON.stringify(after.defs)}`)
   assert(after.defId !== '', '新建出来的定义要能被 `propDefs()` 找到')
-  assert(after.rows.includes(after.defId), `新建之后卡片要当场出现那一行（不能等别处碰一下）：${JSON.stringify(after)}`)
+  assert(after.rows.includes(after.defId), `新建之后行下要当场出现那一行（不能等别处碰一下）：${JSON.stringify(after)}`)
   assert(!after.form, `新建完表单应关闭：${JSON.stringify(after)}`)
 
   /**
@@ -13506,18 +13549,20 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
    * 页曾经能声明 `_fieldDefs`，但那一格**没有任何消费方**：子块不会因此获得那些字段。
    * 一个能写、没人读的入口比没有更糟 —— 用户会以为「声明了，成员就有这一格了」。
    * 这条与 `arch-check [31]` 是一对：那边钉代码里没有那条分支，这边钉界面上没有那个入口。
+   * （抽屉直接 inspect 页块；中心还聚焦着 hostId ⇒ 页不是聚焦根 ⇒ 抽屉全画面板。）
    */
-  const pagePeek = await page.evaluate(() => {
+  const pageId = await page.evaluate(() => {
     const p = window.__qua.allBlocks().find((b) => b.lists.includes('page') && !b.lists.includes('tag'))
-    if (p) window.__qua.invoke('core.block/focus-block', { blockId: p.id })
+    if (p) window.__qua.invoke('core.block/inspect', { blockId: p.id })
     return p?.id ?? ''
   })
-  assert(pagePeek !== '', '假数据里应有页')
+  assert(pageId !== '', '假数据里应有页')
+  await page.waitForSelector('.props-drawer')
   await page.waitForTimeout(250)
   const pageSect = await page.evaluate(() => ({
-    declared: document.querySelectorAll('#properties-body [data-declared-prop-id]').length,
-    add: document.querySelectorAll('#properties-body [data-declare-add]').length,
-    section: document.querySelectorAll('.props-declared').length,
+    declared: document.querySelectorAll('.props-drawer .properties-body [data-declared-prop-id]').length,
+    add: document.querySelectorAll('.props-drawer .properties-body [data-declare-add]').length,
+    section: document.querySelectorAll('.props-drawer .props-declared').length,
   }))
   assert(
     pageSect.declared === 0 && pageSect.add === 0 && pageSect.section === 0,
@@ -13525,26 +13570,26 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
   )
 
   /** 声明是**标签**的事：它的成员会继承，这条声明有获得方 */
-  const pageId = await page.evaluate(() => {
+  const declTagId = await page.evaluate(() => {
     const t = window.__qua.allBlocks().find((b) => b.lists.includes('tag'))
-    if (t) window.__qua.invoke('core.block/focus-block', { blockId: t.id })
+    if (t) window.__qua.invoke('core.block/inspect', { blockId: t.id })
     return t?.id ?? ''
   })
-  assert(pageId !== '', '假数据里应有标签')
+  assert(declTagId !== '', '假数据里应有标签')
   await page.waitForTimeout(250)
 
   const pageBefore = await page.evaluate(() => ({
-    declared: [...document.querySelectorAll('#properties-body [data-declared-prop-id]')].length,
+    declared: [...document.querySelectorAll('.props-drawer .properties-body [data-declared-prop-id]')].length,
     rows: [...document.querySelectorAll('.prop-row[data-prop-id]')].length,
-    text: document.querySelector('#properties-body')?.innerText ?? '',
+    text: document.querySelector('.props-drawer .properties-body')?.innerText ?? '',
   }))
   // 种子里 `#任务` 已经声明了「任务状态」：基线不一定是 0，断言要按 **+1** 走
   assert(pageBefore.declared <= 1, `前置：这个标签的声明条数是种子里带来的：${JSON.stringify(pageBefore)}`)
 
   const pickId = await page.evaluate(() => window.__qua.propDefs().find((d) => d.label === '冒烟新属性')?.id ?? '')
 
-  // ① 自己的入口 ⇒ 这一页**自己**多一行值（不是声明）
-  await page.click('#properties-add')
+  // ① 自己的入口 ⇒ 这个标签**自己**多一行值（不是声明）
+  await page.click('.props-drawer .props-add')
   await page.waitForSelector('.props-form--own')
   // 复用走次级浏览：草稿行常开新建形态，分组下拉收在「从已有属性选」后面
   await page.evaluate(() => document.querySelector('.props-form--own .props-browse-toggle')?.click())
@@ -13555,7 +13600,7 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
 
   const pageOwn = await page.evaluate(() => ({
     rows: [...document.querySelectorAll('.prop-row[data-prop-id]')].map((x) => x.dataset.propId),
-    declared: [...document.querySelectorAll('#properties-body [data-declared-prop-id]')].length,
+    declared: [...document.querySelectorAll('.props-drawer .properties-body [data-declared-prop-id]')].length,
   }))
   assert(pageOwn.rows.includes(pickId), `自己的入口要加「这一块自己的」属性行：${JSON.stringify(pageOwn)}`)
   assert(
@@ -13564,7 +13609,7 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
   )
 
   // ② 声明段自己的入口 ⇒ 只写声明，不给自己加行
-  await page.evaluate(() => document.querySelector('[data-declare-add]')?.click())
+  await page.evaluate(() => document.querySelector('.props-drawer [data-declare-add]')?.click())
   await page.waitForSelector('.props-form--declared')
   const dbg = await page.evaluate(() => {
     document.querySelector('.props-form--declared .props-browse-toggle')?.click()
@@ -13582,8 +13627,8 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
   await page.waitForTimeout(300)
 
   const pageAfter = await page.evaluate(() => ({
-    declared: [...document.querySelectorAll('#properties-body [data-declared-prop-id]')].map((x) => x.dataset.declaredPropId),
-    text: document.querySelector('#properties-body')?.innerText ?? '',
+    declared: [...document.querySelectorAll('.props-drawer .properties-body [data-declared-prop-id]')].map((x) => x.dataset.declaredPropId),
+    text: document.querySelector('.props-drawer .properties-body')?.innerText ?? '',
     section: document.querySelector('.props-declared')?.dataset.declaredSection,
   }))
   assert(
@@ -13603,7 +13648,7 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
   )
   await page.waitForTimeout(300)
   const undeclared = await page.evaluate((id) => ({
-    declared: [...document.querySelectorAll('#properties-body [data-declared-prop-id]')].length,
+    declared: [...document.querySelectorAll('.props-drawer .properties-body [data-declared-prop-id]')].length,
     defStillThere: window.__qua.propDefs().some((d) => d.id === id),
   }), pickId)
   assert(undeclared.declared === pageBefore.declared, `解除后回到基线：${JSON.stringify(undeclared)}`)
@@ -13633,9 +13678,9 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
     return {
       ownProps: Array.isArray(raw?.props?._ownProps) ? raw.props._ownProps : [],
       fieldDefs: Array.isArray(raw?.props?._fieldDefs) ? raw.props._fieldDefs : [],
-      declared: [...document.querySelectorAll('#properties-body [data-declared-prop-id]')].map((x) => x.dataset.declaredPropId),
+      declared: [...document.querySelectorAll('.props-drawer .properties-body [data-declared-prop-id]')].map((x) => x.dataset.declaredPropId),
     }
-  }, pageId)
+  }, declTagId)
   assert(reverseAfter.fieldDefs.includes(pickId), `声明应写进 _fieldDefs：${JSON.stringify(reverseAfter)}`)
   assert(reverseAfter.ownProps.includes(pickId), '声明不该清掉本块自己的值槽')
 
@@ -13650,10 +13695,12 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
    *    能绕过 disabled，所以「标签属性选不了自己」一直没被抓到。
    */
   const ownDefId = await page.evaluate(() => window.__qua.propDefs().find((d) => d.label === '任务状态')?.id ?? '')
+  // 抽屉直接 inspect 到声明它的标签（同块重复 invoke 会 toggle，先看抽屉现在画着谁）
   const tagId = await page.evaluate((id) => {
     const def = window.__qua.propDefs().find((d) => d.id === id)
     const tid = def?.declaredBy?.[0] ?? ''
-    if (tid) window.__qua.invoke('core.block/focus-block', { blockId: tid })
+    const cur = document.querySelector('.props-drawer')?.dataset.targetBlockId
+    if (tid && cur !== tid) window.__qua.invoke('core.block/inspect', { blockId: tid })
     return tid
   }, ownDefId)
   assert(tagId !== '', '「任务状态」应有一处标签属性声明（种子里的 #任务）')
@@ -13663,23 +13710,23 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
     role: document.querySelector('.props-declared')?.dataset.declaredSection,
     title: document.querySelector('.props-declared .props-section-title')?.textContent ?? '',
     hint: document.querySelector('.props-declared .ui-info')?.getAttribute('aria-label') ?? '',
-    declaredRows: [...document.querySelectorAll('#properties-body .prop-declared [data-declared-prop-id]')].length,
+    declaredRows: [...document.querySelectorAll('.props-drawer .properties-body .prop-declared [data-declared-prop-id]')].length,
   }))
   assert(tagSection.role === 'tag', `标签块上的声明段应标成 tag：${JSON.stringify(tagSection)}`)
   assert(tagSection.title === '标签属性', `标签块上的这一段要叫「标签属性」：${JSON.stringify(tagSection)}`)
   assert(tagSection.hint.includes('使用这个标签的块'), `这一段要说清它给的是成员的格子：${JSON.stringify(tagSection)}`)
   assert(tagSection.declaredRows > 0, `前置：这个标签应已有声明：${JSON.stringify(tagSection)}`)
 
-  await page.click('#properties-add')
+  await page.click('.props-drawer .props-add')
   await page.waitForSelector('.props-form--own')
   const ownPlacement = await page.evaluate(() => {
     const form = document.querySelector('.props-form--own')
-    const section = document.querySelector('#properties-body .props-declared')
+    const section = document.querySelector('.props-drawer .properties-body .props-declared')
     return {
       formBeforeSection: Boolean(
         form && section && (form.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING),
       ),
-      addInSection: Boolean(document.querySelector('#properties-add')?.closest('.prop-fields')),
+      addInSection: Boolean(document.querySelector('.props-drawer .props-add')?.closest('.prop-fields')),
     }
   })
   assert(ownPlacement.formBeforeSection, `自己的草稿行要长在「标签属性」段前面（否则像在给声明段加东西）：${JSON.stringify(ownPlacement)}`)
@@ -13702,7 +13749,7 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
       ownProps: Array.isArray(raw?.props?._ownProps) ? raw.props._ownProps : [],
       fieldDefs: Array.isArray(raw?.props?._fieldDefs) ? raw.props._fieldDefs : [],
       rows: [...document.querySelectorAll('.prop-row[data-prop-id]')].map((x) => x.dataset.propId),
-      declared: [...document.querySelectorAll('#properties-body [data-declared-prop-id]')].map((x) => x.dataset.declaredPropId),
+      declared: [...document.querySelectorAll('.props-drawer .properties-body [data-declared-prop-id]')].map((x) => x.dataset.declaredPropId),
     }
   }, tagId)
   assert(tagOwn.ownProps.includes(ownDefId), `标签块点自己的入口要写进 _ownProps：${JSON.stringify(tagOwn)}`)
@@ -13721,7 +13768,7 @@ await check('T125 「新建属性」真的建出定义并当场出现那一行�
   assert(declaredChip.found, `声明 chip 的名字要带可点命中区（props-tag-name）：${JSON.stringify(declaredChip)}`)
   assert(declaredChip.refTo === ownDefId, `声明 chip 的名字要走同一条导航契约（data-ref-to 指向定义块）：${JSON.stringify(declaredChip)}`)
   assert(declaredChip.title !== '', `可点就要看得出来能点（title 要说去哪）：${JSON.stringify(declaredChip)}`)
-  await page.locator('#properties-body ' + `[data-declared-prop-id="${ownDefId}"] .props-tag-name`).click()
+  await page.locator('.props-drawer .properties-body ' + `[data-declared-prop-id="${ownDefId}"] .props-tag-name`).click()
   await page.waitForTimeout(200)
   const afterChip = await page.evaluate(() => window.__qua.snapshot().activeId)
   assert(afterChip === ownDefId, `点声明 chip 的名字应打开定义块：${afterChip} ≠ ${ownDefId}`)
@@ -15540,7 +15587,7 @@ await check('T149 覆盖层：关掉之后按键仍落在编辑器；浮层开�
   return `关掉面板后打字进得去（${before.slice(0, 8)}→${after.slice(0, 8)}）；视口 1440→760 后浮层仍在内；锚点消失即关`
 })
 
-await check('T150 派生卡也能关：关掉即离开槽（模型不动）；「添加组件」能加回来；「看属性」开抽屉不复活卡', async () => {
+await check('T150 派生卡也能关：关掉即离开槽（模型不动）；「添加组件」能加回来', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
@@ -15549,8 +15596,7 @@ await check('T150 派生卡也能关：关掉即离开槽（模型不动）；�
     page.evaluate(() => {
       /**
        * 「在槽里」＝**看得见**，不是「DOM 里有个节点」。
-       * 检视卡是静态节点，带 `hidden` 启动保护；它回到 `cards` 之后若没显式显形，
-       * 节点、内容、`data-card-id` 全都在，`display:none` —— 断言只看 Boolean 会假绿。
+       * 收起等状态也可能让卡在 DOM 里却不可见——断言只看 Boolean 会假绿。
        */
       const visible = (sel) => {
         const el = document.querySelector(sel)
@@ -15560,14 +15606,12 @@ await check('T150 派生卡也能关：关掉即离开槽（模型不动）；�
         left: window.__qua.snapshot().dock.left.cards,
         right: window.__qua.snapshot().dock.right.cards,
         belongs: visible('#dock-left .dock-card[data-card-id="belongs"]'),
-        inspect: visible('#dock-right .dock-card[data-card-id="inspect"]'),
         blocks: window.__qua.allBlocks().length,
       }
     })
 
   const before = await dockState()
   assert(before.left.includes('belongs') && before.belongs, `前置：默认左槽有归属卡：${JSON.stringify(before)}`)
-  assert(before.right.includes('inspect') && before.inspect, `前置：默认右槽有检视卡：${JSON.stringify(before)}`)
 
   // ① 卡头的 ✕（与窗口卡同一颗按钮、同一条路）：只摘 cards，模型一个字节不动
   await page.locator('#dock-left .dock-card[data-card-id="belongs"] [data-dock-action="close"]').click()
@@ -15577,7 +15621,8 @@ await check('T150 派生卡也能关：关掉即离开槽（模型不动）；�
   assert(!closed.belongs, '关掉后 DOM 里也不该有这张卡')
   assert(closed.blocks === before.blocks, `关掉一张视图卡不该动模型：${before.blocks} → ${closed.blocks}`)
 
-  // ② 回程：「添加组件」画廊里它还在，点了就回来（否则 ✕ 就是单向陷阱）
+  // ② 回程：「添加组件」画廊里它还在，点了就回来（否则 ✕ 就是单向陷阱）。
+  // 「看属性」的落点是属性抽屉（不动槽、不复活任何卡），T1b 已钉。
   await page.locator('#dock-left-add').click()
   await page.waitForTimeout(160)
   const rows = await layerRows(page)
@@ -15593,101 +15638,8 @@ await check('T150 派生卡也能关：关掉即离开槽（模型不动）；�
   assert(back.left.includes('belongs') && back.belongs, `加回来应重新出现在槽里：${JSON.stringify(back.left)}`)
   assert(back.blocks === before.blocks, '加回来也不该动模型')
 
-  // ③ 检视卡：关掉之后「看属性」**不再**把它放回来——那条命令的落点是属性抽屉
-  //    （不动槽、不复活卡）；卡自己的回程是「添加组件」画廊，与归属卡同一条路。
-  await page.locator('#dock-right .dock-card[data-card-id="inspect"] [data-dock-action="close"]').click()
-  await page.waitForTimeout(140)
-  const noInspect = await dockState()
-  assert(!noInspect.right.includes('inspect') && !noInspect.inspect, `检视卡应能关掉：${JSON.stringify(noInspect.right)}`)
-  const activeId = await page.evaluate(() => window.__qua.snapshot().activeId)
-  await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), activeId)
-  await page.waitForSelector('.props-drawer')
-  const viaCmd = await page.evaluate(() => ({
-    cards: window.__qua.snapshot().dock.right.cards,
-    present: Boolean(document.querySelector('#dock-right .dock-card[data-card-id="inspect"]')),
-    drawer: document.querySelector('.props-drawer')?.dataset.targetBlockId ?? '',
-  }))
-  assert(!viaCmd.cards.includes('inspect') && !viaCmd.present, `「看属性」不再复活检视卡：${JSON.stringify(viaCmd)}`)
-  assert(viaCmd.drawer === activeId, `「看属性」开的是钉在那一块上的抽屉：${JSON.stringify(viaCmd)}`)
-  await page.keyboard.press('Escape')
-  await page.waitForTimeout(250)
-
-  // 回程＝画廊：检视卡还在目录里，点了就回来（✕ 不是单向陷阱）
-  await page.locator('#dock-right-add').click()
-  await page.waitForTimeout(160)
-  const rowsRight = await layerRows(page)
-  const atInspect = rowsRight.findIndex((r) => r.label === '检视卡')
-  assert(atInspect >= 0, `画廊里应有检视卡：${JSON.stringify(rowsRight.map((r) => r.label))}`)
-  await page.locator(`.layer-item[data-index="${atInspect}"]`).click()
-  await page.waitForTimeout(200)
-  const inspectBack = await dockState()
-  assert(inspectBack.right.includes('inspect') && inspectBack.inspect, `检视卡应从画廊加回来：${JSON.stringify(inspectBack.right)}`)
-
   await ctx.close()
-  return `归属卡关掉→画廊加回来（模型 0 变化）；检视卡关掉→「看属性」开抽屉不复活卡，卡从画廊回`
-})
-
-/**
- * **检视卡在多根屏上的空态是「不画」，但加卡这个动作不能静默。**
- *
- * 设计不变（92.1：多根屏没有单一对象 ⇒ 属性区收起）：卡仍在 `cards` 里，
- * 只是按主体隐藏。用户会在「日记流」上点添加之后看到「什么都没有」——
- * 真正的缺陷是**反馈缺失**，不是「卡不该收起」。
- * 这一条同时钉住：「先说原因」在添加之前，「给一句反馈」在添加之后，
- * 打开一个页之后卡出现。
- */
-await check('T202 检视卡在多根屏：画廊先说原因、添加给反馈、卡按主体收起；打开页后出现', async () => {
-  const { ctx, page } = await freshPage(browser, base)
-  // 不 quiet：这一条要验给用户的那句话
-  await openFirstPage(page)
-
-  // ① 页里可见 ⇒ 先关掉（回程从画廊开始）
-  await page.locator('#dock-right .dock-card[data-card-id="inspect"] [data-dock-action="close"]').click()
-  await page.waitForTimeout(140)
-  const closed = await page.evaluate(() => window.__qua.snapshot().dock.right.cards)
-  assert(!closed.includes('inspect'), `前置：检视卡已关掉：${JSON.stringify(closed)}`)
-
-  // ② 切到日记流（多根屏）
-  const jid = await page.evaluate(() => {
-    const j = window.__qua.allBlocks().find((b) => b.roles?.includes('journal'))?.id ?? ''
-    if (j) window.__qua.invoke('core.page/open', { pageId: j })
-    return j
-  })
-  assert(jid, '前置：应有今日 journal 块')
-  await page.waitForTimeout(300)
-  const roots = await page.evaluate(() => window.__qua.__editor.doc.roots.length)
-  assert(roots > 1, `前置：日记流是多根屏：${roots}`)
-
-  // ③ 画廊在**添加之前**说清它为什么暂时不可见
-  await page.locator('#dock-right-add').click()
-  await page.waitForTimeout(160)
-  const rows = await layerRows(page)
-  const at = rows.findIndex((r) => r.label === '检视卡')
-  assert(at >= 0, `多根屏上画廊仍应列出检视卡：${JSON.stringify(rows.map((r) => r.label))}`)
-  assert(rows[at].hint.includes('没有单一对象'), `添加之前先说原因：${JSON.stringify(rows[at])}`)
-
-  // ④ 添加：落进 cards，按主体收起；必须给一句反馈
-  await page.locator(`.layer-item[data-index="${at}"]`).click()
-  await page.waitForTimeout(250)
-  const added = await page.evaluate(() => ({
-    cards: window.__qua.snapshot().dock.right.cards,
-    hidden: document.getElementById('inspect-card')?.hidden === true,
-    toast: [...document.querySelectorAll('.toast')].map((x) => x.textContent ?? '').join(' | '),
-  }))
-  assert(added.cards.includes('inspect'), `加进来应落进 cards：${JSON.stringify(added)}`)
-  assert(added.hidden, `多根屏上仍按主体收起（92.1 不变）：${JSON.stringify(added)}`)
-  assert(added.toast.includes('已加入槽里'), `添加不能静默成功：${JSON.stringify(added)}`)
-
-  // ⑤ 打开一个页 ⇒ 有单一主体，卡出现
-  await openFirstPage(page)
-  const shown = await page.evaluate(() => ({
-    hidden: document.getElementById('inspect-card')?.hidden === true,
-    title: document.getElementById('inspect-card-title')?.textContent ?? '',
-  }))
-  assert(!shown.hidden && shown.title !== '', `打开一个页后卡出现并认主体：${JSON.stringify(shown)}`)
-
-  await ctx.close()
-  return `多根屏：画廊说明 → 添加反馈 → 卡按主体收起；打开页后出现`
+  return `归属卡关掉→离开 cards 且 DOM 无节点（模型 0 变化）→画廊加回来`
 })
 
 /* ---------------------------------------------------------------- T151 */
@@ -17733,15 +17685,16 @@ await check(
     })
     assert(setup.defId !== '' && setup.memberId !== '', `前置：定义与 #任务 的成员都应存在：${JSON.stringify(setup)}`)
 
-    // 打开定义块：属性卡里就是选项编辑器（全量视角）
+    // 打开定义块：名字下面的定义身体里就是选项编辑器（全量视角；检视卡已退场，
+    // 定义值配置的家是定义身体——与抽屉同一段、同一写径）
     await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.defId)
-    await page.waitForSelector('.choices-editor')
-    const empty = await page.evaluate(() => ({
-      target: document.getElementById('inspect-card')?.dataset.targetBlockId ?? '',
-      rows: document.querySelectorAll('#properties-body .choices-editor .choice-row').length,
-      note: document.querySelector('#properties-body .choices-editor .props-empty')?.textContent ?? '',
-    }))
-    assert(empty.target === setup.defId, `属性卡此刻的主体应是要编辑的定义块：${JSON.stringify(empty)}`)
+    await page.waitForSelector('.blk-def-body .choices-editor')
+    const empty = await page.evaluate((defId) => ({
+      inBody: Boolean(document.querySelector(`.blk[data-block-id="${defId}"] .blk-def-body .choices-editor`)),
+      rows: document.querySelectorAll('.blk-def-body .choices-editor .choice-row').length,
+      note: document.querySelector('.blk-def-body .choices-editor .props-empty')?.textContent ?? '',
+    }), setup.defId)
+    assert(empty.inBody, `选项编辑器应挂在定义块自己的身体里：${JSON.stringify(empty)}`)
     assert(empty.rows === 0 && empty.note.length > 0, `没有选项时给空态，而不是空下拉：${JSON.stringify(empty)}`)
 
     for (const [name, viaEnter] of [
@@ -17769,8 +17722,8 @@ await check(
       const def = window.__qua.propDefs().find((d) => d.label === '冒烟状态')
       const block = window.__qua.__editor.store.blocks.find((b) => b.id === def?.id)
       return {
-        rows: document.querySelectorAll('#properties-body .choices-editor .choice-row').length,
-        names: [...document.querySelectorAll('#properties-body .choices-editor .choice-name')].map((e) => e.value),
+        rows: document.querySelectorAll('.blk-def-body .choices-editor .choice-row').length,
+        names: [...document.querySelectorAll('.blk-def-body .choices-editor .choice-name')].map((e) => e.value),
         kids: block?.children.length ?? -1,
         records: Array.isArray(block?.props?._choices) ? block.props._choices.length : -1,
       }
@@ -17782,9 +17735,12 @@ await check(
     assert(added.kids === 0, `选项不进森林：${JSON.stringify(added)}`)
     assert(JSON.stringify(added.names) === JSON.stringify(['待办', '完成']), `顺序＝插入顺序：${JSON.stringify(added.names)}`)
 
-    // 成员块：下拉里的项来自 choicesFor（空占位 ＋ 两条）
+    // 成员块：下拉里的项来自 choicesFor（空占位 ＋ 两条）。
+    // 没填值的栏收在待填里：先展开（行脸只全显有值的行），下拉才在场。
     await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.memberId)
     await page.waitForTimeout(240)
+    await page.evaluate(() => document.querySelector('.blk-props-manage .blk-manage-pending')?.click())
+    await page.waitForTimeout(150)
     const options = await page.evaluate((propId) => {
       const sel = document.querySelector(`.prop-row[data-prop-id="${propId}"] select`)
       return sel ? [...sel.options].map((o) => ({ value: o.value, text: o.textContent })) : null
@@ -17821,11 +17777,15 @@ await check(
     /**
      * **新建 select 之后直接落在定义页**：否则用户得到一个空下拉，还得自己猜
      * 「去哪加选项」。走 UI 的「新建」那条路（不是直接 invoke）。
+     * 检视卡退场后草稿行住抽屉（加属性是 schema 变更）；面板钉在打开时的块上不跟导航，
+     * 「落在定义页」看的是**中心**——新建后导航到定义块，定义身体里就是选项编辑器。
      */
     await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.memberId)
     await page.waitForTimeout(220)
+    await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), setup.memberId)
+    await page.waitForSelector('.props-drawer')
     await page.evaluate(() => {
-      if (!document.querySelector('.props-form--own')) document.getElementById('properties-add')?.click()
+      if (!document.querySelector('.props-form--own')) document.querySelector('.props-drawer .props-add')?.click()
       const form = document.querySelector('.props-form--own')
       const name = form?.querySelector('.props-new-group input.prop-input')
       if (name instanceof HTMLInputElement) {
@@ -17843,12 +17803,15 @@ await check(
     })
     await page.waitForTimeout(360)
     const nav = await page.evaluate(() => ({
-      target: document.getElementById('inspect-card')?.dataset.targetBlockId ?? '',
-      editor: Boolean(document.querySelector('.choices-editor')),
+      active: window.__qua.snapshot().activeId,
       defId: window.__qua.propDefs().find((d) => d.label === '冒烟导航')?.id ?? '',
     }))
     assert(nav.defId !== '', `UI 新建 select 定义应写进库：${JSON.stringify(nav)}`)
-    assert(nav.target === nav.defId && nav.editor, `新建 select 后应停在定义页（那里就是选项编辑器）：${JSON.stringify(nav)}`)
+    const editor = await page.evaluate(
+      (defId) => Boolean(document.querySelector(`.blk[data-block-id="${defId}"] .blk-def-body .choices-editor`)),
+      nav.defId,
+    )
+    assert(nav.active === nav.defId && editor, `新建 select 后应停在定义页（那里就是选项编辑器）：${JSON.stringify(nav)}`)
 
     await ctx.close()
     return `定义页加 2 条 ⇒ 成员下拉 3 项；值＝choice id（${pick.value.slice(-6)}）；改名不改值；新建 select 落在定义页`
@@ -18063,24 +18026,24 @@ await check(
 
     // 图标选择器：点第一行的图标 → 网格选择器搜 flag → 写回 `_icon`
     //（选择器已网格化——弹窗＋搜索格，不再是 layer 菜单；交互同 T304）
-    await page.locator('#properties-body .choices-editor .choice-icon').first().click()
+    await page.locator('.blk-def-body .choices-editor .choice-icon').first().click()
     await page.waitForSelector('.icon-picker .icon-picker-cell', { timeout: 3000 })
     // 选择器默认 emoji tab（T305）——lucide 的 flag 在图标 tab 里
     await page.click('.icon-picker-tabs .icon-picker-tab:nth-child(2)')
     await page.fill('.icon-picker .icon-picker-search', 'flag')
     await page.click('.icon-picker .icon-picker-cell[data-icon="lucide:flag"]')
     await page.waitForFunction(
-      () => document.querySelector('#properties-body .choices-editor .choice-icon')?.getAttribute('data-icon') === 'lucide:flag',
+      () => document.querySelector('.blk-def-body .choices-editor .choice-icon')?.getAttribute('data-icon') === 'lucide:flag',
     )
 
     // 脸选择器同一枚入口的颜色行：选红后选项图标的描边吃到身份色 token
-    await page.locator('#properties-body .choices-editor .choice-icon').first().click()
+    await page.locator('.blk-def-body .choices-editor .choice-icon').first().click()
     await page.waitForSelector('.icon-picker-colors .icon-picker-swatch', { timeout: 3000 })
     await page.click('.icon-picker-colors .icon-picker-swatch[data-tip="身份色：red"]')
     await page.waitForFunction(
       () =>
         document
-          .querySelector('#properties-body .choices-editor .choice-icon')
+          .querySelector('.blk-def-body .choices-editor .choice-icon')
           ?.style.getPropertyValue('--value-c')
           .includes("--ui-identity-red") === true,
     )
@@ -18095,7 +18058,7 @@ await check(
     assert(gutterNow, '颜色写入后 gutter 图标应立刻带上身份色，不等下一次重画')
     await page.keyboard.press('Escape')
     // 勾选框映射：勾上「显示为勾选框」→ 出现 on/off 两个下拉（默认前两个选项）
-    await page.locator('#properties-body [data-choice-check]').check()
+    await page.locator('.blk-def-body [data-choice-check]').check()
     await page.waitForSelector('[data-choice-check-which="on"]')
     const checkState = await page.evaluate(() => {
       const on = document.querySelector('[data-choice-check-which="on"]')
@@ -18116,7 +18079,7 @@ await check(
     assert(checkState.hasStatus, '还应给出「勾选表示完成（任务型）」')
 
     // 先在 gutter 上显示出来（默认 panel，不会画占位）；重画后仍勾着
-    await page.locator('#properties-body [data-choice-gutter]').check()
+    await page.locator('.blk-def-body [data-choice-gutter]').check()
     await page.waitForTimeout(150)
     const gutterChecked = await page.evaluate(
       () => document.querySelector('[data-choice-gutter]')?.checked ?? null,
@@ -18314,18 +18277,18 @@ await check(
     assert(setup.defId !== '' && setup.a !== setup.b, `前置：两个块、两条标签、一条 select 定义：${JSON.stringify(setup)}`)
     await page.waitForTimeout(320)
 
-    // 打开 #甲 的属性卡 → 标签属性段里那条 select 有「选项」入口
+    // 打开 #甲（zoom）→ 名字下面的定义身体里，字段声明那条 select 有「选项」入口
     await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.tagA)
     await page.waitForSelector(`[data-declared-choices="${setup.defId}"]`)
     await page.evaluate((propId) => document.querySelector(`[data-declared-choices="${propId}"]`)?.click(), setup.defId)
-    await page.waitForSelector('.choices-editor')
+    await page.waitForSelector('.blk-def-body .choices-editor')
     const opened = await page.evaluate(() => ({
       drawers: document.querySelectorAll('.drawer').length,
-      inCard: Boolean(document.querySelector('.prop-declared .choices-editor')),
+      inBody: Boolean(document.querySelector('.blk-def-body .prop-declared .choices-editor')),
       rows: document.querySelectorAll('.choices-editor .choice-row').length,
     }))
     assert(opened.drawers === 0, `标签视角就地展开，不叠 drawer：${JSON.stringify(opened)}`)
-    assert(opened.inCard && opened.rows === 1, `标签属性段里出现选项编辑器（含已有的全局项）：${JSON.stringify(opened)}`)
+    assert(opened.inBody && opened.rows === 1, `定义身体的声明段里出现选项编辑器（含已有的全局项）：${JSON.stringify(opened)}`)
 
     // 标签视角新增：缺省「只对本标签可见」
     await page.evaluate(() => {
@@ -18400,9 +18363,12 @@ await check(
     const back = await page.evaluate((s) => window.__qua.fields(s.a).find((f) => f.propId === s.defId)?.choices.map((c) => c.label) ?? [], setup)
     assert(back.includes('全局项'), `恢复后 #甲 又看得到全局项：${JSON.stringify(back)}`)
 
-    // 块上的下拉与派生同一份：不是「面板里有、控件里没有」
+    // 块上的下拉与派生同一份：不是「面板里有、控件里没有」。
+    // 没填值的栏收在待填里：先展开，下拉才在场。
     await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.a)
     await page.waitForTimeout(220)
+    await page.evaluate(() => document.querySelector('.blk-props-manage .blk-manage-pending')?.click())
+    await page.waitForTimeout(150)
     const dom = await page.evaluate((propId) => {
       const sel = document.querySelector(`.prop-row[data-prop-id="${propId}"] select`)
       return sel ? [...sel.options].map((o) => o.textContent) : null
@@ -18491,10 +18457,14 @@ await check(
     assert(setup.defId !== '', '前置：应有一条声明给 #冒烟书 的 number 定义')
     await page.waitForTimeout(320)
 
-    // 在 #冒烟电影 的**声明**表单里输入同名同 kind ⇒ 两个动作同时可见
+    // 在 #冒烟电影 的**声明**表单里输入同名同 kind ⇒ 两个动作同时可见。
+    // 电影标签此刻零声明 ⇒ 定义身体不画（声明非空才画）；声明段的空态添加入口
+    // 住在抽屉里（路由细分：零声明的主体标签保留这一段，否则加第一条声明没有路）。
     await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), setup.movieId)
     await page.waitForTimeout(220)
-    await page.evaluate(() => document.querySelector('[data-declare-add]')?.click())
+    await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), setup.movieId)
+    await page.waitForSelector('.props-drawer')
+    await page.evaluate(() => document.querySelector('.props-drawer [data-declare-add]')?.click())
     await page.waitForSelector('.props-form--declared')
     await page.evaluate(() => {
       const form = document.querySelector('.props-form--declared')
@@ -18556,9 +18526,11 @@ await check(
     const groupsOn = async (blockId) => {
       await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), blockId)
       await page.waitForTimeout(180)
-      // 表单开着就沿用（`formOpen` 跨主体保留）：再点一次「＋ 添加属性」会把它关掉
+      // 草稿行住抽屉（检视卡退场）；换块 inspect 会换面板 ⇒ 草稿态不跨主体保留，每次现开
+      await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), blockId)
+      await page.waitForSelector('.props-drawer')
       await page.evaluate(() => {
-        if (!document.querySelector('.props-form--own')) document.getElementById('properties-add')?.click()
+        if (!document.querySelector('.props-form--own')) document.querySelector('.props-drawer .props-add')?.click()
       })
       await page.waitForSelector('.props-form--own')
       return page.evaluate(() => {
@@ -31037,7 +31009,7 @@ await check('T309 ref 的候选域：四档切换；标签档过滤候选；手�
   await page.evaluate((defId) => window.__qua.invoke('core.block/focus-block', { blockId: defId }), setup.defId)
   await page.waitForTimeout(300)
   const emptyState = await page.evaluate(() => {
-    const row = document.querySelector('#properties-body .prop-ref-domain-row')
+    const row = document.querySelector('.blk-def-body .prop-ref-domain-row')
     const sel = row?.querySelector('.prop-ref-mode')
     return {
       row: Boolean(row),
@@ -31055,7 +31027,7 @@ await check('T309 ref 的候选域：四档切换；标签档过滤候选；手�
 
   // 切档本身不写库（取消选择＝一切照旧）；真选中标签才落一条 tags 档的域
   await page.evaluate(() => {
-    const sel = document.querySelector('#properties-body .prop-ref-mode')
+    const sel = document.querySelector('.blk-def-body .prop-ref-mode')
     sel.value = 'tags'
     sel.dispatchEvent(new Event('change', { bubbles: true }))
   })
@@ -31072,8 +31044,8 @@ await check('T309 ref 的候选域：四档切换；标签档过滤候选；手�
     return {
       domain: live?.props?._refDomain ?? null,
       legacy: live?.props?._refTags ?? null,
-      chips: [...document.querySelectorAll('#properties-body .prop-ref-domain-row .props-tag')].map((e) => e.textContent ?? ''),
-      mode: document.querySelector('#properties-body .prop-ref-mode')?.value ?? '',
+      chips: [...document.querySelectorAll('.blk-def-body .prop-ref-domain-row .props-tag')].map((e) => e.textContent ?? ''),
+      mode: document.querySelector('.blk-def-body .prop-ref-mode')?.value ?? '',
     }
   }, setup.defId)
   assert(
@@ -31087,9 +31059,14 @@ await check('T309 ref 的候选域：四档切换；标签档过滤候选；手�
   assert(constrained.chips.some((s) => s.includes('#演员')), '候选段应画出这枚标签 chip：' + JSON.stringify(constrained.chips))
   assert(constrained.mode === 'tags', '档位跟着存储走：' + JSON.stringify(constrained.mode))
 
-  // ③ 值选择器：候选只剩 #演员 的成员；标题说明「为什么只有这几行」
+  // ③ 值选择器：候选只剩 #演员 的成员；标题说明「为什么只有这几行」。
+  // 没填值的栏收在「+N 项待填」里：先展开，选值的入口才在场（行脸只全显有值的行）。
   await page.evaluate((host) => window.__qua.invoke('core.block/focus-block', { blockId: host }), setup.host)
   await page.waitForTimeout(300)
+  await page.evaluate(() => {
+    document.querySelector('.blk-props-manage .blk-manage-pending')?.click()
+  })
+  await page.waitForSelector(`.blk-props-manage .prop-row[data-prop-id="${setup.defId}"]`, { timeout: 4000 })
   await page.evaluate((pid) => {
     document.querySelector('.prop-row[data-prop-id="' + pid + '"] .prop-ref')?.click()
   }, setup.defId)
@@ -31165,7 +31142,7 @@ await check('T309 ref 的候选域：四档切换；标签档过滤候选；手�
   await page.evaluate((defId) => window.__qua.invoke('core.block/focus-block', { blockId: defId }), setup.defId)
   await page.waitForTimeout(280)
   await page.evaluate(() => {
-    const sel = document.querySelector('#properties-body .prop-ref-mode')
+    const sel = document.querySelector('.blk-def-body .prop-ref-mode')
     sel.value = 'blocks'
     sel.dispatchEvent(new Event('change', { bubbles: true }))
   })
@@ -31190,7 +31167,7 @@ await check('T309 ref 的候选域：四档切换；标签档过滤候选；手�
   // ⑦ 手选两个块 ⇒ 清单就是候选（不是子树）；已选的不再出现；抬头只报数量、不念块名
   const pickBlock = async (name) => {
     await page.evaluate(() => {
-      const sel = document.querySelector('#properties-body .prop-ref-mode')
+      const sel = document.querySelector('.blk-def-body .prop-ref-mode')
       sel.value = 'blocks'
       sel.dispatchEvent(new Event('change', { bubbles: true }))
     })
@@ -31211,7 +31188,7 @@ await check('T309 ref 的候选域：四档切换；标签档过滤候选；手�
   const list = await page.evaluate(
     (defId) => ({
       domain: window.__qua.__editor.store.find(defId)?.props?._refDomain ?? null,
-      chips: [...document.querySelectorAll('#properties-body .prop-ref-domain-row .props-tag')].map((e) => e.textContent ?? ''),
+      chips: [...document.querySelectorAll('.blk-def-body .prop-ref-domain-row .props-tag')].map((e) => e.textContent ?? ''),
     }),
     setup.defId,
   )
@@ -31269,7 +31246,7 @@ await check('T309 ref 的候选域：四档切换；标签档过滤候选；手�
   assert(journalId !== '', '前置：库里应有一个日记块')
   await page.waitForTimeout(300)
   const dayChip = await page.evaluate(() =>
-    [...document.querySelectorAll('#properties-body .prop-ref-domain-row .props-tag')].map((e) => e.textContent ?? ''),
+    [...document.querySelectorAll('.blk-def-body .prop-ref-domain-row .props-tag')].map((e) => e.textContent ?? ''),
   )
   assert(dayChip.length === 1, '日记块应画成一枚 chip：' + JSON.stringify(dayChip))
   assert(/\d{4}/.test(dayChip[0]), '日记块应显示日期投影（不是「无标题」也不是 id）：' + JSON.stringify(dayChip[0]))
@@ -32131,7 +32108,7 @@ await check('T317 asset 值控件：预览独立成带、地址在下一行，�
   return `行下管理档：预览 ${geom.thumbW}×${geom.thumbH}px 单独成带（距地址 ${geom.addrTop - geom.thumbsBottom}px）、地址 ${geom.inputW}px；选文件退图标键`
 })
 
-await check('T318 检视卡段序：类型专属段紧跟属性值，块配置在后', async () => {
+await check('T318 属性抽屉段序：类型专属段紧跟属性值，块配置在后', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
   const ids = await page.evaluate(() => {
@@ -32144,12 +32121,16 @@ await check('T318 检视卡段序：类型专属段紧跟属性值，块配置�
   })
   const read = () =>
     page.evaluate(() =>
-      [...document.querySelectorAll('#properties-body > .props-section')].map(
+      [...document.querySelectorAll('.props-drawer .properties-body > .props-section')].map(
         (s) => s.querySelector('.props-section-title')?.textContent ?? '',
       ),
     )
 
+  // 检视卡退场 ⇒ 面板宿主是抽屉；被检视块是聚焦根时值段只画壳（段头＋添加），
+  // 段序判据不变：值段仍在第一位，类型专属紧跟其后。
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), ids.def)
+  await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), ids.def)
+  await page.waitForSelector('.props-drawer')
   await page.waitForTimeout(200)
   const defOrder = await read()
   assert(
@@ -32157,7 +32138,7 @@ await check('T318 检视卡段序：类型专属段紧跟属性值，块配置�
     `定义块段序应是「属性 → 这条属性的值 → 块配置 → 系统信息」：${JSON.stringify(defOrder)}`,
   )
 
-  await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), ids.tag)
+  await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), ids.tag)
   await page.waitForTimeout(200)
   const tagOrder = await read()
   assert(
@@ -34221,11 +34202,11 @@ await check('T356 新建子块触发器：选完父块当场问「沿不沿引�
 })
 
 /**
- * T357｜**检视卡里加归属**：面板这一跳的载荷键是 `childId`（命令声明表口径），
+ * T357｜**面板里加归属**：面板这一跳的载荷键是 `childId`（命令声明表口径），
  * 不是面板作用域的 `blockId`。键名错配时 handler 把子块判成空串、零写入零报错，
  * 用户看到的就是「加了没生效」。T52 只钉命令本身，钉不住装配层这一跳。
  */
-await check('T357 检视卡加/摘归属：面板入口写进 _belongsTo，chip 当场出现与消失', async () => {
+await check('T357 面板加/摘归属：面板入口写进 _belongsTo，chip 当场出现与消失', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
@@ -34242,10 +34223,12 @@ await check('T357 检视卡加/摘归属：面板入口写进 _belongsTo，chip 
   })
   await page.waitForTimeout(300)
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), ids.targetId)
-  await page.waitForSelector('.props-belong-add', { timeout: 4000 })
+  // 检视卡退场 ⇒ 身份/归属段住属性抽屉（管理面）；聚焦根的值段行不重复画，配置段照画
+  await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), ids.targetId)
+  await page.waitForSelector('.props-drawer .props-belong-add', { timeout: 4000 })
 
   // 点「＋」→ 从候选里选已有标签（面板入口不改身份，只写边）
-  await page.click('.props-belong-add')
+  await page.click('.props-drawer .props-belong-add')
   await page.waitForSelector('.layer .layer-input', { timeout: 4000 })
   await page.fill('.layer .layer-input', '归属探针')
   await page.waitForTimeout(150)
@@ -34269,7 +34252,7 @@ await check('T357 检视卡加/摘归属：面板入口写进 _belongsTo，chip 
     }),
     ids,
   )
-  assert(added.written, `检视卡加归属应写进子块的 _belongsTo：${JSON.stringify(added)}`)
+  assert(added.written, `面板加归属应写进子块的 _belongsTo：${JSON.stringify(added)}`)
   assert(
     added.chips.some((s) => s.text.includes('归属探针') && s.id === ids.tagId),
     `加完这一行应当场出现上级 chip：${JSON.stringify(added)}`,
@@ -34285,7 +34268,7 @@ await check('T357 检视卡加/摘归属：面板入口写进 _belongsTo，chip 
     }),
     ids,
   )
-  assert(!removed.written, `检视卡摘归属应清掉 _belongsTo：${JSON.stringify(removed)}`)
+  assert(!removed.written, `面板摘归属应清掉 _belongsTo：${JSON.stringify(removed)}`)
   assert(removed.chips === 0, `摘掉后这一行不该留着 chip：${JSON.stringify(removed)}`)
 
   await ctx.close()
@@ -35166,7 +35149,7 @@ await check('T368 引述空行上的「在上下新建块」真的多一块：�
 /**
  * T369｜**主体行下管理档**（单主体屏的根行）：值全显 ＋ 一行待填；块标字段不重复。
  *
- * 钉的是「行脸 vs 管理面」的边界（这一步只立行脸那一档，检视卡还在）：
+ * 钉的是「行脸 vs 管理面」的边界（行脸这一档 ＋ 抽屉路由各答一半）：
  *   · 单主体屏（zoom 进一块）⇒ 根行下面就是管理档，有值的字段**全显**、可直接改；
  *   · 归块标的字段（`_uiPosition: block-left` 的 checkbox）**不在**行下再出一格
  *     ——同一行同一 `propId` 的可编辑控件 ≤ 1（同一个值 30px 内两个控件，

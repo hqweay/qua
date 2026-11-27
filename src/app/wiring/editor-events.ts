@@ -310,10 +310,10 @@ function viewEvents(
    * （格式／基数／候选域／选项），标签挂字段声明段（非空才画，行判据不画就没身体）。
    *
    * 身体是缓存实例（行重画搬家不重建），内容**每次模型变化后现画**：段组件的
-   * render() 返回新鲜元素，与检视卡同一条新鲜度契约（面板也是每次 store 变化
+   * render() 返回新鲜元素，与抽屉同一条新鲜度契约（面板也是每次 store 变化
    * 整卡重建）。订阅**不按 id 过滤**：段的内容读跨块派生（选项是定义块的子块、
    * chip 名字与选项名是别的块的投影），只认本块 id 会漏外部改动 ⇒ 防抖到与
-   * 检视卡同一档（60ms）再画。能力包（picker／命令接线）与面板同源
+   * 抽屉同一档（60ms）再画。能力包（picker／命令接线）与面板同源
    * （`panels.propDeps`），写完重画跟着身体自己的块走。
    */
   const defBodies = createRowBodyCache(
@@ -411,7 +411,7 @@ function viewEvents(
     holder.className = 'blk-manage-body'
     into.appendChild(holder)
     /**
-     * 能力包与抽屉/检视卡同源（`panels.propDeps`）：写路径、行的派生、显示名只有一份。
+     * 能力包与抽屉同源（`panels.propDeps`）：写路径、行的派生、显示名只有一份。
      * 主体取「此刻库里那一块」而不是闭包里的旧引用——撤销/换库之后旧对象已不在森林里。
      */
     const caps = getPanels().propDeps(() => kb.get(block.id))

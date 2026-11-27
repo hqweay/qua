@@ -56,14 +56,6 @@ export interface Chrome {
    *    底边之下才算，否则左右留白也会误触。
    */
   blankAreaEl: HTMLElement
-  /**
-   * 右槽里的**检视卡**：属性面板挂在它上面，标题显示当前对象的名字。
-   *
-   * 它是常驻节点（`renderDockStack` 的 `persistent`），不是每次重画现造的卡片：
-   * 里面是表单，重建会丢焦点与光标。
-   */
-  inspectCardEl: HTMLElement
-  inspectCardTitleEl: HTMLElement
   /** 顶栏里的 tab 条（纯容器；内容由 `ui/center-tabs.ts` 画） */
   centerTabsEl: HTMLElement
   /** 新建 tab 的 `+`：**在滚动区之外**，tab 多了也不会被横向滚走 */
@@ -84,9 +76,7 @@ export interface Chrome {
    * （块 tab 的内容住编辑器，不用它）。可见性的切换归表面宿主，不归 tab 条。
    */
   centerSurfaceEl: HTMLElement
-  propertiesBodyEl: HTMLElement
-  propertiesAddEl: HTMLButtonElement
-  /** 右槽的堆叠容器：检视卡在装配时挂进去（它必须先在文档里，重画才认得它） */
+  /** 右槽的堆叠容器：窗口卡与派生卡都由装配层按 prefs 现排 */
   dockRightStackEl: HTMLElement
   /**
    * ⚠️ **块底的三段（标签页 footer／查询视图／反链 footer）不在这里了**：
@@ -120,16 +110,12 @@ export function createChrome(onCrumb?: (blockId: string, place: OpenAction) => v
   const topbarEl = must('topbar')
   const emptyHintEl = must('empty-hint')
   const noticeEl = must('boot-notice')
-  const inspectCardEl = must('inspect-card')
-  const inspectCardTitleEl = must('inspect-card-title')
   const centerTabsEl = must('center-tabs')
   const centerTabAddEl = must<HTMLButtonElement>('center-tab-add')
   const centerTabListEl = must<HTMLButtonElement>('center-tab-list')
   const centerFilterEl = must<HTMLButtonElement>('center-filter')
   const centerFilterPanelEl = must('center-filter-panel')
   const centerSurfaceEl = must('center-surface')
-  const propertiesBodyEl = must('properties-body')
-  const propertiesAddEl = must<HTMLButtonElement>('properties-add')
   const dockRightStackEl = must('dock-right-stack')
 
   function showNotice(text: string | null): void {
@@ -211,16 +197,12 @@ export function createChrome(onCrumb?: (blockId: string, place: OpenAction) => v
     editorEl,
     scrollEl,
     blankAreaEl: scrollEl,
-    inspectCardEl,
-    inspectCardTitleEl,
     centerTabsEl,
     centerTabAddEl,
     centerTabListEl,
     centerFilterEl,
     centerFilterPanelEl,
     centerSurfaceEl,
-    propertiesBodyEl,
-    propertiesAddEl,
     dockRightStackEl,
   }
 }

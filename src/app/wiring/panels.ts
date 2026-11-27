@@ -24,6 +24,7 @@ import {
   hasChildrenViewBody,
   findInForest,
   flatten,
+  focusRootOf,
   hasList,
   iconOf,
   isQueryBlock,
@@ -175,7 +176,6 @@ export type PanelsDeps = {
 
 export function setupPanels(deps: PanelsDeps) {
   const { blocks, kb, layers, app, owners, journalMounts, shortId, run, syncSections, scheduleSave, scheduleBadge, refClick } = deps
-  const chrome = deps.getChrome()
   const mainEd = deps.getMainEd()
   /**
    * 边图邻接表**当次现建**：根集合随「父的露面」变，缓存一处就会让加了露面之后
@@ -199,51 +199,10 @@ export function setupPanels(deps: PanelsDeps) {
   /* ------------------------------------------------------------ 属性区 */
 
   /**
-   * 属性区的**主体**：这一屏**唯一的那个块**。
-   *
-   * 判据一条、不分角色：`doc.roots.length === 1` ⇒ 面板画那一块；否则收起。
-   * 于是「打开一个页 / 聚焦一个块 / 只看今天这一天日记」都显示（它们都是单根），
-   * 而日记流（今日＋更早的几天）、查询列表、多页并排都收起 —— 那些屏上没有
-   * 「一个东西」可言，拿其中一段冒充整屏的主体正是本区最该避免的错位。
-   *
-   * ## 为什么不跟光标
-   *
-   * 「主体」必须是**被显式放到台面上的东西**。这个应用里台面只有两处：中心槽的当前对象
-   * （`activeId`）与侧槽里**钉住**的块 —— 两者都是用户主动选定的，会一直待在原处直到再选一次。
-   * 光标不在这两处里：它是阅读/输入过程中的瞬时位置。
-   *
-   * 三个具体后果（不是口味）：
-   *   · **布局跳**：本区在正文**上方**。跟着光标 ⇒ 按一次 ↑/↓ 就可能在阅读内容上方
-   *     插进/抽走几行 chrome，用户读到的那段文字整体位移。方向键是最高频的按键。
-   *   · **位置与主体不符**：面板在顶、主体却在第 47 行。
-   *   · **两套主体**：`activeId` 已经是「这一屏是谁」（面包屑、装载根、左右槽不跟随都按它算），
-   *     再让属性区另认一个 ⇒ 同一屏有两处指着不同的块，用户没法从界面推出「改的是哪一个」。
-   *
-   * ## 那「不想 zoom 就想改某块的属性」怎么办
-   *
-   * 那个动作的成本被算错了：**块标点一下就是聚焦**（块标＝聚焦入口），它已经把
-   * 「把这一块放上台面」做成了一次点击。所以不需要第二套主体，需要的是捷径，
-   * 而捷径已经有一条（点块标 / 块菜单「聚焦到此块」）。
-   *
-   * ⚠️ 与「zoom 是视图配置、不引入焦点栈」一致：本区读的就是那个视图配置（当前对象），
-   *    不额外持有任何「上次是谁」的记忆，因此也没有「点空白就收起」这回事。
+   * 检视卡已退场（属性贴块：值段的行挂主体根行下的管理档，管理面归抽屉）。
+   * 旁槽不再有「屏级镜像块级数据」的卡——那是检视卡的根本错位：主体只能是
+   * 「这一屏唯一那个根」，而属性是每块一份。
    */
-  function subject(): Block | null {
-    const roots = deps.getMainEd().doc.roots
-    return roots.length === 1 ? roots[0]! : null
-  }
-
-  /**
-   * 检视卡：**常驻卡片**（列在右槽，`renderDockStack` 的 `persistent`）。
-   *
-   * 先挂进堆叠再交给重画：`renderDockStack` 只保留**已在文档里**的常驻节点
-   * （游离节点会被当成垃圾清掉，然后写进一棵看着空的树）。
-   *
-   * 为什么是常驻而不是每次现造：里面是表单，重建会丢焦点与光标 ——
-   * 与钉住区同一条理由（那边踩过一次「每敲一个字跳一次」）。
-   */
-  const inspectCard = chrome.inspectCardEl
-  chrome.dockRightStackEl.appendChild(inspectCard)
 
   /**
    * **`ref` 值的选择器**：从整片森林里挑一块。
@@ -399,13 +358,13 @@ export function setupPanels(deps: PanelsDeps) {
           if (!owner) return
           app.createPropRefTarget(owner.id, propId, row.pick.name)
           // 与「选了已有目标」同一条：属性区要立刻显示新值
-          scheduleProperties()
+          scheduleDrawer()
           return
         }
         const id = String(row.id).slice('ref/'.length)
         onPick(id)
         // 选择器关掉之后属性区要立刻显示新值（不等下一次 store 通知）
-        scheduleProperties()
+        scheduleDrawer()
       },
     })
   }
@@ -559,7 +518,7 @@ export function setupPanels(deps: PanelsDeps) {
 
   /**
    * **块配置段的能力包**（身份与归属的写与开取，按块绑定）：
-   * 属性面板（检视卡／抽屉）与块配置弹窗两个宿主共用同一份——
+   * 属性面板（抽屉）与块配置弹窗两个宿主共用同一份——
    * 段组件只认 ctx（`config-sections.ts`），判据与写路径只此一处。
    * `repaint` 由宿主给：面板＝刷自己的实例，弹窗＝整棵重绘自己。
    */
@@ -702,7 +661,7 @@ export function setupPanels(deps: PanelsDeps) {
   }
 
   /**
-   * 属性面板的**读写回调只做一份**：检视卡与属性抽屉是同一份内容的两个宿主
+   * 属性面板的**读写回调只做一份**：抽屉与行下管理档是同一份内容的两个宿主
    * （一个跟焦点、常驻右槽；一个显式点出、钉在打开时那块上）。
    * 宿主之间只差两件事：`target`（画哪一块）与 `repaint`（写入后刷哪一个实例）。
    * 身份/归属段不再各持回调：统一走 `blockConfigOps`（与弹窗同一份）。
@@ -905,25 +864,20 @@ export function setupPanels(deps: PanelsDeps) {
     }
   }
 
-  const propertiesPanel = new PropertiesPanel(
-    {
-      root: inspectCard,
-      title: chrome.inspectCardTitleEl,
-      body: chrome.propertiesBodyEl,
-      add: chrome.propertiesAddEl,
-    },
-    makePropertiesDeps(() => subject()),
-  )
-
   /* ------------------------------------------------------------ 属性抽屉 */
 
   /**
-   * **属性抽屉**：显式点出的任务面，宿主是 `layers.openDrawer`（整高右滑，看完即走）。
+   * **属性抽屉**：显式点出的管理面，宿主是 `layers.openDrawer`（整高右滑，看完即走）。
    *
-   * 与检视卡共用同一份 `PropertiesPanel` 与写入回调（上面 `makePropertiesDeps`），
-   * 差别只在主体与生命周期：检视卡画「这一屏是谁」（跟焦点换内容）；
-   * 抽屉**钉在打开时那一块上**——不跟焦点、不换中心、不动槽（这正是它与
-   * 「看属性＝开右槽」旧口径的分界）。
+   * 挂的是 `PropertiesPanel` 与同一份写入回调（上面 `makePropertiesDeps`）；
+   * 抽屉**钉在打开时那一块上**——不跟焦点、不换中心、不动槽。
+   *
+   * **路由纪律（不重复屏幕已钉住的那一份）**：被检视的块是当前屏的聚焦根
+   * （`focusRootOf`，判据经 `subjectRow` 注入）⇒ 值段**行**与声明段不画——
+   * 它们此刻就钉在那块根行下（管理档／定义身体），再画一份就是同屏两份值控件。
+   * 但值段的**段尾添加入口与草稿行照画**：加属性是 schema 变更，抽屉是它唯一
+   * 稳定的家；它创造「尚不存在的东西」，不构成重复。zoom 态「给这块加第一个字段」
+   * 只从这里走，能力不随主体性分叉。
    *
    * ⚠️ 抽屉抬头已经写着「是谁」：面板的 title 槽给一个空元素占位（面板不写它）。
    * ⚠️ 钉住的块被删 ⇒ 整张抽屉关掉（`renderDrawer` 的判据），不留一个空壳。
@@ -935,7 +889,7 @@ export function setupPanels(deps: PanelsDeps) {
   /** 抽屉当前聚焦的属性栏（带 `focusPropId` 的入口喂进来）；「同一栏再点一次＝收起」靠它判 */
   let drawerFocusPropId: string | null = null
 
-  /** 库一变就跟着刷（与检视卡同一条通知、同鲜度）；抽屉已被关掉就顺手清状态 */
+  /** 库一变就跟着刷；抽屉已被关掉就顺手清状态 */
   function renderDrawer(): void {
     if (!layers.drawerOpen()) {
       drawerPanel = null
@@ -1012,10 +966,15 @@ export function setupPanels(deps: PanelsDeps) {
       root.append(titleEl, body, add)
       const panel = new PropertiesPanel(
         { root, title: titleEl, body, add },
-        makePropertiesDeps(() => (drawerBlockId ? findInForest(deps.getWs().blocks, drawerBlockId) : null)),
-        // 与检视卡**同一份面板**、同一个默认：ref 值一律画引用 chip。
-        // inline 岛的机器（`RefIslandDeps` ＋ `inlineRefIsland` 开关）整包留着——真要做
-        // 原地编辑时只在这里打开，不在两条路径上各写一套值行。
+        {
+          ...makePropertiesDeps(() => (drawerBlockId ? findInForest(deps.getWs().blocks, drawerBlockId) : null)),
+          // 路由判据经注入传入、每次 render 现判：抽屉钉在打开时的块上，
+          // 而屏幕的聚焦根会换（导航不改抽屉）⇒ 判据不能在开抽屉时定死。
+          subjectRow: () => focusRootOf(deps.getMainEd().doc.roots),
+        },
+        // ref 值一律画引用 chip（与行下管理档同一个默认）：inline 岛的机器
+        // （`RefIslandDeps` ＋ `inlineRefIsland` 开关）整包留着——真要做原地编辑时
+        // 只在这里打开，不在两条路径上各写一套值行。
       )
       drawerPanel = panel
       drawerRootEl = root
@@ -1026,43 +985,24 @@ export function setupPanels(deps: PanelsDeps) {
     if (focusPropId && drawerRootEl) focusPropRow(drawerRootEl, focusPropId)
   }
 
-  function renderProperties(): void {
-    renderInspectTitle(subject())
-    propertiesPanel.render()
-  }
-
   /**
-   * 重算时机：**当前对象变了**、或库里那块的内容变了，才需要重画。
+   * 重画时机：**库里那块的内容变了**、或装载换了屏（聚焦根换 ⇒ 路由判据可能翻面）。
    *
    * 触发点少而明确 —— 装载（换页 / 聚焦 / 翻日 / 换库，见 `loadPage`）、store 写入、
-   * 面板自己的写入完成。光标移动、窗口失焦、点空白**都不在其中**：那些都不改变「这一屏是谁」。
-   * 这正是本区不跟光标换来的好处：没有一组「焦点去哪了」的监听要维护，
-   * 也就没有「改到一半面板自己消失」这一类要防。
+   * 面板自己的写入完成。光标移动、窗口失焦、点空白**都不在其中**。
    *
-   * ⚠️ `blocks.subscribe` 仍要在：改标签/属性值之后行内容要跟着变，这与主体是谁无关。
+   * ⚠️ `blocks.subscribe` 仍要在：改标签/属性值之后行内容要跟着变。
    */
   let propertyTimer: number | null = null
-  function scheduleProperties(): void {
+  function scheduleDrawer(): void {
     if (propertyTimer !== null) window.clearTimeout(propertyTimer)
     propertyTimer = window.setTimeout(() => {
       propertyTimer = null
-      renderProperties()
       renderDrawer()
     }, 60)
   }
 
-  /**
-   * 卡片标题＝**当前对象的名字**（journal 用日期投影，与面包屑同一口径）。
-   *
-   * 为什么标题交给卡而不是「块属性」四个字：这张卡要回答的是「现在在改**谁**」。
-   * 名字写在卡的抬头，换主体时**标题变、卡不动** —— 位置稳定，用户不用重新认路。
-   */
-  function renderInspectTitle(b: Block | null): void {
-    chrome.inspectCardTitleEl.textContent = b ? blockLabel(b, (id) => kb.get(id)) : ''
-  }
-
-  blocks.subscribe(() => scheduleProperties())
-  renderProperties()
+  blocks.subscribe(() => scheduleDrawer())
 
   /* ------------------------------------------------------------ 挂载区（每段一个） */
 
@@ -1927,8 +1867,8 @@ export function setupPanels(deps: PanelsDeps) {
     createRefPeekArea,
     activateRefsFor,
     recordRecentColor,
-    renderProperties,
-    scheduleProperties,
+    renderDrawer,
+    scheduleDrawer,
     pickRefValue,
     pickChoiceValue,
     pickTagValue,
@@ -1939,7 +1879,7 @@ export function setupPanels(deps: PanelsDeps) {
     mountEmbedView,
     viewShown,
     /**
-     * **属性段的读写能力包工厂**（检视卡/抽屉与正文里的定义投影同源）：给一个
+     * **属性段的读写能力包工厂**（抽屉与正文里的定义投影同源）：给一个
      * 主体取值函数，返回同一套 picker／命令接线（写完重画跟着那个主体走）。
      * 行内投影宿主用它把能力钉在身体自己的块上——判据与写路径只有一份，
      * 壳各自包 chrome 与「写完谁重画」。
