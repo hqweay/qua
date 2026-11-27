@@ -17,10 +17,13 @@
  */
 import { walkForest } from '../model/walk.ts'
 import { isDeleted, type Block } from '../model/model.ts'
-import { CALLOUT_TYPES_BLOCK_ID, builtinCalloutTypes, toCalloutRecords, type CalloutType } from '../infra/callout.ts'
+import { CALLOUT_TYPES_BLOCK_ID, builtinCalloutTypes, mkCalloutTypesBlock, toCalloutRecords, type CalloutType } from '../infra/callout.ts'
 import { CALLOUT_TYPES_PROP } from '../model/model.ts'
 import { parseChoices } from '../props/choices.ts'
 import type { Tx } from './types.ts'
+
+/** 再导出：块的**形状**住在 `infra/callout.ts`（种子与首建共造同一份），写路径只负责落它 */
+export { mkCalloutTypesBlock }
 
 /** 按 id 找一块，**含软删**（确定性 id 的存在性只能这样判） */
 export function findCalloutTypesBlock(forest: readonly Block[]): Block | undefined {
@@ -49,19 +52,6 @@ export function calloutTypesIn(block: Block | undefined): CalloutType[] {
     ...(c.color !== undefined ? { color: c.color } : {}),
     ...(c.deleted ? { deleted: true as const } : {}),
   }))
-}
-
-/** 首建的那一块（无正文／别名／露面：它不参与组织，只承载记录） */
-export function mkCalloutTypesBlock(records: readonly CalloutType[]): Block {
-  const now = Date.now()
-  return {
-    id: CALLOUT_TYPES_BLOCK_ID,
-    content: [],
-    children: [],
-    created: now,
-    modified: now,
-    props: { [CALLOUT_TYPES_PROP]: toCalloutRecords(records) },
-  }
 }
 
 /** 一笔改写的结局：`deleted` ⇒ 表被软删（不写、也不复活：恢复是回收站的事） */

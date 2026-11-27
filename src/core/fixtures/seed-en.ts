@@ -55,6 +55,14 @@ export const SEED_EN: Record<string, string> = {
   '证据': 'Evidence',
   '这一版多了两种行：引述块有七种语气，代码块常显语言徽章——斜杠菜单里都能造。':
     'This build adds two new row kinds: quote callouts with seven tones, and code blocks with an always-visible language badge — both live in the slash menu.',
+  '语气也能自己造：点引述抬头那颗徽章，菜单末尾「新建类型…」——取名、换图标与颜色。':
+    'Tones are yours to invent: click the badge on a callout header, and "New type…" at the end of the menu lets you name it, pick an icon, and choose a color.',
+  '光标在正文开头再按 ↑、结尾再按 ↓，就选中上／下一块；对象一个个选中，普通正文行落回光标接着打字。':
+    'Press ↑ again at the start of the text, or ↓ at the end, and the neighbouring block is selected; objects are selected one at a time, while a plain text row hands the caret back so you can keep typing.',
+  '聚焦一块时，它下面立起属性栏：有值的字段全显，没填的收成「N 项待填」一行，点开就地填。':
+    'Focus a block and a property bar stands up under it: every filled field is shown, the empty ones collapse into one "N to fill" line you can open in place.',
+  '选项自己带颜色与图标：块左边那枚值图标按它染，看板的分组列头也是同一个颜色。':
+    'Options carry their own color and icon: the value icon beside the block marker takes that color, and so does the board column header.',
   '粘一段 Markdown（标题、列表、引述、代码围栏）会直接变成一组块，而不是一坨纯文本。':
     'Paste a Markdown snippet (headings, lists, quotes, fenced code) and it becomes a tree of blocks instead of one blob of text.',
   '块的身体能单独折起来：子块还在，只收住正文那一段。':
@@ -63,8 +71,10 @@ export const SEED_EN: Record<string, string> = {
     'This whole screen is demo content, but **you can really edit it**: close and reopen, and your changes are still there.',
   '屏幕底部那条「今天的待办」是一条查询：自动收集今天还没做完的事。':
     'The "Today\'s To-dos" strip at the bottom is a query: it automatically collects what is still open today.',
-  '右槽是反链：选中一块，就能看到谁在引用它；它身上的属性贴在块上——行下、块标旁与抽屉里。':
-    'The right panel is backlinks: select a block to see who references it; the properties it carries live on the block itself — under the row, beside the name, and in the drawer.',
+  '页底那几栏（成员、引用、备注）在页与块窗口里是同一套；右槽默认是回收站——删掉的块在那儿原样躺着。':
+    'The bars at the bottom of a page (members, references, notes) are the same in a page and in a block window; the right dock defaults to the trash, where deleted blocks wait exactly as they were.',
+  '它身上的属性贴在块上：聚焦时的行下属性栏、块标旁那枚小图标、以及属性抽屉里，改的都是同一份值。':
+    'The properties it carries live on the block itself: the property bar under a focused row, the small icons beside the block marker, and the properties drawer all edit the same values.',
   '左槽「常用」那格是一张收纳盘：小卡收进一张卡，卡头就是把手；拖出来就还原。':
     'The "Favorites" slot in the left panel is a tray: shortcuts grouped into one card, with the header as its handle; drag one out to restore it.',
   '左槽「目录」把页、标签、属性、自动化摊成四面：前两面拖块进去就是加一条归属，后两面只读。':
@@ -169,6 +179,8 @@ export const SEED_EN: Record<string, string> = {
     'Click the header to switch tones: quote / info / warning / error / tip / important / note.',
   '变体是值，不是另一个类型：查询可以按「引述类型」把警告筛出来。':
     'The tone is a value, not another type: a query can filter "Callout type = warning".',
+  '语气也能自己造：点抬头徽章，菜单末尾「新建类型…」——取名、换图标与颜色。':
+    'Tones are yours to invent: click the header badge, and "New type…" at the end of the menu lets you name it, pick an icon, and choose a color.',
   '代码块把语言写在徽章上，点它就能换；59 门有语法，可搜。':
     'A code block shows its language in a badge; click it to switch. 59 languages have real syntax and are searchable.',
   '一段代码': 'A Code Sample',
@@ -256,6 +268,7 @@ export const SEED_EN: Record<string, string> = {
   '探索中': 'Exploring',
   '已落地': 'Shipped',
   '搁置': 'Shelved',
+  '参考': 'Reference',
   '命令面板': 'Command Palette',
   '行内图片': 'Inline Images',
   '多库与库根': 'Multiple Libraries and Roots',
@@ -274,6 +287,11 @@ export const SEED_EN: Record<string, string> = {
   '正文折叠': 'Body Folding',
   '块窗口': 'Block Windows',
   '新建页先问名字': 'Name a New Page First',
+  '块选区': 'Block Selection',
+  '自定义引述类型': 'Custom Callout Types',
+  '行下属性栏': 'Manage Row',
+  '选项配色': 'Option Colors',
+  '定义块折叠': 'Definition Body Folding',
   '大文档秒开': 'Large Documents Open Instantly',
   '行内形状语言': 'Inline Shape Language',
   '字段入口三面共用': 'One Field Entry, Three Surfaces',

@@ -23,7 +23,7 @@ test('演示 dock：默认布局追加一只收纳盘，位置在快捷排与日
   assert.equal(dock.left.cards[at + 1]?.kind, 'derived', '盘后第一张应是派生大卡（日历）')
   assert.equal(tray.id, SEED_TRAY_ID)
   assert.ok(tray.title !== undefined && tray.title !== '', '演示盘应有名字（卡头留守的是上下文）')
-  // 右槽照默认（检视卡＋反链）
+  // 右槽照默认（回收站）：演示盘只动左槽
   assert.deepEqual(
     dock.right.cards.map(dockKey),
     DEFAULT_DOCK.right.cards.map(dockKey),

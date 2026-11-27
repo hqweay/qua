@@ -31,6 +31,7 @@ import {
   ACTIVE_VIEW_PROP,
   appendEdge,
   ALIASES_PROP,
+  builtinCalloutTypes,
   CHILD_PROPS_PROP,
   CODE_TEXT_PROP,
   CODE_TYPE,
@@ -41,6 +42,7 @@ import {
   derivedId,
   mkAutomationBlock,
   mkBlock,
+  mkCalloutTypesBlock,
   mkObjRecord,
   mkPropDef,
   mkQueryBlock,
@@ -153,11 +155,16 @@ export function seedWorkspace(): Workspace {
     { text: '把斜杠菜单和命令面板各试一遍', tags: ['任务', '证据'], task: true },
     ...filler([
       '这一版多了两种行：引述块有七种语气，代码块常显语言徽章——斜杠菜单里都能造。',
+      '语气也能自己造：点引述抬头那颗徽章，菜单末尾「新建类型…」——取名、换图标与颜色。',
+      '光标在正文开头再按 ↑、结尾再按 ↓，就选中上／下一块；对象一个个选中，普通正文行落回光标接着打字。',
+      '聚焦一块时，它下面立起属性栏：有值的字段全显，没填的收成「N 项待填」一行，点开就地填。',
+      '选项自己带颜色与图标：块左边那枚值图标按它染，看板的分组列头也是同一个颜色。',
       '粘一段 Markdown（标题、列表、引述、代码围栏）会直接变成一组块，而不是一坨纯文本。',
       '块的身体能单独折起来：子块还在，只收住正文那一段。',
       '这一屏全是演示内容，但**真的能改**：关掉重开，改动还在。',
       '屏幕底部那条「今天的待办」是一条查询：自动收集今天还没做完的事。',
-      '右槽是反链：选中一块，就能看到谁在引用它；它身上的属性贴在块上——行下、块标旁与抽屉里。',
+      '页底那几栏（成员、引用、备注）在页与块窗口里是同一套；右槽默认是回收站——删掉的块在那儿原样躺着。',
+      '它身上的属性贴在块上：聚焦时的行下属性栏、块标旁那枚小图标、以及属性抽屉里，改的都是同一份值。',
       '左槽「常用」那格是一张收纳盘：小卡收进一张卡，卡头就是把手；拖出来就还原。',
       '左槽「目录」把页、标签、属性、自动化摊成四面：前两面拖块进去就是加一条归属，后两面只读。',
       '反链栏和成员栏的抬头都有「改指向…」：引用指错了目标，选一次整片改过去，⌘Z 一步回。',
@@ -307,6 +314,16 @@ export function seedWorkspace(): Workspace {
       text: '',
       props: { _type: QUOTE_TYPE, [CALLOUT_PROP]: 'warning' },
       children: [{ text: '变体是值，不是另一个类型：查询可以按「引述类型」把警告筛出来。' }],
+    },
+    /**
+     * **自定义语气**的样本：内置七种之外，种子自带一条用户类型「参考」。
+     * 类型记录挂在隐藏单例块上（与第一次在 UI 里新建走同一条形状），
+     * 这里摸得到的是它的**用处**——名字、图标与颜色都来自那条记录。
+     */
+    {
+      text: '',
+      props: { _type: QUOTE_TYPE, [CALLOUT_PROP]: SEED_CALLOUT_TYPE_ID },
+      children: [{ text: '语气也能自己造：点抬头徽章，菜单末尾「新建类型…」——取名、换图标与颜色。' }],
     },
     // **代码块**的正文住在 `_code`（身体），这一行是标题；标题行尾常显语言徽章
     { text: '代码块把语言写在徽章上，点它就能换；59 门有语法，可搜。' },
@@ -512,6 +529,21 @@ export function seedWorkspace(): Workspace {
   blocks.push(...featureInstances(vocab.featureTagId))
   blocks.push(featureBoard)
 
+  /**
+   * **引述类型表的样本**：内置七种 ＋ 一条用户类型「参考」。
+   *
+   * 表挂在固定 id 的隐藏单例块上（无正文／别名／露面，只承载记录）——与第一次在 UI 里
+   * 新建类型时物化出来的那一块同一个形状。种子先把「自定义语气」这件事变成数据，
+   * 于是「写作示范」里那段引述一打开就能看到名字、图标与颜色都来自这条记录。
+   */
+  const calloutTypes = mkCalloutTypesBlock([
+    ...builtinCalloutTypes(),
+    { id: SEED_CALLOUT_TYPE_ID, label: s('参考'), icon: 'lucide:book-marked', color: 'purple' },
+  ])
+  calloutTypes.created = SEED_AT
+  calloutTypes.modified = SEED_AT
+  blocks.push(calloutTypes)
+
   /* ---------------------------------------------- 要拿到已建块 id 才能写的样本 */
 
   /**
@@ -623,6 +655,14 @@ export const SEED_MAP_VIEW_ID = 'seed-functional-map'
 export const SEED_TRAY_ID = derivedId('tray', 'seed/quick')
 
 /**
+ * 种子里那条**自定义引述类型**的 id。
+ *
+ * 类型记录挂在隐藏单例块上（`_calloutTypes`），块的 id 由 core 的 `derivedId('core','callout-types')`
+ * 固定；这里只需要记录那一条用户类型的 id——引用它的引述块写的是 id，不是名字。
+ */
+export const SEED_CALLOUT_TYPE_ID = derivedId('callout', 'seed/reference')
+
+/**
  * 「功能」标签 ＋ 声明给它的两个属性定义。
  *
  * 它们住在**森林顶层**（身份不参与组织，位置不承载信息）；顺序：定义块在前、标签在后——
@@ -639,15 +679,18 @@ function featureVocabulary(): { blocks: Block[]; tagId: string } {
     { [DEFAULT_PROP]: FEATURE_STATUS_EXPLORING_ID },
     FEATURE_STATUS_PROP_ID,
   )
-  const choice = (label: string, id: string, icon: string): PropChoice => ({
+  // 选项自己带图标与颜色（色板 key）：块左侧那枚值图标按它染，看板列头同色。
+  // 颜色的取值域与身份色板同一组名字（`isColorValue`）；写 hex 也可以，只是种子用板色。
+  const choice = (label: string, id: string, icon: string, color: string): PropChoice => ({
     id,
     label,
     icon: `lucide:${icon}`,
+    color,
   })
   setChoices(statusDef, [
-    choice(s('探索中'), FEATURE_STATUS_EXPLORING_ID, 'loader-circle'),
-    choice(s('已落地'), FEATURE_STATUS_SHIPPED_ID, 'circle-check'),
-    choice(s('搁置'), FEATURE_STATUS_SHELVED_ID, 'minus'),
+    choice(s('探索中'), FEATURE_STATUS_EXPLORING_ID, 'loader-circle', 'blue'),
+    choice(s('已落地'), FEATURE_STATUS_SHIPPED_ID, 'circle-check', 'green'),
+    choice(s('搁置'), FEATURE_STATUS_SHELVED_ID, 'minus', 'orange'),
   ])
   const dateDef = mkPropDef(s(FEATURE_DATE_LABEL), 'date', {}, FEATURE_DATE_PROP_ID)
   const tag = mkTagBlock(s(FEATURE_TAG_LABEL))
@@ -707,6 +750,11 @@ function featureInstances(tagId: string): Block[] {
     record(s('正文折叠'), FEATURE_STATUS_SHIPPED_ID, '2026-11-26'),
     record(s('块窗口'), FEATURE_STATUS_SHIPPED_ID, '2026-11-25'),
     record(s('新建页先问名字'), FEATURE_STATUS_SHIPPED_ID, '2026-11-25'),
+    record(s('块选区'), FEATURE_STATUS_SHIPPED_ID, '2026-11-27'),
+    record(s('自定义引述类型'), FEATURE_STATUS_SHIPPED_ID, '2026-11-27'),
+    record(s('行下属性栏'), FEATURE_STATUS_SHIPPED_ID, '2026-11-28'),
+    record(s('选项配色'), FEATURE_STATUS_SHIPPED_ID, '2026-11-28'),
+    record(s('定义块折叠'), FEATURE_STATUS_SHIPPED_ID, '2026-11-28'),
     record(s('引用某一段'), FEATURE_STATUS_EXPLORING_ID),
     record(s('定时提醒')),
     record(s('图库管理'), FEATURE_STATUS_SHELVED_ID),

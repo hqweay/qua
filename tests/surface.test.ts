@@ -26,7 +26,8 @@ test('中心接得住的派生卡是派生卡目录的子集（目录唯一一�
 
 test('中心派生卡守卫：接得住的放行，槽绑定的持久卡与未知 id 拒绝', () => {
   assert.equal(centerDerivedOpenable('trash'), true, '回收站的身体是纯派生 DOM ⇒ 中心接得住')
-  assert.equal(centerDerivedOpenable('inspect'), false, '检视卡的身体绑在右槽（持久实例）')
+  // 属性检视卡已退场（属性贴在块上：行下管理档／抽屉），目录里不再有它——
+  // 拿一个不存在的 id 当「拒绝」的样本只会重复 `'nope'`，所以这里只留真正槽绑定的那一张。
   assert.equal(centerDerivedOpenable('mount'), false, '挂载区卡是每槽一台的编辑器')
   assert.equal(centerDerivedOpenable('nope'), false)
 })

@@ -192,3 +192,22 @@ export function toCalloutRecords(types: readonly CalloutType[]): PropChoice[] {
     ...(x.deleted ? { deleted: true as const } : {}),
   }))
 }
+
+/**
+ * 承载类型表的那一块（无正文／别名／露面：它不参与组织，只承载记录）。
+ *
+ * 形状住在模型侧而不是写路径里：**首建**（事务内）与**种子**都要造它，
+ * 两处各写一份就会漂移——种子造出来的表结构不认识、或读路径认不出那张表。
+ * 写入（首建进森林／整表替换）仍归 `core/kb`，因为那要点事务。
+ */
+export function mkCalloutTypesBlock(records: readonly CalloutType[]): Block {
+  const now = Date.now()
+  return {
+    id: CALLOUT_TYPES_BLOCK_ID,
+    content: [],
+    children: [],
+    created: now,
+    modified: now,
+    props: { [CALLOUT_TYPES_PROP]: toCalloutRecords(records) },
+  }
+}
