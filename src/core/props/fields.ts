@@ -343,6 +343,16 @@ export function systemFieldOf(fieldId: string): SystemFieldDecl | undefined {
   return FIELD_BY_ID.get(fieldId)
 }
 
+/**
+ * 系统槽的**选项域**（`undefined` ＝ 不是系统槽，或这个槽没有固定值域）。
+ *
+ * 两个消费面（字段值控件/条件树，分组段头/看板）都从这里取；`find` 交给按库现查的
+ * 词汇表（引述类型），声明本身不缓存任何库里的东西。
+ */
+export function systemFieldChoices(propId: string, find?: BlockLookup): readonly FieldChoice[] | undefined {
+  return systemFieldOf(propId)?.choices?.(find)
+}
+
 /** `{prop:{id}}` 可以问到的**系统槽白名单**（`queryable` 的投影） */
 export const QUERYABLE_SYSTEM_PROPS: readonly string[] = SYSTEM_FIELDS.filter((d) => d.queryable === true).map((d) => d.id)
 

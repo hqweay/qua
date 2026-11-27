@@ -15,11 +15,6 @@ import { openTagChoice } from '../../app/retrieval/name-choice.ts'
 import { Layers, type Row } from '../../ui/overlay/layers.ts'
 import {
   blockLabel,
-  CALLOUT_PROP,
-  LANG_PROP,
-  calloutGroupChoices,
-  codeLangChoices,
-  calloutTypesOf,
   canonicalNode,
   cardLayoutOf,
   childDisplayProps,
@@ -58,6 +53,7 @@ import {
   type QueryNode,
   type QuerySpec,
   type ViewOwnerRef,
+  systemFieldChoices,
 } from '../../core/index.ts'
 import { t } from '../../core/infra/msg.ts'
 import { readAutomation, type AutomationDef, type AutomationTrigger } from '../../core/automation/automation.ts'
@@ -197,10 +193,9 @@ function openSpecPopover(opts: {
        */
       choices: (propId) => {
         if (propId === '_tags') return kb.tags().map((t) => ({ id: t.id, label: blockLabel(t, kbGet) }))
-        // 引述类型是系统槽上的动态词汇（与 `_tags` 同一先例）：含墓碑，旧条件读得出名字
-        if (propId === CALLOUT_PROP) return calloutGroupChoices(calloutTypesOf(kbGet))
-        // `_lang` 是静态语言表；未知语言由值控件按 `open` 照原文显示（不在这里造选项）
-        if (propId === LANG_PROP) return codeLangChoices()
+        // 系统槽的选项域来自字段声明（`_callout` 的动态词表、`_lang` 的静态表、`_type` 的类型注册表）
+        const system = systemFieldChoices(propId, kbGet)
+        if (system !== undefined) return system
         const def = kb.get(propId)
         if (!def || propKindOf(def) !== 'select') return []
         return choicesOf(def).map((c) => ({ id: c.id, label: c.label }))

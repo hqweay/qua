@@ -30,11 +30,6 @@ import {
   isHexColor,
   ICON_PROP,
   COLOR_PROP,
-  CALLOUT_PROP,
-  LANG_PROP,
-  calloutGroupChoices,
-  codeLangChoices,
-  calloutTypesOf,
   prop,
   isJournal,
   isViewRoot,
@@ -68,6 +63,7 @@ import {
   type ViewBindingRef,
   type ViewOwnerRef,
   type ViewSurface,
+  systemFieldChoices,
 } from '../../core/index.ts'
 import type { PropCreateMode, PropTarget } from '../../core/infra/ports.ts'
 import { t } from '../../core/infra/msg.ts'
@@ -1262,14 +1258,9 @@ export function setupPanels(deps: PanelsDeps) {
        * 其余属性没有固定值域 ⇒ 空表，列按「第一次出现」排。
        */
       choices: (propId) => {
-        /**
-         * `_callout` 不是属性定义：它的值域是引述类型表（含墓碑——旧值/旧条件
-         * 仍要读得出名字；条件存 id，改名不断旧查询）。与 `_tags` 同一条「系统槽 ＋
-         * 动态词汇」的先例。
-         */
-        if (propId === CALLOUT_PROP) return calloutGroupChoices(calloutTypesOf((id) => kb.get(id)))
-        // `_lang` 是静态语言表；未知语言由值控件按 `open` 照原文显示（不在这里造选项）
-        if (propId === LANG_PROP) return codeLangChoices()
+        // 系统槽的选项域来自字段声明（`_callout` 的动态词表、`_lang` 的静态表、`_type` 的类型注册表）
+        const system = systemFieldChoices(propId, (id) => kb.get(id))
+        if (system !== undefined) return system
         const def = kb.get(propId)
         if (!def) return []
         const records = allChoicesOf(def)
