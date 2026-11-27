@@ -21283,6 +21283,65 @@ await check(
   },
 )
 
+/**
+ * **露面徽章的环里是源的脸，不是字母**：同一个「粘贴为镜像」在查询源（宿主行徽章）
+ * 与 children 源（岛首行徽章）上必须读成同一套图标——代码块＝尖括号。
+ * 环本身（16px 虚线圆）仍是「这是一次露面」的信号；曾经的字母 M 已退场。
+ */
+await check('T380 镜像块标＝虚线圆＋源的脸：代码块镜像显示代码图标，不再画字母 M', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  await page.evaluate(() => window.__qua.invoke('core.page/create'))
+  await page.waitForTimeout(350)
+  const codeId = await page.evaluate(() => {
+    const ed = window.__qua.__editor
+    window.__qua.focusBlock(ed.doc.roots[0].children[0].id, 0)
+    window.__qua.invoke('core.editor/insert-block', { type: 'code' })
+    return window.__qua.__editor.sel?.aBlock ?? ''
+  })
+  assert(codeId, '前置：代码块已建出')
+  await page.waitForTimeout(300)
+  await page.evaluate(
+    (cid) =>
+      window.__qua.invoke('core.embed/insert', {
+        blockId: window.__qua.snapshot().activeId,
+        targetId: cid,
+        view: 'mirror',
+      }),
+    codeId,
+  )
+  await page.waitForTimeout(500)
+  const badge = await page.evaluate((cid) => {
+    const body = document.querySelector('.blk-embed-body[data-embed-body="mirror"]')
+    const row = body?.querySelector('.blk[data-depth="0"]')
+    const mk = row?.querySelector(':scope > .left > .marker')
+    if (!mk) return null
+    const ico = mk.querySelector('.marker-ico')
+    const s = getComputedStyle(mk, '::before')
+    return {
+      rowId: row.dataset.blockId,
+      sameSource: row.dataset.blockId === cid,
+      ringText: s.content,
+      ringWidth: s.width,
+      ringStyle: s.borderTopStyle,
+      face: ico?.dataset.icon ?? '',
+      faceDisplay: ico ? getComputedStyle(ico).display : '',
+    }
+  }, codeId)
+  assert(badge?.sameSource, `镜像岛首行就是源块：${JSON.stringify(badge)}`)
+  assert(
+    badge.ringText === '""' && badge.ringWidth === '16px' && badge.ringStyle === 'dashed',
+    `环里不再画字母，只剩 16px 虚线圆：${JSON.stringify(badge)}`,
+  )
+  assert(
+    badge.face === 'lucide:code' && badge.faceDisplay !== 'none',
+    `环里是源的脸（代码块＝尖括号）且真的可见：${JSON.stringify(badge)}`,
+  )
+
+  await ctx.close()
+  return '代码块镜像的岛首行块标：16px 虚线圆 ＋ 代码尖括号（无字母）'
+})
+
 await check('T201 岛界：点镜像行的折叠三角只折这一次露面（岛内），不折源；再点可逆', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))

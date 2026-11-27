@@ -3294,7 +3294,7 @@
   /* 普通点在静息态是半透明的待命件（--ui-quiet）；徽章是身份，读满强度 */
   opacity: 1;
 }
-/* 环里的脸降一档到 sm：15px 会顶到 16px 的环上（投影那份由 `marker.ts` 直接给 sm） */
+/* 环里的脸降一档到 sm：md（16px）会顶满 16px 的环（投影那份由 `marker.ts` 直接给 sm） */
 .blk[data-embed='1'] .blk-embed-body .blk[data-depth='0'] > .left .marker .marker-ico .ico {
   inline-size: var(--ui-icon-sm);
   block-size: var(--ui-icon-sm);
