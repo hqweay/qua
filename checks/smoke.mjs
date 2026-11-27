@@ -6175,7 +6175,12 @@ await check('T43 待办是块标之后的身份图标：块标仍是圆点、仍
     const leftBefore = row?.querySelector(':scope > .tx')?.getBoundingClientRect().left ?? -1
     window.__qua.focusBlock(b.id, 0)
     window.__qua.invoke('core.editor/toggle-closure')
-    return { id: b.id, leftBefore }
+    const def = window.__qua.propDefs().find((d) => d.label === '任务状态')
+    const liveDef = window.__qua.__editor.store.blocks.find((b) => b.id === def.id)
+    const now = window.__qua.__editor.store.find(b.id)?.props?.[def.id] ?? ''
+    const picked = (liveDef?.props?._choices ?? []).find((c) => c.id === now)
+    if (now !== '' && picked) window.__qua.invoke('core.props/set-choice-color', { choiceId: now, color: 'green' })
+    return { id: b.id, leftBefore, choiceId: now }
   })
   const deep = added.id
 
@@ -6192,6 +6197,7 @@ await check('T43 待办是块标之后的身份图标：块标仍是圆点、仍
         classes: m ? [...m.classList].sort().join(' ') : '',
         focusFor: m?.dataset.focusFor ?? '',
         boxClasses: box ? [...box.classList].sort().join(' ') : '',
+        tint: box?.style.getPropertyValue('--value-c') ?? '',
         before: before?.content ?? '',
         boxW: box?.querySelector('.ico') ? getComputedStyle(box.querySelector('.ico')).width : '',
         text: (row?.querySelector(':scope > .tx')?.textContent ?? '').slice(0, 24),
@@ -6210,6 +6216,7 @@ await check('T43 待办是块标之后的身份图标：块标仍是圆点、仍
   assert(deepRow.boxClasses.includes('closure-box'), `方框应在身份图标上：${deepRow.boxClasses}`)
   // 方框是内容脸，尺寸走调用点的 md 档（CSS 不钉死一档）——这里钉住当前档位的实测值
   assert(deepRow.boxW === '16px', `方框应正常画出来：${deepRow.boxW}`)
+  assert(deepRow.tint.includes('--ui-identity-green'), `任务方框应带当前值色：${deepRow.tint}`)
 
   /**
    * **方框站在「内容列」的起点上**（2026-11-01 用户给的参考图：方框左缘 ＝ 普通块正文左缘）。
@@ -18082,6 +18089,16 @@ await check(
     )
     assert(gutterChecked === true, '勾选快捷入口后重画仍应是勾上的（写进了 `_uiPosition`）')
 
+    // 当前值甲已配 red ⇒ gutter 图标先带值色（此时 check 映射刚建立，行还没换成方框）
+    const checkTintOn = await page.evaluate(
+      ({ hostId, defId }) =>
+        document
+          .querySelector(`.blk[data-block-id="${hostId}"] [data-prop-id="${defId}"]`)
+          ?.style.getPropertyValue('--value-c') ?? '',
+      { hostId: setup.hostId, defId: setup.defId },
+    )
+    assert(checkTintOn.includes('--ui-identity-red'), `gutter 图标应带当前值色：${checkTintOn}`)
+
     // 普通勾选框：值在 off（乙）时点一下 → on（甲）；不产生 data-closure/划线
     await page.evaluate(
       ({ hostId, defId, off }) => {
@@ -18100,6 +18117,12 @@ await check(
       return { closure: row?.getAttribute('data-closure') ?? null, box: Boolean(row?.querySelector('.check-box')) }
     }, setup.hostId)
     assert(plainBefore.box === true && plainBefore.closure === null, `普通勾选框不该是任务：${JSON.stringify(plainBefore)}`)
+    // 切到未配色的乙 ⇒ 方框回中性
+    const checkTintOff = await page.evaluate((id) => {
+      const box = document.querySelector(`.blk[data-block-id="${id}"] .check-box`)
+      return box?.style.getPropertyValue('--value-c') ?? ''
+    }, setup.hostId)
+    assert(checkTintOff === '', `未配色的值应回中性：${checkTintOff}`)
 
     await page.evaluate((id) => {
       document
@@ -18115,6 +18138,12 @@ await check(
       setup,
     )
     assert(plainAfter.value === checkState.on, `点一下应写 on（甲）：${JSON.stringify(plainAfter)}`)
+
+    const checkTintAfter = await page.evaluate((id) => {
+      const box = document.querySelector(`.blk[data-block-id="${id}"] .check-box`)
+      return box?.style.getPropertyValue('--value-c') ?? ''
+    }, setup.hostId)
+    assert(checkTintAfter.includes('--ui-identity-red'), `翻到有色的甲 ⇒ 方框图标跟色：${checkTintAfter}`)
     assert(plainAfter.closure === null, '普通勾选框翻值后仍不是任务')
 
     await ctx.close()

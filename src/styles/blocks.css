@@ -588,9 +588,10 @@
 }
 .blk .identity.closure-box {
   cursor: pointer;
+  color: var(--value-c, var(--ui-text-tertiary));
 }
 .blk .identity.closure-box:hover {
-  color: var(--ui-text-secondary);
+  color: var(--value-c, var(--ui-text-secondary));
 }
 /* 普通 select 的 gutter 入口：点开取值菜单（不是翻转） */
 .blk .identity.prop-mark {
@@ -603,9 +604,10 @@
 /* 普通勾选框（`_check` 无 `_use`）：翻 on/off，不是任务 */
 .blk .identity.check-box {
   cursor: pointer;
+  color: var(--value-c, var(--ui-text-tertiary));
 }
 .blk .identity.check-box:hover {
-  color: var(--ui-text-secondary);
+  color: var(--value-c, var(--ui-text-secondary));
 }
 /* 多值属性：一串图标是一个命中区（点任意一枚开同一个多选菜单） */
 .blk .identity.prop-multi {

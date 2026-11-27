@@ -1284,6 +1284,8 @@ export function makeBlockEl(
         // 右键／⌥+点＝取值菜单（`data-prop-for`）——两个属性同一处，事件按顺序分派。
         mark.dataset.closureFor = b.id
         mark.dataset.propFor = b.id
+        const tint = choiceColorCss(field.choice)
+        if (tint) mark.style.setProperty('--value-c', tint)
         renderIcon(mark, field.icon, closure === 'closed' ? 'circle-check' : 'circle', 'md')
         mark.dataset.tip = t('ui.closure.toggle')
         left?.appendChild(mark)
@@ -1295,6 +1297,8 @@ export function makeBlockEl(
         mark.className = 'identity check-box'
         mark.dataset.propId = field.propId
         mark.dataset.checkFor = b.id
+        const tint = choiceColorCss(field.choice)
+        if (tint) mark.style.setProperty('--value-c', tint)
         renderIcon(mark, field.icon, field.value === field.check.on ? 'square-check' : 'square', 'md')
         const value = field.choice ? field.choice.label.trim() : ''
         mark.dataset.tip = t('ui.props.gutterTitle', {
