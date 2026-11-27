@@ -157,7 +157,7 @@
   <div class="stamp">
     WORKSPACE_VERSION 51<br>
     layers core ← view ← ui ← app ← host<br>
-    gate arch 33/33 · core 1831/1831（本次现算）
+    gate arch 33/33 · core 1869/1869（本次现算）
   </div>
 </header>
 
@@ -196,7 +196,7 @@
     <div class="layer l-core">
       <div class="tag">core</div>
       <div class="body">
-        <span class="files">src/core/ · 141 个模块 · 12 个域（model／kb／query／views／props／relations／identity／storage／search／infra／commands／fixtures）</span>
+        <span class="files">src/core/ · 143 个模块 · 12 个域（model／kb／query／views／props／relations／identity／storage／search／infra／commands／fixtures）</span>
         <span class="note2"><b>零 DOM</b>。模型 / 行内内容 / 树 / 查询求值 / 视图配置 / 拥有者 / 命令声明 / 绑定表 / 上下文键 / 持久化全在这层，可直接在 Node 里单测</span>
       </div>
     </div>
@@ -223,7 +223,8 @@
     <span class="key">_type</span>?      <span class="cmt">封闭注册表：outline（缺省）· core/divider · core/view-embed · core/quote · core/code</span>
     <span class="key">_lang</span>?      <span class="cmt">代码块的语言提示；不认识的名字按纯文本画、原文照存</span>
     <span class="key">_code</span>?      <span class="cmt">代码文档（身体）：代码块的正文住这里，行上是标题；换骨架时清掉</span>
-    <span class="key">_callout</span>?   <span class="cmt">引述变体（封闭七值）：抬头只画语气，行是子块；换骨架时清掉</span>
+    <span class="key">_callout</span>?   <span class="cmt">引述类型＝记录 id（值域开放）：抬头只画类型名/图标/颜色；换骨架时清掉</span>
+    <span class="key">_calloutTypes</span>? <span class="cmt">引述类型表（记录数组）挂隐藏单例块；旧库回退内置七种</span>
     <span class="key">_icon</span>?      <span class="cmt">lucide:&lt;name&gt; 或字面文本</span>
     <span class="key">_date</span>?      <span class="cmt">有它 ⇒ 日记块（只读、全局一天一个）</span>
     <span class="key">_aliases</span>?   <span class="cmt">地址：0..N，首个是主名，全局唯一</span>
@@ -312,7 +313,7 @@
       </div>
       <div class="step">
         <div class="k">② 声明</div>
-        <div class="v">命令（205 条）</div>
+        <div class="v">命令（216 条）</div>
         <div class="d">纯语义：capability / undoable，没有 key、没有 context</div>
       </div>
       <div class="step">
@@ -695,7 +696,7 @@
   </div>
 
   <div class="card pad" style="margin-top:18px">
-    <div class="subh">默认布局 <span>左槽＝导航与时间，右槽＝当前块的检视与出处</span></div>
+    <div class="subh">默认布局 <span>左槽＝导航与时间，右槽＝窗口与回收站（反链/成员是页底挂载栏，属性贴在块上）</span></div>
     <div class="mock">
       <div class="slotbox">
         <div class="sh"><span>左槽 · cards</span><span>4 小卡 ＋ 2 卡</span></div>
@@ -713,14 +714,10 @@
         </div>
       </div>
       <div class="slotbox">
-        <div class="sh"><span>右槽 · cards</span><span>3 卡</span></div>
+        <div class="sh"><span>右槽 · cards</span><span>窗口卡 ＋ 1 卡</span></div>
         <div class="mcard solo">
-          <div class="h"><span>检视 · 当前块</span><span class="dots">⌄ ⤢ ✕</span></div>
+          <div class="h"><span>窗口 · 某一块</span><span class="dots">⌄ ⤢ ✕</span></div>
           <div class="b"><div class="l m"></div><div class="l"></div><div class="l s"></div><div class="l"></div></div>
-        </div>
-        <div class="mcard">
-          <div class="h"><span>反链</span><span class="dots">⌄ ⤢ ✕</span></div>
-          <div class="b"><div class="l"></div><div class="l m"></div></div>
         </div>
         <div class="mcard">
           <div class="h"><span>回收站</span><span class="dots">⌄ ⤢ ✕</span></div>
@@ -729,7 +726,7 @@
       </div>
     </div>
     <div class="note" style="margin-top:10px">
-      示意里三件事各示范一处：<b>小卡</b>是格子不是卡片；<b>归属树</b>是「收起」（<code>data-collapsed</code>，body 隐藏、编辑器还在）；<b>检视</b>是「单卡」（槽层 <code>data-solo</code>，其它卡让位但状态不变）。
+      示意里三件事各示范一处：<b>小卡</b>是格子不是卡片；<b>归属树</b>是「收起」（<code>data-collapsed</code>，body 隐藏、编辑器还在）；<b>窗口卡</b>是「单卡」（槽层 <code>data-solo</code>，其它卡让位但状态不变）。
       收起的卡与单卡的目标都<b>按 id 记在设备状态里</b>，所以拖到另一槽、刷新、重开都还在。
     </div>
   </div>

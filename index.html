@@ -33,11 +33,11 @@
     <link rel="icon" href="data:," />
     <!-- 文案为空壳：一切用户可见文案由 src/msg.ts 在启动时灌入 -->
     <title></title>
-    <script type="module" crossorigin src="./assets/index-D9kH7LSM.js"></script>
+    <script type="module" crossorigin src="./assets/index-BZQCB9-o.js"></script>
     <link rel="modulepreload" crossorigin href="./assets/icon-catalog-BRPqingI.js">
     <link rel="modulepreload" crossorigin href="./assets/index-BRXex3Sy.js">
     <link rel="modulepreload" crossorigin href="./assets/index-Byl9oyLF.js">
-    <link rel="stylesheet" crossorigin href="./assets/index-BW0iW0oV.css">
+    <link rel="stylesheet" crossorigin href="./assets/index-CU3CBmiu.css">
   </head>
   <body>
     <!-- 启动级持久告警（数据只读 / 保存失败）；默认隐藏，文案由 msg.ts 灌入 -->
@@ -134,28 +134,7 @@
       </main>
 
       <section class="dock" id="dock-right" data-dock="right">
-        <div class="dock-stack" id="dock-right-stack">
-          <!--
-            检视卡：内容**跟着中心槽的当前对象**走（不是光标所在行）。
-            它是右槽的常驻节点（`renderDockStack` 的 persistent），因为里面是表单：
-            重画整槽会把正在输入的控件换掉、丢焦点与光标。
-            形状与钉住区同一套卡（`.dock-card`），但主体来源不同：
-            钉住区的主体是卡片自带的块 id，这张卡的主体是 `activeId`。
-          -->
-          <div class="dock-card" id="inspect-card" data-inspect-card hidden>
-            <div class="dock-card-head">
-              <span class="dock-card-title ui-ellipsis ui-ellipsis-grow" id="inspect-card-title"></span>
-            </div>
-            <div class="dock-card-body">
-              <div class="properties-body" id="properties-body"></div>
-              <!--
-                添加入口在**体**里、不在卡头：卡头只放卡级控件（收起／单卡／关闭），
-                每张卡同构；作用于内容的动作贴着内容长（与日历「点月份回本月」同一条口径）。
-              -->
-              <button class="props-add" id="properties-add" type="button"></button>
-            </div>
-          </div>
-        </div>
+        <div class="dock-stack" id="dock-right-stack"></div>
         <div class="dock-resize"></div>
       </section>
     </div>
