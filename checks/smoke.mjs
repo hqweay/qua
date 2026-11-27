@@ -384,7 +384,7 @@ const rootMarker = (side, blockId) =>
 
 /* ---------------------------------------------------------------- 敲字 */
 
-await check('T1 冷启动不抢光标；点块才聚焦；属性区跟着「这一屏是谁」而不是光标；journal 的日期行不被写入', async () => {
+await check('T1 冷启动不抢光标；点块才聚焦；管理档跟着「这一屏是谁」而不是光标；journal 的日期行不被写入', async () => {
   const { ctx, page, errors } = await freshPage(browser, base)
   const before = await snap(page)
   const cold = await page.evaluate(() => {
@@ -392,13 +392,12 @@ await check('T1 冷启动不抢光标；点块才聚焦；属性区跟着「这�
     const b = window.__qua.blocks()
     const editable = b.find((x) => !x.roles?.includes('journal'))
     const editor = document.getElementById('editor')
-    const props = document.getElementById('inspect-card')
     return {
       id: editable?.id ?? '',
       focused: editor?.contains(document.activeElement) ?? false,
       sel: window.__qua.snapshot().selection ?? null,
-      propsHidden: props?.hidden ?? null,
-      propsTarget: props?.dataset.targetBlockId ?? '',
+      // 管理档只挂在单主体屏的根行下：多根屏上一格都不该出现
+      manageRows: document.querySelectorAll('.blk[data-props-manage="1"]').length,
       activeId: window.__qua.snapshot().activeId,
     }
   })
@@ -406,29 +405,27 @@ await check('T1 冷启动不抢光标；点块才聚焦；属性区跟着「这�
   assert(!cold.focused, `冷启动不该把焦点抢进编辑器：${JSON.stringify(cold)}`)
   assert(!cold.sel, `冷启动不该有模型选区：${JSON.stringify(cold)}`)
   /**
-   * 冷启动是**日记流**（多根）⇒ 没有单一主体 ⇒ 属性区收起。
+   * 冷启动是**日记流**（多根）⇒ 没有单一主体 ⇒ 任何一行都不挂管理档。
    * 这与「有没有焦点」无关：哪怕光标进了某一天，日记流也不是「一个东西」。
    */
-  assert(cold.propsHidden === true, `日记流（多根）没有单一主体 ⇒ 属性区应收起：${JSON.stringify(cold)}`)
+  assert(cold.manageRows === 0, `日记流（多根）没有单一主体 ⇒ 行下不出管理档：${JSON.stringify(cold)}`)
 
   // 真点一下那一行：光标进编辑器（**不是**换当前对象）
   await page.locator(`.blk[data-block-id="${cold.id}"] > .tx`).click()
   await page.waitForTimeout(120)
   const clicked = await page.evaluate(() => {
     const editor = document.getElementById('editor')
-    const props = document.getElementById('inspect-card')
     return {
       focused: editor?.contains(document.activeElement) ?? false,
       sel: window.__qua.snapshot().selection ?? null,
-      propsHidden: props?.hidden ?? null,
-      propsTarget: props?.dataset.targetBlockId ?? '',
+      manageRows: document.querySelectorAll('.blk[data-props-manage="1"]').length,
     }
   })
   assert(clicked.focused, `点击块后编辑器应获得焦点：${JSON.stringify(clicked)}`)
   assert(clicked.sel?.aBlock === cold.id, `点击后选区应落在被点的块上：${JSON.stringify(clicked)}`)
   assert(
-    clicked.propsHidden === true,
-    `只是把光标放进某个块，不会让属性区认它当主体（仍是多根的日记流）：${JSON.stringify(clicked)}`,
+    clicked.manageRows === 0,
+    `只是把光标放进某个块，不会让任何一行认它当主体（仍是多根的日记流）：${JSON.stringify(clicked)}`,
   )
 
   await page.keyboard.type('真正敲进去的六个字')
@@ -447,10 +444,10 @@ await check('T1 冷启动不抢光标；点块才聚焦；属性区跟着「这�
   const journalText = await page.evaluate(() => window.__qua.blocks().find((b) => b.roles?.includes('journal'))?.text)
   assert(journalText === '', `journal 行不该被写入：${JSON.stringify(journalText)}`)
   await ctx.close()
-  return `冷启动无焦点、无选区、日记流（多根）属性区收起；点击只挪光标不改主体；块数 ${after.blocks}，DOM 节点 ${after.domNodes}`
+  return `冷启动无焦点、无选区、日记流（多根）行下无管理档；点击只挪光标不改主体；块数 ${after.blocks}，DOM 节点 ${after.domNodes}`
 })
 
-await check('T1b 属性区跟「当前对象」走：聚焦换主体、光标移动不换、点空白不收起', async () => {
+await check('T1b 管理档跟「当前对象」走：聚焦换主体、光标移动不换、点空白不收起', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
   const ids = await page.evaluate(() =>
@@ -460,104 +457,78 @@ await check('T1b 属性区跟「当前对象」走：聚焦换主体、光标移
       .map((b) => b.id),
   )
   assert(ids.length >= 2, `至少需要两个可编辑块才能测「换主体」：${JSON.stringify(ids)}`)
-  /**
-   * ⚠️ 要拿**内容块**，不能拿页根：`create-def` 落在页块上只是「声明一个字段」
-   *    （`_fieldDefs` 加一条），页自己身上并没有这一行值 —— 行数差就造不出来。
-   *    页根就是 `activeId`，排除它还能顺带保证「主体会真的换」。
-   */
   const pageId = await page.evaluate(() => window.__qua.snapshot().activeId)
   const [a, b] = ids.filter((id) => id !== pageId)
   assert(a && b, `需要两个非根的块：page=${pageId}｜ids=${JSON.stringify(ids)}`)
   const state = () =>
     page.evaluate(() => {
-      const props = document.getElementById('inspect-card')
+      const host = document.querySelector('.blk-props-manage')
       return {
-        hidden: props?.hidden ?? null,
-        target: props?.dataset.targetBlockId ?? '',
+        forId: host?.dataset.propsManageFor ?? '',
+        rowId: host?.closest('.blk')?.dataset.blockId ?? '',
+        rows: host?.querySelectorAll('.prop-row[data-prop-id]').length ?? 0,
         activeId: window.__qua.snapshot().activeId,
       }
     })
 
-  // 打开一页 ⇒ 唯一根 ⇒ 主体＝页块（**不是**光标所在的块）
-  const onPage = await state()
-  assert(onPage.hidden === false, `单根视图（页）⇒ 属性区应显示：${JSON.stringify(onPage)}`)
-  assert(onPage.target === onPage.activeId, `主体应等于当前对象：${JSON.stringify(onPage)}`)
-
   /**
-   * 卡内段序：**属性值第一，块配置第二**。
-   *
-   * 判据是「打开这块要干什么」：高频动作是填值；身份/露面/分类是低频的「它是谁」。
-   * 顺序反了会把主工作区推到卡底（这一屏很长时尤其明显）。
-   */
-  const order = await page.evaluate(() => {
-    const body = document.getElementById('properties-body')
-    const sections = [...(body?.querySelectorAll(':scope > .props-section') ?? [])]
-    return {
-      classes: sections.map((s) => s.className),
-      titles: sections.map((s) => s.querySelector('.props-section-title')?.textContent ?? ''),
-    }
-  })
-  assert(
-    order.classes[0]?.includes('prop-fields') === true,
-    `第一段应是属性值：${JSON.stringify(order)}`,
-  )
-  assert(
-    order.titles[0] === '属性' && order.titles[1] === '块配置',
-    `段序应是「属性 → 块配置」：${JSON.stringify(order)}`,
-  )
-  const chrome = await page.evaluate(() => {
-    const primary = document.querySelector('#properties-body .prop-fields')
-    const head = primary?.querySelector('.props-section-head')
-    return {
-      primary: primary?.classList.contains('props-section--primary') ?? false,
-      icons: document.querySelectorAll('#properties-body .props-section-ico .ico').length,
-      headBg: head ? getComputedStyle(head).backgroundColor : '',
-    }
-  })
-  assert(chrome.primary, `属性段应是主段（props-section--primary）：${JSON.stringify(chrome)}`)
-  assert(chrome.icons >= 3, `每个段头都该有图标（属性/块配置/系统信息）：${JSON.stringify(chrome)}`)
-  assert(chrome.headBg !== 'rgba(0, 0, 0, 0)', `主段段头应有一条可见的底色：${JSON.stringify(chrome)}`)
-
-  /**
-   * 给块 A 单加一条属性槽 —— 这样「面板画谁」就有了可测的高度差：
-   * 若跟着光标走，A 多一行、B 少一行，面板高度会变；跟当前对象走则一动不动。
+   * 「管理档画谁」要有可测的观察点：给**页块自己**与块 A 各登记一条自有属性并写上值。
+   * 页是主体 ⇒ 页根行下有一行；光标在内容块之间动 ⇒ 纹丝不动；zoom 换主体 ⇒ 搬去新根行。
    *
    * ⚠️ 不能随便取 `propDefs()[0]`：库里自带的「任务状态」被定成 **gutter 属性**
-   *    （`_uiPosition: 'block-left'`），它**本来就不进面板**（同一个值不开两个编辑面）。
-   *    所以这里显式新建一个面板属性，否则断言的会是「gutter 过滤生效」而不是「主体是谁」。
+   *    （`_uiPosition: 'block-left'`），它**不进行下管理档**（同一个值不开两个编辑面）。
+   *    所以这里显式新建一条文本属性，否则断言的会是「gutter 过滤生效」而不是「主体是谁」。
+   *    `target: 'own'` 落的是块自己的 `_ownProps` 槽——对页块也是同一个槽
+   *    （「自己的值」与「成员的声明」是两个去处，命令层不按块类型猜）。
    */
-  await page.evaluate((id) => {
-    window.__qua.invoke('core.props/create-def', { blockId: id, label: '主体测试属性', kind: 'text', target: 'own' })
-  }, a)
-  await page.waitForTimeout(200)
+  const propsOf = await page.evaluate(
+    ({ pageId, a }) => {
+      window.__qua.invoke('core.props/create-def', { blockId: pageId, label: '主体页记事', kind: 'text', target: 'own' })
+      window.__qua.invoke('core.props/create-def', { blockId: a, label: '主体测试属性', kind: 'text', target: 'own' })
+      const defs = window.__qua.propDefs()
+      const pageProp = defs.find((d) => d.label === '主体页记事')?.id ?? ''
+      const aProp = defs.find((d) => d.label === '主体测试属性')?.id ?? ''
+      if (pageProp) window.__qua.invoke('core.props/set-value', { blockId: pageId, propId: pageProp, value: '页的记事' })
+      if (aProp) window.__qua.invoke('core.props/set-value', { blockId: a, propId: aProp, value: 'A 的记事' })
+      return { pageProp, aProp }
+    },
+    { pageId, a },
+  )
+  assert(propsOf.pageProp && propsOf.aProp, `前置：页与块 A 的自有属性都应建出来：${JSON.stringify(propsOf)}`)
+  await page.waitForTimeout(300)
+
+  // 打开一页 ⇒ 唯一根 ⇒ 主体＝页块：管理档挂在**页根行**下（不是光标所在的块）
+  const onPage = await state()
+  assert(
+    onPage.forId === pageId && onPage.rowId === pageId,
+    `单根视图（页）⇒ 管理档挂在页根行下：${JSON.stringify(onPage)}`,
+  )
+  assert(onPage.rows === 1, `页自己的那条属性画在页根行下：${JSON.stringify(onPage)}`)
 
   // ① 光标在页里的某块上动来动去 ⇒ 主体不变（这是本口径最要紧的一条）
   await page.locator(`.blk[data-block-id="${a}"] > .tx`).click()
   await page.waitForTimeout(120)
   const atA = await state()
-  assert(atA.target === onPage.target, `光标点进块 A，主体仍是当前对象（不是 A）：${JSON.stringify(atA)}`)
+  assert(atA.forId === pageId, `光标点进块 A，管理档仍挂在页根行下（不是 A）：${JSON.stringify(atA)}`)
 
   await page.locator(`.blk[data-block-id="${b}"] > .tx`).click()
   await page.waitForTimeout(120)
   const atB = await state()
-  assert(atB.target === onPage.target, `光标换到块 B，主体依然不变：${JSON.stringify(atB)}`)
+  assert(atB.forId === pageId, `光标换到块 B，管理档依然不变：${JSON.stringify(atB)}`)
 
   /**
-   * ② **属性不占正文的流**（这是它搬进右槽换来的性质）。
-   *    量真实几何：只要它还在正文上方，正文首行 top 就会随面板高度变化；
-   *    搬到槽里之后，两个高度不同的主体之间首行 top 必须一模一样。
+   * ② **管理档贴着主体根行**（属性贴块换来的性质：它就在正文流里、主体根行之下）。
+   *    光标在内容块之间动，管理档不许搬家——量页根行 top 与宿主归属，两态必须一模一样；
+   *    A 自己那条属性也不许漏进页的管理档（它只属于 A）。
    */
   const geometry = () =>
     page.evaluate(() => {
-      const first = document.querySelector('#editor .blk')
-      const card = document.getElementById('inspect-card')
+      const host = document.querySelector('.blk-props-manage')
+      const rowEl = host?.closest('.blk')
       return {
-        top: first ? Math.round(first.getBoundingClientRect().top) : -1,
-        panel: Math.round(card.getBoundingClientRect().height),
-        // 属性卡必须住在右槽里，而不是正文的 #doc 里
-        inRightDock: document.getElementById('dock-right').contains(card),
-        inDoc: document.getElementById('doc').contains(card),
-        rows: document.querySelectorAll('.prop-row[data-prop-id]').length,
+        forId: host?.dataset.propsManageFor ?? '',
+        top: rowEl ? Math.round(rowEl.getBoundingClientRect().top) : -1,
+        rows: [...(host?.querySelectorAll('.prop-row[data-prop-id]') ?? [])].map((x) => x.dataset.propId ?? ''),
       }
     })
   await page.locator(`.blk[data-block-id="${a}"] > .tx`).click()
@@ -566,16 +537,21 @@ await check('T1b 属性区跟「当前对象」走：聚焦换主体、光标移
   await page.locator(`.blk[data-block-id="${b}"] > .tx`).click()
   await page.waitForTimeout(120)
   const geoB = await geometry()
-  assert(geoA.inRightDock === true && geoA.inDoc === false, `属性卡应住在右槽、不在正文里：${JSON.stringify(geoA)}`)
-  assert(geoA.top === geoB.top, `光标换行不该抽动布局：正文首行 top ${geoA.top} → ${geoB.top}`)
-  assert(geoA.panel === geoB.panel, `卡的高度也不该随光标变：${geoA.panel} → ${geoB.panel}`)
-  assert(geoA.rows === 0, `页块自己没有那个属性 ⇒ 卡里不该出现块 A 的那一行：${JSON.stringify(geoA)}`)
+  assert(
+    geoA.forId === pageId && geoB.forId === pageId,
+    `管理档应一直挂在页根行下：${JSON.stringify({ geoA, geoB })}`,
+  )
+  assert(geoA.top === geoB.top, `光标换行不该抽动布局：页根行 top ${geoA.top} → ${geoB.top}`)
+  assert(
+    geoA.rows.length === 1 && geoA.rows[0] === propsOf.pageProp,
+    `页的管理档只有页自己的那一行（A 的不漏进来）：${JSON.stringify(geoA)}`,
+  )
 
-  // ③ 点到编辑区外：面板**不**收起（它不是「焦点面板」）
+  // ③ 点到编辑区外：管理档**不**收起（它不是「焦点面板」，它跟主体走）
   await page.mouse.click(8, 8)
   await page.waitForTimeout(120)
   const outside = await state()
-  assert(outside.hidden === false && outside.target === onPage.target, `点到编辑区外，主体不变、面板不收起：${JSON.stringify(outside)}`)
+  assert(outside.forId === pageId, `点到编辑区外，管理档不变：${JSON.stringify(outside)}`)
 
   // ④ 聚焦到块 A ⇒ 主体换成 A（这就是「不想 zoom 却要改某块属性」的那一下点击）
   //
@@ -587,36 +563,24 @@ await check('T1b 属性区跟「当前对象」走：聚焦换主体、光标移
   await page.waitForTimeout(200)
   const zoomed = await state()
   assert(zoomed.activeId === a, `点块标应把它放上台面（当前对象＝A）：${JSON.stringify(zoomed)}`)
-  assert(zoomed.hidden === false && zoomed.target === a, `聚焦后主体换成 A：${JSON.stringify(zoomed)}`)
-  const zoomedRows = await page.evaluate(() => document.querySelectorAll('.prop-row[data-prop-id]').length)
-  assert(zoomedRows === 1, `聚焦到 A 之后，它自己那条属性才出现在卡里：${zoomedRows}`)
+  assert(zoomed.forId === a && zoomed.rowId === a, `聚焦后管理档搬到 A 的根行下：${JSON.stringify(zoomed)}`)
+  assert(zoomed.rows === 1, `聚焦到 A 之后，它自己那条属性才出现在管理档里：${JSON.stringify(zoomed)}`)
   const dockAfter = await page.evaluate(() => window.__qua.snapshot().dock.right.open)
   assert(dockBefore === dockAfter, `zoom 不得改动右槽开关：${dockBefore} → ${dockAfter}`)
 
   /**
-   * 槽**关着**时 zoom：卡跟着不存在，槽保持关着。
+   * 槽**关着**时 zoom：槽保持关着；管理档照旧跟着主体走、与槽无关。
    *
-   * 这是「关着的槽不自动打开」的断言。不设回退位置（比如「槽关了就把属性挪回正文上方」）：
+   * 这是「关着的槽不自动打开」的断言。不设回退位置（比如「槽关了就把属性挪到别处」）：
    * 那会长出 `if (dockOpen)` 分支，然后长出兄弟分支，最后变成两套按位置分叉的形状。
-   *
-   * ⚠️ 判据取**计算后的可见性**而不是 `getClientRects()`：关槽用的是
-   *    `visibility: hidden` 加列宽归零，DOM 仍在文档里、`getClientRects()` 照样有值
-   *    （这一点与「元素被 display:none 摘掉」不同，早先在这里断言过一次假的失败）。
+   * 管理档住在正文流里，本就不依赖槽——换到没有字段的 B ⇒ 行下整格不出（空集不出那一格）。
    */
-  const inspectVisible = () =>
-    page.evaluate(() => {
-      const c = document.getElementById('inspect-card')
-      if (!c) return null
-      return getComputedStyle(c).visibility !== 'hidden' && c.getClientRects().length > 0
-    })
-
   await page.evaluate(() => window.__qua.invoke('core.dock/toggle-right', {}))
   await page.waitForTimeout(150)
   const closedAtA = await page.evaluate(() => ({
     open: window.__qua.snapshot().dock.right.open,
   }))
   assert(closedAtA.open === false, `前置：右槽应已关闭：${JSON.stringify(closedAtA)}`)
-  assert(!(await inspectVisible()), '槽关着 ⇒ 卡片不可见')
 
   // 在槽关着的时候再 zoom 一次（换到块 B）
   await page.locator(`.blk[data-block-id="${b}"] .marker`).click()
@@ -624,10 +588,11 @@ await check('T1b 属性区跟「当前对象」走：聚焦换主体、光标移
   const closedAtB = await page.evaluate(() => ({
     open: window.__qua.snapshot().dock.right.open,
     activeId: window.__qua.snapshot().activeId,
+    manageRows: document.querySelectorAll('.blk-props-manage').length,
   }))
   assert(closedAtB.activeId === b, `前置：第二次 zoom 应换到 B：${JSON.stringify(closedAtB)}`)
   assert(closedAtB.open === false, `槽关着时 zoom，不许自动打开：${JSON.stringify(closedAtB)}`)
-  assert(!(await inspectVisible()), '槽关着时 zoom 之后，卡片仍不可见（不留回退位置）')
+  assert(closedAtB.manageRows === 0, `B 没有字段 ⇒ 行下不出管理档（与槽开不开无关）：${JSON.stringify(closedAtB)}`)
 
   /**
    * ⑥ 显式入口「看属性」——落点是**属性抽屉**：不换中心、**不动槽**。
@@ -643,6 +608,40 @@ await check('T1b 属性区跟「当前对象」走：聚焦换主体、光标移
   }))
   assert(inspected.open === false, `「看属性」不动槽（侧槽开关只归 core.dock/*）：${JSON.stringify(inspected)}`)
   assert(inspected.target === b, `「看属性」应开属性抽屉并画在那一块上：${JSON.stringify(inspected)}`)
+
+  /**
+   * 面板段序与主段 chrome（从检视卡搬来）：这一判据是**面板**自己的，
+   * 抽屉挂的是同一份 PropertiesPanel ⇒ 判据不变，宿主换成抽屉。
+   * 段序：**属性值第一，块配置第二**——高频动作是填值；身份/露面/分类是低频的「它是谁」。
+   */
+  const order = await page.evaluate(() => {
+    const body = document.querySelector('.props-drawer .properties-body')
+    const sections = [...(body?.querySelectorAll(':scope > .props-section') ?? [])]
+    return {
+      classes: sections.map((s) => s.className),
+      titles: sections.map((s) => s.querySelector('.props-section-title')?.textContent ?? ''),
+    }
+  })
+  assert(
+    order.classes[0]?.includes('prop-fields') === true,
+    `第一段应是属性值：${JSON.stringify(order)}`,
+  )
+  assert(
+    order.titles[0] === '属性' && order.titles[1] === '块配置',
+    `段序应是「属性 → 块配置」：${JSON.stringify(order)}`,
+  )
+  const chrome = await page.evaluate(() => {
+    const primary = document.querySelector('.props-drawer .properties-body .prop-fields')
+    const head = primary?.querySelector('.props-section-head')
+    return {
+      primary: primary?.classList.contains('props-section--primary') ?? false,
+      icons: document.querySelectorAll('.props-drawer .properties-body .props-section-ico .ico').length,
+      headBg: head ? getComputedStyle(head).backgroundColor : '',
+    }
+  })
+  assert(chrome.primary, `属性段应是主段（props-section--primary）：${JSON.stringify(chrome)}`)
+  assert(chrome.icons >= 3, `每个段头都该有图标（属性/块配置/系统信息）：${JSON.stringify(chrome)}`)
+  assert(chrome.headBg !== 'rgba(0, 0, 0, 0)', `主段段头应有一条可见的底色：${JSON.stringify(chrome)}`)
 
   // 抽屉**钉在打开时那块**：焦点走了，内容不跟（跟焦点的是检视卡，不是抽屉）。
   // ⚠️ 换主体走导航命令：⑤ 已 zoom 到 B，a 不在 DOM 里，点不到它的块标。
@@ -695,7 +694,7 @@ await check('T1b 属性区跟「当前对象」走：聚焦换主体、光标移
   assert(!(await page.evaluate(() => Boolean(document.querySelector('.drawer')))), '点别的表面（槽卡）＝离开 ⇒ 关')
 
   await ctx.close()
-  return `页＝主体；光标 A→B 主体不变、正文不跳（top ${geoA.top}）；卡在右槽不在正文；点外侧不收起；zoom 后主体＝A 且开关一字未变（${dockBefore}）；槽关着时 zoom 不自动开、卡不可见；「看属性」开抽屉不动槽、钉在 B、toggle 可收、Esc 可关、点正文不关/点槽卡关`
+  return `页＝主体（管理档挂页根行，top ${geoA.top}）；光标 A→B 管理档不变；点外侧不收起；zoom 后管理档搬到 A 且开关一字未变（${dockBefore}）；B 无字段 ⇒ 行下不出格；槽关着时 zoom 不自动开；「看属性」开抽屉不动槽、钉在 B、段序属性→块配置、toggle 可收、Esc 可关、点正文不关/点槽卡关`
 })
 
 await check('T2 Enter 拆块 ／ Backspace 合并 ／ Tab 缩进 ／ Shift+Tab 还原', async () => {
@@ -7471,7 +7470,9 @@ await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 
   assert(schemaTop, '定义是森林顶层的 schema 块（不是标签的子块）')
 
   /**
-   * 属性区**也画声明段**（只有页/标签有）。
+   * **声明段住抽屉**（管理面）：schema 变更（加属性／改声明）不在行下重复。
+   * 行脸只回答「已有的字段值是什么」——标签块自己当主体时，声明由正文里的
+   * 定义身体画（那一格可折、带添加入口）；抽屉挂的是同一份声明段。
    *
    * 它曾经被撤掉过（理由：与独立的声明编辑面是同一份东西的两套实现，且这里只能解除）。
    * 撤掉之后在页/标签上点「添加属性」**没有任何可见结果** —— 那次点击写的是
@@ -7479,20 +7480,37 @@ await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 
    * ⇒ 这一段现在**自带自己的添加入口**（写 `_fieldDefs`），抬头那个写 `_ownProps`。
    *    两个槽两个入口：共用一个就必须按块类型猜意图，而标签块恰好两个都需要。
    */
+  await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), tag.tagId)
+  await page.waitForSelector('.props-drawer')
   const declared = await page.evaluate(() => ({
-    visible: !document.getElementById('inspect-card').hidden,
-    // 按面取：正文里标签的投影身体现在也画同一套声明段（一套段两个壳），检视卡的读数归检视卡
-    declaredRows: [...document.querySelectorAll('#properties-body .prop-declared [data-declared-prop-id]')].map(
+    target: document.querySelector('.props-drawer')?.dataset.targetBlockId ?? '',
+    declaredRows: [...document.querySelectorAll('.props-drawer .prop-declared [data-declared-prop-id]')].map(
       (x) => x.dataset.declaredPropId,
     ),
-    ownEntry: document.querySelectorAll('#properties-body [data-declare-add]').length,
+    ownEntry: document.querySelectorAll('.props-drawer [data-declare-add]').length,
   }))
-  assert(declared.visible, '标签页应显示属性区')
+  assert(declared.target === tag.tagId, `抽屉应画在标签块上：${JSON.stringify(declared)}`)
   assert(
     declared.declaredRows.includes(own[0].id),
-    `属性区的声明段应列出刚声明的「状态」：${JSON.stringify(declared)}`,
+    `抽屉的声明段应列出刚声明的「状态」：${JSON.stringify(declared)}`,
   )
   assert(declared.ownEntry === 1, `声明段要有自己的添加入口（写 _fieldDefs）：${JSON.stringify(declared)}`)
+  // 行下这边：标签自己的 `_fieldDefs` 是**给成员的声明**，不是它自己的字段
+  // ⇒ 标签自己零值字段 ⇒ 行下整格不出管理档（空集不出那一格；声明不铺进行脸）
+  const tagManage = await page.evaluate((id) => {
+    const host = document.querySelector(`.blk[data-block-id="${id}"] > .blk-props-manage`)
+    return {
+      forId: host?.dataset.propsManageFor ?? '',
+      rows: host?.querySelectorAll('.prop-row[data-prop-id]').length ?? 0,
+      declared: host?.querySelectorAll('.prop-declared, [data-declared-prop-id]').length ?? 0,
+    }
+  }, tag.tagId)
+  assert(
+    tagManage.forId === '' && tagManage.rows === 0 && tagManage.declared === 0,
+    `标签自己没有值字段 ⇒ 行下不出管理档（声明是给成员的，schema 的宿主是定义身体与抽屉）：${JSON.stringify(tagManage)}`,
+  )
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(200)
 
   // ③ 成员块上写值：一块一槽 props[propId]
   //
@@ -7507,25 +7525,29 @@ await check('T51 属性区：定义的独立块 / 平铺一行 / 来源标注 / 
   assert(ownField?.value === '已完成', `成员块应有值：${JSON.stringify(fields)}`)
   assert(ownField.sources.includes(tag.tagId), `来源应是 #任务：${JSON.stringify(ownField)}`)
 
-  // ④ 打开成员块：属性区平铺一行、来源写「来自 #任务」
+  // ④ 打开成员块：管理档平铺一行、来源写「来自 #任务」
   //
-  // ⚠️ 「任务状态」归 gutter（`_uiPosition: 'block-left'`），但**卡里同样可编辑**：
-  //    两面读同一份 `fieldRows`、写同一条命令、写完两边都重画 —— 所以它也是这里的一行。
+  // ⚠️ 「任务状态」归 gutter（`_uiPosition: 'block-left'`）⇒ 它**不进行下管理档**
+  //    （块标旁已有那一格，同一个值不开两个编辑面）⇒ 管理档只有「状态」一行。
   //    断言一律按 propId 取，不按下标（行序随声明顺序变，不是契约）。
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), hostId)
   await page.waitForTimeout(120)
   const panel = await page.evaluate((propId) => {
-    const row = document.querySelector(`.prop-row[data-prop-id="${propId}"]`)
+    const host = document.querySelector('.blk-props-manage')
+    const row = host?.querySelector(`.prop-row[data-prop-id="${propId}"]`)
+    const input = row?.querySelector('input')
     return {
+      forId: host?.dataset.propsManageFor ?? '',
       label: row?.querySelector('.prop-name')?.textContent ?? '',
       source: row?.querySelector('.prop-source')?.textContent ?? '',
-      value: row?.querySelector('.prop-input')?.value ?? '',
-      rows: [...document.querySelectorAll('.prop-row[data-prop-id]')].map((x) => x.dataset.propId),
+      value: input ? input.value : (row?.textContent ?? ''),
+      rows: [...(host?.querySelectorAll('.prop-row[data-prop-id]') ?? [])].map((x) => x.dataset.propId),
     }
   }, own[0].id)
-  assert(panel.rows.length === 2, `这一块有两条属性（「状态」＋ #任务 声明的「任务状态」）：${JSON.stringify(panel)}`)
+  assert(panel.forId === hostId, `成员块是单主体屏 ⇒ 管理档挂在它的根行下：${JSON.stringify(panel)}`)
+  assert(panel.rows.length === 1, `管理档只有「状态」一行（任务状态归块标，不进行下）：${JSON.stringify(panel)}`)
   assert(new Set(panel.rows).size === panel.rows.length, `同一 propId 只显示一行：${JSON.stringify(panel)}`)
-  assert(panel.label === '状态' && panel.value === '已完成', JSON.stringify(panel))
+  assert(panel.label === '状态' && panel.value.includes('已完成'), JSON.stringify(panel))
   assert(panel.source.includes('#任务'), `来源应标出标签：${JSON.stringify(panel)}`)
 
   /**
@@ -7585,16 +7607,22 @@ await check('T52 归属边：属于在属性区、成员含算作、禁环、悬
   )
   assert(rel.parents.includes(tags['人物']), `#演员 的上级应含 #人物：${JSON.stringify(rel)}`)
 
-  // 「属于」住在**属性区**：打开 #演员（主体换成它），那一行列出 #人物
+  // 「属于」住在**管理面（抽屉）**：打开 #演员 的抽屉，那一行列出 #人物
+  // （行下管理档只画值段；「属于」是身份段，不重复进行脸）
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), tags['演员'])
   await page.waitForTimeout(250)
+  await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), tags['演员'])
+  await page.waitForSelector('.props-drawer')
   const belongsRow = await page.evaluate(() => ({
-    hasRow: !!document.querySelector('.prop-belongs'),
-    chips: [...document.querySelectorAll('.prop-belongs .props-tag')].map((e) => e.textContent ?? ''),
-    panelVisible: !document.getElementById('inspect-card').hidden,
+    hasRow: !!document.querySelector('.props-drawer .prop-belongs'),
+    chips: [...document.querySelectorAll('.props-drawer .prop-belongs .props-tag')].map((e) => e.textContent ?? ''),
+    target: document.querySelector('.props-drawer')?.dataset.targetBlockId ?? '',
   }))
-  assert(belongsRow.hasRow, '属性区应有「属于」一行（任何块都显示）')
+  assert(belongsRow.target === tags['演员'], `抽屉应画在 #演员 上：${JSON.stringify(belongsRow)}`)
+  assert(belongsRow.hasRow, '抽屉应有「属于」一行（任何块都显示）')
   assert(belongsRow.chips.some((t) => t.includes('人物')), `「属于」应列出 #人物：${JSON.stringify(belongsRow)}`)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(200)
 
   // 算作：查 #人物 的成员要含只打 #演员 的 B
   const deep = await page.evaluate((id) => window.__qua.tagMembersDeep(id), tags['人物'])
@@ -7623,7 +7651,7 @@ await check('T52 归属边：属于在属性区、成员含算作、禁环、悬
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), ids.b)
   await page.waitForTimeout(150)
   const bPanel = await page.evaluate(() => ({
-    labels: [...document.querySelectorAll('.prop-row[data-prop-id] .prop-name')].map((e) => e.textContent),
+    labels: [...document.querySelectorAll('.blk-props-manage .prop-row[data-prop-id] .prop-name')].map((e) => e.textContent),
     fields: window.__qua.fields(window.__qua.__editor.doc.roots[0].id).map((f) => f.label),
   }))
   assert(!bPanel.labels.includes('姓名') && !bPanel.fields.includes('姓名'), `只打 #演员 的块不该有 #人物 的字段：${JSON.stringify(bPanel)}`)
@@ -7662,13 +7690,17 @@ await check('T52 归属边：属于在属性区、成员含算作、禁环、悬
   assert(soft.revivable.length === 1 && soft.gone.length === 0, `软删的上级应落 revivable：${JSON.stringify(soft)}`)
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), tags['演员'])
   await page.waitForTimeout(250)
+  await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), tags['演员'])
+  await page.waitForSelector('.props-drawer')
   const softUi = await page.evaluate(() => ({
-    text: document.querySelector('.prop-belongs')?.textContent ?? '',
-    prune: !!document.querySelector('.prop-belongs [data-prune-belongs]'),
-    revivable: !!document.querySelector('.prop-belongs [data-dangling="revivable"]'),
+    text: document.querySelector('.props-drawer .prop-belongs')?.textContent ?? '',
+    prune: !!document.querySelector('.props-drawer .prop-belongs [data-prune-belongs]'),
+    revivable: !!document.querySelector('.props-drawer .prop-belongs [data-dangling="revivable"]'),
   }))
   assert(softUi.revivable && /回收站/.test(softUi.text), `「上级在回收站」要看得见：${JSON.stringify(softUi)}`)
   assert(!softUi.prune, '回收站里的上级不给清理入口（复活要自愈）')
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(200)
 
   // ② 真删 #人物（从森林里摘掉）：落 gone，可清理；点清理 ⇒ 边没了
   await page.evaluate((parentId) => {
@@ -7679,13 +7711,15 @@ await check('T52 归属边：属于在属性区、成员含算作、禁环、悬
   }, tags['人物'])
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), tags['演员'])
   await page.waitForTimeout(250)
+  await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), tags['演员'])
+  await page.waitForSelector('.props-drawer')
   const goneUi = await page.evaluate(() => ({
-    text: document.querySelector('.prop-belongs')?.textContent ?? '',
-    prune: !!document.querySelector('.prop-belongs [data-prune-belongs]'),
+    text: document.querySelector('.props-drawer .prop-belongs')?.textContent ?? '',
+    prune: !!document.querySelector('.props-drawer .prop-belongs [data-prune-belongs]'),
   }))
   assert(/已删除/.test(goneUi.text), `真删的上级应显示「已删除」：${JSON.stringify(goneUi)}`)
   assert(goneUi.prune, '真删的上级应可清理')
-  await page.evaluate(() => document.querySelector('.prop-belongs [data-prune-belongs]')?.click())
+  await page.evaluate(() => document.querySelector('.props-drawer .prop-belongs [data-prune-belongs]')?.click())
   await page.waitForTimeout(250)
   const pruned = await page.evaluate((id) => window.__qua.tagParents(id), tags['演员'])
   assert(pruned.length === 0, `清理之后不该还有上级：${JSON.stringify(pruned)}`)
@@ -32016,7 +32050,7 @@ await check('T317 asset 值控件：预览独立成带、地址在下一行，�
   await page.evaluate((host) => window.__qua.invoke('core.block/focus-block', { blockId: host }), ids.host)
   await page.waitForFunction(
     (link) =>
-      [...document.querySelectorAll('#inspect-card .prop-asset-img')].some(
+      [...document.querySelectorAll('.blk-props-manage .prop-asset-img')].some(
         (img) => img.getAttribute('src') === link && img.naturalWidth > 0,
       ),
     url,
@@ -32027,9 +32061,10 @@ await check('T317 asset 值控件：预览独立成带、地址在下一行，�
    * 判据是**几何**（不是看截图）：预览带在上、地址带在下，两条带不许相交；
    * 预览必须是「图的值」而不是行内小缩略图（高度足够），地址仍能拿回全文。
    * 上一版把三者塞进一个框里，图贴着输入框，读不出哪部分是值。
+   * 宿主是主体行下的管理档（值段复用抽屉的 fields-section，控件一个字节没变）。
    */
   const geom = await page.evaluate((propId) => {
-    const row = document.querySelector(`#inspect-card .prop-row[data-prop-id="${propId}"]`)
+    const row = document.querySelector(`.blk-props-manage .prop-row[data-prop-id="${propId}"]`)
     const box = row?.querySelector('[data-asset-editor]')
     if (!row || !box) return { found: false }
     const r = (sel) => {
@@ -32062,7 +32097,7 @@ await check('T317 asset 值控件：预览独立成带、地址在下一行，�
       pickIcon: Boolean(box.querySelector('.prop-asset-pick .ico')),
     }
   }, ids.propId)
-  assert(geom.found, '检视卡里应能找到这一栏的 asset 控件')
+  assert(geom.found, '管理档里应能找到这一栏的 asset 控件')
   assert(geom.hits === 0, `预览／地址／选文件键三者不许矩形相交：${JSON.stringify(geom)}`)
   assert(geom.thumbsW >= geom.thumbW, `单值预览不许被容器裁掉：${JSON.stringify(geom)}`)
   assert(geom.thumbH >= 60, `预览要是一条带，不是 1.6em 的小缩略图：${JSON.stringify(geom)}`)
@@ -32077,10 +32112,10 @@ await check('T317 asset 值控件：预览独立成带、地址在下一行，�
    * 顺带钉住「收成滚动容器」的副作用：缩略图列的 overflow-x 会让 overflow-y 也按
    * auto 算，挂在盒外的摘除 × 会被上沿裁掉 —— 它必须整枚落在自己那枚图里。
    */
-  await page.hover(`#inspect-card .prop-row[data-prop-id="${ids.propId}"] .prop-asset-thumb`)
+  await page.hover(`.blk-props-manage .prop-row[data-prop-id="${ids.propId}"] .prop-asset-thumb`)
   await page.waitForTimeout(300)
   const remove = await page.evaluate((propId) => {
-    const box = document.querySelector(`#inspect-card .prop-row[data-prop-id="${propId}"] [data-asset-editor]`)
+    const box = document.querySelector(`.blk-props-manage .prop-row[data-prop-id="${propId}"] [data-asset-editor]`)
     const wrap = box?.querySelector('.prop-asset-thumbs')?.getBoundingClientRect()
     const x = box?.querySelector('.prop-asset-remove')?.getBoundingClientRect()
     if (!wrap || !x) return { found: false }
@@ -32093,7 +32128,7 @@ await check('T317 asset 值控件：预览独立成带、地址在下一行，�
   assert(remove.found && remove.shown && remove.inside, `摘除 × 要显形且不被裁切：${JSON.stringify(remove)}`)
 
   await ctx.close()
-  return `检视卡窄槽：预览 ${geom.thumbW}×${geom.thumbH}px 单独成带（距地址 ${geom.addrTop - geom.thumbsBottom}px）、地址 ${geom.inputW}px；选文件退图标键`
+  return `行下管理档：预览 ${geom.thumbW}×${geom.thumbH}px 单独成带（距地址 ${geom.addrTop - geom.thumbsBottom}px）、地址 ${geom.inputW}px；选文件退图标键`
 })
 
 await check('T318 检视卡段序：类型专属段紧跟属性值，块配置在后', async () => {
@@ -32134,7 +32169,7 @@ await check('T318 检视卡段序：类型专属段紧跟属性值，块配置�
   return `定义块 ${defOrder.join(' → ')}；标签 ${tagOrder.join(' → ')}`
 })
 
-await check('T319 检视卡里选本地图：行脸当场换成新图（不等下一次交互）', async () => {
+await check('T319 管理档里选本地图：行脸当场换成新图（不等下一次交互）', async () => {
   const { ctx, page } = await freshPage(browser, base)
   const b64 =
     'iVBORw0KGgoAAAANSUhEUgAAACgAAAAoCAIAAAADnC86AAAAMElEQVR4nO3NQQkAAAgEsItjHGMbyxKCn8H+y3S9iFgsFovFYrFYLBaLxWKxWHxnAY8m0GozORegAAAAAElFTkSuQmCC'
@@ -32148,11 +32183,17 @@ await check('T319 检视卡里选本地图：行脸当场换成新图（不等�
     return { host: host.id, propId: def.id }
   })
   await page.evaluate((host) => window.__qua.invoke('core.block/focus-block', { blockId: host }), ids.host)
-  await page.waitForSelector(`#inspect-card .prop-row[data-prop-id="${ids.propId}"] [data-asset-pick]`, { timeout: 5000 })
+  // 没填值的栏收在「+N 项待填」里：先展开，选图的入口才在场（行脸只全显有值的行）
+  await page.waitForSelector('.blk-props-manage .blk-manage-pending', { timeout: 5000 })
+  await page.click('.blk-props-manage .blk-manage-pending')
+  await page.waitForSelector(
+    `.blk-props-manage .prop-row[data-prop-id="${ids.propId}"] [data-asset-pick]`,
+    { timeout: 5000 },
+  )
 
   const [chooser] = await Promise.all([
     page.waitForEvent('filechooser', { timeout: 5000 }),
-    page.click(`#inspect-card .prop-row[data-prop-id="${ids.propId}"] [data-asset-pick]`),
+    page.click(`.blk-props-manage .prop-row[data-prop-id="${ids.propId}"] [data-asset-pick]`),
   ])
   await chooser.setFiles({ name: '即时封面.png', mimeType: 'image/png', buffer: Buffer.from(b64, 'base64') })
   const hash = await page.waitForFunction(
@@ -32166,9 +32207,9 @@ await check('T319 检视卡里选本地图：行脸当场换成新图（不等�
 
   /**
    * 判据：**写值那条路径自己负责重画那一行**，不等用户下一次点别处。
-   * 行脸是投影面，不是缓存；检视卡改了值，它必须当场跟上。
+   * 行脸是投影面，不是缓存；管理档改了值，它必须当场跟上。
    *
-   * ⚠️ 这一块是 zoom 进来的（检视卡的主体就是它）⇒ 它的行脸是**主体行下的管理档**，
+   * ⚠️ 这一块是 zoom 进来的（单主体屏的根就是它）⇒ 它的行脸是**主体行下的管理档**，
    *    不是块下属性行。判据不变，宿主换了。
    */
   await page.waitForFunction(
@@ -32192,20 +32233,20 @@ await check('T319 检视卡里选本地图：行脸当场换成新图（不等�
   assert(line.img, `行脸应画真图（不是停在旧链接/占位）：${JSON.stringify(line)}`)
 
   // 预览是值的舞台：点图＝默认动作（内态图开 lightbox）
-  await page.click(`#inspect-card .prop-row[data-prop-id="${ids.propId}"] .prop-asset-thumb`)
+  await page.click(`.blk-props-manage .prop-row[data-prop-id="${ids.propId}"] .prop-asset-thumb`)
   await page.waitForSelector('.lightbox', { timeout: 3000 })
   const lightbox = await page.evaluate(() => ({
     open: Boolean(document.querySelector('.lightbox')),
     decoded: (document.querySelector('.lightbox-img')?.naturalWidth ?? 0) > 0,
     title: document.querySelector('.lightbox-title')?.textContent ?? '',
   }))
-  assert(lightbox.open && lightbox.decoded, `点检视卡里的预览应开 lightbox 并解码：${JSON.stringify(lightbox)}`)
+  assert(lightbox.open && lightbox.decoded, `点管理档里的预览应开 lightbox 并解码：${JSON.stringify(lightbox)}`)
   assert(lightbox.title.includes('即时封面'), `lightbox 标题应是这一栏的名字：${JSON.stringify(lightbox)}`)
   await page.keyboard.press('Escape')
   await page.waitForSelector('.lightbox', { state: 'detached', timeout: 3000 })
 
   await ctx.close()
-  return `检视卡选图后行脸当场换成 ${line.ref.slice(0, 8)}… 并画真图；点预览开 lightbox`
+  return `管理档选图后行脸当场换成 ${line.ref.slice(0, 8)}… 并画真图；点预览开 lightbox`
 })
 
 await check('T320 asset 多值：计数徽标＋溢出渐隐＋可聚焦横向滚', async () => {
@@ -32228,12 +32269,12 @@ await check('T320 asset 多值：计数徽标＋溢出渐隐＋可聚焦横向�
   }, urls)
   await page.evaluate((host) => window.__qua.invoke('core.block/focus-block', { blockId: host }), ids.host)
   await page.waitForFunction(
-    (propId) => Boolean(document.querySelector(`#inspect-card .prop-row[data-prop-id="${propId}"] .prop-asset-count`)),
+    (propId) => Boolean(document.querySelector(`.blk-props-manage .prop-row[data-prop-id="${propId}"] .prop-asset-count`)),
     ids.propId,
     { timeout: 5000 },
   )
   const affordance = await page.evaluate((propId) => {
-    const row = document.querySelector(`#inspect-card .prop-row[data-prop-id="${propId}"]`)
+    const row = document.querySelector(`.blk-props-manage .prop-row[data-prop-id="${propId}"]`)
     const preview = row?.querySelector('.prop-asset-preview')
     const thumbs = row?.querySelector('.prop-asset-thumbs')
     const scroll = thumbs
@@ -32258,7 +32299,7 @@ await check('T320 asset 多值：计数徽标＋溢出渐隐＋可聚焦横向�
   return `4 张：徽标「${affordance.count}」、右缘渐隐、容器可聚焦且横向滚得动`
 })
 
-await check('T321 检视卡的引用值：点名字跳目标，尾键换目标', async () => {
+await check('T321 管理档的引用值：点名字跳目标，尾键换目标', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   await openFirstPage(page)
@@ -32272,15 +32313,15 @@ await check('T321 检视卡的引用值：点名字跳目标，尾键换目标',
     return { host: host.id, propId: def.id, target: target?.id ?? '' }
   })
   assert(ids.target !== '', '前置：应建出引用目标页')
-  await page.waitForSelector(`#inspect-card .prop-row[data-prop-id="${ids.propId}"] .prop-ref`, { timeout: 5000 })
-  await page.click(`#inspect-card .prop-row[data-prop-id="${ids.propId}"] .prop-ref`)
+  await page.waitForSelector(`.blk-props-manage .prop-row[data-prop-id="${ids.propId}"] .prop-ref`, { timeout: 5000 })
+  await page.click(`.blk-props-manage .prop-row[data-prop-id="${ids.propId}"] .prop-ref`)
   await page.waitForFunction((tid) => window.__qua.snapshot().activeId === tid, ids.target, { timeout: 4000 })
   const jumped = await page.evaluate(() => window.__qua.snapshot().activeId)
   assert(jumped === ids.target, `点引用名字应跳到目标：${JSON.stringify({ jumped, target: ids.target })}`)
 
   await page.evaluate((host) => window.__qua.invoke('core.block/focus-block', { blockId: host }), ids.host)
   await page.waitForTimeout(200)
-  await page.click(`#inspect-card .prop-row[data-prop-id="${ids.propId}"] .prop-ref-change`)
+  await page.click(`.blk-props-manage .prop-row[data-prop-id="${ids.propId}"] .prop-ref-change`)
   await page.waitForSelector('.layer', { timeout: 4000 })
   const picker = await page.evaluate(() => document.querySelector('.layer-head')?.textContent ?? '')
   assert(picker.includes('选择'), `尾键应重新打开选择器：${JSON.stringify(picker)}`)
@@ -33561,7 +33602,7 @@ await check('T344 镜像岛里按 ⌘⇧D＝删聚焦的源块，露面不动；
   return `镜像岛里 ⌘⇧D＝删聚焦的源行，露面块不动；摘露面仍由命名命令承担`
 })
 
-await check('T345 定义投影：定义块名字下面画值配置；标签声明非空才画；正文身体与检视卡同写径', async () => {
+await check('T345 定义投影：定义块名字下面画值配置；标签声明非空才画；正文身体与抽屉同写径', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await openFirstPage(page)
 
@@ -33595,16 +33636,20 @@ await check('T345 定义投影：定义块名字下面画值配置；标签声�
   assert(tagBody.present, `声明后身体当场出现：${JSON.stringify(tagBody)}`)
   assert(tagBody.chips.length === 1, `身体里列出刚声明的字段：${JSON.stringify(tagBody.chips)}`)
 
-  // ③ 定义块的身体：值配置段（text 定义有格式轴）。正文与检视卡是同一套段的两个壳：
+  // ③ 定义块的身体：值配置段（text 定义有格式轴）。正文身体与抽屉是同一套段的两个壳：
   //    从身体改格式走同一条命令，重画后两边都读模型——控件不许比存储先说。
+  //    （第二壳是抽屉：管理面挂同一份段组件；值段的另一处在行下管理档，但定义块
+  //    的值配置是 schema，行下不画它——两壳判据落在身体与抽屉上。）
   await page.evaluate((id) => window.__qua.invoke('core.block/focus-block', { blockId: id }), tagBody.chips[0])
   await page.waitForTimeout(200)
+  await page.evaluate((id) => window.__qua.invoke('core.block/inspect', { blockId: id }), tagBody.chips[0])
+  await page.waitForSelector('.props-drawer')
   const defBody = await page.evaluate((id) => {
     const body = document.querySelector(`.blk[data-block-id="${id}"] .blk-def-body`)
     return {
       present: Boolean(body),
       hasFormat: Boolean(body?.querySelector('[data-def-format]')),
-      panelFormat: document.querySelector('#inspect-card [data-def-format]')?.value ?? '',
+      panelFormat: document.querySelector('.props-drawer [data-def-format]')?.value ?? '',
     }
   }, tagBody.chips[0])
   assert(defBody.present && defBody.hasFormat, `定义块身体画值配置（格式轴在场）：${JSON.stringify(defBody)}`)
@@ -33618,15 +33663,15 @@ await check('T345 定义投影：定义块名字下面画值配置；标签声�
   const after = await page.evaluate(
     (id) => ({
       body: document.querySelector(`.blk[data-block-id="${id}"] .blk-def-body [data-def-format]`)?.value ?? '',
-      panel: document.querySelector('#inspect-card [data-def-format]')?.value ?? '',
+      panel: document.querySelector('.props-drawer [data-def-format]')?.value ?? '',
     }),
     tagBody.chips[0],
   )
   assert(after.body === 'url', `身体改格式写进模型并重画回来（不是停在点出来的状态）：${JSON.stringify(after)}`)
-  assert(after.panel === 'url', `检视卡同一份段读同一个模型（一套段两个壳同写径）：${JSON.stringify(after)}`)
+  assert(after.panel === 'url', `抽屉同一份段读同一个模型（一套段两个壳同写径）：${JSON.stringify(after)}`)
 
   await ctx.close()
-  return `空标签不画身体；声明后当场出现；定义身体改格式 ⇒ 模型与检视卡同步`
+  return `空标签不画身体；声明后当场出现；定义身体改格式 ⇒ 模型与抽屉同步`
 })
 await check('T346 行内块新建看法：子块行当场让位，卡片与大纲不画两遍（与刷新后同一批行）', async () => {
   const { ctx, page } = await freshPage(browser, base)
