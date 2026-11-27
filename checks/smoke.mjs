@@ -35426,7 +35426,7 @@ await check('T371 镜像岛里 ⇧↑ 越界选中宿主：复制引用落源 id
   return '镜像岛 ⇧↑ 选中宿主，复制引用落源 id，文本标明是露面引用'
 })
 
-await check('T372 文本边界 ↑ 选中查询屏根，↓ 回到正文恢复光标，再 ↑ 仍可选中', async () => {
+await check('T372 单行正文任意位置 ↑ 选中查询屏根，↓ 回正文恢复光标，再 ↑ 仍可选中', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const fx = await page.evaluate(() => {
@@ -35461,10 +35461,11 @@ await check('T372 文本边界 ↑ 选中查询屏根，↓ 回到正文恢复�
   await page.evaluate((id) => window.__qua.focusBlock(id, 1), fx.pid)
   await page.keyboard.press('ArrowUp')
   await page.waitForTimeout(150)
-  assert((await selection()).length === 0, '文本内部 ↑ 不进块选区，交原生光标')
+  const mid = await selection()
+  assert(mid.includes(fx.qid), `单行块中间 ↑ 也按可见行边界选中查询块：${JSON.stringify(mid)}`)
 
   await ctx.close()
-  return '文本块首 ↑ 选中查询屏根；↓ 回正文恢复光标；再 ↑ 仍可选中；文本内部 ↑ 仍归原生'
+  return '单行正文任意位置 ↑ 选中查询屏根；↓ 回正文恢复光标；再 ↑ 仍可选中'
 })
 
 await check('T373 镜像岛纯 ↑ 越界也选中宿主（不只 ⇧↑）', async () => {
@@ -35701,6 +35702,43 @@ await check('T378 代码岛末行 ↓ 有下一行：交回外层并落光标', 
 
   await ctx.close()
   return '代码岛末行有下一行：↓ 交回外层、光标落下一行，不进块选区'
+})
+
+await check('T379 单行正文块末尾 ↑ 也能选中上方查询块（按可见行判边界）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const fx = await page.evaluate(() => {
+    const q = window.__qua
+    q.invoke('core.page/create')
+    const ed = q.__editor
+    const root = ed.doc.roots[0]
+    const parent = ed.insert.insertBlockAfter(root.id, '容器')
+    q.invoke('core.query/create', { name: '查询条件XYZ', spec: { where: { any: [] } }, parentId: parent })
+    const query = (ed.store.find(parent)?.children ?? [])
+      .map((k) => (typeof k === 'string' ? k : k.id))
+      .find((id) => Boolean(ed.store.find(id)?.props?._query)) ?? ''
+    q.focusBlock(query, 0)
+    q.invoke('core.editor/insert-block', { text: '甲乙丙丁' })
+    return { query, below: ed.sel?.aBlock ?? '' }
+  })
+  assert(fx.query && fx.below, `前置：查询块与正文块：${JSON.stringify(fx)}`)
+
+  await page.evaluate((id) => window.__qua.focusBlock(id, 9999), fx.below)
+  const before = await page.evaluate(() => ({
+    off: window.__qua.__editor.sel?.aOff ?? -1,
+    ids: [...(window.__qua.__editor.bsel.blockSel?.ids ?? [])],
+  }))
+  assert(before.off === 4 && before.ids.length === 0, `前置：光标在单行块末尾：${JSON.stringify(before)}`)
+  await page.keyboard.press('ArrowUp')
+  await page.waitForTimeout(150)
+  const state = await page.evaluate(() => ({
+    caret: window.__qua.__editor.sel?.aBlock ?? '',
+    ids: [...(window.__qua.__editor.bsel.blockSel?.ids ?? [])],
+  }))
+  assert(state.ids.includes(fx.query), `单行块末尾 ↑ 应一次选中上方查询块：${JSON.stringify(state)}`)
+
+  await ctx.close()
+  return '单行正文块末尾 ↑ 按可见行判边界，一次选中上方查询块'
 })
 
 const known = results.filter((r) => !r.ok && r.known)

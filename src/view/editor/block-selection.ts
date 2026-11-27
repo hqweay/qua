@@ -197,6 +197,18 @@ export class BlockSelection {
     return Boolean(tx && tx.isContentEditable && getComputedStyle(tx).display !== 'none')
   }
 
+  /** 折叠光标是否在目标块的首/末可见行；单行块末尾也算向上边界 */
+  private caretOnEdge(id: string, dir: -1 | 1): boolean {
+    const s = this.ed.readSel()
+    if (!s || s.aBlock !== id || s.aBlock !== s.hBlock || s.aOff !== s.hOff) return false
+    const tx = this.ed.txEl(id)
+    const caret = this.ed.caretRect()
+    if (!tx || !caret) return false
+    const rects = [...tx.getClientRects()]
+    const edge = dir > 0 ? rects[rects.length - 1] : rects[0]
+    return Boolean(edge && Math.abs(caret.top - edge.top) <= Math.min(8, edge.height / 2))
+  }
+
   /**
    * 方向键在对象与正文之间穿行：
    * - 文本边界遇到不可落光标的块 ⇒ 选中它；
@@ -206,20 +218,20 @@ export class BlockSelection {
   moveAdjacentBlock(dir: -1 | 1, fromIsland = false): boolean {
     const wasSelected = this.blockSel !== null
     if (this.blockSel && this.blockSel.ids.length !== 1) return false
-    const s = this.ed.sel
+    const modelSel = this.ed.sel
+    const domSel = fromIsland ? null : this.ed.readSel()
     if (!this.blockSel) {
+      const s = domSel ?? modelSel
       if (!s) return false
       if (!fromIsland) {
         if (s.aBlock !== s.hBlock || s.aOff !== s.hOff) return false
         const loc = locate(this.ed.doc, s.aBlock)
         if (!loc || !selectable(loc.block)) return false
-        const len = plainLen(loc.block.content)
-        const off = Math.max(0, Math.min(s.aOff, len))
-        if (dir > 0 ? off !== len : off !== 0) return false
+        if (!this.caretOnEdge(s.aBlock, dir)) return false
       }
     }
     const ids = this.visibleIds()
-    const currentId = this.blockSel?.ids[0] ?? s!.aBlock
+    const currentId = this.blockSel?.ids[0] ?? (fromIsland ? modelSel!.aBlock : domSel!.aBlock)
     const next = ids[ids.indexOf(currentId) + dir]
     if (!next) return false
     const reachable = this.caretReachable(next)
