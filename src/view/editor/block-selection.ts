@@ -5,7 +5,7 @@
  * 其余一律经 `ed`（doc／模型选区／渲染／事务）——它没有自己的不变量，
  * 「只选可见行」「删只删最上层根」都是编辑器口径的投影，不另立第二份。
  */
-import { flatten, isJournalBlock, isPropDefBlock, locate, plainLen, walkForest, type Block, type Located } from '../../core/index.ts'
+import { flatten, hasBody, isJournalBlock, isPropDefBlock, locate, plainLen, walkForest, type Block, type Located } from '../../core/index.ts'
 import type { BlockEditor } from './editor.ts'
 import { copyTextOfBlock } from './copy-text.ts'
 
@@ -189,10 +189,10 @@ export class BlockSelection {
     return true
   }
 
-  /** 相邻行自己有可写正文槽、且不是这一屏的装载根 ⇒ 浏览器能把光标落进去，方向键仍归原生 */
+  /** 相邻行是纯正文行、且不是装载根 ⇒ 浏览器能把光标落进去，方向键仍归原生 */
   private caretReachable(id: string): boolean {
     const loc = locate(this.ed.doc, id)
-    if (!loc || loc.parent === null) return false
+    if (!loc || loc.parent === null || hasBody(loc.block)) return false
     const tx = this.ed.blockEl(id)?.querySelector<HTMLElement>(':scope > .tx')
     return Boolean(tx && tx.isContentEditable && getComputedStyle(tx).display !== 'none')
   }

@@ -35497,6 +35497,38 @@ await check('T374 普通正文块之间 ↑/↓ 仍是光标移动，不变成�
   return '普通正文块之间 ↑/↓ 仍是原生光标移动，未进块选区'
 })
 
+await check('T375 普通块紧邻查询块：从普通块 ↑ 仍选中查询块（带身体不算可落光标）', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const fx = await page.evaluate(() => {
+    const q = window.__qua
+    q.invoke('core.page/create')
+    const ed = q.__editor
+    const root = ed.doc.roots[0]
+    const parent = ed.insert.insertBlockAfter(root.id, '容器')
+    q.invoke('core.query/create', { name: '查询条件XYZ', spec: { where: { any: [] } }, parentId: parent })
+    const qid = (ed.store.find(parent)?.children ?? [])
+      .map((k) => (typeof k === 'string' ? k : k.id))
+      .find((id) => Boolean(ed.store.find(id)?.props?._query)) ?? ''
+    q.focusBlock(qid, 0)
+    q.invoke('core.editor/insert-block', { text: '222' })
+    return { parent, qid, below: ed.sel?.aBlock ?? '' }
+  })
+  assert(fx.qid && fx.below, `前置：普通块与查询块相邻：${JSON.stringify(fx)}`)
+
+  await page.evaluate((id) => window.__qua.focusBlock(id, 0), fx.below)
+  await page.keyboard.press('ArrowUp')
+  await page.waitForTimeout(150)
+  const state = await page.evaluate(() => ({
+    caret: window.__qua.__editor.sel?.aBlock ?? '',
+    ids: [...(window.__qua.__editor.bsel.blockSel?.ids ?? [])],
+  }))
+  assert(state.ids.includes(fx.qid), `普通块 ↑ 应选中带身体的查询块：${JSON.stringify(state)}`)
+
+  await ctx.close()
+  return '普通块紧邻查询块时，↑ 仍选中查询块而非只移光标'
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 
