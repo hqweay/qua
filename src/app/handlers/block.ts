@@ -86,14 +86,13 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
   /**
    * **删除一块** —— 页／标签／日记／字段定义／内容块共用这一条。
    *
-   * 落点只有一条判据：这一下站在**露面岛**里 ⇒ 删的是这一次露面，不是岛里的源
-   * （菜单把宿主 id 放在 `embedHost`；键位没有菜单上下文，编辑器自带 `embedHostId`）。
-   * 其余全部交给 `App.deleteBlock`：怎么删、要不要确认、删完落到哪，都在那一份里。
+   * 对象只由「这一下作用在谁身上」决定：显式 target 优先，否则是光标所在的块。
+   * 露面岛里的那一行就是源自己的行 ⇒ 在岛里删它，与在那里打字、建子块是同一条落点。
+   * 摘露面是另一个动作（命名命令 `core.embed/remove`），不能拿删除键替它——
+   * 同一个键两个动词，用户从焦点猜不到对象会在岛边界换掉。
+   * 怎么删、要不要确认、删完落到哪，全交给 `App.deleteBlock`。
    */
   'core.block/delete': (a, app) => {
-    const embedHost = S(a.embedHost) || app.ed.embedHostId
-    // 摘露面不发「已删除」——删的是这一次的露面，源与其正文一个字节没动
-    if (embedHost) return app.removeEmbed(embedHost)
     const id = targetBlock(a, app)
     return id ? app.deleteBlock(id) : false
   },
@@ -366,11 +365,7 @@ export const STRUCT_HANDLERS: Record<string, Handler> = {
       .catch(() => app.toast(t('err.clipboardFailed'), 'warn'))
     return true
   },
-  'core.editor/delete-selected-blocks': (_a, app) => {
-    // 与单块 ⌘⇧D 同一条判据：站在露面岛里 ⇒ 摘露面，不删岛里的源子树
-    if (app.ed.embedHostId) return app.removeEmbed(app.ed.embedHostId)
-    return app.ed.bsel.deleteSelectedBlocks()
-  },
+  'core.editor/delete-selected-blocks': (_a, app) => app.ed.bsel.deleteSelectedBlocks(),
   'core.editor/indent-selected-blocks': (_a, app) => app.ed.bsel.indentSelectedBlocks(),
   'core.editor/outdent-selected-blocks': (_a, app) => app.ed.bsel.outdentSelectedBlocks(),
   'core.editor/toggle-closure-selected-blocks': (_a, app) => app.ed.bsel.toggleClosureSelectedBlocks(),

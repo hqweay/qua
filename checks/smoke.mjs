@@ -33518,7 +33518,7 @@ await check('T343 露面卡片成员实时刷新：给源块新增子块，投�
   return `源加子块 ⇒ 投影卡片 2→3 当场刷新（无聚焦/重开/手动刷新）`
 })
 
-await check('T344 镜像岛里按 ⌘⇧D＝摘这一次露面，源不动；从源自己的位置按仍删源（与菜单同一判据）', async () => {
+await check('T344 镜像岛里按 ⌘⇧D＝删聚焦的源块，露面不动；移除露面仍走命名命令', async () => {
   const { ctx, page } = await freshPage(browser, base)
   await page.evaluate(() => window.__qua.quiet(true))
   const fx = await buildListTree(page)
@@ -33534,45 +33534,25 @@ await check('T344 镜像岛里按 ⌘⇧D＝摘这一次露面，源不动；从
   )
   assert(embedId !== '', `前置：镜像已插入：${embedId}`)
 
-  // 真点击把光标放进岛里的源行，再按 ⌘⇧D（与菜单走同一条删除判据）
+  // 真点击把光标放进岛里的源行，再按 ⌘⇧D。读活动编辑器的光标：镜像岛是另一台编辑器
   await page.locator(`.blk-embed-body .blk[data-block-id="${fx.rows[1]}"] > .tx`).click()
   await page.waitForTimeout(150)
-  /**
-   * 读**活动编辑器**的光标，不是正文那台的：镜像岛是另一台编辑器，点进去
-   * `deps.getEd()` 就换成它了，正文那台的 `selection` 停在原处不动——读后者
-   * 会把「光标确实进了岛」误判成「没进去」。
-   */
   const focused = await page.evaluate(() => window.__qua.snapshot().activeSelection?.aBlock ?? '')
   assert(focused === fx.rows[1], `前置：光标在镜像岛的源行上：${focused}`)
   await page.keyboard.press('Meta+Shift+D')
   await page.waitForTimeout(350)
   const after = await page.evaluate(
     ({ sid, eid }) => ({
-      srcIntact: Boolean(window.__qua.__editor.store.find(sid)),
-      embedGone: !window.__qua.__editor.store.find(eid),
-      toasts: [...document.querySelectorAll('.toast')].map((t) => t.textContent ?? ''),
+      srcGone: !window.__qua.__editor.store.find(sid),
+      embedIntact: Boolean(window.__qua.__editor.store.find(eid)),
     }),
     { sid: fx.rows[1], eid: embedId },
   )
-  assert(after.srcIntact, `⌘⇧D 在镜像上不删源：${JSON.stringify(after)}`)
-  assert(after.embedGone, `⌘⇧D 在镜像上摘的是露面：${JSON.stringify(after)}`)
-  assert(
-    !after.toasts.some((t) => t?.includes('已删除')),
-    `摘露面不说「已删除」（与菜单同口径）：${JSON.stringify(after.toasts)}`,
-  )
-
-  // 反向：从正文里源自己的那一行按 ⌘⇧D，仍要能删源（不因判据收紧而丢能力）
-  await page.evaluate((sid) => window.__qua.focusBlock(sid, 0), fx.rows[2])
-  await page.waitForTimeout(150)
-  const beforeDel = await page.evaluate((sid) => Boolean(window.__qua.__editor.store.find(sid)), fx.rows[2])
-  assert(beforeDel, '前置：另一个源块还在')
-  await page.keyboard.press('Meta+Shift+D')
-  await page.waitForTimeout(350)
-  const srcGone = await page.evaluate((sid) => !window.__qua.__editor.store.find(sid), fx.rows[2])
-  assert(srcGone, '正文里对自己的块按 ⌘⇧D 仍删源（正常删除能力没丢）')
+  assert(after.srcGone, `⌘⇧D 在镜像岛里删的是聚焦的源行：${JSON.stringify(after)}`)
+  assert(after.embedIntact, `删源不连坐露面块（摘露面是另一个动作）：${JSON.stringify(after)}`)
 
   await ctx.close()
-  return `镜像岛里 ⌘⇧D＝摘露面（源不动、不谎报）；正文对自己 ⌘⇧D 仍删源`
+  return `镜像岛里 ⌘⇧D＝删聚焦的源行，露面块不动；摘露面仍由命名命令承担`
 })
 
 await check('T345 定义投影：定义块名字下面画值配置；标签声明非空才画；正文身体与检视卡同写径', async () => {
