@@ -207,6 +207,8 @@ export interface CodeIslandMount {
   onContextMenu?: (anchor: DOMRect) => void
   /** ⌘↵：代码块也照常切换任务；岛内接管，避免 CM6 默认 insertBlankLine */
   onToggleTask?: () => void
+  /** 纵向越界交回外层；没有相邻行时返回 false，让光标停在原地 */
+  onExit?: (dir: -1 | 1) => boolean
 }
 
 export interface CodeIslandHandle {
@@ -214,7 +216,7 @@ export interface CodeIslandHandle {
   dispose(): void
 }
 
-export function mountCodeIsland({ getEd, blockId, into, onCopyBlock, onCutBlock, onCopyBlockText, onContextMenu, onToggleTask }: CodeIslandMount): CodeIslandHandle {
+export function mountCodeIsland({ getEd, blockId, into, onCopyBlock, onCutBlock, onCopyBlockText, onContextMenu, onToggleTask, onExit }: CodeIslandMount): CodeIslandHandle {
   const ed = getEd()
   const initial = ed.store.find(blockId)
   const lang = canonicalLang(initial ? prop<string>(initial, '_lang') : undefined)
@@ -267,6 +269,27 @@ export function mountCodeIsland({ getEd, blockId, into, onCopyBlock, onCutBlock,
         syntaxHighlighting(syntaxColors),
         search({ top: true }),
         keymap.of([
+          // 纵向边界：只在空光标走到岛首/岛尾时交回外层；无目标就停住，不建块也不回标题
+          {
+            key: 'ArrowDown',
+            run: (v) => {
+              const sel = v.state.selection
+              if (sel.ranges.length !== 1 || !sel.main.empty) return false
+              const head = sel.main.head
+              if (head !== v.state.doc.length || v.state.doc.lineAt(head).to !== head) return false
+              return onExit?.(1) ?? false
+            },
+            stopPropagation: true,
+          },
+          {
+            key: 'ArrowUp',
+            run: (v) => {
+              const sel = v.state.selection
+              if (sel.ranges.length !== 1 || !sel.main.empty || sel.main.head !== 0) return false
+              return onExit?.(-1) ?? false
+            },
+            stopPropagation: true,
+          },
           // ⌘⇧C：空选区复制整块纯文本。有划选不接管（那一档用 ⌘C 的文本复制）。
           {
             key: 'Mod-Shift-c',

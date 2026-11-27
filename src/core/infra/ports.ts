@@ -228,6 +228,8 @@ export interface App {
   runGroup<T>(fn: () => T, kind?: UndoKind): T
   /** 焦点在露面岛里向上越界时，把活动编辑器交回外层并整块选中这次露面的宿主 */
   selectEmbedHost(hostId: string): boolean
+  /** 代码岛纵向越界交回外层；没有相邻行时返回 false，光标留在岛内 */
+  leaveCodeIsland(dir: -1 | 1): boolean
   /* 页面 */
   listPages(): { id: string; title: string; icon: string; blocks: number }[]
   activePageId(): string

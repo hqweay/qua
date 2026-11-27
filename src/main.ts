@@ -1588,6 +1588,11 @@ const app: App = {
     }
     return ok
   },
+  leaveCodeIsland: (dir) => {
+    const ok = ed.bsel.moveAdjacentBlock(dir, true)
+    if (ok) ed.container.focus({ preventScroll: true })
+    return ok
+  },
   showSelectionRefPicker,
   toggleColorAxis,
 

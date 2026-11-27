@@ -186,6 +186,7 @@ function viewEvents(
         onToggleTask: () => {
           getApp().toggleClosure(block.id)
         },
+        onExit: (dir) => getApp().leaveCodeIsland(dir),
       }),
     (block) => `${block.id}\u0000${prop<string>(block, LANG_PROP) ?? ''}`,
   )

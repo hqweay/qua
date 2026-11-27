@@ -35626,6 +35626,83 @@ await check('T376 穿过查询块到纯正文行：退出块选区并落光标�
   return '穿过查询块到纯正文行：退出选中态、光标落回正文，不粘在块选区'
 })
 
+await check('T377 代码岛末行 ↓ 无下一行：光标停原地，不建块不回标题', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const codeId = await page.evaluate(() => {
+    const q = window.__qua
+    q.invoke('core.page/create')
+    const ed = q.__editor
+    q.focusBlock(ed.doc.roots[0].children[0].id, 0)
+    q.invoke('core.editor/insert-block', { type: 'code' })
+    return ed.sel?.aBlock ?? ''
+  })
+  assert(codeId, '前置：代码块已建出')
+  const before = await page.evaluate(() => window.__qua.allBlocks().length)
+  const rect = await page.evaluate((id) => {
+    const el = document.querySelector(`.blk[data-block-id="${id}"] > .tx`)
+    if (!el) return null
+    const r = el.getBoundingClientRect()
+    return { x: r.left + 4, y: r.top + r.height / 2 }
+  }, codeId)
+  assert(rect, '前置：代码标题可见')
+  await page.mouse.click(rect.x, rect.y)
+  await page.keyboard.press('ArrowDown')
+  await page.waitForTimeout(150)
+  assert(await page.evaluate(() => Boolean(document.activeElement?.closest('.cm-editor'))), '前置：已进入代码岛')
+  await page.keyboard.type('abc')
+  await page.keyboard.press('ArrowDown')
+  await page.waitForTimeout(150)
+  const after = await page.evaluate(() => ({
+    inCode: Boolean(document.activeElement?.closest('.cm-editor')),
+    code: document.querySelector('.cm-content')?.textContent ?? '',
+    total: window.__qua.allBlocks().length,
+  }))
+  assert(after.inCode && after.code.includes('abc'), `末行 ↓ 应停在代码岛：${JSON.stringify(after)}`)
+  assert(after.total === before, `方向键不该建块：${JSON.stringify({ before, after })}`)
+
+  await ctx.close()
+  return '代码岛末行向下无目标：光标停原地、代码不变、块数不变'
+})
+
+await check('T378 代码岛末行 ↓ 有下一行：交回外层并落光标', async () => {
+  const { ctx, page } = await freshPage(browser, base)
+  await page.evaluate(() => window.__qua.quiet(true))
+  const fx = await page.evaluate(() => {
+    const q = window.__qua
+    q.invoke('core.page/create')
+    const ed = q.__editor
+    q.focusBlock(ed.doc.roots[0].children[0].id, 0)
+    q.invoke('core.editor/insert-block', { type: 'code' })
+    const code = ed.sel?.aBlock ?? ''
+    q.invoke('core.editor/insert-block', { blockId: code, text: '下面' })
+    return { code, below: ed.sel?.aBlock ?? '' }
+  })
+  assert(fx.code && fx.below, `前置：代码块与下一行：${JSON.stringify(fx)}`)
+  const rect = await page.evaluate((id) => {
+    const el = document.querySelector(`.blk[data-block-id="${id}"] > .tx`)
+    if (!el) return null
+    const r = el.getBoundingClientRect()
+    return { x: r.left + 4, y: r.top + r.height / 2 }
+  }, fx.code)
+  assert(rect, '前置：代码标题可见')
+  await page.mouse.click(rect.x, rect.y)
+  await page.keyboard.press('ArrowDown')
+  await page.waitForTimeout(150)
+  await page.keyboard.type('abc')
+  await page.keyboard.press('ArrowDown')
+  await page.waitForTimeout(150)
+  const state = await page.evaluate(() => ({
+    inCode: Boolean(document.activeElement?.closest('.cm-editor')),
+    caret: window.__qua.__editor.sel?.aBlock ?? '',
+    ids: [...(window.__qua.__editor.bsel.blockSel?.ids ?? [])],
+  }))
+  assert(!state.inCode && state.caret === fx.below && state.ids.length === 0, `末行 ↓ 应交回下一正文行：${JSON.stringify(state)}`)
+
+  await ctx.close()
+  return '代码岛末行有下一行：↓ 交回外层、光标落下一行，不进块选区'
+})
+
 const known = results.filter((r) => !r.ok && r.known)
 const fail = results.filter((r) => !r.ok && !r.known).length
 

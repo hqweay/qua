@@ -200,28 +200,32 @@ export class BlockSelection {
   /**
    * 方向键在对象与正文之间穿行：
    * - 文本边界遇到不可落光标的块 ⇒ 选中它；
-   * - 已选中一个块、下一行是纯正文 ⇒ 退出选区并把光标落在靠近方向的端点；
+   * - 已选中一个块、或从嵌套编辑岛交回，下一行是纯正文 ⇒ 退出选区并落光标；
    * - 对象之间继续穿行仍是选中态；普通正文之间动作用原生光标，不在这里接管。
    */
-  moveAdjacentBlock(dir: -1 | 1): boolean {
+  moveAdjacentBlock(dir: -1 | 1, fromIsland = false): boolean {
     const wasSelected = this.blockSel !== null
     if (this.blockSel && this.blockSel.ids.length !== 1) return false
+    const s = this.ed.sel
     if (!this.blockSel) {
-      const s = this.ed.sel
-      if (!s || s.aBlock !== s.hBlock || s.aOff !== s.hOff) return false
-      const loc = locate(this.ed.doc, s.aBlock)
-      if (!loc || !selectable(loc.block)) return false
-      const len = plainLen(loc.block.content)
-      const off = Math.max(0, Math.min(s.aOff, len))
-      if (dir > 0 ? off !== len : off !== 0) return false
+      if (!s) return false
+      if (!fromIsland) {
+        if (s.aBlock !== s.hBlock || s.aOff !== s.hOff) return false
+        const loc = locate(this.ed.doc, s.aBlock)
+        if (!loc || !selectable(loc.block)) return false
+        const len = plainLen(loc.block.content)
+        const off = Math.max(0, Math.min(s.aOff, len))
+        if (dir > 0 ? off !== len : off !== 0) return false
+      }
     }
     const ids = this.visibleIds()
-    const currentId = this.blockSel?.ids[0] ?? this.ed.sel!.aBlock
+    const currentId = this.blockSel?.ids[0] ?? s!.aBlock
     const next = ids[ids.indexOf(currentId) + dir]
     if (!next) return false
     const reachable = this.caretReachable(next)
-    if (!wasSelected && reachable) return false
-    if (wasSelected && reachable) {
+    const handOff = fromIsland || wasSelected
+    if (!handOff && reachable) return false
+    if (handOff && reachable) {
       const loc = locate(this.ed.doc, next)
       this.blockSel = null
       this.paintBlockSel()
