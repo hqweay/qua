@@ -32,7 +32,8 @@ test('字段候选：属性定义在前（带 kind／基数），系统槽在后
   assert.equal(fields[1]?.cardinality, 'many')
   assert.deepEqual(fields[2], { id: '_date', label: '日记日期', kind: 'date' })
   assert.deepEqual(fields[3], { id: '_aliases', label: '别名', kind: 'text' })
-  assert.deepEqual(fields[4], { id: '_type', label: '块类型', kind: 'select' })
+  // `_type` 的值域是封闭注册表，但盘上有别的版本写进来的未知 id：照原文显示（open）
+  assert.deepEqual(fields[4], { id: '_type', label: '块类型', kind: 'select', open: true })
   assert.deepEqual(fields[5], { id: '_callout', label: '引述类型', kind: 'select' })
   assert.deepEqual(fields[6], { id: '_lang', label: '代码语言', kind: 'select', open: true })
 })

@@ -11,6 +11,7 @@
  *    平铺草稿退役：两套投影必然分叉，留一份就够。
  */
 import { type PropKind } from '../props/props.ts'
+import type { SystemFieldDecl } from '../props/fields.ts'
 
 /** 属性条件的算子（与 `PropOp` 一一对应；`empty` 与 `exists` 是两件事） */
 export type DraftOp = 'eq' | 'neq' | 'contains' | 'gt' | 'gte' | 'lt' | 'lte' | 'exists' | 'empty'
@@ -24,27 +25,31 @@ export const DRAFT_OPS: readonly DraftOp[] = ['eq', 'neq', 'contains', 'gt', 'gt
 export const SELECT_OPS: readonly DraftOp[] = ['eq', 'neq', 'exists', 'empty']
 
 /**
- * 这一行**能问**哪些算子（按字段 kind 收窄）。
+ * 这一行**能问**哪些算子（按字段 kind 收窄，再按字段声明上的两格收一遍）。
  *
  * - **布尔**：没有未填态，`empty` 与 `exists:false` 是同一个答案 ⇒ 不给 `empty`；
  * - **`select`**：只有「等于／不等于某一项」「有没有这一栏」「填了没填」这四个问法；
- * - **`_type`**（系统槽，按字段 id 特判——它没有定义块、kind 表达不了）：
- *   只有「是哪种／不是哪种／写没写过」，`empty` 与 `eq` 默认类型同解
- *   （`readSystemField` 读 `blockTypeOf`，缺省就是默认类型），按 F 批纪律收掉。
+ * - **读法恒声明**（`mandatory`，如块类型）：`exists`／`empty` 都是死项
+ *   （恒真或恒空），两个都不给；
+ * - **靠类型声明拥有这一栏**（如引述类型／代码语言）：`empty` 恒等于 `exists:false`
+ *   ——「不是这种块」就是「没填」，留两项只是让同一个问题有两种写法。
+ *
+ * 两格都来自字段声明（`fields.ts`），这里不再按字段 id 特判：**收窄规则只有一份**，
+ * 加一个系统槽不用回来改算子表。
  *
  * ⚠️ 已经存下来的算子**永远留在下拉里**：收窄只决定「新加时不给什么」，
  *    不许打开一次就悄悄把用户的条件改掉。
  */
-export function opsFor(kind: PropKind | undefined, current: DraftOp | undefined, field?: string): readonly DraftOp[] {
+export function opsFor(
+  kind: PropKind | undefined,
+  current: DraftOp | undefined,
+  decl?: Pick<SystemFieldDecl, 'mandatory' | 'ownerType'>,
+): readonly DraftOp[] {
   const cur = current ?? 'eq'
-  const allow: readonly DraftOp[] =
-    field === '_type'
-      ? ['eq', 'neq', 'exists']
-      : kind === 'checkbox'
-        ? DRAFT_OPS.filter((o) => o !== 'empty')
-        : kind === 'select'
-          ? SELECT_OPS
-          : DRAFT_OPS
+  let allow: readonly DraftOp[] =
+    kind === 'checkbox' ? DRAFT_OPS.filter((o) => o !== 'empty') : kind === 'select' ? SELECT_OPS : DRAFT_OPS
+  if (decl?.mandatory === true) allow = allow.filter((o) => o !== 'exists' && o !== 'empty')
+  else if (decl?.ownerType !== undefined) allow = allow.filter((o) => o !== 'empty')
   return allow.includes(cur) ? allow : [...allow, cur]
 }
 

@@ -16,6 +16,7 @@ import {
   mkPropDef,
   opsFor,
   runQuery,
+  systemFieldOf,
   type Block,
   type QueryNode,
   type QuerySpec,
@@ -44,6 +45,21 @@ test('算子按字段 kind 收窄：select 不给大小比较，布尔不给「�
   assert.ok(boolOps.includes('exists'))
   // 其余 kind 不受影响
   assert.deepEqual([...opsFor('text', undefined)], [...DRAFT_OPS])
+})
+
+test('字段声明上的两格再收一遍：恒声明的槽不给 exists／empty，类型拥有的槽不给 empty', () => {
+  const type = systemFieldOf('_type')!
+  // 块类型是必答槽：`exists` 恒真、`empty` 恒空——两个都不该给（给了就是恒真/恒空的死项）
+  assert.deepEqual([...opsFor('select', undefined, type)], ['eq', 'neq'])
+  assert.ok(!opsFor('select', 'exists', type).includes('empty'), '两个死项都不给')
+  // 靠类型声明拥有这一栏：`empty:true` ≡ `exists:false`（「不是这种块」＝「没填」）
+  const callout = systemFieldOf('_callout')!
+  assert.deepEqual([...opsFor('select', undefined, callout)], ['eq', 'neq', 'exists'])
+  // 已存的 empty 仍留在下拉末尾（那条「不静默改写」的纪律照旧），只是新加时不再给
+  const kept = opsFor('select', 'empty', callout)
+  assert.equal(kept[kept.length - 1], 'empty')
+  // 用户定义的普通 select 不受影响：声明了但清空是一个真实状态
+  assert.deepEqual([...opsFor('select', undefined, undefined)], ['eq', 'neq', 'exists', 'empty'])
 })
 
 test('收窄不许悄悄改掉已存下来的算子（打开一次条件就变了＝静默改写）', () => {

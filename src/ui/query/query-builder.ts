@@ -17,11 +17,6 @@ import {
   SELF,
   systemQueryFieldLabel,
   treeOfSpec,
-  DEFAULT_BLOCK_TYPE,
-  DIVIDER_TYPE,
-  EMBED_TYPE,
-  CODE_TYPE,
-  QUOTE_TYPE,
   type Marks,
   type PropKind,
   type QuerySpec,
@@ -51,23 +46,6 @@ const ROLE_TEXT: Record<RoleKind, MsgId> = {
 
 export function roleText(role: RoleKind): string {
   return t(ROLE_TEXT[role])
-}
-
-/**
- * 块类型的值 → 人话（`TYPE_DECLS` 的封闭值域，条件树下拉与 chip 共用这一份；
- * 未知 id——别的版本或插件写进来的——由 `typeValueLabel` 原样显示）。
- */
-const TYPE_VALUE_TEXT: Record<string, MsgId> = {
-  [DEFAULT_BLOCK_TYPE]: 'ui.query.type.outline',
-  [DIVIDER_TYPE]: 'ui.query.type.divider',
-  [EMBED_TYPE]: 'ui.query.type.embed',
-  [QUOTE_TYPE]: 'ui.query.type.quote',
-  [CODE_TYPE]: 'ui.query.type.code',
-}
-
-export function typeValueLabel(id: string): string {
-  const key = TYPE_VALUE_TEXT[id]
-  return key ? t(key) : id
 }
 
 const OP_TEXT: Record<DraftOp, MsgId> = {
@@ -266,8 +244,6 @@ function propText(row: Extract<TreeRow, { kind: 'prop' }>, deps: ConditionTextDe
       ? t('ui.query.selfProp')
       : row.value === ''
         ? t('ui.query.builder.noValue')
-        : row.field === '_type'
-          ? typeValueLabel(row.value)
-          : (propValueText(field ?? { id: row.field }, row.value, deps) ?? row.value)
+        : (propValueText(field ?? { id: row.field }, row.value, deps) ?? row.value)
   return t('ui.query.label.cmp', { name, op: t(OP_TEXT[row.op]), value: shown })
 }

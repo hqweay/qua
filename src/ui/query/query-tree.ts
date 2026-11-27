@@ -26,8 +26,8 @@ import {
   isRoleKind,
   isQueryableSystemProp,
   systemQueryFieldLabel,
+  systemFieldOf,
   batchSpecOfDraft,
-  TYPE_DECLS,
   ENGINE_CREATED,
   ENGINE_MODIFIED,
   todayISO,
@@ -44,7 +44,7 @@ import {
   isJournalDate,
 } from '../../core/index.ts'
 import { t, type MsgId } from '../../core/infra/msg.ts'
-import { roleText, typeValueLabel } from './query-builder.ts'
+import { roleText } from './query-builder.ts'
 import { markPicker } from './mark-picker.ts'
 
 /** 字段下拉的一项（与 `core/query/query-fields.ts` 的 `QueryFieldOption` 结构相同；`kind` 可缺省） */
@@ -772,7 +772,7 @@ export class QueryTree {
     )
     out.push(
       selectEl(
-        opsFor(this.fieldKind(row.field), row.op, row.field).map((op) => ({ value: op, label: t(OP_TEXT[op]) })),
+        opsFor(this.fieldKind(row.field), row.op, systemFieldOf(row.field)).map((op) => ({ value: op, label: t(OP_TEXT[op]) })),
         row.op,
         (next) => {
           row.op = next as DraftOp
@@ -833,27 +833,6 @@ export class QueryTree {
         'qt-value',
         'value',
       )
-      return sel
-    }
-    /**
-     * 块类型的值域是**封闭注册表**（`TYPE_DECLS`）——给下拉不给输入框，
-     * 用户没有机会拼错 id。JSON 写进来的未知 id 如实显示（读侧降级画成大纲，
-     * 但「块类型＝那个 id」仍是可编辑的事实）。
-     */
-    if (row.field === '_type') {
-      const known = Object.keys(TYPE_DECLS)
-      const current = row.value
-      const sel = document.createElement('select')
-      sel.className = 'qt-value'
-      sel.dataset.qt = 'value'
-      sel.appendChild(option('', t('ui.query.builder.noValue')))
-      if (current !== '' && !known.includes(current)) sel.appendChild(option(current, current))
-      for (const id of known) sel.appendChild(option(id, typeValueLabel(id)))
-      sel.value = current
-      sel.addEventListener('change', () => {
-        row.value = sel.value
-        this.syncRow(sel, row)
-      })
       return sel
     }
     const kind = this.fieldKind(row.field)
